@@ -1388,7 +1388,11 @@ class UnifiedRadixCache(BasePrefixCache):
         if host_avail < kv_tokens:
             needed = kv_tokens - host_avail
             if self.evict_host(needed) < needed:
-                return None
+                # F1: ACK backlog holds host_lock_ref on finished L3 writes;
+                # drain the ready ACKs once, then retry eviction exactly once.
+                self.drain_storage_control_queues_local()
+                if self.evict_host(needed) < needed:
+                    return None
         aux_xfers = [x for xfers in comp_xfers.values() for x in xfers]
         aux_xfers.extend(sidecar_xfers)
         return self.cache_controller.write(
@@ -2728,8 +2732,9 @@ class UnifiedRadixCache(BasePrefixCache):
             _b15_wc_pending = len(self.ongoing_write_through)
             _b15_wc_t0 = time.perf_counter()
             while self.ongoing_write_through:
+                # No assert after the drain: _finish_write_through_ack may
+                # re-enqueue entries; the while condition covers reentry.
                 self._drain_write_through_acks()
-                assert len(self.ongoing_write_through) == 0
             try:
                 _b15_log({"evt": "pa_writing_check",
                           "ms": round((time.perf_counter() - _b15_wc_t0) * 1000, 3),
