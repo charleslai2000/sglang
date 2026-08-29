@@ -41,6 +41,24 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# T38C-PROBE (L3 read-chain observation; log-only. Appends JSON lines to
+# /tmp/t38c-probe.log only when /tmp/t38c-on exists; zero numeric-path change;
+# removed after experiment)
+def _t38c_log(rec):
+    try:
+        import json as _json
+        import time as _time
+        import os as _os
+        if not _os.path.exists("/tmp/t38c-on"):
+            return
+        rec["ts"] = round(_time.time(), 3)
+        with open("/tmp/t38c-probe.log", "a") as _f:
+            _f.write(_json.dumps(rec, default=str) + "\n")
+    except Exception:
+        pass
+
+
+
 
 class StorageOperation(BaseStorageOperation):
     def __init__(
@@ -596,6 +614,17 @@ class HybridCacheController(BaseHiCacheController):
 
         kv_hit_pages = hit_result.kv_hit_pages
         operation.pool_storage_result.update_kv_hit_pages(kv_hit_pages)
+        try:
+            _t38c_log({"evt": "pc_storage_query",
+                       "rid": operation.request_id,
+                       "keys": [k[:16] for k in hash_value[:8]],
+                       "query_suffix_len": len(hash_value),
+                       "kv_hit_pages": int(kv_hit_pages),
+                       "storage_hit_count": int(kv_hit_pages) * self.page_size,
+                       "sidecar_hits": {getattr(k, "value", k): int(v)
+                                         for k, v in hit_result.extra_pool_hit_pages.items()}})
+        except Exception:
+            pass
 
         return (
             hash_value[:kv_hit_pages],
@@ -663,6 +692,15 @@ class HybridCacheController(BaseHiCacheController):
             self._resolve_sidecar_nonkv_derived_pool_transfers(operation)
             results = self.storage_backend.batch_get_v2(transfers_nonkv)
             pool_hits = count_pool_hits(results)
+            try:
+                _t38c_log({"evt": "pc_get_v2", "phase": "sidecar",
+                           "rid": operation.request_id,
+                           "sidecar": [getattr(t.name, "value", t.name) for t in transfers_nonkv],
+                           "n_keys": sum(len(t.keys or []) for t in transfers_nonkv),
+                           "hit_pages": {getattr(k, "value", k): int(v)
+                                         for k, v in pool_hits.items()}})
+            except Exception:
+                pass
         # Emit PrefetchAck to prefetch_sync_queue, even the operation has been canceled by the
         # scheduler thread.  The prefetch sync thread expects the same number of PrefetchAck objects
         # to perform all_reduce.

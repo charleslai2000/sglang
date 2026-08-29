@@ -47,7 +47,38 @@ from sglang.srt.utils import get_device_module
 
 logger = logging.getLogger(__name__)
 
+# B1.5-PROBE (T31 rebase of T23; read-only instrumentation, appends JSON lines to
+# /tmp/b15-probe.log only, zero numeric-path change; removed after experiment)
+def _b15_log(rec):
+    try:
+        import json as _json
+        import time as _time
+        rec["ts"] = round(_time.time(), 3)
+        with open("/tmp/b15-probe.log", "a") as _f:
+            _f.write(_json.dumps(rec) + "\n")
+    except Exception:
+        pass
+
+
 device_module = get_device_module()
+
+
+
+# T38C-PROBE (L3 read-chain observation; log-only. Appends JSON lines to
+# /tmp/t38c-probe.log only when /tmp/t38c-on exists; zero numeric-path change;
+# removed after experiment)
+def _t38c_log(rec):
+    try:
+        import json as _json
+        import time as _time
+        import os as _os
+        if not _os.path.exists("/tmp/t38c-on"):
+            return
+        rec["ts"] = round(_time.time(), 3)
+        with open("/tmp/t38c-probe.log", "a") as _f:
+            _f.write(_json.dumps(rec, default=str) + "\n")
+    except Exception:
+        pass
 
 
 class LayerLoadingEvent:
@@ -92,6 +123,15 @@ class LayerDoneCounter:
     def wait_until(self, threshold: int):
         if self.consumer_index < 0:
             return
+        if threshold == 0:
+            try:
+                _ev = self.events[self.consumer_index]
+                _b15_log({"evt": "pb_layer_wait",
+                          "consumer": self.consumer_index,
+                          "ready_layer0": bool(_ev.load_events[0].query()),
+                          "ready_all": bool(_ev.finish_event.query())})
+            except Exception:
+                pass
         self.events[self.consumer_index].wait(threshold)
 
     def reset(self):
@@ -940,6 +980,13 @@ class HiCacheController:
                 num_bytes=self._transfer_num_bytes(op),
             )
         )
+        try:
+            _b15_log({"evt": "pb_load_submit",
+                      "producer_id": producer_id,
+                      "n_tokens": len(op.device_indices),
+                      "n_nodes": len(op.node_ids)})
+        except Exception:
+            pass
         return producer_id
 
     def evict_device(self, device_indices: torch.Tensor) -> int:
@@ -1113,6 +1160,17 @@ class HiCacheController:
             sidecar_hits = count_pool_hits(sidecar_results)
 
         # Clamp to minimal number of hits.
+        try:
+            _t38c_log({"evt": "pc_get_v2", "phase": "kv_batch",
+                       "rid": operation.request_id,
+                       "sidecar": "kv",
+                       "n_keys": len(batch_hashes),
+                       "kv_hits": int(kv_hits),
+                       "sidecar_hits": {getattr(k, "value", k): int(v)
+                                         for k, v in sidecar_hits.items()},
+                       "clamped_pages": min([kv_hits, *sidecar_hits.values()])})
+        except Exception:
+            pass
         return min([kv_hits, *sidecar_hits.values()])
 
     def prefetch_io_aux_func(self):
