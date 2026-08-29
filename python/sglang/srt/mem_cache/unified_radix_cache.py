@@ -1604,8 +1604,36 @@ class UnifiedRadixCache(BasePrefixCache):
         return transfers
 
     def write_backup_storage(self, node_id: NodeId) -> None:
+        """Persist node_id's KV chain to L3, completing ancestor gaps first.
+
+        L3 reads only hit when every page hash from the recoverable anchor
+        down to the node exists in storage. write_back evicts leaves without
+        ever backing up their ancestors, so writing only the leaf would
+        persist a suffix with a missing prefix. Fill the anchor->node gap:
+        host-backup the unbacked gap nodes, wait out their D->H acks (their
+        ack path re-enters this method per node and submits those L3 writes),
+        then submit the remaining gap nodes in ancestors-first order."""
         if not self.enable_storage or self.cache_controller is None:
             return
+        gap = self.tree_core.collect_storage_gap(node_id)
+        if not gap:
+            return
+        for nid in gap:
+            if not self.tree_core.is_backuped(nid):
+                self._execute_and_commit_kv_backup(BackupKV([nid]), write_back=False)
+        # Blocking, but only in the write_back path, which already blocks on
+        # D->H acks in writing_check; the write_through path never has an
+        # unbacked gap node. The drain is also safe to re-enter from the
+        # outer ack drain: single-threaded, guarded per ack_id, and the outer
+        # iterator ends cleanly once the queue is cleared.
+        while any(nid in self.ongoing_write_through for nid in gap):
+            self._drain_write_through_acks()
+        for nid in gap:
+            if not self.tree_core.is_storage_written(nid):
+                self._write_backup_storage_node(nid)
+
+    def _write_backup_storage_node(self, node_id: NodeId) -> None:
+        """Submit one node's KV to L3 and register its ack entry."""
         spec = self.tree_core.build_storage_backup_spec(
             node_id, self.hicache_storage_pass_prefix_keys
         )
@@ -1634,6 +1662,9 @@ class UnifiedRadixCache(BasePrefixCache):
             node_id,
             self.inc_host_lock_ref(node_id).to_dec_params(),
         )
+        # Dedupe guard at submission: the re-entrant gap walk must not
+        # resubmit a node whose write is already in flight.
+        self.tree_core.mark_storage_written(node_id)
 
     def is_backuped(self, node_id: NodeId) -> bool:
         return self.tree_core.is_backuped(node_id)
@@ -2451,6 +2482,9 @@ class UnifiedRadixCache(BasePrefixCache):
                     if entry is not None:
                         node_id, lock_params = entry
                         self.dec_host_lock_ref(node_id, lock_params)
+                        # The write is durable: promote the node to a
+                        # persisted anchor when its parent chain is.
+                        self.tree_core.advance_storage_persisted(node_id)
                 if (
                     log_metrics
                     and self.enable_storage_metrics
@@ -2666,6 +2700,21 @@ class UnifiedRadixCache(BasePrefixCache):
             extra_pool_names,
         )
 
+    def _drain_write_through_acks(self) -> None:
+        """One full pass over the D->H ack queue: sync each DMA and ack every
+        pending write-through entry (write_back entries included)."""
+        cc = self.cache_controller
+        for ack in cc.ack_write_queue:
+            ack.finish_event.synchronize()
+            acked = False
+            for ack_id in ack.node_ids:
+                if ack_id in self.ongoing_write_through:
+                    self._finish_write_through_ack(ack_id)
+                    acked = True
+            if acked:
+                self._log_write_ack_metrics(ack)
+        cc.ack_write_queue.clear()
+
     def writing_check(
         self, write_back: bool = False, finish_count: Optional[int] = None
     ) -> None:
@@ -2679,13 +2728,7 @@ class UnifiedRadixCache(BasePrefixCache):
             _b15_wc_pending = len(self.ongoing_write_through)
             _b15_wc_t0 = time.perf_counter()
             while self.ongoing_write_through:
-                for ack in cc.ack_write_queue:
-                    ack.finish_event.synchronize()
-                    for ack_id in ack.node_ids:
-                        if ack_id in self.ongoing_write_through:
-                            self._finish_write_through_ack(ack_id)
-                    self._log_write_ack_metrics(ack)
-                cc.ack_write_queue.clear()
+                self._drain_write_through_acks()
                 assert len(self.ongoing_write_through) == 0
             try:
                 _b15_log({"evt": "pa_writing_check",

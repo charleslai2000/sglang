@@ -135,6 +135,13 @@ class UnifiedTreeNode:
         # Anchor NodeId of an in-flight H->D load-back reading this node's
         # host slots; such host copies must not be reclaimed until the ack.
         self.load_back_pending_id: Optional[int] = None
+        # L3 write state: storage_written is set when this node's KV is
+        # submitted to storage (dedupe; continuity not implied), and
+        # storage_persisted when the write is acked and the parent chain is
+        # continuous -- the condition for serving as an anchor. The root is
+        # the always-persisted anchor and is itself never written.
+        self.storage_written = False
+        self.storage_persisted = False
 
     def component(self, component_type: ComponentType) -> ComponentData:
         return self.component_data[component_type]
@@ -1886,6 +1893,50 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
             prefix_keys=prefix_keys,
             comp_xfers=comp_xfers,
         )
+
+    def collect_storage_gap(self, node_id: NodeId) -> list[NodeId]:
+        """Ancestors-first node ids from the nearest storage-persisted
+        ancestor (root when none) down to node_id whose KV is not in L3.
+
+        Nodes with an L3 write already submitted (storage_written) are
+        walked past, not collected: their pages are in storage, so rewriting
+        them is redundant, but they are not anchors until their ack promotes
+        them. The walk stops at the first persisted node, which is the
+        recoverable anchor for the chain."""
+        gap: list[NodeId] = []
+        node = self.node_by_id(node_id)
+        while (
+            node is not None
+            and node is not self.root_node
+            and not node.storage_persisted
+        ):
+            if not node.storage_written:
+                gap.append(node.id)
+            node = node.parent
+        gap.reverse()
+        return gap
+
+    def mark_storage_written(self, node_id: NodeId) -> None:
+        """Record that node_id's KV was submitted to L3 (dedupe guard)."""
+        self.node_by_id(node_id).storage_written = True
+
+    def advance_storage_persisted(self, node_id: NodeId) -> None:
+        """Record a node's L3 write ack; it becomes a persisted anchor when
+        its parent already is (the root always is). Lazy chain promotion: a
+        node acked before its parent stays unpromoted and is walked past,
+        never rewritten, by later gap collections."""
+        node = self.node_by_id(node_id)
+        node.storage_written = True
+        if (
+            node.parent is None
+            or node.parent is self.root_node
+            or node.parent.storage_persisted
+        ):
+            node.storage_persisted = True
+
+    def is_storage_written(self, node_id: NodeId) -> bool:
+        """Whether the node's KV was already submitted to L3."""
+        return self.node_by_id(node_id).storage_written
 
     def build_hicache_transfers(
         self,
