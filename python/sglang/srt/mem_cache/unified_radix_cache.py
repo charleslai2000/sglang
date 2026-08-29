@@ -378,6 +378,11 @@ class UnifiedRadixCache(BasePrefixCache):
         # Reset Controller.
         self.session.slots.clear()
         self.ongoing_write_through: dict[int, _OngoingWriteThrough] = {}
+        # L3 persists deferred out of the D->H ack drain: nodes whose write
+        # acked while their anchor->node chain was not yet written to L3.
+        self._pending_storage_writes: list[NodeId] = []
+        # Re-entry guard for _drain_write_through_acks (see its entry check).
+        self._drain_write_through_depth = 0
         self.ongoing_load_back: dict[int, _OngoingLoadBack] = {}
         self.enable_storage = False
         self.prefetch_loaded_tokens_by_reqid: dict[str, int] = {}
@@ -1448,9 +1453,11 @@ class UnifiedRadixCache(BasePrefixCache):
             self.dec_lock_ref(lock_node_id, lock_params)
         if self.enable_storage:
             # Back up each fragment: after a split, lock_node only holds the
-            # suffix; the prefix fragment must be persisted as well.
-            for node_id in publish_node_ids:
-                self.write_backup_storage(node_id)
+            # suffix; the prefix fragment must be persisted as well. Deferred:
+            # the gap-fill wait would re-enter the running drain (unbounded
+            # recursion); _flush_pending_storage_writes persists the nodes
+            # once the drain returns.
+            self._pending_storage_writes.extend(publish_node_ids)
 
     def load_back(
         self,
@@ -1607,6 +1614,14 @@ class UnifiedRadixCache(BasePrefixCache):
             )
         return transfers
 
+    def _flush_pending_storage_writes(self) -> None:
+        """Persist every node whose D->H write acked while its chain was not
+        yet written to L3. The ack path only defers (see
+        _finish_write_through_ack), so this runs outside any drain."""
+        while self._pending_storage_writes:
+            node_id = self._pending_storage_writes.pop(0)
+            self.write_backup_storage(node_id)
+
     def write_backup_storage(self, node_id: NodeId) -> None:
         """Persist node_id's KV chain to L3, completing ancestor gaps first.
 
@@ -1627,14 +1642,18 @@ class UnifiedRadixCache(BasePrefixCache):
                 self._execute_and_commit_kv_backup(BackupKV([nid]), write_back=False)
         # Blocking, but only in the write_back path, which already blocks on
         # D->H acks in writing_check; the write_through path never has an
-        # unbacked gap node. The drain is also safe to re-enter from the
-        # outer ack drain: single-threaded, guarded per ack_id, and the outer
-        # iterator ends cleanly once the queue is cleared.
+        # unbacked gap node. Ack completion only defers L3 persists (see
+        # _finish_write_through_ack), so the drain never re-enters here.
         while any(nid in self.ongoing_write_through for nid in gap):
             self._drain_write_through_acks()
         for nid in gap:
             if not self.tree_core.is_storage_written(nid):
                 self._write_backup_storage_node(nid)
+        # Nodes deferred by the acks drained above completed their D->H DMAs;
+        # persist them now, before a later eviction can reclaim their host
+        # copies. Their chains were either just submitted or are filled by
+        # the nested calls.
+        self._flush_pending_storage_writes()
 
     def _write_backup_storage_node(self, node_id: NodeId) -> None:
         """Submit one node's KV to L3 and register its ack entry."""
@@ -2705,19 +2724,37 @@ class UnifiedRadixCache(BasePrefixCache):
         )
 
     def _drain_write_through_acks(self) -> None:
-        """One full pass over the D->H ack queue: sync each DMA and ack every
-        pending write-through entry (write_back entries included)."""
+        """One pass over one generation of the D->H ack queue: sync each DMA
+        and ack every pending write-through entry (write_back entries
+        included)."""
         cc = self.cache_controller
-        for ack in cc.ack_write_queue:
-            ack.finish_event.synchronize()
-            acked = False
-            for ack_id in ack.node_ids:
-                if ack_id in self.ongoing_write_through:
-                    self._finish_write_through_ack(ack_id)
-                    acked = True
-            if acked:
-                self._log_write_ack_metrics(ack)
-        cc.ack_write_queue.clear()
+        if self._drain_write_through_depth:
+            # Re-entered from an ack callback: the enclosing drain owns this
+            # round; acking again would double-claim the same generation.
+            logger.warning(
+                "skipping re-entered _drain_write_through_acks; the "
+                "enclosing drain owns this round"
+            )
+            return
+        self._drain_write_through_depth += 1
+        try:
+            # Claim the whole generation up front so every ack is popped
+            # exactly once before its callback runs; acks enqueued by the
+            # callbacks wait for the next round instead of being drained
+            # again here.
+            batch = list(cc.ack_write_queue)
+            cc.ack_write_queue.clear()
+            for ack in batch:
+                ack.finish_event.synchronize()
+                acked = False
+                for ack_id in ack.node_ids:
+                    if ack_id in self.ongoing_write_through:
+                        self._finish_write_through_ack(ack_id)
+                        acked = True
+                if acked:
+                    self._log_write_ack_metrics(ack)
+        finally:
+            self._drain_write_through_depth -= 1
 
     def writing_check(
         self, write_back: bool = False, finish_count: Optional[int] = None
@@ -2732,9 +2769,10 @@ class UnifiedRadixCache(BasePrefixCache):
             _b15_wc_pending = len(self.ongoing_write_through)
             _b15_wc_t0 = time.perf_counter()
             while self.ongoing_write_through:
-                # No assert after the drain: _finish_write_through_ack may
-                # re-enqueue entries; the while condition covers reentry.
+                # No assert after the drain: the flush below may host-backup
+                # gap nodes and enqueue fresh D->H entries.
                 self._drain_write_through_acks()
+            self._flush_pending_storage_writes()
             try:
                 _b15_log({"evt": "pa_writing_check",
                           "ms": round((time.perf_counter() - _b15_wc_t0) * 1000, 3),
@@ -2763,6 +2801,9 @@ class UnifiedRadixCache(BasePrefixCache):
                 self._finish_write_through_ack(ack_id)
             self._log_write_ack_metrics(ack)
             finish_count -= 1
+        # Persists deferred by the acks above run after the pop loop, never
+        # from inside it (their D->H wait would steal the bounded queue).
+        self._flush_pending_storage_writes()
 
     def _log_write_ack_metrics(self, ack: HiCacheAck) -> None:
         """Record D->H backup volume and duration for a completed write ack."""
