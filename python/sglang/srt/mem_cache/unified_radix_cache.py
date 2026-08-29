@@ -118,6 +118,37 @@ COMPONENT_REGISTRY: dict[ComponentType, type[TreeComponent]] = {
 
 logger = logging.getLogger(__name__)
 
+# B1.5-PROBE (T31 rebase of T23; read-only instrumentation, appends JSON lines to
+# /tmp/b15-probe.log only, zero numeric-path change; removed after experiment)
+def _b15_log(rec):
+    try:
+        import json as _json
+        import time as _time
+        rec["ts"] = round(_time.time(), 3)
+        with open("/tmp/b15-probe.log", "a") as _f:
+            _f.write(_json.dumps(rec) + "\n")
+    except Exception:
+        pass
+
+
+
+
+# T38C-PROBE (L3 read-chain observation; log-only. Appends JSON lines to
+# /tmp/t38c-probe.log only when /tmp/t38c-on exists; zero numeric-path change;
+# removed after experiment)
+def _t38c_log(rec):
+    try:
+        import json as _json
+        import time as _time
+        import os as _os
+        if not _os.path.exists("/tmp/t38c-on"):
+            return
+        rec["ts"] = round(_time.time(), 3)
+        with open("/tmp/t38c-probe.log", "a") as _f:
+            _f.write(_json.dumps(rec, default=str) + "\n")
+    except Exception:
+        pass
+
 
 class _OngoingWriteThrough(NamedTuple):
     """Tracks an in-flight D→H write-through operation."""
@@ -591,6 +622,7 @@ class UnifiedRadixCache(BasePrefixCache):
         if self.disable:
             return EvictResult()
         start_time = time.perf_counter()
+        _b15_evict_t0 = time.perf_counter()
         tracker = {ct: 0 for ct in self.tree_components}
 
         request_by_type = self._evict_request_by_type(params)
@@ -608,6 +640,13 @@ class UnifiedRadixCache(BasePrefixCache):
 
         # Report full-layer tokens only
         self.update_eviction_metrics(tracker[BASE_COMPONENT_TYPE], start_time)
+        try:
+            _b15_log({"evt": "pa_evict",
+                      "ms": round((time.perf_counter() - _b15_evict_t0) * 1000, 3),
+                      "requested_tokens": params.num_tokens,
+                      "mamba_num": params.mamba_num})
+        except Exception:
+            pass
         return EvictResult(
             num_tokens_evicted=tracker[BASE_COMPONENT_TYPE],
             swa_num_tokens_evicted=tracker.get(ComponentType.SWA, 0),
@@ -1662,6 +1701,13 @@ class UnifiedRadixCache(BasePrefixCache):
         matched_prefix_tokens: Optional[list[int]] = None,
     ) -> None:
         if not self.enable_storage or self.cache_controller is None:
+            try:
+                _t38c_log({"evt": "pc_outcome", "phase": "entry",
+                           "rid": req_id,
+                           "outcome": "skipped_no_l3",
+                           "storage_enabled": bool(self.enable_storage)})
+            except Exception:
+                pass
             return
 
         buffer_mode = self.host_memory_mode == "buffer_only"
@@ -1676,20 +1722,47 @@ class UnifiedRadixCache(BasePrefixCache):
         stats = self._prefetch_outcome_stats
         if prefetch_length > 0:
             stats["attempts"] += 1
+        try:
+            _t38c_log({"evt": "pc_outcome", "phase": "issue", "rid": req_id,
+                       "outcome": "attempt",
+                       "prefetch_length": prefetch_length,
+                       "prefetch_threshold": self.prefetch_threshold,
+                       "suffix_len": len(new_input_tokens),
+                       "counters": dict(stats)})
+        except Exception:
+            pass
         if prefetch_length < self.prefetch_threshold:
             if prefetch_length > 0:
                 stats["declined_too_short"] += 1
+            try:
+                _t38c_log({"evt": "pc_outcome", "phase": "issue", "rid": req_id,
+                           "outcome": "declined_too_short",
+                           "counters": dict(stats)})
+            except Exception:
+                pass
             # A too-short/fully-matched suffix can become a full recompute if
             # the device match evicts while queued; arm the paced retry.
             self._storage_prefetch_missed_rids.add(req_id)
             return
         if not buffer_mode and self.cache_controller.prefetch_rate_limited():
             stats["declined_rate_limited"] += 1
+            try:
+                _t38c_log({"evt": "pc_outcome", "phase": "issue", "rid": req_id,
+                           "outcome": "declined_rate_limited", "site": "issue",
+                           "counters": dict(stats)})
+            except Exception:
+                pass
             self._storage_prefetch_missed_rids.add(req_id)
             return
         if req_id in self.ongoing_prefetch or (
             buffer_mode and self.buffer_pipeline.has_staged(req_id)
         ):
+            try:
+                _t38c_log({"evt": "pc_outcome", "phase": "issue", "rid": req_id,
+                           "outcome": "skipped_dup",
+                           "counters": dict(stats)})
+            except Exception:
+                pass
             # A fetch (or an unconsumed hold) already exists for this rid;
             # overwriting would leak its staging slots.
             return
@@ -1748,6 +1821,13 @@ class UnifiedRadixCache(BasePrefixCache):
                 self.dec_host_lock_ref(last_host_node_id, anchor_lock_params)
             # Forfeited over transient staging pressure; retryable.
             self._storage_prefetch_missed_rids.add(req_id)
+            try:
+                _t38c_log({"evt": "pc_outcome", "phase": "issue", "rid": req_id,
+                           "outcome": "forfeited_alloc_failed",
+                           "prefetch_length": prefetch_length,
+                           "counters": dict(stats)})
+            except Exception:
+                pass
             return
 
         aux_xfers = [x for xfers in comp_xfers.values() for x in xfers]
@@ -1760,6 +1840,13 @@ class UnifiedRadixCache(BasePrefixCache):
             extra_pools=aux_xfers or None,
         )
         stats["issued"] += 1
+        try:
+            _t38c_log({"evt": "pc_outcome", "phase": "issue", "rid": req_id,
+                       "outcome": "issued",
+                       "prefetch_length": prefetch_length,
+                       "counters": dict(stats)})
+        except Exception:
+            pass
         # Snapshots for the L3 miss accounting at the query outcome (the
         # hit/revoke drains): requested span and total prompt length.
         operation.stats_requested_tokens = prefetch_length
@@ -1840,6 +1927,13 @@ class UnifiedRadixCache(BasePrefixCache):
         #
         # That is, when this function returns the host memory referenced must be inserted
         # into the radix tree or released to pool.
+        try:
+            _t38c_log({"evt": "pc_l3_host",
+                       "rid": operation.request_id,
+                       "completed_tokens": int(operation.completed_tokens or 0),
+                       "requested_tokens": int(getattr(operation, "stats_requested_tokens", 0) or 0)})
+        except Exception:
+            pass
 
         req_id = operation.request_id
         completed_tokens = operation.completed_tokens
@@ -2282,11 +2376,26 @@ class UnifiedRadixCache(BasePrefixCache):
                     # race (abort cleanup discards the marker).
                     self._storage_prefetch_missed_rids.add(req_id)
                     self.revoke_pending_prefetch(req_id)
+                    try:
+                        _t38c_log({"evt": "pc_outcome", "phase": "drain", "rid": req_id,
+                                   "outcome": "terminated_revoke",
+                                   "counters": dict(self._prefetch_outcome_stats)})
+                    except Exception:
+                        pass
                     continue
                 if operation.storage_hit_count < self.prefetch_threshold:
                     # Below-threshold hit: classify + feed the L3 miss
                     # accounting, then revoke (not enough benefit).
                     self._account_prefetch_outcome(operation, revoked=True)
+                    try:
+                        _t38c_log({"evt": "pc_outcome", "phase": "drain", "rid": req_id,
+                                   "outcome": ("revoked_insufficient" if operation.storage_hit_count > 0
+                                               else "revoked_full_miss"),
+                                   "storage_hit_count": int(operation.storage_hit_count),
+                                   "requested_tokens": int(getattr(operation, "stats_requested_tokens", 0) or 0),
+                                   "counters": dict(self._prefetch_outcome_stats)})
+                    except Exception:
+                        pass
                     self._storage_prefetch_missed_rids.add(req_id)
                     self.revoke_pending_prefetch(req_id)
                     continue
@@ -2295,6 +2404,12 @@ class UnifiedRadixCache(BasePrefixCache):
                 if not _try_alloc_storage_hit(operation):
                     # Counted once at first parking, not per retry tick.
                     self._prefetch_outcome_stats["declined_rate_limited"] += 1
+                    try:
+                        _t38c_log({"evt": "pc_outcome", "phase": "drain", "rid": req_id,
+                                   "outcome": "declined_rate_limited", "site": "drain",
+                                   "counters": dict(self._prefetch_outcome_stats)})
+                    except Exception:
+                        pass
                     self.buffer_pipeline.pending_hit_allocs.append(operation)
 
         def _drain_ack_prefetch():
@@ -2561,6 +2676,8 @@ class UnifiedRadixCache(BasePrefixCache):
 
         if write_back:
             # Blocking: wait for all pending write-backs
+            _b15_wc_pending = len(self.ongoing_write_through)
+            _b15_wc_t0 = time.perf_counter()
             while self.ongoing_write_through:
                 for ack in cc.ack_write_queue:
                     ack.finish_event.synchronize()
@@ -2570,6 +2687,12 @@ class UnifiedRadixCache(BasePrefixCache):
                     self._log_write_ack_metrics(ack)
                 cc.ack_write_queue.clear()
                 assert len(self.ongoing_write_through) == 0
+            try:
+                _b15_log({"evt": "pa_writing_check",
+                          "ms": round((time.perf_counter() - _b15_wc_t0) * 1000, 3),
+                          "pending": _b15_wc_pending})
+            except Exception:
+                pass
             return
 
         if finish_count is None:
@@ -2633,6 +2756,12 @@ class UnifiedRadixCache(BasePrefixCache):
 
         while finish_count > 0:
             ack = cc.ack_load_queue.pop(0)
+            try:
+                _b15_log({"evt": "pb_load_done",
+                          "n_tokens": ack.num_tokens,
+                          "n_pending": len(cc.ack_load_queue)})
+            except Exception:
+                pass
             ack.finish_event.synchronize()
             for ack_id in ack.node_ids:
                 if (
@@ -2670,6 +2799,12 @@ class UnifiedRadixCache(BasePrefixCache):
         """Prepare KV cache loading from host to device.
         Returns (device_indices, last_node). Buffer mode dispatches to the
         staged-prefetch consumption (BufferModePipeline.init_load_back)."""
+        try:
+            _b15_log({"evt": "pa_lb_init",
+                      "rid": (params.req.rid if params.req is not None else None),
+                      "host_hit_length": params.host_hit_length})
+        except Exception:
+            pass
         if self.buffer_pipeline is not None:
             return self.buffer_pipeline.init_load_back(params)
         best_match_node_id = params.best_match_node
@@ -2710,6 +2845,16 @@ class UnifiedRadixCache(BasePrefixCache):
 
     def check_hicache_events(self) -> None:
         """Called per scheduler step to poll async HiCache events."""
+        try:
+            import time as _t38c_time
+            _now = _t38c_time.time()
+            _last = getattr(self, "_t38c_last_stats_ts", 0.0)
+            if _now - _last >= 30.0:
+                self._t38c_last_stats_ts = _now
+                _t38c_log({"evt": "pc_stats_snapshot",
+                           "counters": dict(self._prefetch_outcome_stats)})
+        except Exception:
+            pass
         # Reap the previous round's PP-sync sends before issuing new ones.
         self._drain_async_work()
 

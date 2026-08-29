@@ -349,6 +349,37 @@ else:
 
 logger = logging.getLogger(__name__)
 
+# B1.5-PROBE (T31 rebase of T23; read-only instrumentation, appends JSON lines to
+# /tmp/b15-probe.log only, zero numeric-path change; removed after experiment)
+def _b15_log(rec):
+    try:
+        import json as _json
+        import time as _time
+        rec["ts"] = round(_time.time(), 3)
+        with open("/tmp/b15-probe.log", "a") as _f:
+            _f.write(_json.dumps(rec) + "\n")
+    except Exception:
+        pass
+
+
+
+
+# T38C-PROBE (L3 read-chain observation; log-only. Appends JSON lines to
+# /tmp/t38c-probe.log only when /tmp/t38c-on exists; zero numeric-path change;
+# removed after experiment)
+def _t38c_log(rec):
+    try:
+        import json as _json
+        import time as _time
+        import os as _os
+        if not _os.path.exists("/tmp/t38c-on"):
+            return
+        rec["ts"] = round(_time.time(), 3)
+        with open("/tmp/t38c-probe.log", "a") as _f:
+            _f.write(_json.dumps(rec, default=str) + "\n")
+    except Exception:
+        pass
+
 
 def _prewarm_hccl_group(device, group, device_module):
     warmup_tensor = torch.zeros(1, dtype=torch.int32, device=device)
@@ -2802,6 +2833,12 @@ class Scheduler(
             self.handle_generate_request(tokenized_req)
 
     def _prefetch_kvcache(self, req: Req):
+        try:
+            _t38c_log({"evt": "pc_prefetch_enter", "phase": "entry",
+                       "rid": req.rid,
+                       "l3_enabled": bool(self.enable_hicache_storage)})
+        except Exception:
+            pass
         if self.enable_hicache_storage:
             req.init_next_round_input(self.tree_cache, cow_mamba=False)
             tree_cache = self.tree_cache
@@ -2819,6 +2856,31 @@ class Scheduler(
                 and not tree_cache.is_root(req.last_node)
             ):
                 last_host_node = req.last_node
+
+            try:
+                _t38c_matched_len = len(req.prefix_indices) + req.host_hit_length
+                _t38c_match_end = req._compute_max_prefix_len(
+                    len(req.full_untruncated_fill_ids)
+                )
+                _t38c_anchor_hash = tree_cache.get_last_hash_value(last_host_node)
+                _t38c_log({"evt": "pc_prefetch_enter", "phase": "gate",
+                           "rid": req.rid,
+                           "matched_len": _t38c_matched_len,
+                           "match_end": _t38c_match_end,
+                           "suffix_len": max(0, _t38c_match_end - _t38c_matched_len),
+                           "anchor": {
+                               "is_root": bool(tree_cache.is_root(last_host_node)),
+                               "is_backuped": bool(tree_cache.is_backuped(last_host_node)),
+                               "last_hash8": (_t38c_anchor_hash or "")[:8],
+                           },
+                           "buffer_mode": buffer_mode,
+                           "gate_pass": bool(
+                               tree_cache.is_backuped(last_host_node)
+                               or tree_cache.is_root(last_host_node)
+                               or (buffer_mode and _t38c_anchor_hash is not None)
+                           )})
+            except Exception:
+                pass
 
             if (
                 tree_cache.is_backuped(last_host_node)
@@ -3386,9 +3448,8 @@ class Scheduler(
             if self.enable_hicache_storage:
                 self._retry_missed_storage_prefetches()
 
-        if self.enable_priority_preemption or self.is_hybrid_swa:
-            # Reset batch_is_full to try preemption with a prefill adder.
-            running_batch.batch_is_full = False
+        # Reset batch_is_full to retry admission with a prefill adder.
+        running_batch.batch_is_full = False
 
         if (
             running_batch.batch_is_full or len(self.waiting_queue) == 0
@@ -3852,6 +3913,16 @@ class Scheduler(
         batch.launch_ts = time.monotonic()
         batch.after_idle_gap = self._sched_idled
         self._sched_idled = False
+        try:
+            _b15_log({"evt": "pa_batch",
+                      "step_kind": ("decode" if batch.forward_mode.is_decode()
+                                    else "prefill" if batch.forward_mode.is_extend()
+                                    else "other"),
+                      "batch_size": len(batch.reqs),
+                      "forward_iter": self.forward_ct,
+                      "consumer_index": int(batch.hicache_consumer_index)})
+        except Exception:
+            pass
 
         if self.scripted_scheduler_hook is not None:
             self.scripted_scheduler_hook.on_run_batch(batch)
