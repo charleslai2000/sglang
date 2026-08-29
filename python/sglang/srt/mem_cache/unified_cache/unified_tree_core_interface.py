@@ -423,6 +423,28 @@ class UnifiedTreeCoreInterface(ABC):
         ...
 
     @abstractmethod
+    def collect_storage_gap(self, node_id: NodeId) -> list[NodeId]:
+        """Ancestors-first node ids between the nearest storage-persisted
+        ancestor (root when none) and node_id whose KV is not in L3."""
+        ...
+
+    @abstractmethod
+    def mark_storage_written(self, node_id: NodeId) -> None:
+        """Record that node_id's KV was submitted to L3 (dedupe guard)."""
+        ...
+
+    @abstractmethod
+    def advance_storage_persisted(self, node_id: NodeId) -> None:
+        """Record a node's L3 write ack and promote it to a persisted anchor
+        when its parent already is (the root always is)."""
+        ...
+
+    @abstractmethod
+    def is_storage_written(self, node_id: NodeId) -> bool:
+        """Whether the node's KV was already submitted to L3."""
+        ...
+
+    @abstractmethod
     def build_hicache_transfers(
         self,
         component_type: ComponentType,
