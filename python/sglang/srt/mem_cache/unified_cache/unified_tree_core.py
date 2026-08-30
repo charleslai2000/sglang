@@ -502,6 +502,11 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         """
         return self._node_arena[node_id]
 
+    def node_exists(self, node_id: NodeId) -> bool:
+        """Whether the node id still resolves in the arena; eviction/drop
+        may have deleted it after a deferred reference was recorded."""
+        return node_id in self._node_arena
+
     def is_backuped(self, node_id: NodeId) -> bool:
         """Whether the node's KV is already backed up to host."""
         return self._node_arena[node_id].backuped

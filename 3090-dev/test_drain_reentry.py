@@ -243,13 +243,16 @@ class _FakeTreeCore:
     """Stub for UnifiedTreeCore: one unpersisted chain per evicted leaf.
 
     collect_storage_gap models the real walk (skip nodes whose L3 write was
-    already submitted; no persisted anchor exists in the test).
+    already submitted; no persisted anchor exists in the test). The arena is
+    modeled by ``deleted``: lookups on a deleted node raise KeyError exactly
+    like the real ``_node_arena[node_id]``.
     """
 
     def __init__(self, chains):
         self.chains = [list(chain) for chain in chains]
         self.backuped = set()
         self.storage_written = set()
+        self.deleted = set()
         self.enable_storage = False  # mirrored by the cache's property
 
     def _chain_of(self, node_id):
@@ -258,18 +261,30 @@ class _FakeTreeCore:
                 return chain
         return []
 
+    def mark_deleted(self, *node_ids):
+        self.deleted.update(node_ids)
+
+    def node_exists(self, node_id):
+        return node_id not in self.deleted
+
     def collect_storage_gap(self, node_id):
+        if node_id in self.deleted:
+            raise KeyError(node_id)
         return [
             nid for nid in self._chain_of(node_id) if nid not in self.storage_written
         ]
 
     def is_backuped(self, node_id):
+        if node_id in self.deleted:
+            raise KeyError(node_id)
         return node_id in self.backuped
 
     def commit_backup(self, node_id, host_indices, comp_xfers):
         self.backuped.add(node_id)
 
     def is_storage_written(self, node_id):
+        if node_id in self.deleted:
+            raise KeyError(node_id)
         return node_id in self.storage_written
 
     def mark_storage_written(self, node_id):
@@ -312,6 +327,8 @@ class _FakeController:
         self.ack_write_queue = []
         self.storage_ops = []
         self.mem_pool_host = SimpleNamespace(available_size=lambda: 1 << 30)
+        # Storage threads never started: the local drain short-circuits.
+        self.prefetch_hit_queue = None
 
     def write(self, device_indices, node_id=-1, extra_pools=None):
         self.ack_write_queue.append(_FakeAck([node_id]))
@@ -341,6 +358,8 @@ def _make_cache(tree_core):
     cache.ongoing_write_through = {}
     cache.ongoing_backup = {}
     cache._pending_storage_writes = []
+    cache._storage_persist_skip_count = 0
+    cache.host_memory_mode = "default"
     cache._drain_write_through_depth = 0
     cache.cache_controller = _FakeController()
     return cache
@@ -496,6 +515,57 @@ class DrainReentryRegressionTest(unittest.TestCase):
         cache._drain_write_through_acks()
         self.assertEqual(len(cache.cache_controller.ack_write_queue), 1)
         self.assertEqual(cache._drain_write_through_depth, 1)
+
+    def test_pending_node_deleted_before_flush_is_skipped(self):
+        # A node whose D->H ack deferred an L3 persist can be deleted before
+        # the flush runs: a later eviction step may drop its subtree or
+        # reclaim its host leaf. Flushing it must skip, never KeyError on
+        # the arena lookup (3090 crash family: stale _pending_storage_writes
+        # references).
+        tree_core = _FakeTreeCore([[42]])
+        cache = _make_cache(tree_core)
+        cache._pending_storage_writes.append(42)
+        tree_core.mark_deleted(42)
+
+        cache._flush_pending_storage_writes()
+
+        self.assertEqual(cache._pending_storage_writes, [])
+        self.assertEqual(cache._storage_persist_skip_count, 1)
+        self.assertEqual(cache.cache_controller.storage_ops, [])
+
+    def test_gap_node_deleted_mid_gapfill_is_skipped(self):
+        # The gap-fill's own D->H backups evict_host when host space is
+        # tight; host eviction deletes host-only leaves -- including the
+        # demoted pending node -- so a gap collected up front can reference
+        # a node that dies mid-loop (3090 crash: KeyError from is_backuped).
+        tree_core = _FakeTreeCore([[10, 20, 30]])
+        cache = _make_cache(tree_core)
+        cache._pending_storage_writes.append(30)
+        cache.cache_controller.mem_pool_host.available_size = lambda: 8
+        tree_core.host_evict_deletes = [30]
+        components_mod = sys.modules["sglang.srt.mem_cache.unified_cache.components"]
+
+        def drive_host_eviction(component_type, num_tokens):
+            # First call frees 16 tokens by deleting host leaf 30 (the
+            # demoted pending node); later calls find nothing to delete.
+            if tree_core.host_evict_deletes:
+                tree_core.mark_deleted(tree_core.host_evict_deletes.pop(0))
+                return SimpleNamespace(
+                    device_frees={},
+                    host_frees={},
+                    tracker={components_mod.ComponentType.FULL: 16},
+                )
+            return SimpleNamespace(device_frees={}, host_frees={}, tracker={})
+
+        tree_core.drive_host_eviction = drive_host_eviction
+
+        cache._flush_pending_storage_writes()
+
+        self.assertEqual(cache._pending_storage_writes, [])
+        self.assertEqual(cache._storage_persist_skip_count, 1)
+        self.assertIn(30, tree_core.deleted)
+        # The live gap nodes still reached L3 exactly once.
+        self.assertEqual(tree_core.storage_written, {10, 20})
 
 
 if __name__ == "__main__":

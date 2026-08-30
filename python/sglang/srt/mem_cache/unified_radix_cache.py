@@ -381,6 +381,9 @@ class UnifiedRadixCache(BasePrefixCache):
         # L3 persists deferred out of the D->H ack drain: nodes whose write
         # acked while their anchor->node chain was not yet written to L3.
         self._pending_storage_writes: list[NodeId] = []
+        # Deferred persists skipped because their node was deleted before
+        # the flush consumed it (observability for the stale-ref family).
+        self._storage_persist_skip_count = 0
         # Re-entry guard for _drain_write_through_acks (see its entry check).
         self._drain_write_through_depth = 0
         self.ongoing_load_back: dict[int, _OngoingLoadBack] = {}
@@ -1621,10 +1624,25 @@ class UnifiedRadixCache(BasePrefixCache):
     def _flush_pending_storage_writes(self) -> None:
         """Persist every node whose D->H write acked while its chain was not
         yet written to L3. The ack path only defers (see
-        _finish_write_through_ack), so this runs outside any drain."""
+        _finish_write_through_ack), so this runs outside any drain. Nodes
+        deleted since their deferral (eviction/drop/tombstone cleanup) are
+        skipped, not persisted."""
         while self._pending_storage_writes:
             node_id = self._pending_storage_writes.pop(0)
-            self.write_backup_storage(node_id)
+            if not self.tree_core.node_exists(node_id):
+                self._skip_stale_storage_persist(node_id)
+                continue
+            try:
+                self.write_backup_storage(node_id)
+            except KeyError:
+                # Backstop: the node or a gap ancestor died between the
+                # existence check and the arena lookups; nothing to persist.
+                self._skip_stale_storage_persist(node_id)
+
+    def _skip_stale_storage_persist(self, node_id: NodeId) -> None:
+        """Count and log a deferred L3 persist whose node is no longer alive."""
+        self._storage_persist_skip_count += 1
+        logger.debug("stale L3 persist skipped: node %d no longer alive", node_id)
 
     def write_backup_storage(self, node_id: NodeId) -> None:
         """Persist node_id's KV chain to L3, completing ancestor gaps first.
@@ -1639,11 +1657,22 @@ class UnifiedRadixCache(BasePrefixCache):
         if not self.enable_storage or self.cache_controller is None:
             return
         gap = self.tree_core.collect_storage_gap(node_id)
+        # Gap nodes may have been deleted since the deferral: the arena
+        # lookup below would KeyError on a dead id. Nodes deleted by this
+        # loop's own D->H backups are re-filtered per iteration.
+        gap = [nid for nid in gap if self.tree_core.node_exists(nid)]
         if not gap:
             return
         for nid in gap:
+            if not self.tree_core.node_exists(nid):
+                self._skip_stale_storage_persist(nid)
+                continue
             if not self.tree_core.is_backuped(nid):
                 self._execute_and_commit_kv_backup(BackupKV([nid]), write_back=False)
+        # The D->H backups above evict_host when host space is tight; host
+        # eviction deletes host-only leaves, which may be gap nodes. Re-filter
+        # before the drain and L3 writes.
+        gap = [nid for nid in gap if self.tree_core.node_exists(nid)]
         # Blocking, but only in the write_back path, which already blocks on
         # D->H acks in writing_check; the write_through path never has an
         # unbacked gap node. Ack completion only defers L3 persists (see
@@ -1651,6 +1680,9 @@ class UnifiedRadixCache(BasePrefixCache):
         while any(nid in self.ongoing_write_through for nid in gap):
             self._drain_write_through_acks()
         for nid in gap:
+            if not self.tree_core.node_exists(nid):
+                self._skip_stale_storage_persist(nid)
+                continue
             if not self.tree_core.is_storage_written(nid):
                 self._write_backup_storage_node(nid)
         # Nodes deferred by the acks drained above completed their D->H DMAs;
