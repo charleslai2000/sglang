@@ -76,7 +76,8 @@ def _install_stubenv():
         "DecLockRefParams": object,
         "DecLockRefResult": object,
         "EvictParams": object,
-        "EvictResult": object,
+        # The real eviction path constructs this with keyword args.
+        "EvictResult": type("EvictResult", (), {"__init__": lambda self, **kw: None}),
         "IncLockRefResult": object,
         "InitLoadBackParams": object,
         "InsertParams": object,
@@ -305,6 +306,8 @@ class _FakeTreeCore:
 class _FakeController:
     """Stub for HybridCacheController: D->H writes complete immediately."""
 
+    write_policy = "write_back"
+
     def __init__(self):
         self.ack_write_queue = []
         self.storage_ops = []
@@ -343,7 +346,82 @@ def _make_cache(tree_core):
     return cache
 
 
+class _EvictTreeCore(_FakeTreeCore):
+    """FakeTreeCore plus the eviction-walk surface: yields one unbacked
+    D-leaf (node 42), records the demote order."""
+
+    def __init__(self, chains, order):
+        super().__init__(chains)
+        self.order = order
+        self._yielded = False
+
+    def evict_device_start(self, component_type, request_cnt):
+        pass
+
+    def evict_device_end(self, component_type):
+        pass
+
+    def evict_device_next_node(self, component_type, tracker):
+        if self._yielded:
+            return SimpleNamespace(
+                node_id=None, device_frees={}, host_frees={}, tracker={},
+                made_progress=False,
+            )
+        self._yielded = True
+        return SimpleNamespace(
+            node_id=42, device_frees={}, host_frees={}, tracker={},
+            made_progress=True,
+        )
+
+    def evict_device_leaf(self, node_id, is_write_back):
+        return SimpleNamespace(
+            backup_kv=SimpleNamespace(node_ids=[node_id]),
+            tracker={},
+            device_frees={},
+            host_frees={},
+        )
+
+    def demote(self, node_id):
+        self.order.append("demote")
+        return SimpleNamespace(tracker={}, device_frees={}, host_frees={})
+
+
 class DrainReentryRegressionTest(unittest.TestCase):
+    def test_write_back_evict_flushes_after_demote(self):
+        # The write-back eviction walk must demote a node before any pending
+        # L3 persist flush runs: the persist gap-fill may evict_host, whose
+        # duplicate-reclaim pass takes D-leaves and would strip the
+        # just-acked host copy, breaking _demote's backuped precondition
+        # (3090 crash: assert not node.evicted and node.backuped).
+        order = []
+        tree_core = _EvictTreeCore([[42]], order)
+        tree_core.is_write_back = True
+        cache = _make_cache(tree_core)
+        components_mod = sys.modules[
+            "sglang.srt.mem_cache.unified_cache.components"
+        ]
+        cache.tree_components = (components_mod.ComponentType.FULL,)
+
+        orig_flush = cache._flush_pending_storage_writes
+
+        def flush_with_trace():
+            order.append("flush")
+            orig_flush()
+
+        cache._flush_pending_storage_writes = flush_with_trace
+
+        # Stubenv mode: the ABC the real cache inherits from is faked, so the
+        # metrics hook is absent.
+        cache.update_eviction_metrics = lambda num_evicted, start_time: None
+
+        cache._evict(SimpleNamespace(num_tokens=16, swa_num_tokens=0, mamba_num=0))
+
+        self.assertEqual(order[0], "demote")
+        self.assertLess(order.index("demote"), order.index("flush"))
+        # The walk's backup was demoted and its chain persisted to L3.
+        self.assertEqual(cache._pending_storage_writes, [])
+        self.assertEqual(tree_core.storage_written, {42})
+
     def test_write_back_drain_does_not_recurse(self):
         # Long unpersisted chain (leaf e = chain[-1]): the pre-fix code
         # nested one drain per acked gap node and died with RecursionError.
