@@ -758,7 +758,11 @@ class UnifiedRadixCache(BasePrefixCache):
                         )
                         freed_before_drop = dict(tracker)
                         if written > 0:
-                            self.writing_check(write_back=True)
+                            # Defer the L3 persist flush past the demote: its
+                            # gap-fill may evict_host, and the duplicate-reclaim
+                            # pass takes D-leaves, which would strip this node's
+                            # just-acked host copy before _demote runs.
+                            self.writing_check(write_back=True, flush_pending=False)
                             self._demote(node_id, tracker)
                         elif self._drop_subtree_no_host(node_id, tracker):
                             self._record_dropped_tokens(tracker, freed_before_drop)
@@ -2757,7 +2761,10 @@ class UnifiedRadixCache(BasePrefixCache):
             self._drain_write_through_depth -= 1
 
     def writing_check(
-        self, write_back: bool = False, finish_count: Optional[int] = None
+        self,
+        write_back: bool = False,
+        finish_count: Optional[int] = None,
+        flush_pending: bool = True,
     ) -> None:
         """Poll write-through completions."""
         cc = self.cache_controller
@@ -2772,7 +2779,12 @@ class UnifiedRadixCache(BasePrefixCache):
                 # No assert after the drain: the flush below may host-backup
                 # gap nodes and enqueue fresh D->H entries.
                 self._drain_write_through_acks()
-            self._flush_pending_storage_writes()
+            if flush_pending:
+                # Not before a walk's pending demote: the persist gap-fill may
+                # evict_host, whose duplicate-reclaim pass would steal the
+                # just-acked host copy and break the demote's backuped
+                # precondition (see _evict_components).
+                self._flush_pending_storage_writes()
             try:
                 _b15_log({"evt": "pa_writing_check",
                           "ms": round((time.perf_counter() - _b15_wc_t0) * 1000, 3),
