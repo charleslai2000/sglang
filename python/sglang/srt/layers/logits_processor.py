@@ -711,6 +711,13 @@ class LogitsProcessor(nn.Module):
             logits = lm_head(hidden_states)
         elif should_apply_lm_head_quant_method(lm_head, quant_method):
             logits = quant_method.apply(lm_head, hidden_states, embedding_bias)
+        elif (
+            hasattr(lm_head, "weight")
+            and lm_head.weight.dtype == torch.int8
+            and hasattr(lm_head, "forward_lm_head")
+        ):
+            # sm75 int8 tied embedding/lm_head: block-128 dequant matmul
+            logits = lm_head.forward_lm_head(hidden_states)
         elif hasattr(lm_head, "weight"):
             # Normal linear layer
             if self.use_fp32_lm_head:
