@@ -806,6 +806,11 @@ class HiRadixCache(RadixCache):
         super().reset()
 
     def release_host_resources(self) -> None:
+        if self.cache_controller is not None:
+            # Graceful-exit order: drain/join the storage threads before
+            # destroying the host pool they read/write (NoneType crash on
+            # graceful exit otherwise).
+            self.cache_controller.stop_storage_threads()
         if self.token_to_kv_pool_host is not None:
             self.token_to_kv_pool_host.destroy()
 

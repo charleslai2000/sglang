@@ -659,12 +659,15 @@ class HybridCacheController(BaseHiCacheController):
                 )
         return host_indices, device_indices, resolved_pool_transfers
 
-    def _page_transfer(self, operation: PrefetchOperation) -> bool:
+    def _page_transfer(self, operation: PrefetchOperation) -> int:
         # KV pools and KV-derived pools first — determines actual completed page count
         kv_completed_pages = super()._page_transfer(operation)
 
         # Read non-KV derived sidecar pool, e.g. SWA, Mamba.
         self._page_transfer_sidecar(operation, kv_completed_pages)
+        # Base contract: return the completed KV page count (missing return
+        # used to yield None, killing the IO thread's arithmetics — I7).
+        return kv_completed_pages
 
     def _page_transfer_sidecar(
         self, operation: PrefetchOperation, kv_completed_pages: int

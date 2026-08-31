@@ -2790,9 +2790,10 @@ class ServerArgs:
     hicache_storage_backend: A[
         Optional[str],
         Arg(
-            help="The storage backend for hierarchical KV cache. Built-in backends: file, mooncake, hf3fs, nixl, aibrix. For dynamic backend, use --hicache-storage-backend-extra-config to specify: backend_name (custom name), module_path (Python module path), class_name (backend class name).",
+            help="The storage backend for hierarchical KV cache. Built-in backends: file, extent, mooncake, hf3fs, nixl, aibrix. For dynamic backend, use --hicache-storage-backend-extra-config to specify: backend_name (custom name), module_path (Python module path), class_name (backend class name).",
             choices=[
                 "file",
+                "extent",
                 "sim",
                 "mooncake",
                 "hf3fs",
@@ -2837,6 +2838,32 @@ class ServerArgs:
         "Maximum storage prefetch retries per request when --hicache-storage-prefetch-retry-poll-interval is set.",
         NS("memory"),
     ] = 4
+    hicache_restore_wait_timeout_s: A[
+        float,
+        Arg(
+            help=(
+                "Bounded wait (seconds) for a request whose HiCache storage "
+                "restore was denied for capacity (WAIT_CAPACITY). 0 disables "
+                "the bound. On expiry the request recomputes instead of being "
+                "served from storage (design T13)."
+            ),
+        ),
+        NS("memory"),
+    ] = 60.0
+    hicache_promotion_margin_tokens: A[
+        int,
+        Arg(
+            help=(
+                "Minimum reclaimable device-KV floor kept by the H->D promotion "
+                "admission budget (locked + reserved + new <= capacity - margin, "
+                "P2-1c). 0 does not serialize two 16K chain promotions (the e11 "
+                "crash shape); the default 2048 (one chunk) guarantees the walker "
+                "a minimal satisfiable allocation. Sweep {1024, 2048, 4096} to "
+                "tune."
+            ),
+        ),
+        NS("memory"),
+    ] = 2048
 
     # -------------------------------------------------------------------------
     # Hierarchical sparse attention
@@ -8296,6 +8323,14 @@ class ServerArgs:
             )
         ):
             return
+
+        # Backend selector env fallback: SGLANG_L3_BACKEND applies only when the
+        # flag is unset, so an explicit --hicache-storage-backend stays authoritative.
+        if cfg.hicache_storage_backend is None and envs.SGLANG_L3_BACKEND.get():
+            self._declare(
+                "_handle_hicache",
+                hicache_storage_backend=envs.SGLANG_L3_BACKEND.get(),
+            )
 
         self._validate_hicache_host_memory_mode()
 

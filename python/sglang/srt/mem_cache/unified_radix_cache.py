@@ -13,6 +13,9 @@ import torch
 from sglang.srt.distributed.communication_tags import P2PTag
 from sglang.srt.environ import envs
 from sglang.srt.managers.cache_controller import CacheOperation
+from sglang.srt.managers.scheduler_components.hicache_restore import (
+    promotion_budget_fits,
+)
 from sglang.srt.mem_cache.base_prefix_cache import (
     BasePrefixCache,
     DecLockRefParams,
@@ -150,6 +153,24 @@ def _t38c_log(rec):
         pass
 
 
+# [P2A] Per-request L3 restore final disposition. Emitted exactly once per
+# request at its terminal storage interaction (decline / revoke / finalize):
+# requested = page-aligned span the request could have restored, granted =
+# pages actually delivered, reason = the deny/discard cause when not a full
+# restore. Low frequency by construction (per request, not per attempt).
+def _log_restore_disposition(rid, disposition, requested, granted, reason):
+    logger.info(
+        "[P2A] ts_ms=%d evt=restore_disposition rid=%s disposition=%s "
+        "requested=%d granted=%d reason=%s",
+        int(time.time() * 1000),
+        rid,
+        disposition,
+        requested,
+        granted,
+        reason,
+    )
+
+
 class _OngoingWriteThrough(NamedTuple):
     """Tracks an in-flight D→H write-through operation."""
 
@@ -164,6 +185,11 @@ class _OngoingLoadBack(NamedTuple):
     node_id: NodeId
     lock_params: DecLockRefParams
     host_lock_params: DecLockRefParams
+    # P2-1c: the reservation amount this entry still covers (0 once the
+    # loaded span's allocation/lock ownership transferred it out of
+    # inflight_promotion_reserved). The sanity invariant is
+    # inflight_promotion_reserved == sum(entry.reserved_tokens).
+    reserved_tokens: int = 0
 
 
 class _OngoingPrefetch(NamedTuple):
@@ -295,6 +321,11 @@ class UnifiedRadixCache(BasePrefixCache):
             "l3_sum_rate_main_weighted": 0.0,
         }
 
+        # P2-1c promotion-admission margin (device token level). Config, not
+        # runtime state: init_hicache overrides from server_args; _reset_full
+        # must not clobber it.
+        self.promotion_margin_tokens = 2048
+
         self.reset()
         logger.info(
             f"Init Unified Radix Cache. Components: {self.tree_components}. "
@@ -387,13 +418,36 @@ class UnifiedRadixCache(BasePrefixCache):
         # Re-entry guard for _drain_write_through_acks (see its entry check).
         self._drain_write_through_depth = 0
         self.ongoing_load_back: dict[int, _OngoingLoadBack] = {}
+        # P2-1c promotion admission: net reservation counter (device token
+        # level, "reserved counts only the not-yet-locked part"), its peak,
+        # and the [P2A] event counters (design §5-8).
+        self.inflight_promotion_reserved = 0
+        self._promotion_inflight_peak = 0
+        self._promotion_denied_count = 0
+        self._promotion_denied_exact_count = 0
+        self._promotion_reserve_count = 0
+        self._promotion_transfer_count = 0
+        self._promotion_release_count = 0
         self.enable_storage = False
         self.prefetch_loaded_tokens_by_reqid: dict[str, int] = {}
         self.ongoing_prefetch: dict[str, _OngoingPrefetch] = {}
         # Rids whose storage prefetch resolved without a usable result;
         # popped by the scheduler to pace availability-check retries.
         self._storage_prefetch_missed_rids: set[str] = set()
+        # P2-1 M2: frontier waiters keyed by their anchor node (scheduler
+        # gate skip registers, the ack drain wakes, reconciliation consumes).
+        self._storage_frontier_waiters: dict[NodeId, set[str]] = {}
+        self._storage_frontier_ready: set[str] = set()
+        # P2-1 M1b: terminal prefetch outcome per rid ("finalized" /
+        # "revoked_miss" / "revoked_terminated"), recorded by the drain and
+        # consumed by the scheduler's restore-state reconciliation on the
+        # same (scheduler) thread.
+        self._storage_prefetch_terminal: dict[str, str] = {}
         self.ongoing_backup: dict[int, tuple[NodeId, DecLockRefParams]] = {}
+        # One-shot marker for the storage-failure degradation (see
+        # _handle_storage_failure); cleared together with the controller's
+        # thread restart in reset().
+        self._storage_failure_handled = False
         if self.buffer_pipeline is not None:
             self.buffer_pipeline.reset()
 
@@ -407,6 +461,7 @@ class UnifiedRadixCache(BasePrefixCache):
     def init_hicache(self, server_args: ServerArgs, params: CacheInitParams) -> None:
         """Initialize HiCache infrastructure."""
         self.host_memory_mode = server_args.hicache_host_memory_mode
+        self.promotion_margin_tokens = server_args.hicache_promotion_margin_tokens
         if self.host_memory_mode == "buffer_only":
             # FULL and FULL+SWA only: Mamba has no state-handoff channel on
             # the admission-time load-back read path and is not layer-gated.
@@ -530,6 +585,11 @@ class UnifiedRadixCache(BasePrefixCache):
         self.sidecar_pool_specs.append(spec)
 
     def release_host_resources(self) -> None:
+        if self.cache_controller is not None:
+            # Graceful-exit order: drain/join the storage threads before
+            # destroying the host pools they read/write; otherwise a still-
+            # running backup thread touches a destroyed pool (NoneType crash).
+            self.cache_controller.stop_storage_threads()
         if self.host_pool_group is not None:
             self.host_pool_group.destroy()
 
@@ -716,6 +776,46 @@ class UnifiedRadixCache(BasePrefixCache):
         self._accumulate_tracker(tracker, result.tracker)
         return result.is_dropped
 
+    def _evict_device_leaf_storage_backed(
+        self, node_id: NodeId, tracker: dict[ComponentType, int]
+    ) -> None:
+        """Hollow a device leaf whose chain is L3-durable (the D->H backup
+        failed and the subtree drop was declined): free its device layers,
+        keep the node and host subtree. The L3 copy is the durable backup --
+        written+acked or restored (P2-1 e14)."""
+        result = self.tree_core.evict_device_leaf_storage_backed(node_id)
+        self._free_values(result.device_frees, result.host_frees)
+        self._accumulate_tracker(tracker, result.tracker)
+        logger.info(
+            "[P2A] ts_ms=%d evt=hollow_evict node=%d freed=%d",
+            int(time.time() * 1000),
+            node_id,
+            result.tracker.get(BASE_COMPONENT_TYPE, 0),
+        )
+
+    def _drop_device_leaf_to_miss(
+        self, node_id: NodeId, tracker: dict[ComponentType, int]
+    ) -> None:
+        """Drop an evictable device leaf to a plain miss when the D->H
+        backup failed, the subtree drop was declined, and the chain is not
+        L3-durable (P2-1 e15 Z3): free its device layers, keep the node and
+        host subtree, and leave no hollow/restore expectation behind. The
+        walker's evictable_device_leaves membership guarantees the leaf is
+        unlocked (lock_ref == 0: no active request, no in-flight H->D DMA)
+        and the failed backup never issued the D->H copy; the caller proved
+        is_l3_durable False, so the released KV is not backed by any other
+        tier -- a future access misses and recomputes. Cache persistence is
+        sacrificed, never faked."""
+        result = self.tree_core.drop_device_leaf_to_miss(node_id)
+        self._free_values(result.device_frees, result.host_frees)
+        self._accumulate_tracker(tracker, result.tracker)
+        logger.info(
+            "[P2A] ts_ms=%d evt=forced_drop_to_miss node=%d freed=%d",
+            int(time.time() * 1000),
+            node_id,
+            result.tracker.get(BASE_COMPONENT_TYPE, 0),
+        )
+
     def _evict_components(
         self,
         request_by_type: dict[ComponentType, int],
@@ -774,14 +874,26 @@ class UnifiedRadixCache(BasePrefixCache):
                                 "due to host memory pressure, root node %d",
                                 node_id,
                             )
-                        else:
-                            logger.warning(
-                                "write_back: backup failed under host memory "
-                                "pressure but subtree drop declined (node "
-                                "locked); root node %d stays device-resident "
-                                "until host space frees",
-                                node_id,
+                        elif self.tree_core.is_l3_durable(node_id):
+                            # Backup and drop both blocked (host full; the
+                            # subtree's host values are DMA-locked by an
+                            # in-flight prefetch), but the chain's L3 copy is
+                            # the durable backup -- written+acked OR restored
+                            # (P2-1 e14: a chain restored from L3 is the
+                            # K=32 deadlock shape) -- so hollow the leaf
+                            # instead of leaving it unevictable until host
+                            # space frees.
+                            self._evict_device_leaf_storage_backed(
+                                node_id, tracker
                             )
+                        else:
+                            # P2-1 e15 Z3: no tier can take over this leaf's
+                            # KV (no L3 copy, subtree drop locked) -- degrade
+                            # it to a plain future miss/recompute instead of
+                            # leaving the walker stuck until host space
+                            # frees. Liveness may sacrifice cache hits, but
+                            # never fakes durability.
+                            self._drop_device_leaf_to_miss(node_id, tracker)
             finally:
                 self.tree_core.evict_device_end(ct)
 
@@ -1466,6 +1578,150 @@ class UnifiedRadixCache(BasePrefixCache):
             # once the drain returns.
             self._pending_storage_writes.extend(publish_node_ids)
 
+    # ---- P2-1c promotion admission (H→D capacity reservation) ----
+
+    def _device_locked_tokens(self) -> int:
+        """Derived device locked token count (capacity - available -
+        evictable), the promotion budget's locked term (design §3.1).
+
+        Mirrors the scheduler-side device_locked_tokens dispatcher on the
+        FULL pool: whatever the pool can neither allocate nor evict (chain
+        locks, in-flight DMA, running batches). The e11 dump arithmetic
+        (1033 + 10231 + 21504 = 32768) validates the derivation.
+        """
+        return (
+            self.token_to_kv_pool_allocator.size_full
+            - self._component_available_size(ComponentType.FULL)
+            - self.tree_core.full_evictable_size()
+        )
+
+    def _promotion_budget_fits(self, new_restore: int) -> bool:
+        """Promotion budget predicate (design §3.1):
+        locked + reserved + new_restore <= capacity - margin."""
+        return promotion_budget_fits(
+            locked=self._device_locked_tokens(),
+            reserved=self.inflight_promotion_reserved,
+            new_restore=new_restore,
+            capacity=self.token_to_kv_pool_allocator.size_full,
+            margin=self.promotion_margin_tokens,
+        )
+
+    def _promotion_pool_observation(self) -> str:
+        """P2-1c expert ④: per-pool observation suffix for the [P2A]
+        promotion events -- the FULL pool (the budgeted one) plus each aux
+        pool's free/evictable/locked. Feeds the hybrid two-pool evaluation;
+        per-component budgets are intentionally not implemented this round.
+        """
+        parts = [
+            f"full_free={self._component_available_size(ComponentType.FULL)}",
+            f"full_evictable={self.tree_core.full_evictable_size()}",
+            f"full_locked={self._device_locked_tokens()}",
+        ]
+        if self.is_mamba_enabled:
+            mamba_alloc = self.req_to_token_pool.mamba_allocator
+            mamba_free = mamba_alloc.available_size()
+            mamba_evict = self.tree_core.mamba_evictable_size()
+            parts += [
+                f"mamba_free={mamba_free}",
+                f"mamba_evictable={mamba_evict}",
+                f"mamba_locked={mamba_alloc.size - mamba_free - mamba_evict}",
+            ]
+        if self.is_swa_enabled:
+            swa_alloc = self.token_to_kv_pool_allocator
+            swa_free = swa_alloc.swa_available_size()
+            swa_evict = self.tree_core.swa_evictable_size()
+            parts += [
+                f"swa_free={swa_free}",
+                f"swa_evictable={swa_evict}",
+                f"swa_locked={swa_alloc.size_swa - swa_free - swa_evict}",
+            ]
+        return " " + " ".join(parts)
+
+    def _release_promotion_reservation(
+        self, amount: int, node_id: int, cause: str
+    ) -> None:
+        """Release a promotion reservation (design §3.3 E3/E4 + exception +
+        finalizer paths). The counter must never go negative: on underflow
+        the violation is logged, not silently swallowed, and the counter is
+        clamped to 0 so a bug cannot jam the budget forever (R3).
+        """
+        if amount <= 0:
+            return
+        if self.inflight_promotion_reserved < amount:
+            logger.error(
+                "P2-1c promotion reservation underflow: release %d > held %d "
+                "(node %d, cause=%s)",
+                amount,
+                self.inflight_promotion_reserved,
+                node_id,
+                cause,
+            )
+            self.inflight_promotion_reserved = 0
+            return
+        self.inflight_promotion_reserved -= amount
+        self._promotion_release_count += 1
+        logger.info(
+            "[P2A] ts_ms=%d evt=promotion_release n=%d cause=%s reserved=%d%s",
+            int(time.time() * 1000),
+            amount,
+            cause,
+            self.inflight_promotion_reserved,
+            self._promotion_pool_observation(),
+        )
+
+    def _transfer_promotion_reservation(self, amount: int, node_id: int) -> None:
+        """Ownership transfer (expert ①): once the loaded span's allocation
+        and load lock are established (post cache_controller.load + ongoing
+        registration), the span sits inside the derived locked term --
+        keeping it in reserved too would double-count the same tokens for
+        the whole DMA window and compress all other promotions. The transfer
+        is the reservation -> lock ownership handover: the counter then only
+        covers reservations whose load has not started.
+        """
+        if amount <= 0:
+            return
+        if self.inflight_promotion_reserved < amount:
+            logger.error(
+                "P2-1c promotion reservation underflow on transfer: %d > held %d "
+                "(node %d)",
+                amount,
+                self.inflight_promotion_reserved,
+                node_id,
+            )
+            self.inflight_promotion_reserved = 0
+            return
+        self.inflight_promotion_reserved -= amount
+        self._promotion_transfer_count += 1
+        logger.info(
+            "[P2A] ts_ms=%d evt=promotion_transfer n=%d reserved=%d%s",
+            int(time.time() * 1000),
+            amount,
+            self.inflight_promotion_reserved,
+            self._promotion_pool_observation(),
+        )
+
+    def _finalize_load_back_entry(self, entry: _OngoingLoadBack, cause: str) -> None:
+        """Release a registered load-back entry's residual reservation and
+        locks exactly once (expert ② finalizer: success ACK, failure, cancel,
+        fatal, and shutdown all terminate here or in the pre-registration
+        release paths). The caller pops the entry from ongoing_load_back
+        before invoking this, so exactly-once is structural.
+        """
+        if entry.reserved_tokens > 0:
+            self._release_promotion_reservation(
+                entry.reserved_tokens, entry.node_id, cause
+            )
+        self.dec_lock_ref(entry.node_id, entry.lock_params)
+        self.dec_host_lock_ref(entry.node_id, entry.host_lock_params)
+
+    def _release_all_load_backs(self, cause: str) -> None:
+        """Release every in-flight load-back entry (shutdown / fatal
+        cleanup). Each entry is popped here, so a later ack drain finds
+        nothing to release."""
+        for ack_id in list(self.ongoing_load_back):
+            entry = self.ongoing_load_back.pop(ack_id)
+            self._finalize_load_back_entry(entry, cause=cause)
+
     def load_back(
         self,
         node_id: NodeId,
@@ -1474,6 +1730,35 @@ class UnifiedRadixCache(BasePrefixCache):
     ) -> bool:
         """Load evicted KV data from host back to device (H→D)."""
         if self.cache_controller is None:
+            return False
+
+        # P2-1c checkpoint 1 (entry gate; design §3.2): reserve-before-lock
+        # admission. The budget holds `locked + reserved + est <= capacity -
+        # margin`; est is the host-only span about to be promoted (the
+        # request's device prefix is already inside the derived locked term,
+        # so no double/lost count here). Rejecting before any lock costs
+        # nothing (no host anchor, no chain lock, no spec build) and flows
+        # into the existing RESTORE_DENIED -> WAIT[DEVICE_QUOTA] path (M1b).
+        # est == 0 (pure aux restore) skips the FULL-KV budget: aux pools
+        # have their own budget (rem_swa_tokens).
+        est = (
+            req.host_hit_length
+            if (req is not None and req.host_hit_length > 0)
+            else 0
+        )
+        if est > 0 and not self._promotion_budget_fits(est):
+            self._promotion_denied_count += 1
+            logger.info(
+                "[P2A] ts_ms=%d evt=promotion_denied rid=%s est=%d locked=%d "
+                "reserved=%d margin=%d%s",
+                int(time.time() * 1000),
+                req.rid if req is not None else None,
+                est,
+                self._device_locked_tokens(),
+                self.inflight_promotion_reserved,
+                self.promotion_margin_tokens,
+                self._promotion_pool_observation(),
+            )
             return False
 
         host_anchor_params = self.inc_host_lock_ref(node_id).to_dec_params()
@@ -1532,43 +1817,117 @@ class UnifiedRadixCache(BasePrefixCache):
             self.dec_host_lock_ref(node_id, host_anchor_params)
             return False
 
-        avail = self._component_available_size(ComponentType.FULL)
-        if avail < kv_tokens:
-            needed = kv_tokens - avail
-            self.evict_for_alloc(EvictParams(num_tokens=needed))
-            if self._component_available_size(ComponentType.FULL) < kv_tokens:
+        # P2-1c checkpoint 2 (precise gate + reserve; design §3.2): the
+        # authoritative budget check on the exact spec size, placed BEFORE
+        # evict_for_alloc -- a budget rejection never starts the walker,
+        # which is the mechanism that drops forced_drop (Test A' criterion).
+        # kv_tokens == 0 (pure aux restore) skips the FULL-KV budget. The
+        # reservation happens here, before the device load; every later exit
+        # releases it exactly once (E3/E4 inline, success transfers it to
+        # lock ownership, exceptions via the finally below).
+        reserved_held = 0
+        try:
+            if kv_tokens > 0 and not self._promotion_budget_fits(kv_tokens):
+                self._promotion_denied_exact_count += 1
+                logger.info(
+                    "[P2A] ts_ms=%d evt=promotion_denied_exact rid=%s kv=%d "
+                    "locked=%d reserved=%d margin=%d%s",
+                    int(time.time() * 1000),
+                    req.rid if req is not None else None,
+                    kv_tokens,
+                    self._device_locked_tokens(),
+                    self.inflight_promotion_reserved,
+                    self.promotion_margin_tokens,
+                    self._promotion_pool_observation(),
+                )
                 self.dec_lock_ref(node_id, ancestor_lock_params)
                 self.dec_host_lock_ref(node_id, host_anchor_params)
                 return False
+            if kv_tokens > 0:
+                self.inflight_promotion_reserved += kv_tokens
+                self._promotion_reserve_count += 1
+                if (
+                    self.inflight_promotion_reserved
+                    > self._promotion_inflight_peak
+                ):
+                    self._promotion_inflight_peak = (
+                        self.inflight_promotion_reserved
+                    )
+                reserved_held = kv_tokens
+                logger.info(
+                    "[P2A] ts_ms=%d evt=promotion_reserve n=%d rid=%s reserved=%d%s",
+                    int(time.time() * 1000),
+                    kv_tokens,
+                    req.rid if req is not None else None,
+                    self.inflight_promotion_reserved,
+                    self._promotion_pool_observation(),
+                )
 
-        # Load H→D
-        aux_xfers = [x for xfers in comp_xfers.values() for x in xfers]
-        aux_xfers.extend(sidecar_xfers)
-        device_indices = self.cache_controller.load(
-            host_indices=kv_xfer.host_indices,
-            node_id=node_id,
-            extra_pools=aux_xfers or None,
-        )
+            avail = self._component_available_size(ComponentType.FULL)
+            if avail < kv_tokens:
+                needed = kv_tokens - avail
+                self.evict_for_alloc(EvictParams(num_tokens=needed))
+                if self._component_available_size(ComponentType.FULL) < kv_tokens:
+                    # E3: eviction could not cover the span; the load never
+                    # started, so the reservation is returned.
+                    self._release_promotion_reservation(
+                        reserved_held, node_id, "evict_fail"
+                    )
+                    reserved_held = 0
+                    self.dec_lock_ref(node_id, ancestor_lock_params)
+                    self.dec_host_lock_ref(node_id, host_anchor_params)
+                    return False
 
-        self.dec_lock_ref(node_id, ancestor_lock_params)
-        if device_indices is None:
-            self.dec_host_lock_ref(node_id, host_anchor_params)
-            return False
-
-        # Commit the loaded KV back onto the node + apply its emitted actions.
-        self._apply_cache_actions(
-            self.tree_core.commit_load_back(
-                node_id, device_indices, kv_xfer, comp_xfers
+            # Load H→D
+            aux_xfers = [x for xfers in comp_xfers.values() for x in xfers]
+            aux_xfers.extend(sidecar_xfers)
+            device_indices = self.cache_controller.load(
+                host_indices=kv_xfer.host_indices,
+                node_id=node_id,
+                extra_pools=aux_xfers or None,
             )
-        )
 
-        self.ongoing_load_back[node_id] = _OngoingLoadBack(
-            node_id,
-            self.inc_lock_ref(node_id).to_dec_params(),
-            host_anchor_params,
-        )
+            self.dec_lock_ref(node_id, ancestor_lock_params)
+            if device_indices is None:
+                # E4: the load failed to allocate; the span is still free,
+                # so the reservation is returned.
+                self._release_promotion_reservation(
+                    reserved_held, node_id, "load_fail"
+                )
+                reserved_held = 0
+                self.dec_host_lock_ref(node_id, host_anchor_params)
+                return False
 
-        return True
+            # Commit the loaded KV back onto the node + apply its emitted
+            # actions.
+            self._apply_cache_actions(
+                self.tree_core.commit_load_back(
+                    node_id, device_indices, kv_xfer, comp_xfers
+                )
+            )
+
+            self.ongoing_load_back[node_id] = _OngoingLoadBack(
+                node_id,
+                self.inc_lock_ref(node_id).to_dec_params(),
+                host_anchor_params,
+                0,  # residual reservation: transferred to lock ownership below
+            )
+            # Ownership transfer (expert ①): the span is now allocated AND
+            # locked, so the derived locked term covers it from here until
+            # the ack drain; keeping the reservation until the ack would
+            # double-count the same tokens for the whole DMA window. The
+            # reservation counts only the not-yet-locked part from now on.
+            self._transfer_promotion_reservation(reserved_held, node_id)
+            reserved_held = 0
+            return True
+        finally:
+            if reserved_held > 0:
+                # Exception between the reserve and its transfer/release: the
+                # load never established lock ownership, so the reservation
+                # must be returned (expert ② explicit-failure path).
+                self._release_promotion_reservation(
+                    reserved_held, node_id, "exception"
+                )
 
     def _build_sidecar_transfers(
         self,
@@ -1693,6 +2052,11 @@ class UnifiedRadixCache(BasePrefixCache):
 
     def _write_backup_storage_node(self, node_id: NodeId) -> None:
         """Submit one node's KV to L3 and register its ack entry."""
+        cc = self.cache_controller
+        if cc is not None and cc.storage_failure_reason is not None:
+            # Storage degraded: keep the node host-only (no L3 write, no ack
+            # entry); the next persist flush skips it again at this gate.
+            return
         spec = self.tree_core.build_storage_backup_spec(
             node_id, self.hicache_storage_pass_prefix_keys
         )
@@ -1728,8 +2092,56 @@ class UnifiedRadixCache(BasePrefixCache):
     def is_backuped(self, node_id: NodeId) -> bool:
         return self.tree_core.is_backuped(node_id)
 
+    def prefetch_gate_ok(self, node_id: NodeId, buffer_mode: bool = False) -> bool:
+        """P2-1 M2 prefetch gate: an anchor is prefetch-issuable when it is
+        host-backuped (the cache-mode write-through contiguity), the root, or
+        L3-durable (the durable copy the T11/T12 wake predicates rely on;
+        P2-1 e14 extends it from written+acked to restored chains).
+        Gate and wake must agree or every wake re-registers the wait (the
+        frontier spin). Buffer mode reads by hash, never by anchor backup."""
+        return (
+            self.is_backuped(node_id)
+            or self.is_root(node_id)
+            or self.is_l3_durable(node_id)
+            or (buffer_mode and self.get_last_hash_value(node_id) is not None)
+        )
+
     def is_root(self, node_id: NodeId) -> bool:
         return self.tree_core.is_root(node_id)
+
+    def node_exists(self, node_id: NodeId) -> bool:
+        """Whether the node id still resolves in the arena (eviction/drop may
+        have deleted it after a deferred reference was recorded). P2-1 M1b/M2
+        guard: stale anchors are never dereferenced."""
+        return self.tree_core.node_exists(node_id)
+
+    def is_storage_persisted(self, node_id: NodeId) -> bool:
+        """Whether the node is a persisted storage anchor: its L3 write acked
+        and its parent chain contiguous to the root (the frontier-wake
+        condition, P2-1 M2 T12)."""
+        return self.tree_core.is_storage_persisted(node_id)
+
+    def is_l3_durable(self, node_id: NodeId) -> bool:
+        """Whether the node's KV is confirmed present in L3: written+ACK or
+        restored successfully (P2-1 e14). The unified hollow/eviction and
+        gate/wake predicate; unlike is_storage_persisted no parent-chain
+        contiguity is required."""
+        return self.tree_core.is_l3_durable(node_id)
+
+    def frontier_anchor_ready(self, node_id: NodeId) -> bool:
+        """P2-1 M2 T11: whether a FRONTIER waiter's anchor can serve a
+        re-issued prefetch. Mirrors _wake_frontier_waiters: the chain is
+        L3-durable (written+acked or restored, P2-1 e14), or the anchor was
+        deleted and a re-match falls back to root (self-heal, design §3.3).
+        Deliberately not is_backuped: the host copy commits at D->H
+        submission, before the L3 write, and a wake there re-issues the
+        prefetch into an empty L3 (the M2 premature-wake bug that kept
+        frontier_wake at zero)."""
+        if not self.tree_core.node_exists(node_id):
+            return True
+        return self.tree_core.is_l3_durable(
+            node_id
+        ) or self.tree_core.is_root(node_id)
 
     def get_last_hash_value(self, node_id: NodeId) -> Optional[str]:
         return self.tree_core.get_last_hash_value(node_id)
@@ -1749,6 +2161,7 @@ class UnifiedRadixCache(BasePrefixCache):
             not self.enable_storage
             or self.cache_controller is None
             or self.cache_controller.prefetch_rate_limited()
+            or self.cache_controller.storage_failure_reason is not None
         ):
             return 0
 
@@ -1789,8 +2202,16 @@ class UnifiedRadixCache(BasePrefixCache):
         last_hash: Optional[str] = None,
         prefix_keys: Optional[list[str]] = None,
         matched_prefix_tokens: Optional[list[int]] = None,
-    ) -> None:
-        if not self.enable_storage or self.cache_controller is None:
+    ) -> Optional[str]:
+        """Returns an outcome code for the P2-1 M1b state machine:
+        "issued" / "declined_rate_limited" / "declined_too_short" /
+        "forfeited_alloc_failed" / "skipped_no_l3" / "skipped_dup" (None
+        pre-M1b semantics preserved as the skip codes)."""
+        if (
+            not self.enable_storage
+            or self.cache_controller is None
+            or self.cache_controller.storage_failure_reason is not None
+        ):
             try:
                 _t38c_log({"evt": "pc_outcome", "phase": "entry",
                            "rid": req_id,
@@ -1798,7 +2219,7 @@ class UnifiedRadixCache(BasePrefixCache):
                            "storage_enabled": bool(self.enable_storage)})
             except Exception:
                 pass
-            return
+            return "skipped_no_l3"
 
         buffer_mode = self.host_memory_mode == "buffer_only"
         extra_key, cache_salt = self.tree_core.prefetch_anchor_info(last_host_node_id)
@@ -1833,7 +2254,8 @@ class UnifiedRadixCache(BasePrefixCache):
             # A too-short/fully-matched suffix can become a full recompute if
             # the device match evicts while queued; arm the paced retry.
             self._storage_prefetch_missed_rids.add(req_id)
-            return
+            _log_restore_disposition(req_id, "RECOMPUTE", prefetch_length, 0, "too_short")
+            return "declined_too_short"
         if not buffer_mode and self.cache_controller.prefetch_rate_limited():
             stats["declined_rate_limited"] += 1
             try:
@@ -1843,7 +2265,13 @@ class UnifiedRadixCache(BasePrefixCache):
             except Exception:
                 pass
             self._storage_prefetch_missed_rids.add(req_id)
-            return
+            # The state machine parks the rid in WAIT[PREFETCH_BUDGET]
+            # (T2): the T11 capacity wake re-issues when the budget frees,
+            # so this decline is retryable, not a recompute (the e13
+            # disposition label contradicted the observed restore_retry
+            # cause=capacity wakes).
+            _log_restore_disposition(req_id, "WAIT", prefetch_length, 0, "denied_rate_limit")
+            return "declined_rate_limited"
         if req_id in self.ongoing_prefetch or (
             buffer_mode and self.buffer_pipeline.has_staged(req_id)
         ):
@@ -1855,7 +2283,7 @@ class UnifiedRadixCache(BasePrefixCache):
                 pass
             # A fetch (or an unconsumed hold) already exists for this rid;
             # overwriting would leak its staging slots.
-            return
+            return "skipped_dup"
 
         # Buffer mode holds no tree state during the fetch: buffers are
         # operation-owned, so the anchor needs no pin.
@@ -1909,8 +2337,10 @@ class UnifiedRadixCache(BasePrefixCache):
             )
             if anchor_lock_params is not None:
                 self.dec_host_lock_ref(last_host_node_id, anchor_lock_params)
-            # Forfeited over transient staging pressure; retryable.
+            # Forfeited over transient staging pressure; retryable (T3
+            # parks the rid in WAIT[HOST_ALLOC], woken by T11).
             self._storage_prefetch_missed_rids.add(req_id)
+            _log_restore_disposition(req_id, "WAIT", prefetch_length, 0, "aux_alloc_failed")
             try:
                 _t38c_log({"evt": "pc_outcome", "phase": "issue", "rid": req_id,
                            "outcome": "forfeited_alloc_failed",
@@ -1918,7 +2348,7 @@ class UnifiedRadixCache(BasePrefixCache):
                            "counters": dict(stats)})
             except Exception:
                 pass
-            return
+            return "forfeited_alloc_failed"
 
         aux_xfers = [x for xfers in comp_xfers.values() for x in xfers]
         aux_xfers.extend(sidecar_xfers)
@@ -1930,6 +2360,7 @@ class UnifiedRadixCache(BasePrefixCache):
             extra_pools=aux_xfers or None,
         )
         stats["issued"] += 1
+        logger.info("[P2A] ts_ms=%d evt=prefetch_issued rid=%s prefetch_length=%d", int(time.time() * 1000), req_id, prefetch_length)
         try:
             _t38c_log({"evt": "pc_outcome", "phase": "issue", "rid": req_id,
                        "outcome": "issued",
@@ -1961,6 +2392,7 @@ class UnifiedRadixCache(BasePrefixCache):
             # Cache mode reserves the requested span up front; buffer mode
             # grants occupancy later at hit-alloc time, sized to the hit.
             self.cache_controller.prefetch_tokens_occupied += len(prefetch_key)
+        return "issued"
 
     def _prefetch_timeout_check_linear_func(self, operation: PrefetchOperation) -> bool:
         return (
@@ -2017,6 +2449,7 @@ class UnifiedRadixCache(BasePrefixCache):
         #
         # That is, when this function returns the host memory referenced must be inserted
         # into the radix tree or released to pool.
+        logger.info("[P2A] ts_ms=%d evt=prefetch_finalize rid=%s completed_tokens=%d mode=%s", int(time.time() * 1000), operation.request_id, int(operation.completed_tokens or 0), self.host_memory_mode)
         try:
             _t38c_log({"evt": "pc_l3_host",
                        "rid": operation.request_id,
@@ -2051,11 +2484,30 @@ class UnifiedRadixCache(BasePrefixCache):
             prefetch_key,
         ):
             # Hybrid all-or-nothing check failed; result already discarded.
+            _log_restore_disposition(
+                req_id,
+                "RECOMPUTE",
+                operation.stats_requested_tokens or 0,
+                completed_tokens,
+                "hybrid_discard",
+            )
             return
+
+        requested = operation.stats_requested_tokens or 0
+        if completed_tokens <= 0:
+            disposition, disposition_reason = "RECOMPUTE", "miss"
+        elif completed_tokens < requested:
+            disposition, disposition_reason = "PARTIAL", "shortfall"
+        else:
+            disposition, disposition_reason = "RESTORE", "full"
+        _log_restore_disposition(
+            req_id, disposition, requested, completed_tokens, disposition_reason
+        )
 
         if self.buffer_pipeline is not None:
             # No graft: release the rank-local tail beyond the synced usable
             # length, then park the bounce for admission-time consumption.
+            self.record_storage_prefetch_terminal(req_id, "finalized")
             return self.buffer_pipeline.stage_completed_prefetch(
                 req_id, completed_tokens, hash_value
             )
@@ -2091,6 +2543,18 @@ class UnifiedRadixCache(BasePrefixCache):
             # The commit emits via commit_actions only; the walk's were applied above.
             assert not insert_result.cache_actions
 
+            # The restored span's KV is confirmed in L3 -- it was just read
+            # from there -- so mark the inserted node durable like a
+            # written+acked chain. Without this a restored chain never
+            # qualifies for the hollow fallback or the prefetch gates
+            # (P2-1 e14: the K=32 evict deadlock). A shortfall inserted
+            # exactly prefetch_key[:completed_tokens], so the inserted node
+            # spans precisely the durable range.
+            if insert_result.inserted_host_node is not None:
+                self.tree_core.mark_storage_restored(
+                    insert_result.inserted_host_node
+                )
+
             self.cache_controller.mem_pool_host.free(
                 host_indices[: insert_result.prefix_len]
             )
@@ -2099,6 +2563,7 @@ class UnifiedRadixCache(BasePrefixCache):
         self.dec_host_lock_ref(last_host_node_id, anchor_lock_params)
         del self.ongoing_prefetch[req_id]
         self.cache_controller.prefetch_tokens_occupied -= len(prefetch_key)
+        self.record_storage_prefetch_terminal(req_id, "finalized")
 
         self.prefetch_loaded_tokens_by_reqid[req_id] = loaded_from_storage
         logger.info(
@@ -2195,6 +2660,7 @@ class UnifiedRadixCache(BasePrefixCache):
                 self._prefetch_occupied_span(prefetch_key, host_indices)
             )
             self.prefetch_loaded_tokens_by_reqid[req_id] = 0
+            self.record_storage_prefetch_terminal(req_id, "finalized")
             logger.warning(
                 "HiCache hybrid prefetch discarded req=%s completed=%d requested=%d "
                 "kv_beliefs_kept_pages=%d",
@@ -2207,8 +2673,11 @@ class UnifiedRadixCache(BasePrefixCache):
         return True
 
     def pop_prefetch_loaded_tokens(self, req_id: str) -> int:
-        # The request is being scheduled; a still-unserved miss marker is moot.
+        # The request is being scheduled; a still-unserved miss marker, a
+        # pending terminal outcome, and any frontier wait are moot now.
         self._storage_prefetch_missed_rids.discard(req_id)
+        self._storage_prefetch_terminal.pop(req_id, None)
+        self.discard_frontier_waiter(req_id)
         return self.prefetch_loaded_tokens_by_reqid.pop(req_id, 0)
 
     def pop_storage_prefetch_miss(self, req_id: str) -> bool:
@@ -2218,6 +2687,128 @@ class UnifiedRadixCache(BasePrefixCache):
             self._storage_prefetch_missed_rids.discard(req_id)
             return True
         return False
+
+    # ---- P2-1 M2: frontier waiters (is_backedup gate skip + ACK wake) ----
+
+    def register_frontier_waiter(self, req_id: str, node_id: NodeId) -> None:
+        """Record a frontier wait for req_id keyed by its anchor node (the
+        scheduler's gate else-branch, design T5), and request that node's
+        chain persistence (write_back only writes L3 on eviction, so the
+        wait itself must advance the frontier). Re-registration overwrites
+        the previous key: arrival retries are idempotent. The wait ends when
+        the node's L3 write ack promotes it to storage_persisted
+        (_wake_frontier_waiters), when the per-pass frontier predicate passes,
+        or on cleanup (discard_frontier_waiter)."""
+        for existing, waiters in self._storage_frontier_waiters.items():
+            if req_id in waiters:
+                waiters.discard(req_id)
+                if not waiters:
+                    del self._storage_frontier_waiters[existing]
+                break
+        self._storage_frontier_waiters.setdefault(node_id, set()).add(req_id)
+        # A re-registered waiter is no longer pending wakeup.
+        self._storage_frontier_ready.discard(req_id)
+        # The wait itself advances the storage frontier: write_back only
+        # writes L3 on eviction, so without this the anchor chain would
+        # never reach storage_persisted and the wait would sleep until the
+        # T13 timeout (the 42ms-gap wake=0 bug). The gap fill dedupes by
+        # is_backuped / is_storage_written; a deleted anchor is skipped
+        # (its waiter self-heals through the re-match predicate).
+        if self.tree_core.node_exists(node_id):
+            self.write_backup_storage(node_id)
+
+    def pop_frontier_ready(self, req_id: str) -> bool:
+        """True once per ACK wake for a live request; the scheduler re-issues
+        its prefetch (re-passes the gate, self-healing). Mirrors
+        pop_storage_prefetch_miss."""
+        if req_id in self._storage_frontier_ready:
+            self._storage_frontier_ready.discard(req_id)
+            return True
+        return False
+
+    def discard_frontier_waiter(self, req_id: str) -> None:
+        """Drop a request's frontier wait (abort, state-machine exit,
+        admission consumption). Idempotent."""
+        self._storage_frontier_ready.discard(req_id)
+        for existing, waiters in list(self._storage_frontier_waiters.items()):
+            if req_id in waiters:
+                waiters.discard(req_id)
+                if not waiters:
+                    del self._storage_frontier_waiters[existing]
+
+    def _wake_frontier_waiters(self, node_id: NodeId) -> None:
+        """Move the waiters of a freshly durable node into the ready set
+        (called after advance_storage_persisted in the ack drain; the
+        predicate accepts restored chains too, P2-1 e14). Set membership
+        only -- zero queue consumption, zero callbacks, zero write path --
+        so the F2 exactly-once ack semantics are untouched. Stale or
+        un-durable nodes are skipped, never dereferenced."""
+        waiters = self._storage_frontier_waiters.get(node_id)
+        if not waiters:
+            return
+        if not self.tree_core.node_exists(node_id):
+            return
+        if not self.tree_core.is_l3_durable(node_id):
+            return
+        self._storage_frontier_ready.update(waiters)
+        del self._storage_frontier_waiters[node_id]
+        for req_id in waiters:
+            logger.info(
+                "[P2A] ts_ms=%d evt=frontier_wake rid=%s node=%s",
+                int(time.time() * 1000),
+                req_id,
+                node_id,
+            )
+
+    def prompt_can_qualify_for_prefetch(
+        self, prompt_len: int, host_hit_length: int = 0
+    ) -> bool:
+        """Whether a prompt can ever present a prefetchable suffix: its
+        longest possible storage query (prompt beyond the host match, after
+        the device match has fully decayed), page-aligned the same way
+        prefetch_from_storage aligns keys. False means the query would be
+        declined_too_short forever -- health checks and tiny prompts have no
+        storage-restore intent to wait for."""
+        max_suffix = max(0, prompt_len - host_hit_length)
+        return max_suffix // self.page_size * self.page_size >= self.prefetch_threshold
+
+    def has_restore_potential(
+        self,
+        req_id: str,
+        anchor_node_id: NodeId,
+        host_hit_length: int,
+        prompt_len: Optional[int] = None,
+    ) -> bool:
+        """P2-1 M1b (T6): whether a quota-denied request has recoverable
+        restore material (design §2.5-1): host material, an in-flight or
+        registered restore intent, or an L3-queryable anchor chain. A prompt
+        too short to ever qualify for a storage prefetch has no restore
+        intent (declined_too_short is terminal for it)."""
+        if host_hit_length > 0:
+            return True
+        if prompt_len is not None and not self.prompt_can_qualify_for_prefetch(
+            prompt_len, host_hit_length
+        ):
+            return False
+        if req_id in self.ongoing_prefetch or req_id in self._storage_prefetch_missed_rids:
+            return True
+        if not self.tree_core.node_exists(anchor_node_id):
+            return False
+        return self.tree_core.is_backuped(anchor_node_id) or self.tree_core.is_root(
+            anchor_node_id
+        )
+
+    # ---- P2-1 M1b: terminal prefetch outcomes (drain -> scheduler) ----
+
+    def record_storage_prefetch_terminal(self, req_id: str, outcome: str) -> None:
+        """Record a terminal prefetch outcome for the scheduler's
+        restore-state reconciliation (same thread: the drain runs inside the
+        scheduler's event pass)."""
+        self._storage_prefetch_terminal[req_id] = outcome
+
+    def pop_storage_prefetch_terminal(self, req_id: str) -> Optional[str]:
+        """Consume the recorded terminal outcome once (None when absent)."""
+        return self._storage_prefetch_terminal.pop(req_id, None)
 
     def staged_prefetch_tokens(self, req_id: str) -> int:
         """Tokens a staged buffer-mode prefetch would splice (0 = no hold);
@@ -2237,6 +2828,8 @@ class UnifiedRadixCache(BasePrefixCache):
     def release_aborted_request(self, rid: str) -> None:
         self.prefetch_loaded_tokens_by_reqid.pop(rid, None)
         self._storage_prefetch_missed_rids.discard(rid)
+        self._storage_prefetch_terminal.pop(rid, None)
+        self.discard_frontier_waiter(rid)
         if (
             self.buffer_pipeline is not None
             and self.buffer_pipeline.release_aborted_staged(rid)
@@ -2253,6 +2846,7 @@ class UnifiedRadixCache(BasePrefixCache):
             anchor_lock_params,
             comp_xfers,
         ) = self.ongoing_prefetch[rid]
+        logger.info("[P2A] ts_ms=%d evt=prefetch_abort_cleanup rid=%s pre_alloc=%s", int(time.time() * 1000), rid, operation.host_indices is None)
         if operation.host_indices is None:
             self.cache_controller.terminate_prefetch(operation)
             self.revoke_pending_prefetch(rid)
@@ -2341,6 +2935,35 @@ class UnifiedRadixCache(BasePrefixCache):
             anchor_lock_params,
             comp_xfers,
         ) = info
+        logger.info("[P2A] ts_ms=%d evt=prefetch_revoke rid=%s terminated=%s storage_hit=%d requested=%d", int(time.time() * 1000), req_id, operation.is_terminated(), operation.storage_hit_count, operation.stats_requested_tokens)
+        if operation.is_terminated():
+            revoke_reason = "terminated"
+        elif operation.storage_hit_count == 0:
+            revoke_reason = "miss"
+        elif operation.storage_hit_count < self.prefetch_threshold:
+            revoke_reason = "insufficient"
+        else:
+            revoke_reason = "alloc_failed"
+        if operation.storage_hit_count == 0:
+            # P2-1 e15 Y: the query reported no pages, so the anchor's
+            # L3-durable belief is stale (chain evicted from storage or
+            # never persisted). Clear it on the anchor only -- descendants'
+            # flags are separate facts -- so gates/wakes/hollow stop
+            # trusting the dead chain; a write ack re-sets the belief.
+            self.tree_core.clear_storage_durable(last_host_node_id)
+        _log_restore_disposition(
+            req_id,
+            "RECOMPUTE",
+            operation.stats_requested_tokens or 0,
+            operation.storage_hit_count,
+            f"revoked:{revoke_reason}",
+        )
+        # P2-1 M1b (T9/T10): the scheduler distinguishes a genuine miss (no
+        # wait -- recompute) from a capacity-type termination (retryable).
+        self.record_storage_prefetch_terminal(
+            req_id,
+            "revoked_terminated" if revoke_reason == "terminated" else "revoked_miss",
+        )
         self._invalidate_absent_from_hit_query(operation)
         if self.buffer_pipeline is not None:
             self.buffer_pipeline.pop_prefix_ctx(req_id)
@@ -2516,6 +3139,7 @@ class UnifiedRadixCache(BasePrefixCache):
                         )
                         operation.pool_transfers_done = True
                 if ack.completed_req:
+                    logger.info("[P2A] ts_ms=%d evt=prefetch_io_done rid=%s completed=%s", int(time.time() * 1000), operation.request_id, ack.completed_tokens)
                     if operation.request_id in self.ongoing_prefetch:
                         # check_prefetch_progress() is not called for this rid yet.
                         # Let us insert the prefetch result into the radix tree.
@@ -2541,9 +3165,40 @@ class UnifiedRadixCache(BasePrefixCache):
                     if entry is not None:
                         node_id, lock_params = entry
                         self.dec_host_lock_ref(node_id, lock_params)
-                        # The write is durable: promote the node to a
-                        # persisted anchor when its parent chain is.
-                        self.tree_core.advance_storage_persisted(node_id)
+                        if operation.completed_tokens >= len(
+                            operation.host_indices
+                        ):
+                            # The write is durable: promote the node to a
+                            # persisted anchor when its parent chain is.
+                            # Promoted is every node that became persisted
+                            # here, including descendants acked before
+                            # their parent chain (retroactive promotion).
+                            promoted = self.tree_core.advance_storage_persisted(
+                                node_id
+                            )
+                            # P2-1 M2: a freshly persisted anchor can serve
+                            # its frontier waiters. Set membership only --
+                            # no queue consumption, no callbacks, no write
+                            # path -- so the F2 exactly-once ack semantics
+                            # are untouched.
+                            for promoted_id in promoted:
+                                self._wake_frontier_waiters(promoted_id)
+                        else:
+                            # Partial write (a page batch failed): L3 holds
+                            # no durable copy, so the node must not become
+                            # an anchor (hollow would release the last
+                            # complete copy on its word). Clear the
+                            # submission dedupe guard so the next gap fill
+                            # rewrites the node; the host lock ref was
+                            # released above and re-acquired on resubmit.
+                            logger.warning(
+                                "[P2A] partial backup ack: node %d got %d/%d "
+                                "tokens; will rewrite",
+                                node_id,
+                                operation.completed_tokens,
+                                len(operation.host_indices),
+                            )
+                            self.tree_core.clear_storage_written(node_id)
                 if (
                     log_metrics
                     and self.enable_storage_metrics
@@ -2681,6 +3336,11 @@ class UnifiedRadixCache(BasePrefixCache):
 
     def shutdown(self) -> None:
         """Best-effort auto-detach of the storage backend on process shutdown."""
+        # P2-1c expert ② shutdown/fatal cleanup: the ack drain will never run
+        # again, so every in-flight load-back entry terminates here -- its
+        # residual reservation (0 after the ownership transfer) and locks are
+        # released exactly once.
+        self._release_all_load_backs(cause="shutdown")
         if self._storage_attachment is not None:
             self._storage_attachment.shutdown()
 
@@ -2902,11 +3562,15 @@ class UnifiedRadixCache(BasePrefixCache):
                     and self.buffer_pipeline.try_finish_load_back(ack_id)
                 ):
                     continue
-                node, lock_params, host_lock_params = self.ongoing_load_back.pop(ack_id)
-                self.dec_lock_ref(node, lock_params)
-                self.dec_host_lock_ref(node, host_lock_params)
+                # E5 (success ACK / cancel): pop exactly-once, then the
+                # finalizer releases the entry's residual reservation and
+                # locks (the reservation was transferred to lock ownership at
+                # registration, so the residual is 0 -- the pop is what makes
+                # release exactly-once).
+                entry = self.ongoing_load_back.pop(ack_id)
+                self._finalize_load_back_entry(entry, cause="ack")
                 # Unpin the loaded nodes; host copies stay as reclaimable duplicates.
-                self.tree_core.finish_load_back(node)
+                self.tree_core.finish_load_back(entry.node_id)
 
             if self.metrics_collector is not None:
                 for pool, num_tokens in (ack.num_tokens_by_pool or {}).items():
@@ -2976,8 +3640,36 @@ class UnifiedRadixCache(BasePrefixCache):
             last_best_match_device_node_id,
         )
 
+    def _handle_storage_failure(self, reason: str) -> None:
+        """Degrade when a storage thread died (never restart it).
+
+        Runs once per failure on the scheduler thread: revoke every in-flight
+        prefetch so no request hangs on a dead IO thread (the I7 failure
+        mode), release the host lock refs of unacked storage writes, and log
+        the failure once. The gates in query_storage_hit_length /
+        prefetch_from_storage / _write_backup_storage_node then keep L3 off
+        for the rest of the run; requests fall back to recompute.
+        """
+        if self._storage_failure_handled:
+            return
+        self._storage_failure_handled = True
+        logger.error(
+            "HiCache storage failure: %s. Degrading: L3 queries/prefetches/"
+            "writes are disabled for the rest of this run; requests fall back "
+            "to recompute.",
+            reason,
+        )
+        for rid in list(self.ongoing_prefetch):
+            self.release_aborted_request(rid)
+        for node_id, lock_params in list(self.ongoing_backup.values()):
+            self.dec_host_lock_ref(node_id, lock_params)
+        self.ongoing_backup.clear()
+
     def check_hicache_events(self) -> None:
         """Called per scheduler step to poll async HiCache events."""
+        cc = self.cache_controller
+        if cc is not None and cc.storage_failure_reason is not None:
+            self._handle_storage_failure(cc.storage_failure_reason)
         try:
             import time as _t38c_time
             _now = _t38c_time.time()
@@ -3232,6 +3924,18 @@ class UnifiedRadixCache(BasePrefixCache):
         ongoing_load_back = [
             (nid, lb.node_id) for nid, lb in self.ongoing_load_back.items()
         ]
+        # P2-1c I2 invariant (design §3.3): the net reservation counter
+        # equals the sum of the live entries' residual reservations. Runs on
+        # the scheduler thread at pass boundaries, never mid-load_back, so
+        # the gate->transfer window is never observed.
+        reserved_sum = sum(
+            lb.reserved_tokens for lb in self.ongoing_load_back.values()
+        )
+        assert self.inflight_promotion_reserved == reserved_sum, (
+            f"P2-1c reservation invariant violated: counter="
+            f"{self.inflight_promotion_reserved} != sum(live entries)="
+            f"{reserved_sum}"
+        )
         self.tree_core.sanity_check(ongoing_write_through, ongoing_load_back)
 
     def pretty_print(self) -> None:

@@ -377,6 +377,11 @@ class HiCacheController:
         # Dedicated stop event for storage background threads (prefetch/backup).
         self.storage_stop_event = threading.Event()
 
+        # Storage health: None = healthy. Set by _storage_thread_fatal when a
+        # storage thread dies unexpectedly (never restarted transparently); the
+        # scheduler degrades (L3 off) until an explicit reset/attach.
+        self.storage_failure_reason: Optional[str] = None
+
         # Storage control queues, (re)created whenever the storage threads start.
         self.prefetch_buffer: Optional[Queue[PrefetchOperation]] = None
         self.prefetch_sync_queue: Optional[Queue[PrefetchAck]] = None
@@ -557,6 +562,34 @@ class HiCacheController:
             )
             raise RuntimeError("Failed to stop HiCache storage threads cleanly.")
 
+    def stop_storage_threads(self) -> None:
+        """Stop storage threads for graceful shutdown.
+
+        Order: stop new IO (stop event), let the in-flight operation drain,
+        then join. Must run before the host pools are destroyed, or a still-
+        running backup/prefetch thread can touch a destroyed pool (the
+        graceful-exit NoneType crash). Raises if a thread is stuck after the
+        join timeout (fail-fast: do not tear down pools under a live thread).
+        """
+        self._stop_storage_threads()
+
+    def _storage_thread_fatal(self, thread_name: str, exc: Exception) -> None:
+        """Record a storage thread's unexpected death; never restart it.
+
+        The thread exits after this call. In-flight ownership cannot be
+        reliably transferred to a replacement thread (partial acks, half-
+        written pages), so the scheduler degrades: storage_failure_reason
+        gates L3 queries/writes and the in-flight state is revoked there.
+        """
+        self.storage_failure_reason = f"{thread_name}: {type(exc).__name__}: {exc}"
+        logger.error(
+            "HiCache storage thread %s died (reason=%s); storage is degraded: "
+            "L3 prefetch/backup disabled until restart.",
+            thread_name,
+            self.storage_failure_reason,
+            exc_info=True,
+        )
+
     def attach_storage_backend(
         self,
         storage_backend: str,
@@ -643,6 +676,8 @@ class HiCacheController:
 
             # Ensure stop_event is clear before starting threads.
             self.storage_stop_event.clear()
+            # Fresh attach = fresh lease of life; clear any prior failure.
+            self.storage_failure_reason = None
             self._start_storage_threads()
         except Exception:
             # Best-effort cleanup for partial init.
@@ -802,6 +837,9 @@ class HiCacheController:
             self.prefetch_tokens_occupied = 0
 
         self.storage_stop_event.clear()
+        # Explicit restart (control path): a previous storage-thread failure
+        # must not keep the restarted threads gated off.
+        self.storage_failure_reason = None
 
         if self.enable_storage:
             self.prefetch_thread = threading.Thread(
@@ -1182,7 +1220,8 @@ class HiCacheController:
                 operation = self.prefetch_buffer.get(block=True, timeout=1)
                 if operation is None:
                     continue
-                self._page_transfer(operation)
+                n_pages = self._page_transfer(operation)
+                logger.info("[P2A] ts_ms=%d evt=prefetch_io_finished rid=%s n_tokens=%d", int(time.time() * 1000), operation.request_id, (n_pages or 0) * self.page_size)
 
                 self.prefetch_sync_queue.put(
                     PrefetchAck(
@@ -1193,6 +1232,11 @@ class HiCacheController:
                 )
             except Empty:
                 continue
+            except Exception as e:
+                # Storage thread died (e.g. backend crash, I7-type bug):
+                # record the fatal reason, mark storage unhealthy, exit.
+                self._storage_thread_fatal("prefetch_io_aux_func", e)
+                return
 
     def prefetch_rate_limited(self) -> bool:
         """
@@ -1272,6 +1316,9 @@ class HiCacheController:
 
             except Empty:
                 continue
+            except Exception as e:
+                self._storage_thread_fatal("prefetch_thread_func", e)
+                return
 
     def write_storage(
         self,
@@ -1341,6 +1388,9 @@ class HiCacheController:
 
             except Empty:
                 continue
+            except Exception as e:
+                self._storage_thread_fatal("backup_thread_func", e)
+                return
 
     def prefetch_sync_thread_func(self):
         """Synchronize prefetch results across all PP and TP ranks."""
@@ -1353,6 +1403,9 @@ class HiCacheController:
                 self.ack_prefetch_queue.put(ack)
             except Empty:
                 continue
+            except Exception as e:
+                self._storage_thread_fatal("prefetch_sync_thread_func", e)
+                return
 
     def _reduce_prefetch_ack(self, ack: PrefetchAck) -> None:
         """Synchronize all ranks to agree on a PrefetchAck."""
