@@ -85,5 +85,76 @@ class TestHiCacheSpecFileStorage(HiCacheSpecStorageMixin, CustomTestCase):
         self._run_storage_loadback_keeps_spec_accept_length()
 
 
+@unittest.skipIf(is_hip(), "HiCache + EAGLE3 extent-storage loadback e2e is CUDA-only.")
+class TestHiCacheSpecExtentStorage(HiCacheSpecStorageMixin, CustomTestCase):
+    storage_backend = "extent"
+    expected_storage_backend = "ExtentFileBackend"
+    storage_wait_timeout = 30
+
+    @classmethod
+    def setUpClass(cls):
+        cls.temp_dir = tempfile.mkdtemp()
+        cls.process = None
+        cls._launch_spec_server()
+
+    @classmethod
+    def _get_spec_server_env(cls):
+        return {"SGLANG_HICACHE_EXTENT_BACKEND_STORAGE_DIR": cls.temp_dir}
+
+    @classmethod
+    def _count_file_storage_pages(cls):
+        # The extent backend keeps one preallocated sparse file per rank;
+        # page writes show up as allocated blocks (st_blocks) -- the on-disk
+        # counterpart of the file backend's .bin page count.
+        try:
+            filenames = os.listdir(cls.temp_dir)
+        except FileNotFoundError:
+            return 0, 0
+
+        blocks = 0
+        for filename in filenames:
+            if filename.startswith("hicache.data"):
+                blocks += os.stat(os.path.join(cls.temp_dir, filename)).st_blocks
+        return blocks, blocks
+
+    @classmethod
+    def _wait_for_file_storage_pages(cls):
+        # Extent semantics: wait until the first request's pages are absorbed
+        # (allocated blocks stable across consecutive polls) before restart.
+        deadline = time.monotonic() + cls.storage_wait_timeout
+        last_blocks = -1
+        stable_polls = 0
+        blocks = 0
+
+        while time.monotonic() < deadline:
+            blocks, _ = cls._count_file_storage_pages()
+            if blocks == last_blocks and blocks > 0:
+                stable_polls += 1
+                if stable_polls >= 3:
+                    return blocks, blocks
+            else:
+                stable_polls = 0
+            last_blocks = blocks
+            time.sleep(0.2)
+
+        raise AssertionError(
+            "Timed out waiting for ExtentFileBackend storage to absorb the "
+            f"first request before restart: {blocks=}"
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._stop_spec_server()
+        if hasattr(cls, "temp_dir"):
+            shutil.rmtree(cls.temp_dir, ignore_errors=True)
+
+    def _wait_for_storage_before_restart(self):
+        blocks, _ = self._wait_for_file_storage_pages()
+        print(f"extent_storage_before_restart: {blocks=}")
+
+    def test_extent_storage_loadback_keeps_spec_accept_length(self):
+        self._run_storage_loadback_keeps_spec_accept_length()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
