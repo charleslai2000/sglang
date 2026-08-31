@@ -20,6 +20,7 @@ import sys
 import types
 import unittest
 from enum import Enum
+from queue import Queue
 from types import SimpleNamespace
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -70,6 +71,9 @@ def _install_stubenv():
     _fake_package("sglang.srt.environ", envs=object())
     _fake_package("sglang.srt.managers")
     _fake_package("sglang.srt.managers.cache_controller", CacheOperation=object)
+    # The P2-1c gates import promotion_budget_fits from here; the real
+    # module is loaded before unified_radix_cache in _load_module.
+    _fake_package("sglang.srt.managers.scheduler_components")
     _fake_package("sglang.srt.mem_cache")
     _fake_package("sglang.srt.mem_cache.base_prefix_cache", **{
         "BasePrefixCache": object,
@@ -193,6 +197,22 @@ def _load_module():
 
         return UnifiedRadixCache, _OngoingWriteThrough
     _install_stubenv()
+    # Real hicache_restore (pure module) before the cache module: the
+    # P2-1c gates import promotion_budget_fits from it.
+    hicache_spec = importlib.util.spec_from_file_location(
+        "sglang.srt.managers.scheduler_components.hicache_restore",
+        os.path.join(
+            _PYTHON_DIR,
+            "sglang",
+            "srt",
+            "managers",
+            "scheduler_components",
+            "hicache_restore.py",
+        ),
+    )
+    hicache_mod = importlib.util.module_from_spec(hicache_spec)
+    sys.modules[hicache_spec.name] = hicache_mod
+    hicache_spec.loader.exec_module(hicache_mod)
     spec = importlib.util.spec_from_file_location(
         "stubenv_unified_radix_cache", _MODULE_PATH
     )
@@ -229,6 +249,14 @@ class _FakeAck:
         self.timing_enabled = False
 
 
+def _backup_ack(op_id, completed_tokens, total_tokens):
+    """An ack as queued by backup_thread_func: the operation object itself
+    (full write: completed_tokens == len(host_indices); partial: less)."""
+    return SimpleNamespace(
+        id=op_id, completed_tokens=completed_tokens, host_indices=[0] * total_tokens
+    )
+
+
 class _DeviceValue:
     """Stands in for a device KV tensor: len() and numel() only."""
 
@@ -252,6 +280,8 @@ class _FakeTreeCore:
         self.chains = [list(chain) for chain in chains]
         self.backuped = set()
         self.storage_written = set()
+        self.storage_acked = set()
+        self.persisted = set()
         self.deleted = set()
         self.enable_storage = False  # mirrored by the cache's property
 
@@ -260,6 +290,13 @@ class _FakeTreeCore:
             if node_id in chain:
                 return chain
         return []
+
+    def _parent_of(self, node_id):
+        for chain in self.chains:
+            if node_id in chain:
+                idx = chain.index(node_id)
+                return None if idx == 0 else chain[idx - 1]
+        return None
 
     def mark_deleted(self, *node_ids):
         self.deleted.update(node_ids)
@@ -290,6 +327,9 @@ class _FakeTreeCore:
     def mark_storage_written(self, node_id):
         self.storage_written.add(node_id)
 
+    def clear_storage_written(self, node_id):
+        self.storage_written.discard(node_id)
+
     def build_backup_spec(self, node_id):
         return _DeviceValue(), {}
 
@@ -317,11 +357,46 @@ class _FakeTreeCore:
     def inc_host_lock_ref(self, node_id):
         return SimpleNamespace(to_dec_params=lambda: None)
 
+    def dec_host_lock_ref(self, node_id, params, skip_swa=False):
+        return SimpleNamespace()
+
+    def advance_storage_persisted(self, node_id):
+        """Faithful model of the real chain rule: a node is persisted iff
+        acked and its parent is persisted (chain[0] is a root child); a
+        newly persisted node retroactively promotes acked descendants.
+        Returns the node ids that became persisted here, node first."""
+        self.storage_written.add(node_id)
+        self.storage_acked.add(node_id)
+        if node_id in self.persisted:
+            return []
+        parent = self._parent_of(node_id)
+        if parent is None or parent in self.persisted:
+            return self._promote_persisted_subtree(node_id)
+        return []
+
+    def _promote_persisted_subtree(self, node_id):
+        promoted = [node_id]
+        self.persisted.add(node_id)
+        chain = self._chain_of(node_id)
+        for child in chain[chain.index(node_id) + 1 :]:
+            if child in self.storage_acked and child not in self.persisted:
+                promoted.extend(self._promote_persisted_subtree(child))
+        return promoted
+
+    def is_storage_persisted(self, node_id):
+        return node_id in self.persisted
+
+    def is_l3_durable(self, node_id):
+        # e14 unified predicate (architect formula): storage_persisted or
+        # storage_restored; this fake has no restore source.
+        return node_id in self.persisted
+
 
 class _FakeController:
     """Stub for HybridCacheController: D->H writes complete immediately."""
 
     write_policy = "write_back"
+    storage_failure_reason = None
 
     def __init__(self):
         self.ack_write_queue = []
@@ -329,6 +404,9 @@ class _FakeController:
         self.mem_pool_host = SimpleNamespace(available_size=lambda: 1 << 30)
         # Storage threads never started: the local drain short-circuits.
         self.prefetch_hit_queue = None
+        self.ack_prefetch_queue = Queue()
+        self.ack_backup_queue = Queue()
+        self.host_mem_release_queue = Queue()
 
     def write(self, device_indices, node_id=-1, extra_pools=None):
         self.ack_write_queue.append(_FakeAck([node_id]))
@@ -359,6 +437,9 @@ def _make_cache(tree_core):
     cache.ongoing_backup = {}
     cache._pending_storage_writes = []
     cache._storage_persist_skip_count = 0
+    cache._storage_frontier_waiters = {}
+    cache._storage_frontier_ready = set()
+    cache._storage_prefetch_terminal = {}
     cache.host_memory_mode = "default"
     cache._drain_write_through_depth = 0
     cache.cache_controller = _FakeController()
@@ -532,6 +613,172 @@ class DrainReentryRegressionTest(unittest.TestCase):
         self.assertEqual(cache._pending_storage_writes, [])
         self.assertEqual(cache._storage_persist_skip_count, 1)
         self.assertEqual(cache.cache_controller.storage_ops, [])
+
+    def test_drain_backup_ack_wakes_frontier_waiters(self):
+        # P2-1 M2: an acked backup promotes the node (advance_storage_persisted)
+        # and moves its frontier waiters into the ready set -- set operations
+        # only, one ack consumed exactly once. The F2 generation semantics of
+        # _drain_backup (pop entry, release lock, promote) are unchanged; the
+        # wake hook only appends set memberships after the promotion.
+        tree_core = _FakeTreeCore([[42]])
+        cache = _make_cache(tree_core)
+        cache._storage_frontier_waiters = {42: {"r1"}}
+        cache._storage_frontier_ready = set()
+        cache._storage_prefetch_terminal = {}
+        cache.ongoing_backup = {7: (42, "lock-params")}
+        cache.cache_controller.ack_backup_queue.put(_backup_ack(7, 16, 16))
+
+        cache._drain_storage_control_queues_impl(0, 0, 1, 0, {}, False)
+
+        self.assertEqual(cache.ongoing_backup, {})
+        self.assertTrue(cache.cache_controller.ack_backup_queue.empty())
+        self.assertTrue(tree_core.is_storage_persisted(42))
+        self.assertEqual(cache._storage_frontier_ready, {"r1"})
+        self.assertEqual(cache._storage_frontier_waiters, {})
+        # A repeated drain (no new ack) must not re-wake: exactly-once.
+        cache._drain_storage_control_queues_impl(0, 0, 0, 0, {}, False)
+        self.assertEqual(cache._storage_frontier_ready, {"r1"})
+
+    def test_drain_backup_unpersisted_node_does_not_wake(self):
+        # Lazy promotion: a node acked before its parent chain stays
+        # unpromoted; its waiters must not move to ready.
+        tree_core = _FakeTreeCore([[42]])
+        cache = _make_cache(tree_core)
+        cache._storage_frontier_waiters = {42: {"r1"}}
+        cache._storage_frontier_ready = set()
+        cache.ongoing_backup = {7: (42, "lock-params")}
+        cache.cache_controller.ack_backup_queue.put(_backup_ack(7, 16, 16))
+
+        # The fake promotes unconditionally; simulate the unpromoted case by
+        # leaving the node out of the persisted set after the promote call.
+        orig_advance = tree_core.advance_storage_persisted
+
+        def advance_without_promotion(node_id):
+            result = orig_advance(node_id)
+            tree_core.persisted.discard(node_id)
+            return result
+
+        tree_core.advance_storage_persisted = advance_without_promotion
+
+        cache._drain_storage_control_queues_impl(0, 0, 1, 0, {}, False)
+
+        self.assertEqual(cache._storage_frontier_ready, set())
+        self.assertEqual(cache._storage_frontier_waiters, {42: {"r1"}})
+
+    def test_drain_backup_partial_ack_does_not_promote_and_clears_guard(self):
+        # P2-1 M1: a partial L3 write (a page batch failed) must not promote
+        # the node to a persisted anchor -- hollow would release the last
+        # complete copy on the false premise -- and must clear the
+        # submission dedupe guard so the next gap fill rewrites the node.
+        # A later full ack (the retry) promotes and wakes as usual.
+        tree_core = _FakeTreeCore([[42]])
+        cache = _make_cache(tree_core)
+        cache._storage_frontier_waiters = {42: {"r1"}}
+        cache._storage_frontier_ready = set()
+        cache._storage_prefetch_terminal = {}
+        cache.ongoing_backup = {7: (42, "lock-params")}
+        tree_core.storage_written.add(42)  # submitted earlier
+        cache.cache_controller.ack_backup_queue.put(_backup_ack(7, 8, 16))
+
+        cache._drain_storage_control_queues_impl(0, 0, 1, 0, {}, False)
+
+        self.assertFalse(tree_core.is_storage_persisted(42))
+        self.assertNotIn(42, tree_core.storage_written)
+        self.assertEqual(cache._storage_frontier_ready, set())
+        self.assertEqual(cache._storage_frontier_waiters, {42: {"r1"}})
+        # The retry after the gap fill re-collects the node: a full ack
+        # promotes it and wakes the waiter.
+        cache.ongoing_backup = {8: (42, "lock-params")}
+        tree_core.storage_written.add(42)
+        cache.cache_controller.ack_backup_queue.put(_backup_ack(8, 16, 16))
+        cache._drain_storage_control_queues_impl(0, 0, 1, 0, {}, False)
+        self.assertTrue(tree_core.is_storage_persisted(42))
+        self.assertEqual(cache._storage_frontier_ready, {"r1"})
+        self.assertEqual(cache._storage_frontier_waiters, {})
+
+    def test_drain_backup_parent_ack_promotes_child_acked_earlier(self):
+        # P2-1 M2: a child acked before its parent stays unpromoted (no
+        # wake); the parent's later ack retroactively promotes the child
+        # and wakes its frontier waiter -- chain promotion must not depend
+        # on ack order (parallel write threads, or a partial parent write
+        # retried after the child's full ack).
+        tree_core = _FakeTreeCore([[10, 20]])
+        cache = _make_cache(tree_core)
+        cache._storage_frontier_waiters = {20: {"r1"}}
+        cache._storage_frontier_ready = set()
+        cache.ongoing_backup = {
+            1: (20, "lock-params"),
+            2: (10, "lock-params"),
+        }
+        # Child ack arrives first: lazy promotion leaves it unpromoted.
+        cache.cache_controller.ack_backup_queue.put(_backup_ack(1, 16, 16))
+        cache._drain_storage_control_queues_impl(0, 0, 1, 0, {}, False)
+        self.assertFalse(tree_core.is_storage_persisted(10))
+        self.assertFalse(tree_core.is_storage_persisted(20))
+        self.assertEqual(cache._storage_frontier_ready, set())
+        self.assertEqual(cache._storage_frontier_waiters, {20: {"r1"}})
+        # Parent ack arrives later: retroactive promotion wakes the child's
+        # waiter exactly once.
+        cache.cache_controller.ack_backup_queue.put(_backup_ack(2, 16, 16))
+        cache._drain_storage_control_queues_impl(0, 0, 1, 0, {}, False)
+        self.assertTrue(tree_core.is_storage_persisted(10))
+        self.assertTrue(tree_core.is_storage_persisted(20))
+        self.assertEqual(cache._storage_frontier_ready, {"r1"})
+        self.assertEqual(cache._storage_frontier_waiters, {})
+        # A repeated drain (no new ack) must not re-wake: exactly-once.
+        cache._drain_storage_control_queues_impl(0, 0, 0, 0, {}, False)
+        self.assertEqual(cache._storage_frontier_ready, {"r1"})
+
+    def test_register_trigger_persists_anchor_chain(self):
+        # P2-1 M2 (e8): registering a frontier wait requests the anchor
+        # chain's L3 persistence -- write_back only writes L3 on eviction,
+        # so without this the wait sleeps until the T13 timeout (42ms-gap
+        # wake=0). The gap fill D->H backs up and L3 writes the chain; the
+        # L3 ack then promotes the anchor and wakes the waiter.
+        tree_core = _FakeTreeCore([[10, 20, 30]])
+        cache = _make_cache(tree_core)
+
+        cache.register_frontier_waiter("r1", 30)
+
+        self.assertEqual(tree_core.backuped, {10, 20, 30})
+        self.assertEqual(tree_core.storage_written, {10, 20, 30})
+        self.assertEqual(len(cache.cache_controller.storage_ops), 3)
+        self.assertEqual(cache._storage_frontier_waiters, {30: {"r1"}})
+        # L3 acks (ancestors-first) promote each node and wake the waiter.
+        for op_id in sorted(cache.ongoing_backup):
+            cache.cache_controller.ack_backup_queue.put(_backup_ack(op_id, 16, 16))
+        cache._drain_storage_control_queues_impl(0, 0, 3, 0, {}, False)
+        self.assertEqual(cache._storage_frontier_ready, {"r1"})
+        self.assertEqual(cache._storage_frontier_waiters, {})
+        self.assertEqual(tree_core.persisted, {10, 20, 30})
+
+    def test_register_trigger_dedupes_already_submitted_chain(self):
+        # A re-registration on the same chain (arrival retry) must not
+        # resubmit: the gap fill skips backuped / storage_written nodes.
+        tree_core = _FakeTreeCore([[10, 20, 30]])
+        cache = _make_cache(tree_core)
+
+        cache.register_frontier_waiter("r1", 30)
+        first_ops = len(cache.cache_controller.storage_ops)
+        cache.register_frontier_waiter("r2", 30)
+
+        self.assertEqual(len(cache.cache_controller.storage_ops), first_ops)
+        self.assertEqual(tree_core.storage_written, {10, 20, 30})
+        self.assertEqual(cache._storage_frontier_waiters, {30: {"r1", "r2"}})
+
+    def test_register_trigger_skips_deleted_anchor(self):
+        # A stale anchor (deleted by host churn between the match and the
+        # register) must not crash the gap fill; the waiter self-heals
+        # through the re-match predicate.
+        tree_core = _FakeTreeCore([[10, 20, 30]])
+        tree_core.mark_deleted(30)
+        cache = _make_cache(tree_core)
+
+        cache.register_frontier_waiter("r1", 30)
+
+        self.assertEqual(cache._storage_frontier_waiters, {30: {"r1"}})
+        self.assertEqual(cache.cache_controller.storage_ops, [])
+        self.assertEqual(tree_core.backuped, set())
 
     def test_gap_node_deleted_mid_gapfill_is_skipped(self):
         # The gap-fill's own D->H backups evict_host when host space is

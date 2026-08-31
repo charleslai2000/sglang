@@ -66,6 +66,21 @@ from sglang.srt.server_args import ServerArgs
 if TYPE_CHECKING:
     from sglang.srt.mem_cache.allocator import BaseTokenToKVPoolAllocator
 
+# [P2A] Admission-deny counters. Per-attempt denies are aggregated instead of
+# logged per attempt: a stuck request can deny thousands of times per run (the
+# I7 idle-spin case logged 2358 lines in 3 minutes). The scheduler snapshots
+# this periodically via prefill_deny_snapshot() (one summary line per window).
+_PREFILL_DENY_COUNTERS: Counter[str, int] = Counter()
+
+
+def prefill_deny_snapshot() -> dict:
+    """Return and clear the per-reason admission-deny counts since the last snapshot."""
+    if not _PREFILL_DENY_COUNTERS:
+        return {}
+    stats = dict(_PREFILL_DENY_COUNTERS)
+    _PREFILL_DENY_COUNTERS.clear()
+    return stats
+
 # Clip the estimation of max_new_tokens for the request whose max_new_tokens is very large.
 # This can prevent the server from being too conservative.
 # Note that this only clips the estimation in the scheduler but does not change the stop
@@ -502,10 +517,86 @@ class SchedulePolicy:
         q.extend(last_node_to_reqs[cur_node])
 
 
+def device_charge(
+    full_input_len: int,
+    device_prefix_len: int,
+    max_new: int,
+    page_size: int,
+    mamba_gap: int = 0,
+) -> int:
+    """Incremental device-KV charge shared by the admission gates and the
+    M1b WAIT-wake predicate (P2-1 design §2.4). Only the already-resident
+    device prefix is free; the max(0, ...) guard covers a prefix longer than
+    the input (retraction edge), which would otherwise slip through as a
+    negative charge."""
+    return (
+        max(0, full_input_len - device_prefix_len) + max_new + page_size + mamba_gap
+    )
+
+
+def available_and_evictable_tokens(allocator, tree_cache) -> int:
+    """Available + evictable device KV tokens, mirroring the numerator of
+    PrefillAdder.rem_total_tokens (the adder's running-batch offsets are
+    excluded: the M1b wake predicate may only be more permissive than the
+    admission gate, never stricter). Shared by the WAIT-wake predicate."""
+    if isinstance(allocator, PureSWATokenToKVPoolAllocator):
+        return allocator.swa_available_size() + tree_cache.swa_evictable_size()
+    if isinstance(
+        allocator,
+        (SWATokenToKVPoolAllocator, DeepSeekV4HiSparseTokenToKVPoolAllocator),
+    ):
+        return allocator.full_available_size() + tree_cache.full_evictable_size()
+    if tree_cache.supports_mamba():
+        return allocator.available_size() + tree_cache.full_evictable_size()
+    return allocator.available_size() + tree_cache.evictable_size()
+
+
+def device_locked_tokens(allocator, tree_cache) -> int:
+    """Derived device locked tokens (capacity - available - evictable), the
+    P2-1c promotion-budget locked term (p2-promotion-admission.md §3.1).
+
+    Mirrors the available_and_evictable_tokens allocator dispatch so the
+    budget and the M1b wake predicate read the same pools: the locked
+    remainder is whatever the pool can neither allocate nor evict (chain
+    locks, in-flight DMA, running batches).
+    """
+    if isinstance(allocator, PureSWATokenToKVPoolAllocator):
+        return (
+            allocator.size_full
+            - allocator.swa_available_size()
+            - tree_cache.swa_evictable_size()
+        )
+    if isinstance(
+        allocator,
+        (SWATokenToKVPoolAllocator, DeepSeekV4HiSparseTokenToKVPoolAllocator),
+    ):
+        return (
+            allocator.size_full
+            - allocator.full_available_size()
+            - tree_cache.full_evictable_size()
+        )
+    if tree_cache.supports_mamba():
+        return (
+            allocator.size_full
+            - allocator.available_size()
+            - tree_cache.full_evictable_size()
+        )
+    return (
+        allocator.size_full
+        - allocator.available_size()
+        - tree_cache.evictable_size()
+    )
+
+
 class AddReqResult(Enum):
     CONTINUE = auto()  # Continue to add requests
     NO_TOKEN = auto()  # No token left
     OTHER = auto()  # Other reasons to stop adding requests
+    # M1b (T7): host material exists but the device quota for load-back was
+    # transiently unavailable (init_load_back came back empty). The M1b
+    # scheduler branch turns it into WAIT_CAPACITY instead of a silent
+    # full-span recompute (design C4).
+    RESTORE_DENIED = auto()
 
 
 class PrefillAdder:
@@ -834,6 +925,25 @@ class PrefillAdder:
         if self._mamba_slot_cost and req.mamba_pool_idx is None:
             return self._mamba_slot_cost
         return 0
+
+    def _device_charge(self, req: Req, full_input_len: int, max_new: int) -> int:
+        """Incremental device-KV charge for the admission gates (P2-1 M1a).
+
+        Only the already-resident device prefix (len(req.prefix_indices)) is
+        free: locked at admission, it sits on the pool's used side and never
+        competes for available+evictable. Host/storage hits are charged in
+        full -- load-back makes them resident. The max(0, ...) guard covers a
+        prefix longer than the input (retraction edge cases), which would
+        otherwise slip through the gates as a negative charge. The shared
+        Mamba gap is folded in via _mamba_gap_budget_for_req.
+        """
+        return device_charge(
+            full_input_len,
+            len(req.prefix_indices),
+            max_new,
+            self.page_size,
+            mamba_gap=self._mamba_gap_budget_for_req(req),
+        )
 
     def ceil_paged_tokens(self, tokens: int) -> int:
         return -(-tokens // self.page_size) * self.page_size
@@ -1230,10 +1340,12 @@ class PrefillAdder:
         cand_extend_input_len = len(req.full_untruncated_fill_ids) - len(
             req.prefix_indices
         )
-        total_tokens = cand_extend_input_len + max_new + self.page_size
-        # Shared Mamba pool: fold the new mamba state's shared-gap cost into
-        # `total_tokens` so both `rem_total_tokens` gates reflect the joint budget.
-        total_tokens += self._mamba_gap_budget_for_req(req)
+        # Incremental device-KV charge (P2-1 M1a): the device-resident prefix
+        # is free, host/storage hits are charged in full, and the shared Mamba
+        # gap is folded in. Shared by both rem_total_tokens gates below.
+        total_tokens = self._device_charge(
+            req, len(req.full_untruncated_fill_ids), max_new
+        )
 
         # adjusting the input_tokens based on host_hit_length and page_size
         real_input_tokens = cand_extend_input_len - req.host_hit_length
@@ -1241,6 +1353,7 @@ class PrefillAdder:
         prefix_len = len(req.prefix_indices)
 
         if total_tokens >= self.rem_total_tokens:
+            _PREFILL_DENY_COUNTERS["rem_total_tokens"] += 1
             return AddReqResult.NO_TOKEN
 
         chunk_tokens_limit = self.rem_chunk_tokens
@@ -1254,6 +1367,7 @@ class PrefillAdder:
                 swa_host_hit_length=req.swa_host_hit_length,
             )
             if swa_needed >= self.rem_swa_tokens:
+                _PREFILL_DENY_COUNTERS["swa_budget"] += 1
                 if not self._swa_req_never_fits(
                     real_input_tokens,
                     self._swa_new_tokens(req),
@@ -1272,6 +1386,7 @@ class PrefillAdder:
             and len(self.can_run_list) != 0
             and real_input_tokens >= self.rem_input_tokens
         ):
+            _PREFILL_DENY_COUNTERS["rem_input_tokens"] += 1
             # If without chunked prefill:
             # - if the can_run_list is not empty, we satisfy the constraint of (max_prefill_tokens)
             # - if the can_run_list is empty, always accept the first prefill request
@@ -1280,6 +1395,7 @@ class PrefillAdder:
         with self._lock_node(req.last_node):
             # self.rem_total_tokens may decrease after the lock acquisition
             if total_tokens >= self.rem_total_tokens:
+                _PREFILL_DENY_COUNTERS["rem_total_tokens_lock"] += 1
                 return AddReqResult.NO_TOKEN
 
             if self.is_hybrid_swa:
@@ -1290,6 +1406,7 @@ class PrefillAdder:
                     swa_host_hit_length=req.swa_host_hit_length,
                 )
                 if swa_needed >= self.rem_swa_tokens:
+                    _PREFILL_DENY_COUNTERS["swa_budget_lock"] += 1
                     if not self._swa_req_never_fits(
                         real_input_tokens,
                         self._swa_new_tokens(req),
@@ -1315,6 +1432,7 @@ class PrefillAdder:
                     waiting_queue_len=self.waiting_queue_len,
                 )
             ):
+                _PREFILL_DENY_COUNTERS["prefill_delayer"] += 1
                 return AddReqResult.OTHER
 
             if req.needs_host_load_back():
@@ -1325,6 +1443,17 @@ class PrefillAdder:
                         req=req,
                     )
                 )
+                if new_indices.numel() == 0 and req.needs_host_load_back():
+                    # P2-1 M1b (T7): the load-back found nothing to transfer
+                    # while the request still needs it -- host material is
+                    # present but the device quota was transiently
+                    # unavailable. The scheduler turns this into
+                    # WAIT_CAPACITY[DEVICE_QUOTA] instead of silently
+                    # recomputing the whole span (design C4). Nothing was
+                    # mutated yet: last_node is restored by the scheduler's
+                    # re-match on retry.
+                    _PREFILL_DENY_COUNTERS["load_back_denied"] += 1
+                    return AddReqResult.RESTORE_DENIED
                 req.prefix_indices = torch.cat([req.prefix_indices, new_indices])
                 prefix_len = len(req.prefix_indices)
                 req.cache_protected_len = prefix_len

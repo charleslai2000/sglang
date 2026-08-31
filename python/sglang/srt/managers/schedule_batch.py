@@ -96,6 +96,10 @@ from sglang.srt.disaggregation.utils import FAKE_BOOTSTRAP_HOST, DisaggregationM
 from sglang.srt.dllm.mixin.req import ReqDllmMixin
 from sglang.srt.environ import envs
 from sglang.srt.managers.embed_types import PositionalEmbeds
+from sglang.srt.managers.scheduler_components.hicache_restore import (
+    RestoreState,
+    RestoreWaitReason,
+)
 from sglang.srt.managers.scheduler_components.new_token_ratio_tracker import (
     NewTokenRatioTracker,
 )
@@ -1034,6 +1038,11 @@ class Req(ReqDllmMixin):
         self.storage_prefetch_retry_pending = False
         self.storage_prefetch_retry_wait_polls = 0
         self.storage_prefetch_retry_attempts = 0
+        # P2-1 M1b: restore intent state while queued (scheduler thread only;
+        # see Scheduler._reconcile_restore_states).
+        self.hicache_restore_state: Optional[RestoreState] = None
+        self.hicache_restore_wait_reason: Optional[RestoreWaitReason] = None
+        self.hicache_restore_state_ts: float = 0.0
         # The node to lock until for swa radix tree lock ref
         self.swa_uuid_for_lock: Optional[int] = None
         # Whether the prefill-time SWA tree lock has been released early

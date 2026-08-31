@@ -136,12 +136,21 @@ class UnifiedTreeNode:
         # host slots; such host copies must not be reclaimed until the ack.
         self.load_back_pending_id: Optional[int] = None
         # L3 write state: storage_written is set when this node's KV is
-        # submitted to storage (dedupe; continuity not implied), and
+        # submitted to storage (dedupe; continuity not implied),
+        # storage_acked when its write acked (full or not at all -- a
+        # partial ack clears storage_written and never sets this), and
         # storage_persisted when the write is acked and the parent chain is
         # continuous -- the condition for serving as an anchor. The root is
         # the always-persisted anchor and is itself never written.
         self.storage_written = False
+        self.storage_acked = False
         self.storage_persisted = False
+        # Restore source of L3 durability (P2-1 e14): set when the node's KV
+        # was just read back by a successful restore -- confirmed present in
+        # L3 exactly like a written+acked chain. The unified predicate
+        # is_l3_durable = storage_persisted or storage_restored; consumers
+        # never distinguish the source.
+        self.storage_restored = False
 
     def component(self, component_type: ComponentType) -> ComponentData:
         return self.component_data[component_type]
@@ -1098,6 +1107,14 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         new_node.creation_time = child.creation_time
         # Split fragments stay on the anchor's root path for the ack's walk.
         new_node.load_back_pending_id = child.load_back_pending_id
+        # Split fragments inherit the child's L3 state: the new parent's
+        # pages are a prefix of the child's pages, so every L3-backed
+        # property of the child (written / acked / persisted / restored)
+        # holds for the fragment (P2-1 e14 constraint 2, E13 family).
+        new_node.storage_written = child.storage_written
+        new_node.storage_acked = child.storage_acked
+        new_node.storage_persisted = child.storage_persisted
+        new_node.storage_restored = child.storage_restored
 
         self._for_each_component_lru(child, UnifiedLRUList.remove_node)
 
@@ -1332,6 +1349,77 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         )
         result.is_dropped = True
         return result
+
+    def evict_device_leaf_storage_backed(
+        self, node_id: NodeId
+    ) -> EvictDeviceLeafResult:
+        """Evict a device leaf whose chain is L3-persisted after its D->H
+        backup failed and the subtree drop was declined: release the device
+        layers only and keep the node (and its host-only subtree) intact.
+
+        The L3 copy is the durable backup, so no host copy (and none of the
+        host locks that blocked the drop) is required; the node stays as a
+        device-less leaf that a later L3 restore refills. Without this the
+        leaf is unevictable until host space frees (P2-1: a storage-persisted
+        chain under host pressure deadlocked the device eviction walker and
+        OOM'd the GPU pool)."""
+        result = EvictDeviceLeafResult()
+        node = self.node_by_id(node_id)
+        assert self._is_device_leaf(node), f"node {node.id} is not a D-leaf"
+        self._release_device_leaf_layers(node, result)
+        return result
+
+    def drop_device_leaf_to_miss(self, node_id: NodeId) -> EvictDeviceLeafResult:
+        """Release a device leaf's device layers to a plain miss when its
+        D->H backup failed and the subtree drop was declined and the chain
+        is NOT L3-durable (P2-1 e15 Z3): free the device layers only, keep
+        the node and its host-only subtree, and leave no hollow/restore
+        expectation behind -- a later access misses and recomputes.
+
+        The walker guarantees the drop is safe: evictable_device_leaves
+        membership implies lock_ref == 0 on every component (no active
+        request, no in-flight H->D DMA reading the device slots), and the
+        failed backup never issued the D->H copy (write_through_pending_id
+        is None), so no DMA reads the freed slots. Unlike the storage-backed
+        hollow, no L3 copy backs the release: cache persistence is
+        sacrificed, never faked."""
+        result = EvictDeviceLeafResult()
+        node = self.node_by_id(node_id)
+        assert self._is_device_leaf(node), f"node {node.id} is not a D-leaf"
+        assert node.write_through_pending_id is None, (
+            f"node {node.id} has an in-flight D->H write"
+        )
+        self._release_device_leaf_layers(node, result)
+        return result
+
+    def _release_device_leaf_layers(
+        self,
+        node: UnifiedTreeNode,
+        result: EvictDeviceLeafResult,
+    ) -> None:
+        """Free a device leaf's device layers, keep the node and its
+        host-only subtree, and drop the leaf from the evictable sets (the
+        shared mechanics of the storage-backed hollow and the drop-to-miss
+        fallback)."""
+        trigger = self.components_by_type[BASE_COMPONENT_TYPE]
+        self._evict_component_and_detach_lru(
+            node,
+            trigger,
+            target=EvictLayer.DEVICE,
+            tracker=result.tracker,
+            device_frees=result.device_frees,
+            host_frees=result.host_frees,
+        )
+        self._cascade_evict(
+            node,
+            trigger,
+            result.tracker,
+            device_frees=result.device_frees,
+            host_frees=result.host_frees,
+        )
+        self.kv_events.record_remove(node, medium=StorageMedium.GPU)
+        self.evictable_device_leaves.discard(node)
+        self._update_evictable_leaf_sets(node.parent)
 
     def _release_all_component_layers(
         self,
@@ -1925,23 +2013,85 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         """Record that node_id's KV was submitted to L3 (dedupe guard)."""
         self.node_by_id(node_id).storage_written = True
 
-    def advance_storage_persisted(self, node_id: NodeId) -> None:
+    def clear_storage_written(self, node_id: NodeId) -> None:
+        """Undo the submission dedupe guard after a partial L3 write ack:
+        the incomplete copy is not durable, so the next gap collection must
+        re-collect and rewrite the node."""
+        self.node_by_id(node_id).storage_written = False
+
+    def mark_storage_restored(self, node_id: NodeId) -> None:
+        """Record that the node's KV was just read back from L3 by a
+        successful restore: confirmed present in storage like a written+acked
+        chain (P2-1 e14). The unified predicate is_l3_durable reads this
+        flag and storage_persisted; consumers never distinguish sources."""
+        self.node_by_id(node_id).storage_restored = True
+
+    def clear_storage_durable(self, node_id: NodeId) -> None:
+        """Drop the node's L3-durable belief (P2-1 e15 Y): a restore whose
+        query covered the anchor's prefix keys and found no pages proves
+        the anchor's written/restored claim stale, so gates/wakes/hollow
+        must stop trusting the dead chain. Anchor-precise by contract:
+        descendants keep their own flags (their durability is a separate
+        fact; global consistency is out of scope). A later write ack
+        re-sets the belief."""
+        node = self.node_by_id(node_id)
+        node.storage_persisted = False
+        node.storage_restored = False
+
+    def is_l3_durable(self, node_id: NodeId) -> bool:
+        """Whether the node's KV is confirmed present in L3 (P2-1 e14):
+        written+ACK with a contiguous parent chain (storage_persisted), or
+        read back by a successful restore. The unified hollow/eviction and
+        gate/wake predicate; the restore source needs no parent chain
+        because the restore itself verified the span it read."""
+        node = self.node_by_id(node_id)
+        return node.storage_persisted or node.storage_restored
+
+    def advance_storage_persisted(self, node_id: NodeId) -> list[NodeId]:
         """Record a node's L3 write ack; it becomes a persisted anchor when
-        its parent already is (the root always is). Lazy chain promotion: a
-        node acked before its parent stays unpromoted and is walked past,
-        never rewritten, by later gap collections."""
+        its parent already is (the root always is). Returns every node whose
+        storage_persisted turned True here, node first then descendants:
+        children acked before their parent chain became contiguous are
+        promoted retroactively (chain promotion must not depend on ack
+        order)."""
         node = self.node_by_id(node_id)
         node.storage_written = True
+        node.storage_acked = True
+        if node.storage_persisted:
+            return []
         if (
             node.parent is None
             or node.parent is self.root_node
             or node.parent.storage_persisted
         ):
-            node.storage_persisted = True
+            return self._promote_persisted_subtree(node)
+        return []
+
+    def _promote_persisted_subtree(self, node: UnifiedTreeNode) -> list[NodeId]:
+        """Promote node (its parent chain is contiguous) and, retroactively,
+        every acked descendant whose own ack arrived before this promotion.
+
+        The recursion stops at unpromoted children: a child whose ack has
+        not arrived yet is promoted by its own ack drain later (its parent
+        is persisted by then), which recurses into its subtree the same way.
+        Persisted children are not re-walked: when they were promoted, all
+        their acked descendants were promoted at that moment, and any
+        descendant acked later is promoted by its own ack drain."""
+        promoted = [node.id]
+        node.storage_persisted = True
+        for child in node.children.values():
+            if child.storage_acked and not child.storage_persisted:
+                promoted.extend(self._promote_persisted_subtree(child))
+        return promoted
 
     def is_storage_written(self, node_id: NodeId) -> bool:
         """Whether the node's KV was already submitted to L3."""
         return self.node_by_id(node_id).storage_written
+
+    def is_storage_persisted(self, node_id: NodeId) -> bool:
+        """Whether the node is a persisted storage anchor (its L3 write acked
+        and its parent chain contiguous to the root). P2-1 M2 wake gate."""
+        return self.node_by_id(node_id).storage_persisted
 
     def build_hicache_transfers(
         self,
@@ -2223,7 +2373,11 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
             full_dev = node.component_data[FCT].value is not None
             full_hst = node.component_data[FCT].host_value is not None
 
-            # Full is the tree backbone, so aux data requires Full data.
+            # Full is the tree backbone, so aux data requires Full data. The
+            # hollow leaf (evict_device_leaf_storage_backed) keeps aux host
+            # slices after Full left both tiers: the acked L3 chain is the
+            # durable copy and a later restore refills the node.
+            persisted = node.storage_persisted
             for ct in self.component_types:
                 if ct == FCT:
                     continue
@@ -2232,13 +2386,15 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
                     E(f"node {nid} {ct} device present but Full.value=None")
                 if cd.host_value is not None and not full_hst:
                     # write_back reclaim takes only the Full host layer; an
-                    # aux host slice may outlive it while Full device is live.
-                    if not (self.is_write_back and full_dev):
+                    # aux host slice may outlive it while the Full device is
+                    # live or the node's L3 chain is the durable copy.
+                    if not (self.is_write_back and (full_dev or persisted)):
                         E(f"node {nid} {ct} host present but Full.host_value=None")
 
-            # Every node must keep Full data on at least one layer.
-            if not full_dev and not full_hst:
-                E(f"node {nid} dead: no Full device and no Full host")
+            # Every node must keep Full data on at least one layer: device,
+            # host, or the acked L3 chain (hollow leaves keep only L3).
+            if not full_dev and not full_hst and not persisted:
+                E(f"node {nid} dead: no Full device, no Full host, not L3-persisted")
 
             # Parent prefixes must keep data whenever the child does.
             if node.parent is not None and node.parent is not self.root_node:

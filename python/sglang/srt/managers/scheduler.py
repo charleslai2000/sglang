@@ -207,11 +207,29 @@ from sglang.srt.managers.schedule_batch import (
 )
 from sglang.srt.managers.schedule_policy import (
     AddReqResult,
+    CLIP_MAX_NEW_TOKENS,
     PrefillAdder,
     SchedulePolicy,
+    available_and_evictable_tokens,
+    device_charge,
+    device_locked_tokens,
+    prefill_deny_snapshot,
 )
 from sglang.srt.managers.scheduler_components.batch_result_processor import (
     SchedulerBatchResultProcessor,
+)
+from sglang.srt.managers.scheduler_components.hicache_restore import (
+    RestoreDecision,
+    RestoreEvent,
+    RestoreState,
+    RestoreWaitReason,
+    capacity_wake_applies,
+    next_restore,
+    promotion_budget_fits,
+    promotion_wait_blocked,
+    too_short_wait_armed,
+    wait_clock_next,
+    wait_reason_for,
 )
 from sglang.srt.managers.scheduler_components.dp_attn import SchedulerDPAttnAdapter
 from sglang.srt.managers.scheduler_components.flush_wrapper import SchedulerFlushWrapper
@@ -348,6 +366,17 @@ else:
 
 
 logger = logging.getLogger(__name__)
+
+
+# [P2A] Per-pass admission traces (bif transitions, admission positions,
+# no_token detail) are debug-only: they fire per scheduler pass and would
+# otherwise flood the log (2358+ lines in 3 minutes during an idle spin).
+# Gate on /tmp/t38c-on, the same file gate as the t38c probe: touch the file
+# to enable, remove it to disable (no restart needed).
+def _p2a_trace(fmt, *args):
+    if os.path.exists("/tmp/t38c-on"):
+        logger.info(fmt, *args)
+
 
 # B1.5-PROBE (T31 rebase of T23; read-only instrumentation, appends JSON lines to
 # /tmp/b15-probe.log only, zero numeric-path change; removed after experiment)
@@ -494,6 +523,8 @@ class Scheduler(
         self.enable_hierarchical_cache = get_memory().enable_hierarchical_cache
         self.enable_session_radix_cache = get_memory().enable_session_radix_cache
         self.enable_hicache_storage = get_memory().hicache_storage_backend is not None
+        # [P2A] Throttle for the aggregated admission-deny summary line.
+        self._last_deny_stats_ts = 0.0
         self.enable_decode_hicache = (
             get_disagg().disaggregation_decode_enable_radix_cache
             and self.enable_hierarchical_cache
@@ -2875,21 +2906,14 @@ class Scheduler(
                            },
                            "buffer_mode": buffer_mode,
                            "gate_pass": bool(
-                               tree_cache.is_backuped(last_host_node)
-                               or tree_cache.is_root(last_host_node)
-                               or (buffer_mode and _t38c_anchor_hash is not None)
+                               tree_cache.prefetch_gate_ok(
+                                   last_host_node, buffer_mode
+                               )
                            )})
             except Exception:
                 pass
 
-            if (
-                tree_cache.is_backuped(last_host_node)
-                or tree_cache.is_root(last_host_node)
-                or (
-                    buffer_mode
-                    and tree_cache.get_last_hash_value(last_host_node) is not None
-                )
-            ):
+            if tree_cache.prefetch_gate_ok(last_host_node, buffer_mode):
                 matched_len = len(req.prefix_indices) + req.host_hit_length
                 match_end = req._compute_max_prefix_len(
                     len(req.full_untruncated_fill_ids)
@@ -2900,7 +2924,7 @@ class Scheduler(
                     if tree_cache.hicache_storage_pass_prefix_keys
                     else None
                 )
-                tree_cache.prefetch_from_storage(
+                outcome = tree_cache.prefetch_from_storage(
                     req.rid,
                     last_host_node,
                     new_input_tokens,
@@ -2908,36 +2932,318 @@ class Scheduler(
                     prefix_keys,
                     matched_prefix_tokens=req.full_untruncated_fill_ids[:matched_len],
                 )
+                # P2-1 M1b: feed the issue outcome into the restore state
+                # machine (T1 issued / T2-T4 declines). declined_too_short
+                # only enters WAIT[REVALIDATE] when the prompt can ever
+                # qualify for a storage prefetch -- a can-never-qualify
+                # decline is terminal (plain recompute), and re-issuing it
+                # per pass is the capacity loop.
+                if outcome == "issued":
+                    self._apply_restore_event(req, RestoreEvent.PREFETCH_ISSUED)
+                elif outcome == "declined_rate_limited":
+                    self._apply_restore_event(req, RestoreEvent.DENIED_RATE)
+                elif outcome == "forfeited_alloc_failed":
+                    self._apply_restore_event(req, RestoreEvent.DENIED_ALLOC)
+                elif outcome == "declined_too_short":
+                    # WAIT[REVALIDATE] is the device-match-decay bet, whose
+                    # only re-issue source is the paced retry (step 2 below,
+                    # gated on the poll interval). With the poll disabled
+                    # (M2 default 0) the wait has no wake path and idles
+                    # out the full T13 clock (e13 K=1 t5 60s): the first
+                    # decline is then terminal, and the request recomputes
+                    # immediately (no restore intent is armed).
+                    if self._restore_potential_for(req) and too_short_wait_armed(
+                        get_memory().hicache_storage_prefetch_retry_poll_interval
+                    ):
+                        self._apply_restore_event(req, RestoreEvent.DENIED_SHORT)
+            else:
+                # Gate skip: the anchor is not a storage anchor yet. Cache
+                # mode registers a frontier wait (M2 T5) and marks
+                # WAIT[FRONTIER]; buffer mode reads by hash, never by anchor
+                # backup, so a skip there is final and the request recomputes.
+                # A prompt too short to ever qualify for a storage prefetch
+                # skips the wait too: no restore intent, and the frontier
+                # can never turn it into a restore (T13 would only delay the
+                # recompute).
+                if not buffer_mode and self.tree_cache.prompt_can_qualify_for_prefetch(
+                    len(req.full_untruncated_fill_ids), req.host_hit_length
+                ):
+                    self._apply_restore_event(req, RestoreEvent.GATE_SKIP_FRONTIER)
+                    tree_cache.register_frontier_waiter(req.rid, last_host_node)
+                    logger.info(
+                        "[P2A] ts_ms=%d evt=frontier_wait rid=%s node=%s",
+                        int(time.time() * 1000),
+                        req.rid,
+                        last_host_node,
+                    )
 
-    def _retry_missed_storage_prefetches(self):
-        """Re-issue the availability check for queued requests whose prefetch
-        missed. Pacing counts scheduling passes so TP ranks re-issue on the
-        same pass; a sweep (the admission loop stops at the first
-        unschedulable request) covers the whole queue."""
-        interval = get_memory().hicache_storage_prefetch_retry_poll_interval
-        if interval <= 0 or not self.waiting_queue:
+    def _reconcile_restore_states(self):
+        """Per-pass restore-state reconciliation (P2-1 M1b/M2; evolved from
+        _retry_missed_storage_prefetches). Feeds terminal prefetch outcomes
+        into the request state machine (T8 finalize / T9 miss revoke / T10
+        terminated revoke), consumes M2 frontier wakes (T12), re-issues
+        prefetches for WAIT requests whose capacity predicate now passes
+        (T11), and degrades timed-out waits to recompute (T13)."""
+        if not self.waiting_queue:
             return
-        max_attempts = get_memory().hicache_storage_prefetch_retry_max_attempts
+
+        # 1) Terminal outcomes recorded by the drain this pass (same thread).
         for req in self.waiting_queue:
-            if self.tree_cache.pop_storage_prefetch_miss(req.rid):
-                req.storage_prefetch_retry_pending = True
-                req.storage_prefetch_retry_wait_polls = 0
-            if (
-                not req.storage_prefetch_retry_pending
-                or req.storage_prefetch_retry_attempts >= max_attempts
-            ):
+            self._feed_restore_terminal(req)
+
+        # 2) Legacy paced retry (REVALIDATE fallback when interval > 0).
+        interval = get_memory().hicache_storage_prefetch_retry_poll_interval
+        if interval > 0:
+            max_attempts = get_memory().hicache_storage_prefetch_retry_max_attempts
+            for req in self.waiting_queue:
+                if self.tree_cache.pop_storage_prefetch_miss(req.rid):
+                    req.storage_prefetch_retry_pending = True
+                    req.storage_prefetch_retry_wait_polls = 0
+                if (
+                    not req.storage_prefetch_retry_pending
+                    or req.storage_prefetch_retry_attempts >= max_attempts
+                ):
+                    continue
+                req.storage_prefetch_retry_wait_polls += 1
+                if req.storage_prefetch_retry_wait_polls <= interval:
+                    continue
+                req.storage_prefetch_retry_pending = False
+                req.storage_prefetch_retry_attempts += 1
+                logger.debug(
+                    "HiCache storage prefetch retry req=%s attempt=%d",
+                    req.rid,
+                    req.storage_prefetch_retry_attempts,
+                )
+                self._prefetch_kvcache(req)
+
+        # 3) M2: frontier-ACK wakes (T12). The ack drain moved the waiter
+        # into the ready set earlier in this same event pass.
+        for req in self.waiting_queue:
+            if not self.tree_cache.pop_frontier_ready(req.rid):
                 continue
-            req.storage_prefetch_retry_wait_polls += 1
-            if req.storage_prefetch_retry_wait_polls <= interval:
+            self.tree_cache.discard_frontier_waiter(req.rid)
+            if req.hicache_restore_state is not RestoreState.WAIT_CAPACITY:
+                continue  # state changed since the wake (e.g. timed out)
+            decision = self._apply_restore_event(req, RestoreEvent.FRONTIER_READY)
+            if decision is RestoreDecision.RETRY_PREFETCH:
+                logger.info(
+                    "[P2A] ts_ms=%d evt=restore_retry rid=%s cause=frontier",
+                    int(time.time() * 1000),
+                    req.rid,
+                )
+                self._prefetch_kvcache(req)
+                if req.hicache_restore_state is RestoreState.NONE:
+                    # The wake re-issue was declined too-short: terminal
+                    # (T4 on the re-issue leg), released to recompute now
+                    # instead of idling out the T13 clock.
+                    logger.info(
+                        "[P2A] ts_ms=%d evt=restore_recompute rid=%s cause=too_short",
+                        int(time.time() * 1000),
+                        req.rid,
+                    )
+
+        # 4) M1: WAIT timeout (T13) and per-pass capacity wakes (T11).
+        timeout_s = self.server_args.hicache_restore_wait_timeout_s
+        now = time.perf_counter()
+        for req in self.waiting_queue:
+            if req.hicache_restore_state is not RestoreState.WAIT_CAPACITY:
                 continue
-            req.storage_prefetch_retry_pending = False
-            req.storage_prefetch_retry_attempts += 1
-            logger.debug(
-                "HiCache storage prefetch retry req=%s attempt=%d",
-                req.rid,
-                req.storage_prefetch_retry_attempts,
+            if timeout_s > 0 and now - req.hicache_restore_state_ts > timeout_s:
+                self.tree_cache.discard_frontier_waiter(req.rid)
+                decision = self._apply_restore_event(req, RestoreEvent.TIMEOUT)
+                if decision is RestoreDecision.ADMIT_RECOMPUTE:
+                    logger.info(
+                        "[P2A] ts_ms=%d evt=restore_recompute rid=%s cause=timeout",
+                        int(time.time() * 1000),
+                        req.rid,
+                    )
+                continue
+            if not capacity_wake_applies(req.hicache_restore_wait_reason):
+                # REVALIDATE / HOST_ALLOC denial causes are not testable by
+                # the capacity predicate: re-issuing would be declined
+                # identically every pass (the capacity loop). They leave
+                # only via the paced retry or the T13 timeout.
+                continue
+            if not self._restore_wait_capacity_fits(req):
+                continue
+            if req.hicache_restore_wait_reason is RestoreWaitReason.FRONTIER:
+                self.tree_cache.discard_frontier_waiter(req.rid)
+            decision = self._apply_restore_event(
+                req, RestoreEvent.CAPACITY_FITS, capacity_fits=True
             )
-            self._prefetch_kvcache(req)
+            if decision is RestoreDecision.RETRY_PREFETCH:
+                logger.info(
+                    "[P2A] ts_ms=%d evt=restore_retry rid=%s cause=capacity",
+                    int(time.time() * 1000),
+                    req.rid,
+                )
+                self._prefetch_kvcache(req)
+                if req.hicache_restore_state is RestoreState.NONE:
+                    # Same terminal rule as the T12 wake leg: a capacity
+                    # wake whose re-issued prefetch is declined too-short
+                    # releases the request to recompute immediately.
+                    logger.info(
+                        "[P2A] ts_ms=%d evt=restore_recompute rid=%s cause=too_short",
+                        int(time.time() * 1000),
+                        req.rid,
+                    )
+
+    def _feed_restore_terminal(self, req) -> None:
+        """Consume a terminal prefetch outcome (finalize T8 / revoke T9/T10)
+        recorded by the drain into the request's restore state machine."""
+        outcome = self.tree_cache.pop_storage_prefetch_terminal(req.rid)
+        if outcome is None:
+            return
+        if outcome == "finalized":
+            event, genuine_miss = RestoreEvent.FINALIZED, False
+        elif outcome == "revoked_terminated":
+            event, genuine_miss = RestoreEvent.REVOKED_TERMINATED, False
+        else:  # "revoked_miss"
+            event, genuine_miss = RestoreEvent.REVOKED_MISS, True
+        self._apply_restore_event(req, event, genuine_miss=genuine_miss)
+        if event is RestoreEvent.REVOKED_MISS:
+            logger.info(
+                "[P2A] ts_ms=%d evt=restore_recompute rid=%s cause=miss",
+                int(time.time() * 1000),
+                req.rid,
+            )
+        elif req.hicache_restore_state is RestoreState.READY:
+            logger.info(
+                "[P2A] ts_ms=%d evt=restore_ready rid=%s",
+                int(time.time() * 1000),
+                req.rid,
+            )
+
+    def _apply_restore_event(
+        self,
+        req,
+        event,
+        *,
+        capacity_fits: bool = False,
+        genuine_miss: bool = False,
+    ) -> RestoreDecision:
+        """Feed a restore event into the request's state machine and apply
+        the transition (Req fields only; the decision is returned for the
+        caller to execute). Scheduler thread only -- the drain, the
+        reconciliation and the admission loop all run on it, so there is no
+        concurrent write."""
+        prev_state = req.hicache_restore_state
+        next_state, decision = next_restore(
+            req.hicache_restore_state,
+            event,
+            capacity_fits=capacity_fits,
+            genuine_miss=genuine_miss,
+        )
+        if next_state is req.hicache_restore_state and decision is RestoreDecision.NONE:
+            return decision
+        req.hicache_restore_state = next_state
+        if next_state is RestoreState.WAIT_CAPACITY:
+            req.hicache_restore_wait_reason = wait_reason_for(
+                event, genuine_miss=genuine_miss
+            )
+        else:
+            req.hicache_restore_wait_reason = None
+        # The wait clock is armed at the first WAIT entry of the episode and
+        # never re-armed by a re-decline: re-arming was what let the
+        # capacity loop evade the T13 timeout (state_ts reset every pass).
+        req.hicache_restore_state_ts = wait_clock_next(
+            prev_state, next_state, req.hicache_restore_state_ts, time.perf_counter()
+        )
+        logger.info(
+            "[P2A] ts_ms=%d evt=restore_state rid=%s state=%s reason=%s",
+            int(time.time() * 1000),
+            req.rid,
+            next_state.name,
+            req.hicache_restore_wait_reason.name
+            if req.hicache_restore_wait_reason is not None
+            else "none",
+        )
+        return decision
+
+    def _restore_wait_capacity_fits(self, req) -> bool:
+        """Per-pass WAIT wake predicate (design §2.3): device capacity for
+        the incremental charge (same formula as the admission gates, minus
+        the adder's running offsets -- strictly permissive, never stricter),
+        the host prefetch budget, and for FRONTIER waiters the anchor
+        fallback (persisted, or deleted and re-matchable). The admission
+        gates stay authoritative: a too-permissive wake only costs a
+        re-issued prefetch."""
+        if req.hicache_restore_wait_reason is RestoreWaitReason.FRONTIER:
+            anchor = req.last_host_node
+            if anchor is None:
+                return False
+            # L3-readiness only: the host copy commits at D->H submission,
+            # before the L3 write, and a wake there re-issues the prefetch
+            # into an empty L3 (the M2 premature wake that kept
+            # frontier_wake at zero). The predicate mirrors the ACK wake.
+            return self.tree_cache.frontier_anchor_ready(anchor)
+        cc = self.tree_cache.cache_controller
+        if cc is not None and cc.prefetch_rate_limited():
+            return False
+        # P2-1c promotion-budget item (design §3.4): a DEVICE_QUOTA waiter
+        # whose next step is a FULL-KV promotion (host material ready) must
+        # not wake while the device promotion budget cannot hold it --
+        # waking re-issues prefetch -> finalize -> admission -> re-deny,
+        # burning a full prefetch cycle per wake. host_hit_length == 0
+        # waiters (T6 sources whose material is still staging) are not
+        # budgeted: their next step is the unrestricted L3->H prefetch. The
+        # predicate re-reads every pass, so a reservation release is visible
+        # the same pass (drain runs before this reconciliation).
+        if promotion_wait_blocked(
+            req.hicache_restore_wait_reason,
+            req.host_hit_length,
+            promotion_budget_fits(
+                device_locked_tokens(
+                    self.tree_cache.token_to_kv_pool_allocator, self.tree_cache
+                ),
+                self.tree_cache.inflight_promotion_reserved,
+                req.host_hit_length,
+                self.tree_cache.token_to_kv_pool_allocator.size_full,
+                self.server_args.hicache_promotion_margin_tokens,
+            ),
+        ):
+            return False
+        max_new = min(
+            max(req.sampling_params.max_new_tokens - len(req.output_ids), 0),
+            CLIP_MAX_NEW_TOKENS,
+        )
+        charge = device_charge(
+            len(req.full_untruncated_fill_ids),
+            len(req.prefix_indices),
+            max_new,
+            self.page_size,
+        )
+        return charge < available_and_evictable_tokens(
+            self.req_to_token_pool, self.tree_cache
+        )
+
+    def _restore_potential_for(self, req) -> bool:
+        """Design §2.5-1 restore potential plus the can-never-qualify prompt
+        gate; the shared entry condition for T4/T5/T6 (a quota or gate
+        denial only becomes a WAIT when restore material exists)."""
+        return self.tree_cache.has_restore_potential(
+            req.rid,
+            req.last_host_node,
+            req.host_hit_length,
+            len(req.full_untruncated_fill_ids),
+        )
+
+    def _cleanup_not_added_req(self, req, adder) -> None:
+        """Revert matched mamba idx state when add_one_req rejected the
+        request (avoid a memory leak). Only frees slots freshly allocated in
+        this batch (not pre-existing from a session); session-held slots
+        have their own lifecycle and freeing them here causes double-free."""
+        added = len(adder.can_run_list) > 0 and req is adder.can_run_list[-1]
+        if not added:
+            # init_next_round_input() may stage deferred Mamba COW/clear
+            # metadata before add_one_req() rejects the request.
+            req.mamba_cow_src_index = None
+            req.mamba_needs_clear = False
+            if req.mamba_pool_idx is not None and not getattr(req, "session", None):
+                self.tree_cache.req_to_token_pool.mamba_allocator.free(
+                    req.mamba_pool_idx.unsqueeze(-1)
+                )
+                req.mamba_pool_idx = None
 
     def _add_request_to_queue(self, req: Req, is_retracted: bool = False):
         if not self._set_or_validate_priority(req):
@@ -3446,9 +3752,24 @@ class Scheduler(
         if self.enable_hierarchical_cache or get_memory().enable_flexkv:
             self.tree_cache.check_hicache_events()
             if self.enable_hicache_storage:
-                self._retry_missed_storage_prefetches()
+                self._reconcile_restore_states()
+
+        # [P2A] Periodic aggregate of admission-deny reasons; per-attempt
+        # denies are counters in schedule_policy, not log lines.
+        deny_now = time.time()
+        if deny_now - self._last_deny_stats_ts >= 30.0:
+            self._last_deny_stats_ts = deny_now
+            deny_stats = prefill_deny_snapshot()
+            if deny_stats:
+                logger.info(
+                    "[P2A] ts_ms=%d evt=prefill_deny_summary reasons=%s",
+                    int(deny_now * 1000),
+                    deny_stats,
+                )
 
         # Reset batch_is_full to retry admission with a prefill adder.
+        if running_batch.batch_is_full:
+            _p2a_trace("[P2A] ts_ms=%d evt=bif_reset", int(time.time() * 1000))
         running_batch.batch_is_full = False
 
         if (
@@ -3481,6 +3802,7 @@ class Scheduler(
             and not self.enable_priority_preemption
         ):
             running_batch.batch_is_full = True
+            _p2a_trace("[P2A] ts_ms=%d evt=bif_set reason=allocatable", int(time.time() * 1000))
             return None, running_batch
 
         # Get priority queue
@@ -3553,6 +3875,7 @@ class Scheduler(
                 continue
 
             running_bs = len(running_batch.reqs)
+            _p2a_trace("[P2A] ts_ms=%d evt=admission rid=%s pos=%d qlen=%d running_bs=%d can_run=%d", int(time.time() * 1000), req.rid, self.waiting_queue.index(req), len(self.waiting_queue), running_bs, len(adder.can_run_list))
             candidate_beam_width = (
                 req.beam_group.beam_width if req.beam_group is not None else None
             )
@@ -3562,11 +3885,13 @@ class Scheduler(
                 running_batch=running_batch,
             ):
                 running_batch.batch_is_full = True
+                _p2a_trace("[P2A] ts_ms=%d evt=bif_set reason=can_run rid=%s", int(time.time() * 1000), req.rid)
             if self.disaggregation_mode == DisaggregationMode.PREFILL:
                 # In prefill mode, prealloc queue and transfer queue can also take memory,
                 # so we need to check if the available size for the actual available size.
                 if len(adder.can_run_list) >= self.req_to_token_pool.available_size():
                     running_batch.batch_is_full = True
+                    _p2a_trace("[P2A] ts_ms=%d evt=bif_set reason=disagg rid=%s", int(time.time() * 1000), req.rid)
 
             if running_batch.batch_is_full:
                 if (
@@ -3579,6 +3904,15 @@ class Scheduler(
                 prefetch_done = self.tree_cache.check_prefetch_progress(req.rid)
                 if not prefetch_done:
                     # skip staging requests that are ongoing prefetch
+                    continue
+                # P2-1 M1b: consume a terminal prefetch outcome recorded by
+                # the drain or by check_prefetch_progress itself (finalize /
+                # revoke) before the WAIT skip below.
+                self._feed_restore_terminal(req)
+                if req.hicache_restore_state is RestoreState.WAIT_CAPACITY:
+                    # Restore intent denied for capacity: keep waiting for a
+                    # wake (T11/T12) instead of admitting into a full
+                    # recompute; bounded by the WAIT timeout (T13).
                     continue
                 # Pop the number of tokens loaded from storage (L3 hits)
                 loaded_tokens = self.tree_cache.pop_prefetch_loaded_tokens(req.rid)
@@ -3614,30 +3948,38 @@ class Scheduler(
 
             if res != AddReqResult.CONTINUE:
                 if res == AddReqResult.NO_TOKEN:
+                    if self.enable_hicache_storage and self._restore_potential_for(req):
+                        # P2-1 M1b (T6): quota deny with restore material:
+                        # mark WAIT[DEVICE_QUOTA] and keep scanning (no
+                        # batch_is_full -- the request is not admitted and
+                        # does not stall the queue behind it; the WAIT skip
+                        # above holds it until a T11 wake).
+                        self._apply_restore_event(req, RestoreEvent.ADMISSION_DENY)
+                        self._cleanup_not_added_req(req, adder)
+                        continue
+                    _p2a_trace("[P2A] ts_ms=%d evt=no_token rid=%s res=%s can_run=%d", int(time.time() * 1000), req.rid, res, len(adder.can_run_list))
                     if self.enable_hierarchical_cache:
                         # Set batch_is_full after making sure there are requests that can be served
                         running_batch.batch_is_full = len(adder.can_run_list) > 0 or (
                             not running_batch.is_empty()
                         )
+                        _p2a_trace("[P2A] ts_ms=%d evt=bif_set reason=no_token_hicache rid=%s", int(time.time() * 1000), req.rid)
                     else:
                         running_batch.batch_is_full = True
-                # revert matched mamba idx to avoid memory leak, if req is not added.
-                # Only free if the slot was freshly allocated in this batch (not
-                # pre-existing from a session). Session-held slots have their own
-                # lifecycle and freeing them here causes double-free.
-                added = len(adder.can_run_list) > 0 and req is adder.can_run_list[-1]
-                if not added:
-                    # init_next_round_input() may stage deferred Mamba COW/clear
-                    # metadata before add_one_req() rejects the request.
-                    req.mamba_cow_src_index = None
-                    req.mamba_needs_clear = False
-                    if req.mamba_pool_idx is not None and not getattr(
-                        req, "session", None
-                    ):
-                        self.tree_cache.req_to_token_pool.mamba_allocator.free(
-                            req.mamba_pool_idx.unsqueeze(-1)
-                        )
-                        req.mamba_pool_idx = None
+                        _p2a_trace("[P2A] ts_ms=%d evt=bif_set reason=no_token rid=%s", int(time.time() * 1000), req.rid)
+                elif res == AddReqResult.RESTORE_DENIED:
+                    # P2-1 M1b (T7): host material exists but the device
+                    # quota for load-back was transiently unavailable: mark
+                    # WAIT[DEVICE_QUOTA] and keep scanning (design C4).
+                    logger.info(
+                        "[P2A] ts_ms=%d evt=restore_loadback_fail rid=%s",
+                        int(time.time() * 1000),
+                        req.rid,
+                    )
+                    self._apply_restore_event(req, RestoreEvent.LOAD_BACK_FAIL)
+                    self._cleanup_not_added_req(req, adder)
+                    continue
+                self._cleanup_not_added_req(req, adder)
                 break
 
         if mamba_allocator is not None:
