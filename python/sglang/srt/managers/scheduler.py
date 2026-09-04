@@ -224,12 +224,20 @@ from sglang.srt.managers.scheduler_components.hicache_restore import (
     RestoreState,
     RestoreWaitReason,
     capacity_wake_applies,
+    demand_restore_available,
     next_restore,
     promotion_budget_fits,
     promotion_wait_blocked,
     too_short_wait_armed,
     wait_clock_next,
     wait_reason_for,
+)
+from sglang.srt.managers.scheduler_components.ready_horizon import (
+    CausalEpochs,
+    DeclineReason,
+    NegativeCacheEntry,
+    ReadyHorizonPolicy,
+    ReadyHorizonView,
 )
 from sglang.srt.managers.scheduler_components.dp_attn import SchedulerDPAttnAdapter
 from sglang.srt.managers.scheduler_components.flush_wrapper import SchedulerFlushWrapper
@@ -410,6 +418,15 @@ def _t38c_log(rec):
         pass
 
 
+def policy_epoch_value(policy, epochs, reason) -> int:
+    """The cursor of the causal epoch a decline reason subscribes to
+    (M3, user adjudication subscription table: NO_L3 -> l3_publish,
+    NO_HEADROOM -> host_headroom, SPEC_BUDGET -> spec_budget). The negative
+    cache records this value at the decline; re-eligibility compares the
+    current value against it."""
+    return getattr(epochs, policy.subscribed_epoch(reason))
+
+
 def _prewarm_hccl_group(device, group, device_module):
     warmup_tensor = torch.zeros(1, dtype=torch.int32, device=device)
     torch.distributed.all_reduce(warmup_tensor, group=group)
@@ -523,6 +540,10 @@ class Scheduler(
         self.enable_hierarchical_cache = get_memory().enable_hierarchical_cache
         self.enable_session_radix_cache = get_memory().enable_session_radix_cache
         self.enable_hicache_storage = get_memory().hicache_storage_backend is not None
+        # P3 Ready Horizon (M1): wake re-issues classify as demand restores
+        # only under this flag; off keeps the pre-P3 wiring (T15
+        # BACKUP_PENDING-only classification), byte for byte.
+        self.enable_ready_horizon = server_args.enable_ready_horizon
         # [P2A] Throttle for the aggregated admission-deny summary line.
         self._last_deny_stats_ts = 0.0
         self.enable_decode_hicache = (
@@ -677,6 +698,11 @@ class Scheduler(
 
         # Init schedule policy and new token estimation
         self.init_schedule_policy()
+
+        # P3 Ready Horizon v0 (3.2): the READY_HOST pool maintenance policy
+        # (constructed unconditionally; the per-pass maintenance pass is
+        # gated on enable_ready_horizon).
+        self.init_ready_horizon()
 
         # Init watchdog, memory saver, input blocker and recv skipper
         self.init_watch_dog_memory_saver_input_blocker()
@@ -1327,6 +1353,57 @@ class Scheduler(
             metrics_collector_context=self.metrics_collector_context,
             metrics_collector=self.metrics_collector,
         )
+
+    def init_ready_horizon(self) -> None:
+        """P3 Ready Horizon v0 (3.2): construct the ready-pool policy and
+        its causal-epoch refill tracking (M3, user adjudication: per-rid
+        causal negative-cache; the four causal epochs are compared each
+        pass). The watermark is token-based (ledger 2026-09-01 adjudication
+        #1): watermarks and the write-back reserve are expressed as KV-host
+        token targets -- a fixed request count is not a stable resource
+        target when state length varies. Count mode is the legacy
+        fallback selected by the explicit *_count server_args."""
+        state_p95 = self.server_args.ready_horizon_state_p95_tokens
+        self.ready_horizon_state_p95_tokens = state_p95
+        self.ready_horizon_reserve_tokens = (
+            self.server_args.hicache_writeback_reserve_state_tokens
+            or state_p95
+        )
+        self.ready_horizon_margin_tokens = (
+            self.server_args.ready_horizon_margin_state_tokens
+            or 0
+        )
+        low_count = self.server_args.ready_host_watermark_low_count
+        high_count = self.server_args.ready_host_watermark_high_count
+        if low_count is not None and high_count is not None:
+            # Legacy count mode (explicit opt-in): the pre-token-semantics
+            # request-count watermarks stand as configured.
+            self.ready_horizon_token_mode = False
+            watermark_low = low_count
+            watermark_high = high_count
+        else:
+            self.ready_horizon_token_mode = True
+            low = self.server_args.ready_host_watermark_low
+            high = self.server_args.ready_host_watermark_high
+            watermark_low = low if state_p95 == 0 else state_p95
+            watermark_high = high if state_p95 == 0 else 2 * state_p95
+        self.ready_horizon = ReadyHorizonPolicy(
+            frontier_n=self.server_args.ready_horizon_frontier_n,
+            watermark_low=watermark_low,
+            watermark_high=watermark_high,
+            token_mode=self.ready_horizon_token_mode,
+        )
+        self._ready_horizon_epoch_prev: Optional[CausalEpochs] = None
+        self._ready_horizon_last_refill_ts = 0.0
+        self._ready_horizon_last_log: Optional[tuple] = None
+        # P3 M3 (user adjudication): per-rid causal negative-cache
+        # (rid -> NegativeCacheEntry). A staged request that declined
+        # parks here with its subscribed epoch's cursor; it is not re-
+        # eligible until that epoch advances (or the request identity
+        # changes, or the safety fuse expires). Deterministic L3 misses
+        # are not transient -- the revoke frees the budget and would
+        # re-arm the next pass without the park.
+        self._ready_horizon_negatives: dict = {}
 
     def init_schedule_policy(self):
         # Init schedule policy and new token estimation
@@ -2863,7 +2940,7 @@ class Scheduler(
         for tokenized_req in recv_req:
             self.handle_generate_request(tokenized_req)
 
-    def _prefetch_kvcache(self, req: Req):
+    def _prefetch_kvcache(self, req: Req, *, demand_restore: bool = False):
         try:
             _t38c_log({"evt": "pc_prefetch_enter", "phase": "entry",
                        "rid": req.rid,
@@ -2902,7 +2979,7 @@ class Scheduler(
                            "anchor": {
                                "is_root": bool(tree_cache.is_root(last_host_node)),
                                "is_backuped": bool(tree_cache.is_backuped(last_host_node)),
-                               "last_hash8": (_t38c_anchor_hash or "")[:8],
+                               "last_hash": _t38c_anchor_hash or "",
                            },
                            "buffer_mode": buffer_mode,
                            "gate_pass": bool(
@@ -2931,6 +3008,7 @@ class Scheduler(
                     tree_cache.get_last_hash_value(last_host_node),
                     prefix_keys,
                     matched_prefix_tokens=req.full_untruncated_fill_ids[:matched_len],
+                    demand_restore=demand_restore,
                 )
                 # P2-1 M1b: feed the issue outcome into the restore state
                 # machine (T1 issued / T2-T4 declines). declined_too_short
@@ -3021,9 +3099,21 @@ class Scheduler(
         for req in self.waiting_queue:
             if not self.tree_cache.pop_frontier_ready(req.rid):
                 continue
-            self.tree_cache.discard_frontier_waiter(req.rid)
             if req.hicache_restore_state is not RestoreState.WAIT_CAPACITY:
+                self.tree_cache.discard_frontier_waiter(req.rid)
                 continue  # state changed since the wake (e.g. timed out)
+            was_backup_pending = (
+                req.hicache_restore_wait_reason is RestoreWaitReason.BACKUP_PENDING
+            )
+            if was_backup_pending and not self._restore_backup_wake_ready(req):
+                # A T12 wake for a still-parked backup wait: the chain's
+                # durable frontier has not crossed the request's end (or
+                # the demand ticket pool is full). Consume the wake and
+                # hold the re-issue -- the per-pass T11 predicate re-checks
+                # the frontier, so the request is not lost, and the parked
+                # span stays armed.
+                continue
+            self.tree_cache.discard_frontier_waiter(req.rid)
             decision = self._apply_restore_event(req, RestoreEvent.FRONTIER_READY)
             if decision is RestoreDecision.RETRY_PREFETCH:
                 logger.info(
@@ -3031,16 +3121,15 @@ class Scheduler(
                     int(time.time() * 1000),
                     req.rid,
                 )
-                self._prefetch_kvcache(req)
+                self._prefetch_kvcache(
+                    req,
+                    demand_restore=self.enable_ready_horizon or was_backup_pending,
+                )
                 if req.hicache_restore_state is RestoreState.NONE:
                     # The wake re-issue was declined too-short: terminal
                     # (T4 on the re-issue leg), released to recompute now
                     # instead of idling out the T13 clock.
-                    logger.info(
-                        "[P2A] ts_ms=%d evt=restore_recompute rid=%s cause=too_short",
-                        int(time.time() * 1000),
-                        req.rid,
-                    )
+                    self._log_restore_recompute(req, "too_short")
 
         # 4) M1: WAIT timeout (T13) and per-pass capacity wakes (T11).
         timeout_s = self.server_args.hicache_restore_wait_timeout_s
@@ -3052,11 +3141,7 @@ class Scheduler(
                 self.tree_cache.discard_frontier_waiter(req.rid)
                 decision = self._apply_restore_event(req, RestoreEvent.TIMEOUT)
                 if decision is RestoreDecision.ADMIT_RECOMPUTE:
-                    logger.info(
-                        "[P2A] ts_ms=%d evt=restore_recompute rid=%s cause=timeout",
-                        int(time.time() * 1000),
-                        req.rid,
-                    )
+                    self._log_restore_recompute(req, "timeout")
                 continue
             if not capacity_wake_applies(req.hicache_restore_wait_reason):
                 # REVALIDATE / HOST_ALLOC denial causes are not testable by
@@ -3066,7 +3151,16 @@ class Scheduler(
                 continue
             if not self._restore_wait_capacity_fits(req):
                 continue
-            if req.hicache_restore_wait_reason is RestoreWaitReason.FRONTIER:
+            # Captured before _apply_restore_event clears the reason: a
+            # BACKUP_PENDING wake re-issues with its DEMAND_RESTORE ticket
+            # (past the speculative PREFETCH_BUDGET only).
+            was_backup_pending = (
+                req.hicache_restore_wait_reason is RestoreWaitReason.BACKUP_PENDING
+            )
+            if req.hicache_restore_wait_reason in (
+                RestoreWaitReason.FRONTIER,
+                RestoreWaitReason.BACKUP_PENDING,
+            ):
                 self.tree_cache.discard_frontier_waiter(req.rid)
             decision = self._apply_restore_event(
                 req, RestoreEvent.CAPACITY_FITS, capacity_fits=True
@@ -3077,16 +3171,15 @@ class Scheduler(
                     int(time.time() * 1000),
                     req.rid,
                 )
-                self._prefetch_kvcache(req)
+                self._prefetch_kvcache(
+                    req,
+                    demand_restore=self.enable_ready_horizon or was_backup_pending,
+                )
                 if req.hicache_restore_state is RestoreState.NONE:
                     # Same terminal rule as the T12 wake leg: a capacity
                     # wake whose re-issued prefetch is declined too-short
                     # releases the request to recompute immediately.
-                    logger.info(
-                        "[P2A] ts_ms=%d evt=restore_recompute rid=%s cause=too_short",
-                        int(time.time() * 1000),
-                        req.rid,
-                    )
+                    self._log_restore_recompute(req, "too_short")
 
     def _feed_restore_terminal(self, req) -> None:
         """Consume a terminal prefetch outcome (finalize T8 / revoke T9/T10)
@@ -3098,21 +3191,85 @@ class Scheduler(
             event, genuine_miss = RestoreEvent.FINALIZED, False
         elif outcome == "revoked_terminated":
             event, genuine_miss = RestoreEvent.REVOKED_TERMINATED, False
+        elif outcome == "revoked_backup_pending":
+            event, genuine_miss = RestoreEvent.BACKUP_PENDING, False
         else:  # "revoked_miss"
             event, genuine_miss = RestoreEvent.REVOKED_MISS, True
         self._apply_restore_event(req, event, genuine_miss=genuine_miss)
-        if event is RestoreEvent.REVOKED_MISS:
-            logger.info(
-                "[P2A] ts_ms=%d evt=restore_recompute rid=%s cause=miss",
-                int(time.time() * 1000),
-                req.rid,
+        if (
+            event is RestoreEvent.REVOKED_MISS
+            and genuine_miss
+            and self.enable_ready_horizon
+        ):
+            # P3 M3 (user adjudication): a deterministic miss means the
+            # full requested prefix is not in L3. The ready horizon records
+            # the NO_L3 negative-cache park (cursor = the l3_publish epoch
+            # right now) so this NONE request is not re-probed next pass --
+            # the miss is not transient and its revoke just released the
+            # budget (the e7 spin arm). A later L3 durable/publish advance
+            # or an identity change (prefix/generation) clears it.
+            self._ready_horizon_negatives[req.rid] = NegativeCacheEntry(
+                reason=DeclineReason.NO_L3,
+                epoch_cursor=self.tree_cache.l3_publish_epoch(),
+                fuse_expiry=time.perf_counter()
+                + self.ready_horizon.safety_fuse_s,
+                prefix_len=(
+                    len(req.full_untruncated_fill_ids)
+                    if req.full_untruncated_fill_ids is not None
+                    else 0
+                ),
+                generation=getattr(req, "session_generation", None),
             )
+        if event is RestoreEvent.BACKUP_PENDING:
+            # The lookup found the chain mid-backup: park on the M2 frontier
+            # wait, keyed by the anchor (the parked span is stored in the
+            # cache at the revoke). Registering also requests the chain's
+            # persistence (write_backup_storage), so the wait is
+            # self-arming; the per-pass wake predicate (_restore_backup_wake_ready
+            # -- durable frontier crossed the request end plus a free
+            # DEMAND_RESTORE ticket) then wakes the request for one
+            # re-lookup into the full chain instead of the per-pass
+            # re-issue loop. Bounded by the T13 timeout.
+            if (
+                req.hicache_restore_state is RestoreState.WAIT_CAPACITY
+                and req.last_host_node is not None
+            ):
+                self.tree_cache.register_frontier_waiter(
+                    req.rid, req.last_host_node
+                )
+        if event is RestoreEvent.REVOKED_MISS:
+            self._log_restore_recompute(req, "miss")
         elif req.hicache_restore_state is RestoreState.READY:
             logger.info(
                 "[P2A] ts_ms=%d evt=restore_ready rid=%s",
                 int(time.time() * 1000),
                 req.rid,
             )
+
+    def _final_storage_survivability(self, req) -> str:
+        """[P3] Coarse storage-survivability label at a recompute release:
+        which tier still holds part of the request's KV once it falls back
+        to recompute. L3 durability (written+acked or restored) or a partial
+        host-tree prefix survives; a full-tree miss leaves none. Drives the
+        16-way NEVER_BACKED differential (NEVER / PARTIAL / FULL_THEN_LOST /
+        Z3 / recycle / other)."""
+        tc = self.tree_cache
+        anchor = getattr(req, "last_host_node", None)
+        if anchor is not None and tc.node_exists(anchor):
+            if tc.is_l3_durable(anchor):
+                return "l3"
+            return "host"
+        return "none"
+
+    def _log_restore_recompute(self, req, cause) -> None:
+        logger.info(
+            "[P2A] ts_ms=%d evt=restore_recompute rid=%s cause=%s "
+            "final_storage_survivability=%s",
+            int(time.time() * 1000),
+            req.rid,
+            cause,
+            self._final_storage_survivability(req),
+        )
 
     def _apply_restore_event(
         self,
@@ -3160,6 +3317,318 @@ class Scheduler(
         )
         return decision
 
+    def _ready_horizon_pass(self) -> None:
+        """P3 Ready Horizon v0 (3.2): maintain the READY_HOST pool.
+
+        Runs after _reconcile_restore_states each prefill pass. The refill
+        check is event-driven (M3, user adjudication): it runs only on a
+        causal-epoch event -- L3 durable/publish advanced, host pages
+        released, speculative budget released, or the frontier composition
+        changed -- or the low-frequency safety reconciliation, never at
+        pass rate (e7: the non-directional signature self-sustained a miss
+        issue->revoke spin at ~141/s). Each staging issue delegates to
+        _prefetch_kvcache; a decline parks the rid in the causal
+        negative-cache (its subscribed epoch's cursor), so the rid is not
+        re-eligible until that epoch advances (or identity changes). The
+        refill's own traffic is not an event. Speculative staging never
+        evicts (M2): headroom or budget exhaustion declines silently."""
+        if not self.enable_ready_horizon:
+            return
+        cc = self.tree_cache.cache_controller
+        if cc is None:
+            return
+        policy = self.ready_horizon
+        frontier_reqs = policy.frontier(self.waiting_queue)
+        views = self._ready_horizon_views(frontier_reqs)
+        now = time.perf_counter()
+        epochs = self._ready_horizon_epochs(frontier_reqs, views, cc)
+        event = policy.epoch_event(self._ready_horizon_epoch_prev, epochs)
+        # The snapshot tracks the previous pass, not the last check: a
+        # release that merely returns a counter to its pre-issue value
+        # must still be visible as an event (the e7 spin's second leg).
+        self._ready_horizon_epoch_prev = epochs
+        if not policy.should_refill(
+            event=event,
+            last_refill_ts=self._ready_horizon_last_refill_ts,
+            now=now,
+        ):
+            return
+        self._ready_horizon_last_refill_ts = now
+
+        frontier_rids = {r.rid for r in frontier_reqs}
+        self._ready_horizon_negatives = {
+            rid: entry
+            for rid, entry in self._ready_horizon_negatives.items()
+            if rid in frontier_rids
+        }
+        headroom = self._ready_host_headroom(cc, views)
+        plan = policy.refill_plan(
+            views,
+            tree=self.tree_cache,
+            cc=cc,
+            host_headroom=headroom,
+            negatives=self._ready_horizon_negatives,
+            epochs=epochs,
+            now=now,
+            reserve_floor=self._ready_reserve_floor_tokens(cc),
+        )
+        # Record the headroom-gate declines (NO_HEADROOM): none of these
+        # can stage until host pages free.
+        for rid, reason in plan.declines:
+            view = self._ready_horizon_view_for(views, rid)
+            if view is not None:
+                self._park_ready_decline(rid, view, reason, epochs, now)
+        for view in plan.to_issue:
+            req = view.req
+            self._prefetch_kvcache(req)
+            state = req.hicache_restore_state
+            issued = state is RestoreState.RESTORING
+            logger.info(
+                "[P3] ts_ms=%d evt=ready_stage rid=%s result=%s state=%s "
+                "ready=%d headroom=%d",
+                int(time.time() * 1000),
+                req.rid,
+                "issued" if issued else "declined",
+                state.name if state is not None else "none",
+                plan.ready_count,
+                headroom,
+            )
+            if not issued:
+                # A synchronous decline: the horizon cannot stage this rid
+                # until the causal epoch that resolves the decline
+                # advances. The budget rate-limit is the testable one.
+                if cc.prefetch_rate_limited() or cc.prefetch_speculative_rate_limited():
+                    self._park_ready_decline(
+                        req.rid, view, DeclineReason.SPEC_BUDGET, epochs, now
+                    )
+            elif cc.prefetch_rate_limited() or cc.prefetch_speculative_rate_limited():
+                # The issue just exhausted an inflight budget: every
+                # remaining candidate would decline identically (the e7
+                # attempt-only spinner class), so park the un-tried tail
+                # (SPEC_BUDGET) until a budget-release epoch.
+                for rest in plan.candidates:
+                    if rest.rid in plan.to_issue or rest.rid == req.rid:
+                        continue
+                    self._park_ready_decline(
+                        rest.rid, rest, DeclineReason.SPEC_BUDGET, epochs, now
+                    )
+                break
+
+        if (plan.ready_count, plan.ready_tokens) != self._ready_horizon_last_log:
+            logger.info(
+                "[P3] ts_ms=%d evt=ready_pool size=%d tokens=%d watermark=[%s]",
+                int(time.time() * 1000),
+                plan.ready_count,
+                plan.ready_tokens,
+                policy.describe_watermarks(),
+            )
+            self._ready_horizon_last_log = (plan.ready_count, plan.ready_tokens)
+
+    def _park_ready_decline(
+        self, rid: str, view, reason, epochs, now
+    ) -> None:
+        """Record a staging decline in the per-rid causal negative-cache:
+        the subscribed epoch's cursor at the decline, the request identity
+        fingerprint, and the safety-fuse expiry (the anomalous repeat-fail
+        bound). The rid is not re-eligible until the subscribed epoch
+        advances or the identity changes (or the fuse expires)."""
+        entry = NegativeCacheEntry(
+            reason=reason,
+            epoch_cursor=policy_epoch_value(
+                self.ready_horizon, epochs, reason
+            ),
+            fuse_expiry=now + self.ready_horizon.safety_fuse_s,
+            prefix_len=view.prefix_len,
+            generation=view.generation,
+        )
+        self._ready_horizon_negatives[rid] = entry
+
+    def _ready_horizon_view_for(self, views, rid):
+        for view in views:
+            if view.rid == rid:
+                return view
+        return None
+
+    def _ready_horizon_views(self, frontier_reqs) -> list:
+        """Frozen per-request frontier views for the ready-pool policy
+        (M6: the staged marker is the finalize-written, admission-consumed
+        residency count; the full-prefix gate is resident-material-present
+        (marker > 0))."""
+        buffer_mode = self.server_args.hicache_host_memory_mode == "buffer_only"
+        views = []
+        for req in frontier_reqs:
+            staged = (
+                self.tree_cache.staged_prefetch_tokens(req.rid)
+                if buffer_mode
+                else self.tree_cache.peek_prefetch_loaded_tokens(req.rid)
+            )
+            generation = getattr(req, "session_generation", None)
+            views.append(
+                ReadyHorizonView(
+                    req=req,
+                    rid=req.rid,
+                    state=req.hicache_restore_state,
+                    wait_reason=req.hicache_restore_wait_reason,
+                    staged_tokens=staged,
+                    # the finalize writes the marker (> 0) on a full restore
+                    full_prefix=staged > 0,
+                    host_hit_length=req.host_hit_length,
+                    staging_eligible=self._restore_potential_for(req),
+                    prefix_len=len(req.full_untruncated_fill_ids) if req.full_untruncated_fill_ids is not None else 0,
+                    generation=generation,
+                )
+            )
+        return views
+
+    def _ready_horizon_epochs(self, frontier_reqs, views, cc) -> CausalEpochs:
+        """The four causal-epoch snapshot values (M3, user adjudication).
+        The running batch size is deliberately absent: it flips every pass
+        under an 8-agent workload (the e7 gate breakdown) and a freed GPU
+        slot surfaces through the frontier or headroom epochs. Per-request
+        restore states are absent too: a candidate's denied WAIT
+        transition must not re-arm the check (the per-pass poll M3
+        forbids). The l3_publish epoch comes from the tree's monotonic
+        durability counter; host_headroom from the host pool's free pages;
+        spec_budget from the speculative inflight counter (released = it
+        drops); waiting_frontier from the frontier composition."""
+        return CausalEpochs(
+            l3_publish=self.tree_cache.l3_publish_epoch(),
+            host_headroom=cc.mem_pool_host.available_size(),
+            spec_budget=cc.inflight_speculative_tokens,
+            waiting_frontier=tuple(r.rid for r in frontier_reqs),
+        )
+
+    def _ready_host_headroom(self, cc, views) -> int:
+        """Host headroom for the READY pool (M1): the pool capacity not
+        committed to the active/warm working set. The working set is the
+        pool usage minus the ready horizon's own resident footprint, so
+        the headroom equals the free pages plus the READY footprint; the
+        refill gate then charges the resident footprint and in-flight
+        staging against the free pages -- the same pages the staging alloc
+        consumes (M2: speculative staging eats free headroom only). The P3
+        write-back reserve floor is applied in refill_plan (reserve +
+        margin kept free after the stage), not here."""
+        pool = cc.mem_pool_host
+        return pool.available_size() + self.ready_horizon.ready_resident_tokens(
+            views
+        )
+
+    def _ready_reserve_floor_tokens(self, cc) -> int:
+        """P3 write-back admission: the frozen host tokens a stage must
+        leave free (writeback reserve + safety margin), in the anchor
+        pool's token space. Token mode (ledger adjudication #2) reserves by
+        state KV tokens directly; the legacy GB path converts lazily from
+        the byte server_args because the host pool attach happens after the
+        policy construction."""
+        pool = cc.mem_pool_host if cc is not None else None
+        if pool is None:
+            return 0
+        if self.ready_horizon_token_mode:
+            return (
+                self.ready_horizon_reserve_tokens
+                + self.ready_horizon_margin_tokens
+            )
+        anchor = getattr(pool, "anchor_entry", None)
+        anchor = anchor.host_pool if anchor is not None else pool
+        reserve = 0
+        getter = getattr(anchor, "writeback_reserve", None)
+        if getter is not None:
+            reserve = getter()
+        margin_gb = self.server_args.ready_horizon_safety_margin_gb
+        if margin_gb > 0:
+            bytes_per_token = getattr(
+                anchor, "size_per_token", getattr(anchor, "size", 1) or 1
+            )
+            reserve += int(margin_gb * 1e9 // bytes_per_token)
+        return reserve
+
+    def _hicache_capacity_stats(
+        self, views, cc
+    ) -> dict:
+        """P3 token/capacity model gauge values (ledger 2026-09-01
+        adjudication #3): kv_pool / writeback_reserve / ready_resident /
+        working / spec_inflight / usable (pool - reserve - margin) KV-host
+        token counts, plus per-pool usable (kv, mamba) and READY_state_max.
+        Published to the metrics channel via SchedulerStats; no GB guessing."""
+
+        def _pool_tokens(pool, name):
+            return (
+                pool.logical_size
+                if getattr(pool, "logical_size", None) is not None
+                else pool.size
+            )
+
+        pool = cc.mem_pool_host if cc is not None else None
+        if pool is None or not hasattr(pool, "anchor_entry"):
+            return {
+                "kv_pool_tokens": 0,
+                "writeback_reserve_tokens": 0,
+                "ready_resident_tokens": 0,
+                "working_tokens": 0,
+                "spec_inflight_tokens": 0,
+                "usable_tokens": 0,
+                "kv_host_usable_tokens": 0,
+                "mamba_host_usable_tokens": 0,
+                "ready_state_max_tokens": 0,
+            }
+        anchor = pool.anchor_entry.host_pool
+        kv_pool = _pool_tokens(anchor, "kv")
+        reserve = getattr(anchor, "writeback_reserve", lambda: 0)()
+        margin = getattr(anchor, "writeback_margin", lambda: 0)()
+        ready_resident = self.ready_horizon.ready_resident_tokens(views)
+        used = kv_pool - anchor.available_size()
+        working = max(0, used - ready_resident)
+        spec_inflight = getattr(cc, "inflight_speculative_tokens", 0) or 0
+        usable = kv_pool - reserve - margin
+
+        kv_usable = 0
+        mamba_usable = 0
+        for entry in pool.entries:
+            entry_pool = entry.host_pool
+            entry_reserve = getattr(
+                entry_pool, "writeback_reserve", lambda: 0
+            )()
+            entry_margin = getattr(entry_pool, "writeback_margin", lambda: 0)()
+            entry_usable = _pool_tokens(entry_pool, entry.name.value) - (
+                entry_reserve + entry_margin
+            )
+            if getattr(entry.name, "value", entry.name) == "kv":
+                kv_usable = entry_usable
+            elif getattr(entry.name, "value", entry.name) == "mamba":
+                mamba_usable = entry_usable
+
+        ready_max = 0
+        for view in views:
+            if self.ready_horizon._is_ready_resident(view):
+                ready_max = max(ready_max, view.staged_tokens)
+        return {
+            "kv_pool_tokens": kv_pool,
+            "writeback_reserve_tokens": reserve,
+            "ready_resident_tokens": ready_resident,
+            "working_tokens": working,
+            "spec_inflight_tokens": spec_inflight,
+            "usable_tokens": usable,
+            "kv_host_usable_tokens": kv_usable,
+            "mamba_host_usable_tokens": mamba_usable,
+            "ready_state_max_tokens": ready_max,
+        }
+
+    def _restore_backup_wake_ready(self, req) -> bool:
+        """The T15 backup-completion wake condition (P2-IO R2): the
+        parked request's chain durable frontier has crossed the request's
+        end (backup_wait_ready, re-read every pass -- the ACK drain
+        advances it, so the wake is ACK-driven) and a DEMAND_RESTORE
+        ticket is free (bounded concurrency for a backup-complete wake
+        batch; the re-issue bypasses only the speculative PREFETCH_BUDGET,
+        every other gate still applies)."""
+        anchor = req.last_host_node
+        if anchor is None:
+            return False
+        return (
+            self.tree_cache.backup_wait_ready(req.rid)
+            and demand_restore_available(self.tree_cache.demand_restore_inflight())
+        )
+
     def _restore_wait_capacity_fits(self, req) -> bool:
         """Per-pass WAIT wake predicate (design §2.3): device capacity for
         the incremental charge (same formula as the admission gates, minus
@@ -3177,6 +3646,15 @@ class Scheduler(
             # into an empty L3 (the M2 premature wake that kept
             # frontier_wake at zero). The predicate mirrors the ACK wake.
             return self.tree_cache.frontier_anchor_ready(anchor)
+        if req.hicache_restore_wait_reason is RestoreWaitReason.BACKUP_PENDING:
+            # The wait ends when the chain's durable frontier crosses the
+            # request's end AND a DEMAND_RESTORE ticket is free: the wake
+            # re-issues one prefetch that re-looks-up into the full chain.
+            # The frontier advances only on ACK drains (re-read every
+            # pass), so the wake is ACK-driven, not a poll; a failed
+            # write that never crosses the frontier leaves the request to
+            # the T13 timeout (bounded).
+            return self._restore_backup_wake_ready(req)
         cc = self.tree_cache.cache_controller
         if cc is not None and cc.prefetch_rate_limited():
             return False
@@ -3753,6 +4231,9 @@ class Scheduler(
             self.tree_cache.check_hicache_events()
             if self.enable_hicache_storage:
                 self._reconcile_restore_states()
+                # P3 Ready Horizon v0 (3.2): maintain the READY_HOST pool
+                # after the restore reconciliation (event-driven, M3).
+                self._ready_horizon_pass()
 
         # [P2A] Periodic aggregate of admission-deny reasons; per-attempt
         # denies are counters in schedule_policy, not log lines.
@@ -3813,6 +4294,16 @@ class Scheduler(
             # TEST_RETRACT_NO_PREFILL_BS, we skip the prefill to keep the requests
             # in the waiting queue.
             return None, running_batch
+
+        if self.enable_ready_horizon:
+            # M4 READY-first: stable partition, explicit priority > READY
+            # > base policy; off = the calc_priority order unchanged.
+            self.waiting_queue = self.ready_horizon.partition_ready_first(
+                self.waiting_queue,
+                tree=self.tree_cache,
+                buffer_mode=self.server_args.hicache_host_memory_mode == "buffer_only",
+                priority=self.enable_priority_scheduling,
+            )
 
         # Determine chunked_prefill_size for this batch
         chunked_prefill_size = self.chunked_prefill_size
@@ -3918,6 +4409,21 @@ class Scheduler(
                 loaded_tokens = self.tree_cache.pop_prefetch_loaded_tokens(req.rid)
                 if loaded_tokens > 0:
                     req.storage_hit_length = loaded_tokens
+                    # [P2A] restore "satisfied": the issued prefetch's
+                    # requested span is served from the restored KV this
+                    # admission (loaded_tokens > 0), not merely IO-complete
+                    # to host. This is the issued->satisfied service marker
+                    # for the B_ep/B_fin per-finish windows (metric_compare
+                    # pairs it against the last prefetch_issued of the same
+                    # rid). The write-back reserve fix (writeback consumes
+                    # the reserve) is what lets a chain persist to L3 so a
+                    # later episode can satisfy at all.
+                    logger.info(
+                        "[P2A] ts_ms=%d evt=restore_success rid=%s n_tokens=%d",
+                        int(time.time() * 1000),
+                        req.rid,
+                        loaded_tokens,
+                    )
 
             req.init_next_round_input(self.tree_cache)
             if (

@@ -331,13 +331,16 @@ class HybridCacheController(BaseHiCacheController):
         node_id: int = -1,
         extra_pools: Optional[list[PoolTransfer]] = None,
     ) -> Optional[torch.Tensor]:
-        host_indices = self.mem_pool_host.alloc(len(device_indices))
+        # D->H write-back staging: may use the P3 write-back reserve.
+        alloc = getattr(self.mem_pool_host, "alloc_writeback", self.mem_pool_host.alloc)
+        host_indices = alloc(len(device_indices))
         if host_indices is None:
             return None
         pool_transfers = self.mem_pool_host.resolve_host_transfers(
             extra_pools,
             primary_device_indices=device_indices,
             primary_host_indices=host_indices,
+            writeback=True,
         )
         if pool_transfers is None and extra_pools:
             self.mem_pool_host.free(host_indices)
@@ -582,6 +585,7 @@ class HybridCacheController(BaseHiCacheController):
         hash_value: Optional[List[str]] = None,
         prefix_keys: Optional[List[str]] = None,
         extra_pools: Optional[list[PoolTransfer]] = None,
+        node_id: Optional[Any] = None,
     ) -> int:
         operation = StorageOperation(
             host_indices,
@@ -590,6 +594,7 @@ class HybridCacheController(BaseHiCacheController):
             prefix_keys=prefix_keys,
             pool_transfers=extra_pools,
         )
+        operation.node_id = node_id
         self.backup_queue.put(operation)
         return operation.id
 
@@ -617,7 +622,7 @@ class HybridCacheController(BaseHiCacheController):
         try:
             _t38c_log({"evt": "pc_storage_query",
                        "rid": operation.request_id,
-                       "keys": [k[:16] for k in hash_value[:8]],
+                       "keys": [k for k in hash_value[:8]],
                        "query_suffix_len": len(hash_value),
                        "kv_hit_pages": int(kv_hit_pages),
                        "storage_hit_count": int(kv_hit_pages) * self.page_size,

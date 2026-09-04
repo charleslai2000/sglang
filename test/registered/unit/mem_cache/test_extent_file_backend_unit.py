@@ -8,6 +8,11 @@ import): ``_page_byte_view`` treats byte-like buffers as raw bytes.  The
 ``TestExtentTensorPages`` cases additionally drive the real torch.Tensor
 path (the engine's host-pool flat pages are torch tensors, bf16/fp16/fp32
 CPU) and skip themselves when torch is not installed.
+``TestExtentV1ZeroCopy`` covers the batch_get_v1/batch_set_v1 zero-copy
+surface against a real page_first MHA host pool (k/v dual-block preadv
+split, config-suffix isolation, return-contract negatives); it skips itself
+when torch is not installed.  ``TestExtentIovMaxBoundary`` pins the
+IOV_MAX(1024)-iovec sharding boundary on the raw IO helpers (torch-free).
 
 Run with:
     python3 -m pytest test/registered/unit/mem_cache/test_extent_file_backend_unit.py -v
@@ -603,6 +608,1132 @@ class TestExtentV2(ExtentBackendTestBase):
         )
         self.assertEqual(result[PoolName.KV], [False] * 3)
 
+    def test_v2_trailing_pages_reverse_scan_narrow_cases(self):
+        """TRAILING_PAGES reverse-scans from kv_pages for the nearest mamba
+        checkpoint; a checkpoint farther back (page 15) still bounds the hit
+        even when the query prefix extends past it.
+
+        User-specified regression: a backend that only checked the KV last
+        present page would clamp query 0..20 to 0 (no checkpoint at page 20),
+        losing the valid page-15 checkpoint that must yield boundary=16.
+        """
+        kv, mamba = self._register_pools()
+        keys = self._make_keys(32)
+        for i in range(32):
+            kv._pages[i][:] = self._page_bytes(i)
+        r = self.backend.batch_set_v2([self._transfer(PoolName.KV, keys)])
+        self.assertEqual(r[PoolName.KV], [True] * 32)
+        for i in (15, 31):
+            mamba._pages[i][:] = self._page_bytes(i)
+        r = self.backend.batch_set_v2(
+            [self._transfer(PoolName.MAMBA, [keys[15], keys[31]])]
+        )
+        self.assertEqual(r[PoolName.MAMBA], [True] * 2)
+
+        def query(qlen):
+            return self.backend.batch_exists_v2(
+                keys[:qlen],
+                [
+                    self._transfer(
+                        PoolName.MAMBA,
+                        ["__placeholder__"],
+                        hit_policy=PoolHitPolicy.TRAILING_PAGES,
+                    )
+                ],
+            )
+
+        q20 = query(21)
+        self.assertEqual(q20.kv_hit_pages, 16)
+        self.assertEqual(q20.extra_pool_hit_pages[PoolName.MAMBA], 16)
+        q31 = query(32)
+        self.assertEqual(q31.kv_hit_pages, 32)
+        self.assertEqual(q31.extra_pool_hit_pages[PoolName.MAMBA], 32)
+        q10 = query(11)
+        self.assertEqual(q10.kv_hit_pages, 0)
+        self.assertNotIn(PoolName.MAMBA, q10.extra_pool_hit_pages)
+
+    def test_v2_trailing_pages_live_shape_storage_hit_positive(self):
+        """Live shape (3090 M4 node65): a node's KV fully present with a mamba
+        checkpoint at its write-time last page must yield storage_hit > 0 when
+        queried by a longer chain sharing the same prefix -- not clamp to 0."""
+        # Larger extent to hold the 2048-page live chain (test base is 16Ki).
+        backend = ExtentFileBackend(
+            _make_config(
+                extra_config={
+                    "storage_dir": self.tmpdir,
+                    "extent_size": "64Mi",
+                    "file_size": "512Mi",
+                }
+            )
+        )
+        old = self.backend
+        self.backend = backend
+        try:
+            kv = _PagePool(1000, slots=4096)
+            mamba = _PagePool(1000, slots=4096)
+            backend.register_mem_host_pool_v2(kv, PoolName.KV)
+            backend.register_mem_host_pool_v2(mamba, PoolName.MAMBA)
+            n = 2048
+            keys = self._make_keys(n)
+            for i in range(n):
+                kv._pages[i][:] = self._page_bytes(i)
+            r = backend.batch_set_v2([self._transfer(PoolName.KV, keys)])
+            self.assertEqual(r[PoolName.KV], [True] * n)
+            mamba._pages[n - 1][:] = self._page_bytes(n - 1)
+            r = backend.batch_set_v2(
+                [self._transfer(PoolName.MAMBA, [keys[n - 1]])]
+            )
+            self.assertEqual(r[PoolName.MAMBA], [True])
+            # Longer query chain sharing the same 2048-page prefix.
+            qkeys = keys + [f"q{i:04d}" for i in range(11427 - n)]
+            res = backend.batch_exists_v2(
+                qkeys,
+                [
+                    self._transfer(
+                        PoolName.MAMBA,
+                        ["__placeholder__"],
+                        hit_policy=PoolHitPolicy.TRAILING_PAGES,
+                    )
+                ],
+            )
+            self.assertEqual(res.extra_pool_hit_pages.get(PoolName.KV, 0), n)
+            self.assertGreater(res.kv_hit_pages, 0)
+            self.assertEqual(res.extra_pool_hit_pages[PoolName.MAMBA], n)
+        finally:
+            self.backend = old
+            backend.close()
+
+    def test_v2_placeholder_keys_never_interpreted_as_all_pages(self):
+        """Bug regression (live 3090 M4, storage_hit=0 for every hybrid
+        prefetch): a MAMBA PREFETCH transfer carries placeholder keys
+        (["__placeholder__"], built by mamba_component) whose presence is
+        the *only* signal that the pool's write pattern is TRAILING (node-last
+        checkpoints).  If any transfer reconstruction drops `hit_policy`, the
+        PoolTransfer default (ALL_PAGES, hicache_storage.py) takes over and
+        the boundary scan checks every page of the prefix from 0 -- but mamba
+        only stores node-last pages, so the scan fails at the first KV-only
+        page and clamps kv_hit to 0.  A placeholder-key transfer must be
+        treated as TRAILING regardless of the (possibly defaulted) policy."""
+        kv, mamba = self._register_pools()
+        keys = self._make_keys(9)
+        for i in range(9):
+            kv._pages[i][:] = self._page_bytes(i)
+        r = self.backend.batch_set_v2([self._transfer(PoolName.KV, keys)])
+        self.assertEqual(r[PoolName.KV], [True] * 9)
+        # Live shape: two nodes (3 + 6 pages), a mamba checkpoint at each
+        # node's last page (chain[2] and chain[8]).
+        for i in (2, 8):
+            mamba._pages[i][:] = self._page_bytes(i)
+        r = self.backend.batch_set_v2(
+            [self._transfer(PoolName.MAMBA, [keys[2], keys[8]])]
+        )
+        self.assertEqual(r[PoolName.MAMBA], [True] * 2)
+
+        # A transfer whose hit_policy was dropped defaults to ALL_PAGES.  The
+        # placeholder keys must still route it to the TRAILING scan; reading
+        # it as ALL_PAGES produces the live kv_hit=0 signature.
+        res = self.backend.batch_exists_v2(
+            keys,
+            [
+                self._transfer(
+                    PoolName.MAMBA,
+                    ["__placeholder__"],
+                    hit_policy=PoolHitPolicy.ALL_PAGES,
+                )
+            ],
+        )
+        self.assertGreater(res.kv_hit_pages, 0)
+        self.assertEqual(res.extra_pool_hit_pages.get(PoolName.KV, 0), 9)
+        self.assertEqual(res.extra_pool_hit_pages.get(PoolName.MAMBA, 0), 9)
+
+    def test_v2_placeholder_keys_all_pages_explicit_still_all_pages(self):
+        """Placeholder detection must not swallow an intentionally-ALL_PAGES
+        transfer: a non-placeholder (real-key) ALL_PAGES transfer keeps the
+        strict every-page boundary (fold semantics).  This pins the negative
+        branch so the placeholder special-case stays narrowly scoped."""
+        kv, mamba = self._register_pools()
+        keys = self._make_keys(9)
+        for i in range(9):
+            kv._pages[i][:] = self._page_bytes(i)
+        r = self.backend.batch_set_v2([self._transfer(PoolName.KV, keys)])
+        self.assertEqual(r[PoolName.KV], [True] * 9)
+        # Only a trailing checkpoint (node last page), like mamba really writes.
+        mamba._pages[8][:] = self._page_bytes(8)
+        r = self.backend.batch_set_v2([self._transfer(PoolName.MAMBA, [keys[8]])])
+        self.assertEqual(r[PoolName.MAMBA], [True])
+        # Real-key ALL_PAGES: page 0's component absent -> boundary 0.
+        res = self.backend.batch_exists_v2(
+            keys,
+            [
+                self._transfer(
+                    PoolName.MAMBA,
+                    list(keys),
+                    hit_policy=PoolHitPolicy.ALL_PAGES,
+                )
+            ],
+        )
+        self.assertEqual(res.kv_hit_pages, 0)
+        self.assertEqual(res.extra_pool_hit_pages.get(PoolName.KV, 0), 9)
+        self.assertNotIn(PoolName.MAMBA, res.extra_pool_hit_pages)
+
+
+class TestExtentV1V2KeyScope(ExtentBackendTestBase):
+    """v1 write / v2 query (and reverse) must share the same storage key.
+
+    Bug regression (3090 M3, storage_hit=0 for every prefetch): the engine
+    writes pages through v1 batch_set (raw keys, backup_thread) but runs the
+    hit query through v2 batch_exists_v2 (hybrid _storage_hit_query), which
+    scopes keys with config_suffix (e.g. "_qwen3.5-9b-gptq_0_1").  The v1
+    surface used to look up bare keys, so the v2 query never matched anything
+    the engine had written.  HiCacheFile applies the suffix on both v1 and v2;
+    ExtentFileBackend must too.
+    """
+
+    def _engine_style_backend(self) -> ExtentFileBackend:
+        # Same HiCacheStorageConfig fields the engine passes, with the
+        # Qwen3.5-9B model name of the 3090 repro: suffix "_qwen3.5-9b-gptq_0_1".
+        backend = ExtentFileBackend(
+            _make_config(
+                model_name="qwen3.5-9b-gptq",
+                extra_config={
+                    "storage_dir": self.tmpdir,
+                    "extent_size": "16Ki",
+                    "file_size": "64Ki",
+                },
+            )
+        )
+        self.assertEqual(backend.config_suffix, "_qwen3.5-9b-gptq_0_1")
+        return backend
+
+    def _transfer(self, name, keys, indices=None, hit_policy=None):
+        return PoolTransfer(
+            name=name,
+            host_indices=indices if indices is not None else list(range(len(keys))),
+            keys=list(keys),
+            hit_policy=hit_policy,
+        )
+
+    def test_v1_write_then_v2_query_hits(self):
+        # Engine flow: v1 batch_set (backup_thread) then v2 batch_exists_v2
+        # (hybrid _storage_hit_query, sidecar pool_transfers present).  The
+        # v2 query must find the v1-written pages.
+        backend = self._engine_style_backend()
+        try:
+            keys = self._make_keys(4)
+            values = [self._page_bytes(i) for i in range(4)]
+            self.assertTrue(backend.batch_set(keys, values))
+            self.assertEqual(backend.batch_exists(keys), 4)
+            result = backend.batch_exists_v2(keys, pool_transfers=[])
+            self.assertEqual(result.kv_hit_pages, 4)
+            self.assertEqual(result.extra_pool_hit_pages.get(PoolName.KV), 4)
+            # Single-key v1 exists must agree as well.
+            self.assertTrue(backend.exists(keys[0]))
+        finally:
+            backend.close()
+
+    def test_v1_write_then_v2_sidecar_query_hits(self):
+        # The engine query additionally carries sidecar pool_transfers; the
+        # v2 KV prefix must stay usable when component pages are also present.
+        backend = self._engine_style_backend()
+        try:
+            mamba = _PagePool(1000)
+            backend.register_mem_host_pool_v2(mamba, PoolName.MAMBA)
+            keys = self._make_keys(3)
+            for i in range(3):
+                mamba._pages[i][:] = self._page_bytes(i)
+            self.assertTrue(backend.batch_set(keys, [self._page_bytes(i) for i in range(3)]))
+            self.assertTrue(
+                backend.batch_set_v2([self._transfer(PoolName.MAMBA, keys)])[
+                    PoolName.MAMBA
+                ]
+            )
+            result = backend.batch_exists_v2(
+                keys, [self._transfer(PoolName.MAMBA, keys)]
+            )
+            self.assertEqual(result.kv_hit_pages, 3)
+            self.assertEqual(result.extra_pool_hit_pages[PoolName.MAMBA], 3)
+        finally:
+            backend.close()
+
+    def test_v1_write_then_v2_get_reads_data(self):
+        # Engine restore flow: after the v2 exists query hits, the pages are
+        # read back through v2 batch_get_v2 (hybrid read path) into the KV
+        # pool.  The v1-written bytes must come back intact.
+        backend = self._engine_style_backend()
+        try:
+            kv = _PagePool(1000)
+            backend.register_mem_host_pool_v2(kv, PoolName.KV)
+            keys = self._make_keys(3)
+            values = [self._page_bytes(i) for i in range(3)]
+            self.assertTrue(backend.batch_set(keys, values))
+            result = backend.batch_get_v2([self._transfer(PoolName.KV, keys)])
+            self.assertEqual(result[PoolName.KV], [True] * 3)
+            for i, v in enumerate(values):
+                self.assertEqual(bytes(kv._pages[i]), bytes(v))
+        finally:
+            backend.close()
+
+    def test_v2_write_then_v1_query_hits(self):
+        # Reverse direction: v2 batch_set_v2 (sidecar path) writes pages that
+        # the v1 surface (exists/batch_exists) must also see.
+        backend = self._engine_style_backend()
+        try:
+            kv = _PagePool(1000)
+            backend.register_mem_host_pool_v2(kv, PoolName.KV)
+            keys = self._make_keys(3)
+            for i in range(3):
+                kv._pages[i][:] = self._page_bytes(i)
+            result = backend.batch_set_v2([self._transfer(PoolName.KV, keys)])
+            self.assertEqual(result[PoolName.KV], [True] * 3)
+            self.assertEqual(backend.batch_exists(keys), 3)
+            for k in keys:
+                self.assertTrue(backend.exists(k))
+        finally:
+            backend.close()
+
+    def test_v2_write_then_v1_get_reads_data(self):
+        # v2-written pages must be readable through the v1 read surface.
+        backend = self._engine_style_backend()
+        try:
+            kv = _PagePool(1000)
+            backend.register_mem_host_pool_v2(kv, PoolName.KV)
+            keys = self._make_keys(3)
+            for i in range(3):
+                kv._pages[i][:] = self._page_bytes(i)
+            backend.batch_set_v2([self._transfer(PoolName.KV, keys)])
+            targets = [bytearray(1000) for _ in keys]
+            got = backend.batch_get(keys, targets)
+            self._assert_pages_equal(got, [self._page_bytes(i) for i in range(3)])
+        finally:
+            backend.close()
+
+    def test_cross_path_hits_with_minimal_suffix(self):
+        # The minimal suffix ("_" with an empty model name) must behave the
+        # same: key scoping must not depend on suffix length or content.
+        backend = ExtentFileBackend(
+            _make_config(
+                model_name="",
+                is_mla_model=True,
+                extra_config={
+                    "storage_dir": self.tmpdir,
+                    "extent_size": "16Ki",
+                    "file_size": "64Ki",
+                },
+            )
+        )
+        try:
+            self.assertEqual(backend.config_suffix, "_")
+            keys = self._make_keys(2)
+            values = [self._page_bytes(i) for i in range(2)]
+            self.assertTrue(backend.batch_set(keys, values))
+            self.assertEqual(
+                backend.batch_exists_v2(keys, pool_transfers=[]).kv_hit_pages, 2
+            )
+        finally:
+            backend.close()
+
+
+if torch is not None:
+    from sglang.srt.mem_cache.memory_pool import MHATokenToKVPool
+    from sglang.srt.mem_cache.pool_host import base
+    from sglang.srt.mem_cache.pool_host.mha import MHATokenToKVPoolHost
+
+
+@unittest.skipIf(torch is None, "torch not installed")
+class TestExtentV1ZeroCopy(ExtentBackendTestBase):
+    """v1 zero-copy contract against a real page_first MHA host pool.
+
+    The pool is the real ``MHATokenToKVPoolHost``, so the k/v dual-block
+    preadv split is exercised against mha.py's actual pointer math and
+    buffer memory.  ``host_memory_budget_bytes`` is mocked: this box keeps
+    a 10 GiB reserve against ~8 GiB available, so any real pool
+    construction would fail the budget check (same mock as
+    test_mem_pool_host.py).  The k and v planes carry distinct values, so
+    a swapped or shifted scatter corrupts the buffer equality checks.
+    """
+
+    PAGE_SIZE = 2
+    LAYER_NUM = 2
+    HEAD_NUM = 2
+    HEAD_DIM = 4
+    # 2 planes * L * P * H * D * fp16 itemsize.
+    PAGE_BYTES = 2 * LAYER_NUM * PAGE_SIZE * HEAD_NUM * HEAD_DIM * 2
+
+    def setUp(self):
+        super().setUp()
+        self.assertNotEqual(self.backend.config_suffix, "")
+        self._budget_patch = mock.patch.object(
+            base.psutil,
+            "virtual_memory",
+            return_value=mock.Mock(
+                available=base.HICACHE_HOST_MEMORY_RESERVE_BYTES + 64 * (1024**3)
+            ),
+        )
+        self._budget_patch.start()
+        self.addCleanup(self._budget_patch.stop)
+        self.device_pool = MHATokenToKVPool(
+            size=self.PAGE_SIZE * 2,
+            page_size=self.PAGE_SIZE,
+            dtype=torch.float16,
+            head_num=self.HEAD_NUM,
+            head_dim=self.HEAD_DIM,
+            layer_num=self.LAYER_NUM,
+            device="cpu",
+            enable_memory_saver=False,
+        )
+        self.host_pool = MHATokenToKVPoolHost(
+            device_pool=self.device_pool,
+            host_to_device_ratio=2.0,
+            host_size=0,
+            page_size=self.PAGE_SIZE,
+            layout="page_first",
+            pin_memory=False,
+            device="cpu",
+            allocator_type="default",
+        )
+        self.backend.register_mem_pool_host(self.host_pool)
+
+    @property
+    def num_pages(self) -> int:
+        return self.host_pool.page_num
+
+    def _host_indices(self, num_pages) -> torch.Tensor:
+        # Page p anchors at token index p * page_size (page_first layout).
+        return torch.arange(num_pages * self.PAGE_SIZE, dtype=torch.int64)
+
+    def _fill_pool(self) -> torch.Tensor:
+        """Distinct k/v values per page; returns the expected buffer clone."""
+        ps = self.PAGE_SIZE
+        for p in range(self.num_pages):
+            self.host_pool.kv_buffer[0, p * ps : (p + 1) * ps] = float(p + 1)
+            self.host_pool.kv_buffer[1, p * ps : (p + 1) * ps] = float(p + 100)
+        return self.host_pool.kv_buffer.clone()
+
+    def _flat_bytes(self, page_idx: int) -> bytes:
+        ps = self.PAGE_SIZE
+        page = self.host_pool.kv_buffer[:, page_idx * ps : (page_idx + 1) * ps]
+        return page.flatten().view(torch.uint8).numpy().tobytes()
+
+    def test_v1_write_then_flat_read_round_trip(self):
+        # v1 write gathers the pool's k/v blocks into stored flat pages, and
+        # the flat-page read path must return them byte-identical (v1 write
+        # -> v2-style read consistency).
+        expected = self._fill_pool()
+        keys = self._make_keys(self.num_pages)
+        results = self.backend.batch_set_v1(keys, self._host_indices(self.num_pages))
+        self.assertEqual(results, [True] * self.num_pages)
+        self.assertGreater(self.backend.stats_snapshot()["bytes_written"], 0)
+        targets = [bytearray(self.PAGE_BYTES) for _ in keys]
+        got = self.backend.batch_get(keys, targets)
+        for i, g in enumerate(got):
+            self.assertIsNotNone(g)
+            self.assertEqual(bytes(g), self._flat_bytes(i))
+        # Sanity: the pool data actually differs between k and v planes.
+        self.assertFalse(
+            torch.equal(expected[0], expected[1]),
+            "test requires distinct k/v plane data",
+        )
+
+    def test_v1_read_restores_pool_after_wipe(self):
+        # v1 write -> wipe the pool -> v1 read must restore every page's k
+        # and v segments exactly (the dual-block preadv split is exact).
+        expected = self._fill_pool()
+        keys = self._make_keys(self.num_pages)
+        indices = self._host_indices(self.num_pages)
+        self.assertTrue(all(self.backend.batch_set_v1(keys, indices)))
+        self.host_pool.kv_buffer.zero_()
+        results = self.backend.batch_get_v1(keys, indices)
+        self.assertEqual(results, [True] * self.num_pages)
+        self.assertTrue(
+            torch.equal(self.host_pool.kv_buffer, expected),
+            "v1 read must restore both k and v segments of every page",
+        )
+
+    def test_v1_write_then_v2_query_hits(self):
+        # The engine restore hit query (v2 semantics on the KV pool) must see
+        # pages written through the v1 zero-copy path.
+        self._fill_pool()
+        keys = self._make_keys(self.num_pages)
+        indices = self._host_indices(self.num_pages)
+        self.assertTrue(all(self.backend.batch_set_v1(keys, indices)))
+        self.assertEqual(self.backend.batch_exists(keys), self.num_pages)
+        result = self.backend.batch_exists_v2(keys, pool_transfers=None)
+        self.assertEqual(result.kv_hit_pages, self.num_pages)
+        for key in keys:
+            self.assertTrue(self.backend.exists(key))
+
+    def test_v2_write_then_v1_read(self):
+        # v1 read must consume pages stored by the generic flat-page path
+        # (mixed-generation restore: v1-loaded pages followed by v2 pages).
+        expected = self._fill_pool()
+        keys = self._make_keys(self.num_pages)
+        values = [
+            self.host_pool.get_data_page(i * self.PAGE_SIZE, flat=True)
+            for i in range(self.num_pages)
+        ]
+        self.assertTrue(self.backend.batch_set(keys, values))
+        self.host_pool.kv_buffer.zero_()
+        results = self.backend.batch_get_v1(keys, self._host_indices(self.num_pages))
+        self.assertEqual(results, [True] * self.num_pages)
+        self.assertTrue(torch.equal(self.host_pool.kv_buffer, expected))
+
+    def test_v1_config_suffix_isolation(self):
+        # Keys land under key + config_suffix, so a backend with a different
+        # suffix (a different model/rank) must not see them, and its own
+        # writes must not clobber the first backend's copy.
+        self._fill_pool()
+        keys = self._make_keys(self.num_pages)
+        indices = self._host_indices(self.num_pages)
+        self.assertTrue(all(self.backend.batch_set_v1(keys, indices)))
+        other = ExtentFileBackend(
+            _make_config(
+                model_name="othermodel",
+                extra_config={
+                    "storage_dir": self.tmpdir,
+                    "extent_size": "16Ki",
+                    "file_size": "64Ki",
+                },
+            )
+        )
+        try:
+            other.register_mem_pool_host(self.host_pool)
+            self.assertEqual(other.batch_get_v1(keys, indices), [False] * self.num_pages)
+            self.assertTrue(all(other.batch_set_v1(keys, indices)))
+            self.assertEqual(
+                self.backend.batch_get_v1(keys, indices), [True] * self.num_pages
+            )
+        finally:
+            other.close()
+
+    def test_v1_indices_length_mismatch_returns_false(self):
+        self._fill_pool()
+        keys = self._make_keys(3)
+        bad = torch.arange(3, dtype=torch.int64)  # 3 != 3 * page_size
+        self.assertEqual(self.backend.batch_set_v1(keys, bad), [False] * 3)
+        self.assertEqual(self.backend.batch_get_v1(keys, bad), [False] * 3)
+
+    def test_v1_unregistered_pool_returns_false_list(self):
+        # No registered host pool: the ABC default would return None and the
+        # controller's _page_get_zero_copy would TypeError on it; the extent
+        # v1 contract must return a bool list instead.
+        backend = ExtentFileBackend(
+            _make_config(
+                extra_config={
+                    "storage_dir": self.tmpdir,
+                    "extent_size": "16Ki",
+                    "file_size": "64Ki",
+                }
+            )
+        )
+        try:
+            keys = self._make_keys(2)
+            for call in (
+                backend.batch_get_v1(keys, torch.arange(4, dtype=torch.int64)),
+                backend.batch_set_v1(keys, torch.arange(4, dtype=torch.int64)),
+            ):
+                self.assertIsInstance(call, list)
+                self.assertEqual(call, [False, False])
+        finally:
+            backend.close()
+
+    def test_v1_layer_first_refused_without_corruption(self):
+        # layer_first interleaves per-layer k/v blocks, which the flat-page
+        # sequential scatter would corrupt; v1 must refuse and leave the pool
+        # untouched.
+        layer_pool = MHATokenToKVPoolHost(
+            device_pool=self.device_pool,
+            host_to_device_ratio=2.0,
+            host_size=0,
+            page_size=self.PAGE_SIZE,
+            layout="layer_first",
+            pin_memory=False,
+            device="cpu",
+            allocator_type="default",
+        )
+        self.backend.register_mem_pool_host(layer_pool)
+        layer_pool.kv_buffer.fill_(7)
+        before = layer_pool.kv_buffer.clone()
+        keys = self._make_keys(3)
+        indices = torch.arange(3 * self.PAGE_SIZE, dtype=torch.int64)
+        self.assertEqual(self.backend.batch_set_v1(keys, indices), [False] * 3)
+        self.assertEqual(self.backend.batch_get_v1(keys, indices), [False] * 3)
+        self.assertTrue(torch.equal(layer_pool.kv_buffer, before))
+
+    def test_v1_partial_miss_keeps_other_keys(self):
+        # Per-key success semantics: a missing key must not fail its
+        # neighbors (the engine stops consuming after the first miss, but
+        # earlier keys are already loaded).
+        self._fill_pool()
+        keys = self._make_keys(self.num_pages)
+        self.assertTrue(
+            all(self.backend.batch_set_v1(keys, self._host_indices(self.num_pages)))
+        )
+        results = self.backend.batch_get_v1(
+            keys + ["never-written"], self._host_indices(self.num_pages + 1)
+        )
+        self.assertEqual(results, [True] * self.num_pages + [False])
+
+    def test_v1_read_one_pread_per_extent(self):
+        backend = ExtentFileBackend(
+            _make_config(
+                extra_config={
+                    "storage_dir": self.tmpdir,
+                    "extent_size": "128Ki",
+                    "file_size": "1Mi",
+                }
+            )
+        )
+        try:
+            backend.register_mem_pool_host(self.host_pool)
+            self._fill_pool()
+            keys = self._make_keys(self.num_pages)
+            indices = self._host_indices(self.num_pages)
+            self.assertTrue(all(backend.batch_set_v1(keys, indices)))
+            preads_before = backend.stats_snapshot()["preads"]
+            with mock.patch.object(os, "preadv", wraps=os.preadv) as spy:
+                results = backend.batch_get_v1(keys, indices)
+            self.assertEqual(results, [True] * self.num_pages)
+            self.assertEqual(spy.call_count, 1)
+            self.assertEqual(backend.stats_snapshot()["preads"] - preads_before, 1)
+        finally:
+            backend.close()
+
+    def test_v1_gap_range_merges_with_scratch(self):
+        # Force a <=4KiB gap between two pages in one extent (rewriting A
+        # moves its ref past B's end), then read both: a single preadv
+        # covers the merged range and the dead gap bytes must not shift the
+        # scatter into the wrong host blocks.
+        self._fill_pool()
+        keys = self._make_keys(3)
+        indices = self._host_indices(3)
+        self.assertTrue(all(self.backend.batch_set_v1(keys, indices)))
+        # Rewrite key 0: its new ref lands after key 2 (cursor advanced).
+        self.assertTrue(all(self.backend.batch_set_v1([keys[0]], indices[:2])))
+        fill = self.host_pool.kv_buffer.clone()
+        self.host_pool.kv_buffer.zero_()
+        with mock.patch.object(os, "preadv", wraps=os.preadv) as spy:
+            results = self.backend.batch_get_v1(
+                [keys[1], keys[0]], self._host_indices(2)
+            )
+        self.assertEqual(results, [True, True])
+        self.assertEqual(spy.call_count, 1)
+        # The read targets anchor 0 (dim1 [0,2)) with keys[1]'s data (stored
+        # from dim1 [2,4)) and anchor 2 (dim1 [2,4)) with keys[0]'s data
+        # (stored from dim1 [0,2)); everything else stays zero.
+        ps = self.PAGE_SIZE
+        expected = torch.zeros_like(fill)
+        expected[:, 0:ps] = fill[:, ps : 2 * ps]
+        expected[:, ps : 2 * ps] = fill[:, 0:ps]
+        self.assertTrue(torch.equal(self.host_pool.kv_buffer, expected))
+
+    def test_v1_read_write_stats_counters(self):
+        self._fill_pool()
+        keys = self._make_keys(2)
+        indices = self._host_indices(2)
+        s0 = self.backend.stats_snapshot()
+        self.assertTrue(all(self.backend.batch_set_v1(keys, indices)))
+        s1 = self.backend.stats_snapshot()
+        self.assertEqual(s1["bytes_written"] - s0["bytes_written"], 2 * self.PAGE_BYTES)
+        self.assertEqual(s1["pwrites"] - s0["pwrites"], 1)
+        s2 = self.backend.stats_snapshot()
+        self.assertTrue(all(self.backend.batch_get_v1(keys, indices)))
+        s3 = self.backend.stats_snapshot()
+        self.assertEqual(s3["bytes_read"] - s2["bytes_read"], 2 * self.PAGE_BYTES)
+        self.assertEqual(s3["preads"] - s2["preads"], 1)
+        self.assertEqual(
+            s3["last_batch_requested_bytes"], 2 * self.PAGE_BYTES
+        )
+        self.assertEqual(s3["last_batch_physical_bytes"], 2 * self.PAGE_BYTES)
+
+    def test_v1_stored_page_length_mismatch_refused(self):
+        # A page stored under a different byte length (layout drift) must not
+        # be scattered into the pool; it returns as a miss.
+        self._fill_pool()
+        key = self._make_keys(1)[0]
+        self.assertTrue(self.backend.set(key, bytearray(64)))  # 64 != PAGE_BYTES
+        self.assertEqual(
+            self.backend.batch_get_v1(
+                [key], torch.arange(self.PAGE_SIZE, dtype=torch.int64)
+            ),
+            [False],
+        )
+
+    def _big_pool_backend(self, num_pages):
+        """Fresh backend + host pool with room for ``num_pages`` v1 pages.
+
+        The setUp pool holds only ``page_num`` pages (a few), far below
+        the >512 pages needed to cross the IOV_MAX boundary with 2 blocks
+        per page; the budget mock from setUp is still active, so the
+        second pool construction passes the host-memory check.
+        """
+        backend = ExtentFileBackend(
+            _make_config(
+                extra_config={
+                    "storage_dir": self.tmpdir,
+                    "extent_size": "256Ki",
+                    "file_size": "1Mi",
+                }
+            )
+        )
+        device_pool = MHATokenToKVPool(
+            size=num_pages * self.PAGE_SIZE,
+            page_size=self.PAGE_SIZE,
+            dtype=torch.float16,
+            head_num=self.HEAD_NUM,
+            head_dim=self.HEAD_DIM,
+            layer_num=self.LAYER_NUM,
+            device="cpu",
+            enable_memory_saver=False,
+        )
+        host_pool = MHATokenToKVPoolHost(
+            device_pool=device_pool,
+            host_to_device_ratio=2.0,
+            host_size=0,
+            page_size=self.PAGE_SIZE,
+            layout="page_first",
+            pin_memory=False,
+            device="cpu",
+            allocator_type="default",
+        )
+        self.assertGreaterEqual(host_pool.page_num, num_pages)
+        backend.register_mem_pool_host(host_pool)
+        return backend, host_pool
+
+    def _fill_big_pool(self, host_pool, num_pages) -> torch.Tensor:
+        ps = self.PAGE_SIZE
+        for p in range(num_pages):
+            host_pool.kv_buffer[0, p * ps : (p + 1) * ps] = float(p + 1)
+            host_pool.kv_buffer[1, p * ps : (p + 1) * ps] = float(p + 100)
+        return host_pool.kv_buffer.clone()
+
+    def test_v1_large_batch_over_iov_max_shards_and_round_trips(self):
+        # 600 pages x 2 blocks = 1,200 iovecs > IOV_MAX: batch_set_v1 must
+        # split the pwritev (1024 + 176) and batch_get_v1 the preadv the
+        # same way, and every page must survive byte-identical.  Bug
+        # regression (3090 M4): a single 2,048-iovec pwritev failed with
+        # EINVAL, so 1,495 backup batches never landed.
+        num_pages = 600
+        backend, host_pool = self._big_pool_backend(num_pages)
+        try:
+            expected = self._fill_big_pool(host_pool, num_pages)
+            keys = self._make_keys(num_pages)
+            indices = torch.arange(num_pages * self.PAGE_SIZE, dtype=torch.int64)
+            with mock.patch.object(os, "pwritev", wraps=os.pwritev) as spy:
+                results = backend.batch_set_v1(keys, indices)
+            self.assertEqual(results, [True] * num_pages)
+            self.assertEqual(spy.call_count, 2)  # 1024 + 176 iovecs
+            host_pool.kv_buffer.zero_()
+            with mock.patch.object(os, "preadv", wraps=os.preadv) as spy:
+                results = backend.batch_get_v1(keys, indices)
+            self.assertEqual(results, [True] * num_pages)
+            self.assertEqual(spy.call_count, 2)  # read-side cap: 1024 + 176
+            self.assertTrue(torch.equal(host_pool.kv_buffer, expected))
+        finally:
+            backend.close()
+
+    def test_v1_write_exactly_iov_max_stays_single_syscall(self):
+        # 512 pages x 2 blocks = exactly 1,024 iovecs: the shard cap must
+        # not split below the Linux limit (a lowered cap would show up as
+        # a spurious second pwritev here), and the batch must round-trip.
+        num_pages = 512
+        backend, host_pool = self._big_pool_backend(num_pages)
+        try:
+            expected = self._fill_big_pool(host_pool, num_pages)
+            keys = self._make_keys(num_pages)
+            indices = torch.arange(num_pages * self.PAGE_SIZE, dtype=torch.int64)
+            with mock.patch.object(os, "pwritev", wraps=os.pwritev) as spy:
+                results = backend.batch_set_v1(keys, indices)
+            self.assertEqual(results, [True] * num_pages)
+            self.assertEqual(spy.call_count, 1)
+            host_pool.kv_buffer.zero_()
+            self.assertTrue(all(backend.batch_get_v1(keys, indices)))
+            self.assertTrue(torch.equal(host_pool.kv_buffer, expected))
+        finally:
+            backend.close()
+
+
+@unittest.skipIf(torch is None, "torch not installed")
+class TestExtentClosedLoop2048(ExtentBackendTestBase):
+    """2048-page closed loop across the STORAGE_BATCH_SIZE(1024) boundary.
+
+    Bug-regression pin (3090 M4 live: storage_hit=0 despite 5.7GB persisted).
+    The live engine writes a 2048-page node as two batch_set_v1(1024) calls
+    (_page_backup splits at STORAGE_BATCH_SIZE=1024) and reads back with
+    batch_exists_v2.  This test drives the exact same split through BOTH the
+    v1 and v2 surfaces and asserts: index registers all 2048, batch_exists
+    returns 2048, and batch_get byte-compares identical for every page.
+
+    A future diff that breaks second-batch commit, the prefix scan, or the
+    read path across an extent/batch boundary must turn this test red.
+    """
+
+    PAGE_SIZE = 2
+    LAYER_NUM = 2
+    HEAD_NUM = 2
+    HEAD_DIM = 4
+    PAGE_BYTES = 2 * LAYER_NUM * PAGE_SIZE * HEAD_NUM * HEAD_DIM * 2
+    N_PAGES = 2048
+    BATCH = 1024
+
+    def _large_pool_backend(self):
+        """Backend with a host pool holding >= 2048 pages (device pool
+        sized at N_PAGES*PAGE_SIZE tokens, ratio 2.0 -> > 2048 host pages)."""
+        budget_patch = mock.patch.object(
+            base.psutil,
+            "virtual_memory",
+            return_value=mock.Mock(
+                available=base.HICACHE_HOST_MEMORY_RESERVE_BYTES + 64 * (1024**3)
+            ),
+        )
+        budget_patch.start()
+        self.addCleanup(budget_patch.stop)
+        backend = ExtentFileBackend(
+            _make_config(
+                extra_config={
+                    "storage_dir": self.tmpdir,
+                    "extent_size": "64Mi",
+                    "file_size": "512Mi",
+                }
+            )
+        )
+        device_pool = MHATokenToKVPool(
+            size=self.N_PAGES * self.PAGE_SIZE,
+            page_size=self.PAGE_SIZE,
+            dtype=torch.float16,
+            head_num=self.HEAD_NUM,
+            head_dim=self.HEAD_DIM,
+            layer_num=self.LAYER_NUM,
+            device="cpu",
+            enable_memory_saver=False,
+        )
+        host_pool = MHATokenToKVPoolHost(
+            device_pool=device_pool,
+            host_to_device_ratio=2.0,
+            host_size=0,
+            page_size=self.PAGE_SIZE,
+            layout="page_first",
+            pin_memory=False,
+            device="cpu",
+            allocator_type="default",
+        )
+        backend.register_mem_pool_host(host_pool)
+        backend.register_mem_host_pool_v2(host_pool, PoolName.KV)
+        self.addCleanup(backend.close)
+        return backend, host_pool
+
+    def _fill_pool(self, host_pool, n_pages):
+        ps = self.PAGE_SIZE
+        for p in range(n_pages):
+            host_pool.kv_buffer[0, p * ps : (p + 1) * ps] = float(p + 1)
+            host_pool.kv_buffer[1, p * ps : (p + 1) * ps] = float(p + 100)
+        return host_pool.kv_buffer.clone()
+
+    def _flat_bytes(self, host_pool, page_idx):
+        ps = self.PAGE_SIZE
+        page = host_pool.kv_buffer[:, page_idx * ps : (page_idx + 1) * ps]
+        return page.flatten().view(torch.uint8).numpy().tobytes()
+
+    def _host_indices(self, n_pages, offset_pages=0):
+        return torch.arange(
+            offset_pages * self.PAGE_SIZE,
+            (offset_pages + n_pages) * self.PAGE_SIZE,
+            dtype=torch.int64,
+        )
+
+    def test_v1_2048_cross_batch_boundary_round_trip(self):
+        # Live engine write pattern: 2048 pages in two batch_set_v1(1024).
+        backend, host_pool = self._large_pool_backend()
+        expected = self._fill_pool(host_pool, self.N_PAGES)
+        keys_all = self._make_keys(self.N_PAGES)
+        batch1, batch2 = keys_all[: self.BATCH], keys_all[self.BATCH :]
+        self.assertEqual(
+            backend.batch_set_v1(batch1, self._host_indices(self.BATCH, 0)),
+            [True] * self.BATCH,
+        )
+        self.assertEqual(
+            backend.batch_set_v1(
+                batch2, self._host_indices(self.BATCH, self.BATCH)
+            ),
+            [True] * self.BATCH,
+        )
+        # Index must hold all 2048, batch_exists must return 2048.
+        self.assertEqual(backend.batch_exists(keys_all), self.N_PAGES)
+        with backend._lock:
+            bitmap = [
+                backend._allocator.lookup(backend._storage_key(k)) is not None
+                for k in keys_all
+            ]
+        self.assertEqual(sum(bitmap), self.N_PAGES)
+        # Read back full span and byte-compare every page.
+        self.assertEqual(
+            backend.batch_get_v1(keys_all, self._host_indices(self.N_PAGES, 0)),
+            [True] * self.N_PAGES,
+        )
+        for i in range(self.N_PAGES):
+            self.assertEqual(
+                self._flat_bytes(host_pool, i),
+                expected[:, i * self.PAGE_SIZE : (i + 1) * self.PAGE_SIZE]
+                .flatten()
+                .view(torch.uint8)
+                .numpy()
+                .tobytes(),
+                f"page {i} byte mismatch",
+            )
+
+    def test_v2_2048_cross_batch_boundary_round_trip(self):
+        # v2 surface (live read path) across the same 1024-batch split.
+        backend, host_pool = self._large_pool_backend()
+        expected = self._fill_pool(host_pool, self.N_PAGES)
+        keys_all = self._make_keys(self.N_PAGES)
+        batch1, batch2 = keys_all[: self.BATCH], keys_all[self.BATCH :]
+
+        def transfer(keys, indices):
+            return PoolTransfer(
+                name=PoolName.KV,
+                host_indices=indices,
+                keys=list(keys),
+                hit_policy=None,
+            )
+
+        self.assertEqual(
+            backend.batch_set_v2([transfer(batch1, self._host_indices(self.BATCH, 0))])[
+                PoolName.KV
+            ],
+            [True] * self.BATCH,
+        )
+        self.assertEqual(
+            backend.batch_set_v2(
+                [transfer(batch2, self._host_indices(self.BATCH, self.BATCH))]
+            )[PoolName.KV],
+            [True] * self.BATCH,
+        )
+        res = backend.batch_exists_v2(keys_all, pool_transfers=[])
+        self.assertEqual(res.kv_hit_pages, self.N_PAGES)
+        got = backend.batch_get_v2(
+            [transfer(keys_all, self._host_indices(self.N_PAGES, 0))]
+        )[PoolName.KV]
+        self.assertEqual(got, [True] * self.N_PAGES)
+        for i in range(self.N_PAGES):
+            self.assertEqual(
+                self._flat_bytes(host_pool, i),
+                expected[:, i * self.PAGE_SIZE : (i + 1) * self.PAGE_SIZE]
+                .flatten()
+                .view(torch.uint8)
+                .numpy()
+                .tobytes(),
+                f"v2 page {i} byte mismatch",
+            )
+
+
+class TestExtentIovMaxBoundary(ExtentBackendTestBase):
+    """pwritev/preadv sharding at the Linux IOV_MAX(1024) iovec limit.
+
+    Bug regression (3090 M4, 1,495 backup failures): batch_set_v1 packs 2
+    blocks per page, so a 1024-page batch reaches 2,048 iovecs and one
+    pwritev fails with EINVAL (measured on the 3090 box and locally: 1,024
+    iovecs OK / 1,025 EINVAL / 2,048 EINVAL).  The IO helpers must split
+    past 1,024 iovecs per syscall; these cases pin the raw-helper boundary
+    at odd iovec counts that 2-block pool geometry cannot produce.
+    """
+
+    def test_pwritev_over_iov_max_shards_and_round_trips(self):
+        n = 1025  # one past the measured 1,024-OK boundary
+        chunk = 7
+        buffers = [bytearray(bytes([i % 251]) * chunk) for i in range(n)]
+        with mock.patch.object(os, "pwritev", wraps=os.pwritev) as spy:
+            self.assertTrue(self.backend._pwritev(0, buffers))
+        self.assertEqual(spy.call_count, 2)  # 1024 + 1
+        out = [bytearray(chunk) for _ in range(n)]
+        with mock.patch.object(os, "preadv", wraps=os.preadv) as spy:
+            got = self.backend._preadv_full(0, out)
+        self.assertEqual(got, n * chunk)
+        self.assertEqual(spy.call_count, 2)  # read-side cap: 1024 + 1
+        for i, b in enumerate(out):
+            self.assertEqual(bytes(b), buffers[i])
+
+    def test_pwritev_at_iov_max_stays_single_syscall(self):
+        # Exactly 1,024 iovecs must remain one syscall: a shard cap lowered
+        # below IOV_MAX would show up here as a spurious extra call.
+        n = 1024
+        buffers = [bytearray(bytes([i % 251]) * 7) for i in range(n)]
+        with mock.patch.object(os, "pwritev", wraps=os.pwritev) as spy:
+            self.assertTrue(self.backend._pwritev(0, buffers))
+        self.assertEqual(spy.call_count, 1)
+        out = [bytearray(7) for _ in range(n)]
+        self.assertEqual(self.backend._preadv_full(0, out), n * 7)
+
+
+class TestExtentReadAmplification(ExtentBackendTestBase):
+    """Exact-range reads: physical bytes read must track requested bytes.
+
+    Bug regression (3090 M3, 30x read amplification): the old read path
+    issued one pread per extent covering [min_offset .. max_offset+length)
+    over the batch's requested refs, so small keys sparsely scattered inside
+    a shared 64 MiB extent pulled every interleaved page of other chains from
+    disk -- 93 restores requested ~335 MB and physically read ~10 GB.  The
+    read path must sort requested refs by offset, merge only adjacent ranges
+    (gap <= 4 KiB), and pread each merged range exactly.
+    """
+
+    def _transfer(self, name, keys, indices=None, hit_policy=None):
+        return PoolTransfer(
+            name=name,
+            host_indices=indices if indices is not None else list(range(len(keys))),
+            keys=list(keys),
+            hit_policy=hit_policy,
+        )
+
+    def test_sparse_keys_in_large_extent_read_exact_ranges(self):
+        # 100 x 4 KiB pages inside one 64 MiB extent; request every 25th page
+        # (100 KiB gaps).  The old span read would pull 400 KiB for a 16 KiB
+        # request (25x); exact-range reads must pull exactly the 4 pages.
+        backend = ExtentFileBackend(
+            _make_config(
+                extra_config={
+                    "storage_dir": self.tmpdir,
+                    "extent_size": "64Mi",
+                    "file_size": "64Mi",
+                }
+            )
+        )
+        try:
+            page = 4096
+            keys = self._make_keys(100)
+            values = [self._page_bytes(i, page) for i in range(100)]
+            self.assertTrue(backend.batch_set(keys, values))
+            want = [0, 25, 50, 75]
+            targets = [bytearray(page) for _ in want]
+            preads_before = backend.stats_snapshot()["preads"]
+            got = backend.batch_get([keys[i] for i in want], targets)
+            self._assert_pages_equal(got, [values[i] for i in want])
+            requested = len(want) * page
+            stats = backend.stats_snapshot()
+            self.assertEqual(stats["preads"] - preads_before, len(want))
+            self.assertEqual(stats["last_batch_requested_bytes"], requested)
+            self.assertEqual(stats["last_batch_physical_bytes"], requested)
+            self.assertLessEqual(
+                stats["physical_bytes_read"] / stats["requested_bytes"], 1.2
+            )
+        finally:
+            backend.close()
+
+    def test_contiguous_ranges_merge_into_one_pread(self):
+        # Packed keys are contiguous, so the whole batch is one exact range:
+        # one pread, physical == requested (no dead bytes either way).
+        keys = self._write_keys(10)  # 1000 B each, packed back-to-back
+        targets = [bytearray(1000) for _ in keys]
+        preads_before = self.backend.stats_snapshot()["preads"]
+        with mock.patch.object(os, "preadv", wraps=os.preadv) as spy:
+            got = self.backend.batch_get(keys, targets)
+        self.assertEqual(spy.call_count, 1)
+        stats = self.backend.stats_snapshot()
+        self.assertEqual(stats["preads"] - preads_before, 1)
+        self.assertEqual(stats["last_batch_requested_bytes"], 10 * 1000)
+        self.assertEqual(stats["last_batch_physical_bytes"], 10 * 1000)
+        self._assert_pages_equal(got, [self._page_bytes(i) for i in range(10)])
+
+    def test_disjoint_ranges_not_merged(self):
+        # k0 [0,1000), filler [1000,6000), k1 [6000,7000): the 5 KiB dead gap
+        # must not be absorbed -- two exact preads, 2000 physical bytes.
+        self.assertTrue(
+            self.backend.batch_set(
+                ["k0", "filler", "k1"],
+                [self._page_bytes(1), bytearray(b"F" * 5000), self._page_bytes(3)],
+            )
+        )
+        targets = [bytearray(1000), bytearray(1000)]
+        preads_before = self.backend.stats_snapshot()["preads"]
+        got = self.backend.batch_get(["k0", "k1"], targets)
+        self._assert_pages_equal(got, [self._page_bytes(1), self._page_bytes(3)])
+        stats = self.backend.stats_snapshot()
+        self.assertEqual(stats["preads"] - preads_before, 2)
+        self.assertEqual(stats["last_batch_requested_bytes"], 2000)
+        self.assertEqual(stats["last_batch_physical_bytes"], 2000)
+
+    def test_merge_threshold_boundary_at_4kib(self):
+        # The merge rule is gap <= 4 KiB: a filler of exactly 4096 B merges
+        # (physical = requested + 4096), one of 4097 B does not (physical =
+        # requested).  Pin the boundary so a threshold change is a conscious
+        # diff, not an accidental one.
+        for filler_len, merged in ((4096, True), (4097, False)):
+            self.backend.clear()
+            self.assertTrue(
+                self.backend.batch_set(
+                    ["k0", "filler", "k1"],
+                    [
+                        self._page_bytes(1),
+                        bytearray(b"F" * filler_len),
+                        self._page_bytes(3),
+                    ],
+                )
+            )
+            targets = [bytearray(1000), bytearray(1000)]
+            got = self.backend.batch_get(["k0", "k1"], targets)
+            self._assert_pages_equal(got, [self._page_bytes(1), self._page_bytes(3)])
+            stats = self.backend.stats_snapshot()
+            if merged:
+                self.assertEqual(
+                    stats["last_batch_physical_bytes"], 2000 + filler_len
+                )
+                self.assertEqual(stats["last_batch_preads"], 1)
+            else:
+                self.assertEqual(stats["last_batch_physical_bytes"], 2000)
+                self.assertEqual(stats["last_batch_preads"], 2)
+
+    def test_v2_read_path_counts_exact_ranges(self):
+        # The v2 restore path (batch_get_v2) must apply the same exact-range
+        # reads: request keys 0 and 7 of 10 written pages (6 KiB gap > 4 KiB),
+        # physical == 2000 B == requested.
+        kv = _PagePool(1000)
+        self.backend.register_mem_host_pool_v2(kv, PoolName.KV)
+        keys = self._make_keys(10)
+        values = [self._page_bytes(i) for i in range(10)]
+        for i, v in enumerate(values):
+            kv._pages[i][:] = v
+        self.assertTrue(
+            self.backend.batch_set_v2([self._transfer(PoolName.KV, keys)])[
+                PoolName.KV
+            ][0]
+        )
+        result = self.backend.batch_get_v2(
+            [self._transfer(PoolName.KV, [keys[0], keys[7]])]
+        )
+        self.assertEqual(result[PoolName.KV], [True, True])
+        self.assertEqual(bytes(kv._pages[0]), bytes(values[0]))
+        self.assertEqual(bytes(kv._pages[1]), bytes(values[7]))
+        stats = self.backend.stats_snapshot()
+        self.assertEqual(stats["last_batch_requested_bytes"], 2000)
+        self.assertEqual(stats["last_batch_physical_bytes"], 2000)
+
+    def test_counters_accumulate_with_per_batch_latest(self):
+        # Cumulative counters sum across batches; last_batch_* hold the most
+        # recent _read_pages call (single-key get and batch_get both count).
+        self.assertTrue(self.backend.set("k0", self._page_bytes(1)))
+        self.assertTrue(self.backend.set("k1", self._page_bytes(2)))
+        self.backend.get("k0", bytearray(1000))
+        stats = self.backend.stats_snapshot()
+        self.assertEqual(stats["requested_bytes"], 1000)
+        self.assertEqual(stats["physical_bytes_read"], 1000)
+        self.assertEqual(stats["last_batch_requested_bytes"], 1000)
+        got = self.backend.batch_get(["k0", "k1"], [bytearray(1000), bytearray(1000)])
+        self.assertIsNotNone(got[0])
+        stats = self.backend.stats_snapshot()
+        self.assertEqual(stats["requested_bytes"], 3000)  # 1000 + 2000
+        self.assertEqual(stats["physical_bytes_read"], 3000)
+        self.assertEqual(stats["last_batch_requested_bytes"], 2000)
+        self.assertEqual(stats["last_batch_physical_bytes"], 2000)
+
+    def test_prefetch_bytes_read_stays_zero(self):
+        # This backend has no prefetch logic: every pread is request-driven,
+        # so the separate prefetch accounting must stay 0 after any reads.
+        keys = self._write_keys(5)
+        targets = [bytearray(1000) for _ in keys]
+        self.backend.batch_get(keys, targets)
+        self.backend.get(keys[0], bytearray(1000))
+        stats = self.backend.stats_snapshot()
+        self.assertEqual(stats["prefetch_bytes_read"], 0)
+        self.assertGreater(stats["physical_bytes_read"], 0)
+
 
 class _TensorPagePool:
     """Host-pool stand-in backed by real CPU tensors (engine flat pages)."""
@@ -805,6 +1936,99 @@ class TestExtentFactory(CustomTestCase):
             backend.close()
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _refhash_page_hashes(token_ids, prior_hex, page_size):
+    """Pure-Python SHA256 chained page hash, byte-faithful to the native
+    hash_binding.cpp regular path (page hash = SHA256(prior_digest ||
+    uint32_le(tokens)); prior digest carries across pages, seeded by the
+    caller's prior_hash for page 0).  Used as the deterministic oracle for
+    the write->read round-trip assertion when the native extension cannot be
+    built (missing libssl-dev); validated byte-for-byte against the native
+    hashes in p2io-tester-e7k (CASE A/B)."""
+    import hashlib
+    import struct
+
+    prior = bytes.fromhex(prior_hex) if prior_hex else None
+    has_prior = prior is not None
+    out = []
+    for start in range(0, len(token_ids), page_size):
+        chunk = b"".join(
+            struct.pack("<I", t & 0xFFFFFFFF) for t in token_ids[start : start + page_size]
+        )
+        ctx = hashlib.sha256()
+        if has_prior:
+            ctx.update(prior)
+        if chunk:
+            ctx.update(chunk)
+        prior = ctx.digest()
+        has_prior = True
+        out.append(prior.hex())
+    return out
+
+
+class TestExtentWriteQueryRoundTrip(CustomTestCase):
+    """Deterministic write->read storage_hit=4 round trip through the real
+    controller _storage_hit_query + real backend (e7l/e22 Task 4).
+
+    Encodes the invariant e7l proved at 8-hex (write chain page0 == query
+    key[0]) but whose full-64-hex byte-identity is the open question: when
+    the write registers a page-hash chain and the read recomputes the same
+    span with the same seed, batch_exists must return the full 4 pages.
+    The hash function is the validated pure-Python oracle (native module is
+    not buildable in this environment)."""
+
+    def _engine_style_backend(self):
+        tmpdir = tempfile.mkdtemp(prefix="extent_roundtrip_")
+        backend = ExtentFileBackend(
+            _make_config(
+                model_name="qwen3.5-9b-gptq",
+                extra_config={
+                    "storage_dir": tmpdir,
+                    "extent_size": "16Ki",
+                    "file_size": "64Ki",
+                },
+            )
+        )
+        self.addCleanup(backend.close)
+        self.addCleanup(lambda: shutil.rmtree(tmpdir, ignore_errors=True))
+        return backend
+
+    def _make_query_controller(self, backend, page_size):
+        # _storage_hit_query touches only last_hash/token_ids/prefix_keys/
+        # all_hash_values plus self.get_hash_str/page_size/storage_backend;
+        # instantiate the real method on a bare object (established pattern
+        # for method-in-isolation tests) bound to the refhash oracle.
+        from sglang.srt.managers.cache_controller import HiCacheController
+
+        ctl = object.__new__(HiCacheController)
+        ctl.page_size = page_size
+        ctl.storage_backend = backend
+        ctl.get_hash_str = _refhash_page_hashes
+        return ctl
+
+    def test_same_span_write_then_query_storage_hit_4(self):
+        from sglang.srt.managers.cache_controller import StorageOperation
+
+        page_size = 4
+        seed_hex = "9d373db168e3e6a03e12ea791ce33b00590b4652dd4618889639c8095ac017f7"
+        span = list(range(100, 100 + page_size * 4))  # 4 pages of page_size
+        # Write side: the engine registers spec.hash_value = chain seeded by
+        # parent's last hash.  Register it like _page_backup does.
+        write_keys = _refhash_page_hashes(span, seed_hex, page_size)
+        backend = self._engine_style_backend()
+        values = [bytearray(b"x" * 1000) for _ in write_keys]
+        self.assertTrue(backend.batch_set(write_keys, values))
+        self.assertEqual(backend.batch_exists(write_keys), 4)
+
+        # Read side: _storage_hit_query recomputes the same span with the
+        # same seed and must hit all 4 pages.
+        ctl = self._make_query_controller(backend, page_size)
+        op = StorageOperation(None, span, last_hash=seed_hex)
+        hash_value, storage_hit_count = ctl._storage_hit_query(op)
+        self.assertEqual(len(hash_value), 4)
+        self.assertEqual(storage_hit_count, 4 * page_size)
+        self.assertEqual(hash_value, write_keys)
 
 
 if __name__ == "__main__":

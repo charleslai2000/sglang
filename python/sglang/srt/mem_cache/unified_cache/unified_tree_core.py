@@ -151,6 +151,12 @@ class UnifiedTreeNode:
         # is_l3_durable = storage_persisted or storage_restored; consumers
         # never distinguish the source.
         self.storage_restored = False
+        # P2-1 e16: a node whose device layers were released to a plain miss
+        # by force (backup failed + drop declined + not L3-durable). The node
+        # carries no device/host/L3 KV; it is a tombstone that must not be
+        # traversed as a live host-only descendant, must never rejoin the
+        # evictable sets, and must not be mistaken for L3-durable.
+        self.forced_miss_tombstone = False
 
     def component(self, component_type: ComponentType) -> ComponentData:
         return self.component_data[component_type]
@@ -503,6 +509,12 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
             best_match_node=self.root_node.id,
             cache_actions=[],
         )
+        # P3 Ready Horizon M3: monotonic L3 durable/publish epoch, bumped
+        # once per durability advance (write ack promotion / restore
+        # read-back). The scheduler's l3_publish causal-epoch value; a
+        # value that never moved means the L3 coverage the parked rid
+        # missed on is unchanged, so NO_L3 parks do NOT clear.
+        self._l3_publish_epoch = 0
 
     def node_by_id(self, node_id: NodeId) -> UnifiedTreeNode:
         """Resolve a NodeId back to its tree node.
@@ -519,6 +531,11 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
     def is_backuped(self, node_id: NodeId) -> bool:
         """Whether the node's KV is already backed up to host."""
         return self._node_arena[node_id].backuped
+
+    def is_miss_dropped(self, node_id: NodeId) -> bool:
+        """Whether the node is a P2-1 e16 forced-miss tombstone (device layers
+        released, no host/L3 KV, survived so a later restore can miss)."""
+        return self._node_arena[node_id].forced_miss_tombstone
 
     def is_root(self, node_id: NodeId) -> bool:
         """Whether the node is the tree root."""
@@ -1319,9 +1336,29 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         if any(cd.host_lock_ref > 0 for cd in node.component_data):
             return result
         descendants: list[UnifiedTreeNode] = []
+        # P2-1 e23: a forced-miss tombstone descendant (e16/e17) may still
+        # carry live host-only children when this drop runs (the tombstone is
+        # dead -- no device/host/L3 KV -- but its subtree was never detached,
+        # or was re-attached). The tombstone itself must be skipped for the
+        # host-only release/assert below, but its children are live host-only
+        # nodes that MUST still be freed and deregistered: skipping them would
+        # orphan them when the drop root is removed (node-104 shutdown shape:
+        # H-leaf extra / duplicate ghost / stale host_leaves / mamba host LRU).
+        tombstones: list[UnifiedTreeNode] = []
         stack = list(node.children.values())
         while stack:
             cur = stack.pop()
+            # P2-1 e16: a descendant may previously have been released to a
+            # plain miss by drop_device_leaf_to_miss (backup failed + drop
+            # declined + not L3-durable). It holds no device/host/L3 KV and is
+            # a tombstone; the host-only invariant does not apply to it and
+            # there is nothing to release. Never assert on a dead node, but
+            # still descend into its live host-only children (e23) and
+            # deregister the dead tombstone once its subtree is freed.
+            if cur.forced_miss_tombstone:
+                tombstones.append(cur)
+                stack.extend(cur.children.values())
+                continue
             if any(
                 cd.lock_ref > 0 or cd.host_lock_ref > 0 for cd in cur.component_data
             ):
@@ -1341,6 +1378,11 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
                 result.host_frees,
             )
             self._remove_leaf_from_parent(desc)
+        # Deregister the dead tombstones (nothing to release; their live
+        # children were freed above), so no node survives in the arena with
+        # stale host registrations when the drop root is removed below.
+        for t in tombstones:
+            self._remove_leaf_from_parent(t)
         self._delete_unbacked_device_leaf(
             node,
             result.tracker,
@@ -1369,6 +1411,45 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         self._release_device_leaf_layers(node, result)
         return result
 
+    def detach_miss_dropped(self, node_id: NodeId) -> DropSubtreeNoHostResult:
+        """Detach a forced-miss tombstone leaf and free all of its descendants.
+
+        P2-1 e16/e17: a forced-miss drop (drop_device_leaf_to_miss) releases the
+        leaf's own device layers, but its host-only children carry no device data
+        and are never visited by eviction. A single-node detach would orphan them:
+        they stay in the arena and in the host-leaf / duplicate / aux-mamba LRU
+        registrations while becoming unreachable from the root, and sanity_check's
+        root traversal then reports them as extra H-leaves / duplicate ghosts /
+        stale host_leaves / stray mamba-LRU entries. Detach must therefore walk
+        and free the whole subtree, bottom-up, and fully deregister every node.
+        """
+        result = DropSubtreeNoHostResult(is_dropped=False)
+        node = self._node_arena.get(node_id)
+        if node is None or node.forced_miss_tombstone is False:
+            return result
+        if node.parent is None or node is self.root_node:
+            return result
+        descendants: list[UnifiedTreeNode] = []
+        stack = list(node.children.values())
+        while stack:
+            cur = stack.pop()
+            if any(cd.lock_ref > 0 or cd.host_lock_ref > 0 for cd in cur.component_data):
+                return result
+            descendants.append(cur)
+            stack.extend(cur.children.values())
+        if any(cd.lock_ref > 0 or cd.host_lock_ref > 0 for cd in node.component_data):
+            return result
+        for desc in reversed(descendants):
+            self._release_all_component_layers(desc, StorageMedium.CPU, result.tracker, result.device_frees, result.host_frees)
+            self._remove_leaf_from_parent(desc)
+            self._update_evictable_leaf_sets(desc.parent)
+        self._release_all_component_layers(node, StorageMedium.CPU, result.tracker, result.device_frees, result.host_frees)
+        parent = node.parent
+        self._remove_leaf_from_parent(node)
+        self._update_evictable_leaf_sets(parent)
+        result.is_dropped = True
+        return result
+
     def drop_device_leaf_to_miss(self, node_id: NodeId) -> EvictDeviceLeafResult:
         """Release a device leaf's device layers to a plain miss when its
         D->H backup failed and the subtree drop was declined and the chain
@@ -1389,6 +1470,14 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         assert node.write_through_pending_id is None, (
             f"node {node.id} has an in-flight D->H write"
         )
+        # P2-1 e16: mark the node as a forced-miss tombstone BEFORE the layers
+        # are released so that (a) the flags are set even if a released step
+        # were to run a descendant traverse over its own node (it cannot), and
+        # (b) the mark is in place immediately after, when a later eviction
+        # drop_subtree_traverse must skip it. The node holds no device/host/L3
+        # KV once released; the tombstone is detached from its parent by the
+        # controller's wrapper so the subtree never contains it again.
+        node.forced_miss_tombstone = True
         self._release_device_leaf_layers(node, result)
         return result
 
@@ -2025,6 +2114,20 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         chain (P2-1 e14). The unified predicate is_l3_durable reads this
         flag and storage_persisted; consumers never distinguish sources."""
         self.node_by_id(node_id).storage_restored = True
+        self._bump_l3_publish()
+
+    def _bump_l3_publish(self) -> None:
+        """Advance the monotonic L3 durable/publish epoch (P3 M3). One bump
+        per durability event -- a write ack that promoted a persisted span
+        or a restore read-back that confirmed L3 presence. The scheduler
+        compares this across passes to detect "the L3 coverage changed"
+        (the causal event that clears a NO_L3 negative-cache park)."""
+        self._l3_publish_epoch += 1
+
+    def l3_publish_epoch(self) -> int:
+        """The current L3 durable/publish epoch value (P3 M3). Monotonic;
+        identical values across passes mean no L3 durability advanced."""
+        return self._l3_publish_epoch
 
     def clear_storage_durable(self, node_id: NodeId) -> None:
         """Drop the node's L3-durable belief (P2-1 e15 Y): a restore whose
@@ -2082,11 +2185,84 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         for child in node.children.values():
             if child.storage_acked and not child.storage_persisted:
                 promoted.extend(self._promote_persisted_subtree(child))
+        if promoted:
+            self._bump_l3_publish()
         return promoted
 
     def is_storage_written(self, node_id: NodeId) -> bool:
         """Whether the node's KV was already submitted to L3."""
         return self.node_by_id(node_id).storage_written
+
+    def page_block_in_request(
+        self,
+        node_id: NodeId,
+        pos: dict[str, int],
+        requested_pages: int,
+    ) -> Optional[tuple[int, int]]:
+        """The node's page block within a requested restore span, in request
+        coordinates (0..requested_pages), or None when the node is not on
+        the request's chain.
+
+        pos maps each requested page hash to its index (the request is the
+        chain suffix from the anchor's page end, so the chain's pages
+        partition the request contiguously). The node's hash_value list is
+        per-page hashes; its block is the run of consecutive positions
+        starting at its first page, clamped to the request end. A node
+        whose first page is not on the request (a sibling branch, or any
+        node of another chain -- content addresses are position-specific)
+        has no block: None.
+        """
+        if not self.node_exists(node_id):
+            return None
+        node = self.node_by_id(node_id)
+        if not node.hash_value:
+            return None
+        start = pos.get(node.hash_value[0])
+        if start is None:
+            return None
+        end = start
+        for page_hash in node.hash_value:
+            i = pos.get(page_hash)
+            if i is None or i != end:
+                break
+            end = i + 1
+            if end >= requested_pages:
+                break
+        return start, min(end, requested_pages)
+
+    def persisted_chain_frontier(
+        self,
+        node_id: NodeId,
+        pos: dict[str, int],
+        requested_pages: int,
+    ) -> int:
+        """The durable frontier of the persisted chain under node_id, in
+        request coordinates: the deepest persisted page end on the request
+        branch (the backup-completion wait's durable_frontier).
+
+        Persistence needs a contiguous parent chain, so the persisted nodes
+        under the anchor form a connected prefix of the chain; the frontier
+        is the max block end over them. The walk enters a child only when
+        its parent is persisted (an unpromoted child can have no persisted
+        descendants -- advance_storage_persisted promotes exactly the acked
+        descendants of a persisted node), and prunes branches whose first
+        page is not on the request. The anchor itself (persisted, pages
+        before the request start) contributes 0 and lets the walk through
+        to its children."""
+        if not self.node_exists(node_id):
+            return 0
+
+        def walk(node: UnifiedTreeNode) -> int:
+            end = 0
+            if node.storage_persisted:
+                block = self.page_block_in_request(node.id, pos, requested_pages)
+                if block is not None:
+                    end = block[1]
+                for child in node.children.values():
+                    end = max(end, walk(child))
+            return end
+
+        return walk(self.node_by_id(node_id))
 
     def is_storage_persisted(self, node_id: NodeId) -> bool:
         """Whether the node is a persisted storage anchor (its L3 write acked

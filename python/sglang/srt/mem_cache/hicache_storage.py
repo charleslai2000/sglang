@@ -19,8 +19,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Max pages per batched storage IO call.
-STORAGE_BATCH_SIZE = 128
+# Max pages per batched storage IO call.  1024 per P2-IO A' calibration: the
+# ~44ms/batch engine-side overhead is fixed per batch (175 batches x 44ms =
+# 7.7s of an 8.31s 640MB cold restore; device time only 516ms), so 8x fewer,
+# bigger batches cut it ~8x.  Cost: ~32MB transient buffer per batch at
+# ~31KB/page, held by at most one in-flight batch per IO thread.
+STORAGE_BATCH_SIZE = 1024
 
 
 @dataclass
@@ -44,6 +48,7 @@ class HiCacheStorageConfig:
 class HiCacheStorageExtraInfo:
     prefix_keys: Optional[List[str]] = None
     extra_info: Optional[dict] = None
+    node_id: Optional[Any] = None
 
 
 @dataclass(frozen=True)

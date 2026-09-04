@@ -151,6 +151,24 @@ class SchedulerStats:
     # HiCache metrics
     hicache_host_used_tokens: int = 0
     hicache_host_total_tokens: int = 0
+    # P3 token/capacity model (ledger 2026-09-01 adjudication #3): the six
+    # runtime gauges -- KV pool, write-back reserve, READY resident,
+    # working, spec-inflight and usable (pool - reserve - margin) token
+    # counts -- so the capacity model is machine-checkable without guessing
+    # tokens from GB.
+    hicache_kv_pool_tokens: int = 0
+    hicache_writeback_reserve_tokens: int = 0
+    hicache_ready_resident_tokens: int = 0
+    hicache_working_tokens: int = 0
+    hicache_spec_inflight_tokens: int = 0
+    hicache_usable_tokens: int = 0
+    # P3 per-pool usable + READY state max (e7g followup): the kv and Mamba
+    # host pools publish usable (tokens) independently, and READY_state_max
+    # records the largest resident READY state this run saw, so the
+    # invariance usable >= work + 2*READY_max is machine-checkable.
+    hicache_kv_host_usable_tokens: int = 0
+    hicache_mamba_host_usable_tokens: int = 0
+    hicache_ready_state_max_tokens: int = 0
 
     # Streaming session metrics
     num_streaming_sessions: int = 0
@@ -643,6 +661,88 @@ class SchedulerMetricsCollector(_StatLoggerDIMixin):
             self.hicache_host_total_tokens = Gauge(
                 name="sglang:hicache_host_total_tokens",
                 documentation="Total capacity of the host KV cache in tokens.",
+                labelnames=labels.keys(),
+                multiprocess_mode="mostrecent",
+            )
+            self.hicache_kv_pool_tokens = Gauge(
+                name="sglang:hicache_kv_pool_tokens",
+                documentation=(
+                    "KV host pool capacity in tokens (the anchor pool)."
+                ),
+                labelnames=labels.keys(),
+                multiprocess_mode="mostrecent",
+            )
+            self.hicache_writeback_reserve_tokens = Gauge(
+                name="sglang:hicache_writeback_reserve_tokens",
+                documentation=(
+                    "Write-back reserve in KV host tokens -- capacity "
+                    "protected for the D->H write-back staging channel."
+                ),
+                labelnames=labels.keys(),
+                multiprocess_mode="mostrecent",
+            )
+            self.hicache_ready_resident_tokens = Gauge(
+                name="sglang:hicache_ready_resident_tokens",
+                documentation=(
+                    "KV host tokens held by M6 READY pool members (physically "
+                    "resident full prefixes)."
+                ),
+                labelnames=labels.keys(),
+                multiprocess_mode="mostrecent",
+            )
+            self.hicache_working_tokens = Gauge(
+                name="sglang:hicache_working_tokens",
+                documentation=(
+                    "KV host tokens committed to the active/warm working "
+                    "set: pool usage minus the READY footprint."
+                ),
+                labelnames=labels.keys(),
+                multiprocess_mode="mostrecent",
+            )
+            self.hicache_spec_inflight_tokens = Gauge(
+                name="sglang:hicache_spec_inflight_tokens",
+                documentation=(
+                    "Speculative Ready-Horizon staging tokens in flight "
+                    "(inflight_speculative_tokens)."
+                ),
+                labelnames=labels.keys(),
+                multiprocess_mode="mostrecent",
+            )
+            self.hicache_usable_tokens = Gauge(
+                name="sglang:hicache_usable_tokens",
+                documentation=(
+                    "KV host usable capacity in tokens: pool - write-back "
+                    "reserve - safety margin. The capacity model admits "
+                    "working + ready + spec-inflight <= usable."
+                ),
+                labelnames=labels.keys(),
+                multiprocess_mode="mostrecent",
+            )
+            self.hicache_kv_host_usable_tokens = Gauge(
+                name="sglang:hicache_kv_host_usable_tokens",
+                documentation=(
+                    "KV host pool usable tokens (pool - reserve - margin), "
+                    "the per-pool usable for the capacity invariance."
+                ),
+                labelnames=labels.keys(),
+                multiprocess_mode="mostrecent",
+            )
+            self.hicache_mamba_host_usable_tokens = Gauge(
+                name="sglang:hicache_mamba_host_usable_tokens",
+                documentation=(
+                    "Mamba host pool usable tokens (pool - reserve - "
+                    "margin), the per-pool usable for the capacity "
+                    "invariance."
+                ),
+                labelnames=labels.keys(),
+                multiprocess_mode="mostrecent",
+            )
+            self.hicache_ready_state_max_tokens = Gauge(
+                name="sglang:hicache_ready_state_max_tokens",
+                documentation=(
+                    "Largest KV-token footprint of a READY state seen this "
+                    "run (for the usable >= work + 2*READY_max check)."
+                ),
                 labelnames=labels.keys(),
                 multiprocess_mode="mostrecent",
             )
@@ -1402,6 +1502,39 @@ class SchedulerMetricsCollector(_StatLoggerDIMixin):
             )
             self._log_gauge(
                 self.hicache_host_total_tokens, stats.hicache_host_total_tokens
+            )
+            self._log_gauge(
+                self.hicache_kv_pool_tokens, stats.hicache_kv_pool_tokens
+            )
+            self._log_gauge(
+                self.hicache_writeback_reserve_tokens,
+                stats.hicache_writeback_reserve_tokens,
+            )
+            self._log_gauge(
+                self.hicache_ready_resident_tokens,
+                stats.hicache_ready_resident_tokens,
+            )
+            self._log_gauge(
+                self.hicache_working_tokens, stats.hicache_working_tokens
+            )
+            self._log_gauge(
+                self.hicache_spec_inflight_tokens,
+                stats.hicache_spec_inflight_tokens,
+            )
+            self._log_gauge(
+                self.hicache_usable_tokens, stats.hicache_usable_tokens
+            )
+            self._log_gauge(
+                self.hicache_kv_host_usable_tokens,
+                stats.hicache_kv_host_usable_tokens,
+            )
+            self._log_gauge(
+                self.hicache_mamba_host_usable_tokens,
+                stats.hicache_mamba_host_usable_tokens,
+            )
+            self._log_gauge(
+                self.hicache_ready_state_max_tokens,
+                stats.hicache_ready_state_max_tokens,
             )
 
         # Streaming session metrics

@@ -1729,6 +1729,51 @@ def attach_hybrid_pool_to_unified_cache(
             enable_storage_metrics=cache._enable_metrics_flag,
         )
         _apply_stack_result(cache, kvcache, params, result)
+        # P3 write-back reserve: set once at construction, before any
+        # allocation. The token/capacity model (ledger 2026-09-01
+        # adjudication #2) reserves by STATE KV TOKENS -- the byte budget is
+        # the state-token target converted to KBytes on the anchor pool --
+        # so reserve scales with the hicache-size split instead of drifting
+        # as a fixed absolute GB. The legacy GB knob applies only when the
+        # state-token value is not set. Each pool converts the shared byte
+        # budget into its own token space.
+        state_reserve_tokens = getattr(
+            server_args, "hicache_writeback_reserve_state_tokens", None
+        )
+        if state_reserve_tokens is not None:
+            anchor = cache.host_pool_group.anchor_entry.host_pool
+            reserve_bytes = int(
+                state_reserve_tokens * anchor.size_per_token
+            )
+        else:
+            reserve_bytes = int(server_args.hicache_writeback_reserve_gb * 1e9)
+        if reserve_bytes > 0:
+            cache.host_pool_group.set_writeback_reserve_bytes(reserve_bytes)
+        # e7g followup 2: log the reserve/margin as % of each pool's capacity
+        # (kv + mamba) so drift (67% of the kv pool at 8G/1.5G) shows up in
+        # the engine log instead of a silent 0.44 GB usable.
+        margin_tokens = getattr(
+            server_args, "ready_horizon_margin_state_tokens", None
+        )
+        margin_bytes = (
+            int(margin_tokens * cache.host_pool_group.anchor_entry.host_pool.size_per_token)
+            if margin_tokens is not None and margin_tokens > 0
+            else int(server_args.ready_horizon_safety_margin_gb * 1e9)
+        )
+        for entry in cache.host_pool_group.entries:
+            if margin_bytes == 0:
+                continue
+            pool = entry.host_pool
+            setter = getattr(pool, "set_writeback_reserve_margin_bytes", None)
+            if setter is not None:
+                setter(margin_bytes)
+            logger.info(
+                "P3 write-back reserve/margin as %% of %s host pool: "
+                "reserve=%.1f%% margin=%.1f%%",
+                entry.name.value,
+                100.0 * pool.writeback_reserve() / pool.size,
+                100.0 * int(margin_bytes // pool.size_per_token) / pool.size,
+            )
     except Exception:
         logger.exception("attach_hybrid_pool_to_unified_cache failed")
         raise

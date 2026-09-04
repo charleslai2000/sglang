@@ -855,10 +855,30 @@ class MambaComponent(TreeComponent):
     ) -> None:
         """Evict mamba host resources.
         Internal nodes: private tombstone (free host mamba only).
-        Host leaves: atomic eviction via _evict_host_leaf."""
+        Host leaves: atomic eviction via _evict_host_leaf.
+
+        Flush-before-evict invariant (WriteBack durability): a mamba host
+        checkpoint that is not yet L3-durable must not be host-evicted before
+        its L3 sidecar persists, or the BACKUP_STORAGE gate
+        (build_hicache_transfers, host_value is None) silently drops the
+        sidecar and the checkpoint is lost from device + host + L3. Such a
+        victim is spared this round: its node id is queued, the walk advances
+        past it, and after the walk the queue triggers write_backup_storage
+        (which inc_host_lock_ref-pins the host copy until the L3 ack). On the
+        next eviction round the pin makes the cursor skip it, and the post-ack
+        release returns it to the LRU pool -- so it is never evicted before
+        durable. The flush runs only after cursor_end: an inline
+        write_backup_storage may reenter this walk under host pressure
+        (write_backup_storage -> D->H backup -> evict_host), and a nested
+        cursor_begin/end would clobber the outer walk's active cursor."""
         ct = self.component_type
         host_lru = self.tree_core.host_lru_lists[ct]
         enabled = self.tree_core.enable_session_radix_cache
+        storage_enabled = self.tree_core.enable_storage
+        # Node ids spared this round because their mamba host checkpoint is
+        # not yet L3-durable; persisted after the walk (the cursor is inactive
+        # by then, so a reentrant flush cannot corrupt the walk).
+        deferred_flush: list[NodeId] = []
         if enabled:
             host_lru.cursor_begin()
             x = host_lru.cursor_next(host_lock=True)
@@ -868,7 +888,18 @@ class MambaComponent(TreeComponent):
             if not enabled:
                 x_next = host_lru.get_prev_no_host_lock(x)
             cd = x.component_data[ct]
-            if x in self.tree_core.evictable_host_leaves and (
+            if (
+                storage_enabled
+                and cd.host_value is not None
+                and cd.host_lock_ref == 0
+                and not self.tree_core.is_l3_durable(x.id)
+            ):
+                # A non-durable mamba checkpoint is about to be host-evicted
+                # with its sidecar still unsaved. Persist it first (the pin
+                # below protects the host copy until the L3 ack) and spare
+                # this victim; the next round evicts it once durable.
+                deferred_flush.append(x.id)
+            elif x in self.tree_core.evictable_host_leaves and (
                 not enabled or self._can_evict_leaf_atomically(x)
             ):
                 # Host leaf: atomic eviction (all components host + delete)
@@ -899,6 +930,8 @@ class MambaComponent(TreeComponent):
                 x = x_next
         if enabled:
             host_lru.cursor_end()
+        for node_id in deferred_flush:
+            self.cache.write_backup_storage(node_id)
 
     def free_host_values(self, host_values: list[torch.Tensor]) -> None:
         if self._mamba_pool_host is None:

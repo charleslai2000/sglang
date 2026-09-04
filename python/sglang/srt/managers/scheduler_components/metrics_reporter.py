@@ -1098,6 +1098,39 @@ class SchedulerMetricsReporter:
         self.stats.hicache_host_used_tokens = host_total - host_pool.available_size()
         self.stats.hicache_host_total_tokens = host_total
 
+        # P3 token/capacity model (ledger adjudication #3): the six runtime
+        # gauges (+ per-pool usable + READY_state_max) computed from the
+        # host pool in token space -- no GB guessing.
+        try:
+            cc = getattr(self.scheduler.tree_cache, "cache_controller", None)
+            frontier = self.scheduler.ready_horizon.frontier(
+                self.scheduler.waiting_queue
+            ) if hasattr(self.scheduler, "ready_horizon") else []
+            views = (
+                self.scheduler._ready_horizon_views(frontier)
+                if hasattr(self.scheduler, "_ready_horizon_views")
+                else []
+            )
+            cap = self.scheduler._hicache_capacity_stats(views, cc)
+        except Exception:
+            logger.exception("_hicache_capacity_stats failed")
+            return
+        self.stats.hicache_kv_pool_tokens = cap["kv_pool_tokens"]
+        self.stats.hicache_writeback_reserve_tokens = cap[
+            "writeback_reserve_tokens"
+        ]
+        self.stats.hicache_ready_resident_tokens = cap["ready_resident_tokens"]
+        self.stats.hicache_working_tokens = cap["working_tokens"]
+        self.stats.hicache_spec_inflight_tokens = cap["spec_inflight_tokens"]
+        self.stats.hicache_usable_tokens = cap["usable_tokens"]
+        self.stats.hicache_kv_host_usable_tokens = cap["kv_host_usable_tokens"]
+        self.stats.hicache_mamba_host_usable_tokens = cap[
+            "mamba_host_usable_tokens"
+        ]
+        self.stats.hicache_ready_state_max_tokens = cap[
+            "ready_state_max_tokens"
+        ]
+
     def _update_lora_metrics(self):
         """Update LoRA pool metrics for monitoring and autoscaling."""
         if not self.scheduler.enable_lora:

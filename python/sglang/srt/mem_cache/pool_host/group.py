@@ -68,6 +68,27 @@ class HostPoolGroup:
     def get_entry(self, name: PoolName | None = None) -> PoolEntry:
         return self.anchor_entry if name is None else self.entry_map[name]
 
+    def set_writeback_reserve_bytes(self, reserve_bytes: int) -> None:
+        """P3 write-back reserve across every pool in the group. Each pool
+        converts the shared byte budget into its own logical-token space
+        (its bytes/token differ), so a per-token state byte distribution
+        reserved on the anchor maps to a per-token Mamba/SWA reserve too."""
+        for entry in self.entries:
+            pool = entry.host_pool
+            setter = getattr(pool, "set_writeback_reserve_bytes", None)
+            if setter is not None:
+                setter(reserve_bytes)
+
+    def set_writeback_reserve_margin_bytes(self, margin_bytes: int) -> None:
+        """P3 safety margin across every pool in the group (usable = pool -
+        reserve - margin). Each pool converts the shared byte budget into
+        its own logical-token space."""
+        for entry in self.entries:
+            pool = entry.host_pool
+            setter = getattr(pool, "set_writeback_reserve_margin_bytes", None)
+            if setter is not None:
+                setter(margin_bytes)
+
     def get_pool(self, name: PoolName):
         return self.get_entry(name).host_pool
 
@@ -77,14 +98,40 @@ class HostPoolGroup:
         *,
         pool: PoolName | None = None,
         reclaim: Callable[[int], Any] | None = None,
+        writeback: bool = False,
     ) -> torch.Tensor | None:
-        """Allocate from one pool, optionally reclaiming once before retrying."""
+        """Allocate from one pool, optionally reclaiming once before retrying.
+
+        ``writeback=True`` routes through the pool's write-back staging
+        alloc (which may consume the P3 write-back reserve); the default
+        keeps the reserve floor intact for every other allocation."""
         host_pool = self.get_entry(pool).host_pool
-        indices = host_pool.alloc(need_size)
+        alloc_fn = host_pool.alloc_writeback if writeback else host_pool.alloc
+        indices = alloc_fn(need_size)
         if indices is None and reclaim is not None:
             reclaim(need_size)
-            indices = host_pool.alloc(need_size)
+            indices = alloc_fn(need_size)
         return indices
+
+    def alloc_writeback(
+        self,
+        need_size: int,
+        *,
+        pool: PoolName | None = None,
+        reclaim: Callable[[int], Any] | None = None,
+    ) -> torch.Tensor | None:
+        """Allocate through the D->H write-back staging channel (may consume
+        the P3 write-back reserve). The facade the host cache controllers
+        select via ``getattr(mem_pool_host, "alloc_writeback", ...)`` when
+        ``mem_pool_host`` is this group -- without this method that fallback
+        silently routed backup staging through the reserve-blocked ``alloc``
+        (the write-back reserve became a permanently disabled capacity)."""
+        return self.alloc(
+            need_size,
+            pool=pool,
+            reclaim=reclaim,
+            writeback=True,
+        )
 
     def free(self, indices: torch.Tensor, *, pool: PoolName | None = None) -> int:
         return self.get_entry(pool).host_pool.free(indices)
@@ -95,12 +142,48 @@ class HostPoolGroup:
         *,
         primary_device_indices: torch.Tensor | None = None,
         primary_host_indices: torch.Tensor | None = None,
+        writeback: bool = False,
     ) -> list[PoolTransfer] | None:
         """Allocate unresolved side-pool host indices atomically.
 
         On failure, every allocation made by this call is released and the
         corresponding transfer is restored to its unresolved state.
+        ``writeback=True`` is threaded to alloc() for a D->H/release backup
+        (the channel the P3 write-back reserve protects).
         """
+        if not transfers:
+            return None
+
+        allocated: list[tuple[PoolTransfer, torch.Tensor]] = []
+        derived_transfers: list[PoolTransfer] = []
+        alloc_kwargs = {"writeback": True} if writeback else {}
+
+        def rollback() -> None:
+            for transfer, indices in allocated:
+                self.free(indices, pool=transfer.name)
+                transfer.host_indices = None
+
+        for transfer in transfers:
+            if transfer.indices_from_pool is not None:
+                derived_transfers.append(transfer)
+                continue
+            if transfer.host_indices is not None or transfer.device_indices is None:
+                continue
+            entry = self.entry_map.get(transfer.name)
+            if entry is None:
+                continue
+            indices = self.alloc(
+                len(transfer.device_indices),
+                pool=transfer.name,
+                reclaim=entry.host_evict_fn,
+                **alloc_kwargs,
+            )
+            if indices is None:
+                rollback()
+                return None
+            transfer.host_indices = indices
+            allocated.append((transfer, indices))
+
         if not transfers:
             return None
 
@@ -181,3 +264,17 @@ class HostPoolGroup:
 
     def available_size(self, pool: PoolName | None = None):
         return self.get_entry(pool).host_pool.available_size()
+
+    def writeback_reserve(self, pool: PoolName | None = None) -> int:
+        """The configured write-back reserve (logical tokens) on the given
+        pool (anchor by default)."""
+        pool_obj = self.get_entry(pool).host_pool
+        getter = getattr(pool_obj, "writeback_reserve", None)
+        return getter() if getter is not None else 0
+
+    def writeback_margin(self, pool: PoolName | None = None) -> int:
+        """The configured safety margin (logical tokens) on the given pool
+        (anchor by default)."""
+        pool_obj = self.get_entry(pool).host_pool
+        getter = getattr(pool_obj, "writeback_margin", None)
+        return getter() if getter is not None else 0
