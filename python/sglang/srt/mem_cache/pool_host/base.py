@@ -207,6 +207,17 @@ class HostKVCache(abc.ABC):
 
         # A lock for synchronized operations on memory allocation and state transitions.
         self.lock = threading.RLock()
+        # P3 write-back reserve (tokens): host capacity reserved for the
+        # D->H write-back staging channel. Non-write-back allocs must leave
+        # at least this much free after the allocation; write-back staging
+        # (alloc_writeback) may consume it. Absolute floor guarantee --
+        # enforced before the load-pool usage fractions in the controller.
+        self._writeback_reserve = 0
+        # P3 safety margin (tokens): the additional host floor between the
+        # READY/speculative staging and the write-back reserve, in this
+        # pool's token space. Published alongside the reserve in the usable
+        # capacity model (usable = pool - reserve - margin).
+        self._writeback_margin = 0
         self.clear()
 
     def destroy(self):
@@ -349,6 +360,10 @@ class HostKVCache(abc.ABC):
     def available_size(self):
         return len(self.free_slots) + self.num_release_slots
 
+    def writeback_reserve(self) -> int:
+        """The configured write-back reserve (logical tokens)."""
+        return self._writeback_reserve
+
     def _merge_release_slots(self):
         if self.num_release_slots == 0:
             return
@@ -384,12 +399,71 @@ class HostKVCache(abc.ABC):
         )
         return indices[self.dcp_rank :: self.dcp_size] // self.dcp_size
 
+    def set_writeback_reserve_bytes(self, reserve_bytes: int) -> None:
+        """P3 write-back reserve: host capacity exclusively for the D->H
+        write-back staging channel. Called once at host pool construction,
+        before any allocation. Converts the byte budget to this pool's
+        logical-token space (its own bytes/token), rounded down to the
+        logical page boundary."""
+        reserve_tokens = reserve_bytes // self.size_per_token
+        reserve_tokens -= reserve_tokens % self.logical_page_size
+        self._writeback_reserve = reserve_tokens
+
+    def set_writeback_reserve_margin_bytes(self, margin_bytes: int) -> None:
+        """P3 safety margin (tokens): the additional pool floor between
+        READY/speculative staging and the write-back reserve. Converts the
+        byte budget to this pool's logical-token space, rounded down to the
+        logical page boundary."""
+        margin_tokens = margin_bytes // self.size_per_token
+        margin_tokens -= margin_tokens % self.logical_page_size
+        self._writeback_margin = margin_tokens
+
+    def writeback_margin(self) -> int:
+        """The configured safety margin (logical tokens)."""
+        return getattr(self, "_writeback_margin", 0)
+
     @synchronized
     def alloc(self, need_size: int) -> Optional[torch.Tensor]:
         assert (
             need_size % self.logical_page_size == 0
         ), "The requested size should be a multiple of the page size."
         if need_size > self.available_size():
+            return None
+
+        # P3 write-back reserve: a non-write-back alloc must leave the
+        # reserve untouched (free after >= reserve). The floor is absolute --
+        # the controller's usage fractions are advisory on top of it.
+        if self.available_size() - need_size < self._writeback_reserve:
+            return None
+
+        if need_size > len(self.free_slots):
+            self._merge_release_slots()
+
+        select_index = self.free_slots[:need_size]
+        self.free_slots = self.free_slots[need_size:]
+
+        assert not self.slot_used[select_index].any(), (
+            f"Double-alloc detected: slots already allocated: "
+            f"{select_index[self.slot_used[select_index]].tolist()}."
+        )
+        self.slot_used[select_index] = True
+
+        return select_index
+
+    @synchronized
+    def alloc_writeback(self, need_size: int) -> Optional[torch.Tensor]:
+        """Allocate for the D->H write-back staging channel; the write-back
+        reserve MAY be consumed (this is the channel the reserve protects),
+        so the cap is pool - margin, not pool - reserve - margin. The
+        safety margin is still left free: the margin is a buffer a backup
+        must not drain (occupancy <= C - margin). Identical slot mechanics
+        to alloc(), minus the reserve floor."""
+        assert (
+            need_size % self.logical_page_size == 0
+        ), "The requested size should be a multiple of the page size."
+        if need_size > self.available_size():
+            return None
+        if self.available_size() - need_size < self._writeback_margin:
             return None
 
         if need_size > len(self.free_slots):

@@ -445,6 +445,28 @@ class UnifiedTreeCoreInterface(ABC):
         ...
 
     @abstractmethod
+    def page_block_in_request(
+        self,
+        node_id: NodeId,
+        pos: dict[str, int],
+        requested_pages: int,
+    ) -> Optional[tuple[int, int]]:
+        """The node's page block within a requested restore span, in request
+        coordinates, or None when the node is not on the request's chain."""
+        ...
+
+    @abstractmethod
+    def persisted_chain_frontier(
+        self,
+        node_id: NodeId,
+        pos: dict[str, int],
+        requested_pages: int,
+    ) -> int:
+        """The deepest persisted page end under node_id on the request
+        branch, in request coordinates."""
+        ...
+
+    @abstractmethod
     def build_hicache_transfers(
         self,
         component_type: ComponentType,

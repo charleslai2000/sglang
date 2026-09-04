@@ -191,11 +191,12 @@ def _load_module():
     the stubenv bootstrap (same source file, fake sglang import tree)."""
     if torch is not None:
         from sglang.srt.mem_cache.unified_radix_cache import (
+            _OngoingPrefetch,
             _OngoingWriteThrough,
             UnifiedRadixCache,
         )
 
-        return UnifiedRadixCache, _OngoingWriteThrough
+        return UnifiedRadixCache, _OngoingWriteThrough, _OngoingPrefetch
     _install_stubenv()
     # Real hicache_restore (pure module) before the cache module: the
     # P2-1c gates import promotion_budget_fits from it.
@@ -219,10 +220,10 @@ def _load_module():
     mod = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = mod
     spec.loader.exec_module(mod)
-    return mod.UnifiedRadixCache, mod._OngoingWriteThrough
+    return mod.UnifiedRadixCache, mod._OngoingWriteThrough, mod._OngoingPrefetch
 
 
-UnifiedRadixCache, _OngoingWriteThrough = _load_module()
+UnifiedRadixCache, _OngoingWriteThrough, _OngoingPrefetch = _load_module()
 
 
 # ---------------------------------------------------------------------------
@@ -284,6 +285,33 @@ class _FakeTreeCore:
         self.persisted = set()
         self.deleted = set()
         self.enable_storage = False  # mirrored by the cache's property
+        self._publish_epoch = 0
+
+    def l3_publish_epoch(self):
+        # P3 prefetch_revoke instrumentation reads the publish epoch for the
+        # storage_generation field.
+        return self._publish_epoch
+        # P2-IO T15: per-node page hashes (empty for nodes not on any
+        # modeled request chain) and the modeled request's page hashes.
+        self.node_hashes: dict[int, list[str]] = {}
+        self._request_hashes: list[str] = []
+
+    def set_chain_hashes(self, chain, requested_pages):
+        """Model a request chain: partition [0..requested_pages) across the
+        chain's nodes (page-aligned, contiguous), hash-per-page."""
+        self.node_hashes = {}
+        self._request_hashes = []
+        per = requested_pages // len(chain)
+        for i, nid in enumerate(chain):
+            start = i * per
+            size = per if i < len(chain) - 1 else requested_pages - start
+            hashes = [f"h{j}" for j in range(start, start + size)]
+            self.node_hashes[nid] = hashes
+            self._request_hashes.extend(hashes)
+        return self
+
+    def request_hashes(self):
+        return list(self._request_hashes)
 
     def _chain_of(self, node_id):
         for chain in self.chains:
@@ -323,6 +351,48 @@ class _FakeTreeCore:
         if node_id in self.deleted:
             raise KeyError(node_id)
         return node_id in self.storage_written
+
+    def page_block_in_request(self, node_id, pos, requested_pages):
+        """Model of the real walk: the node's run of consecutive request
+        positions starting at its first page hash, or None when the node
+        is not on the request's chain (no hashes, or its first page is
+        not at a request position)."""
+        if node_id in self.deleted:
+            return None
+        hashes = self.node_hashes.get(node_id)
+        if not hashes:
+            return None
+        start = pos.get(hashes[0])
+        if start is None:
+            return None
+        end = start
+        for page_hash in hashes:
+            i = pos.get(page_hash)
+            if i is None or i != end:
+                break
+            end = i + 1
+            if end >= requested_pages:
+                break
+        return start, min(end, requested_pages)
+
+    def persisted_chain_frontier(self, node_id, pos, requested_pages):
+        """Model of the real walk: the deepest persisted page end on the
+        request branch, stopping at the first unpromoted node (persistence
+        is contiguous from the anchor, so nothing beyond it can be
+        persisted)."""
+        chain = self._chain_of(node_id)
+        try:
+            idx = chain.index(node_id)
+        except ValueError:
+            return 0
+        end = 0
+        for nid in chain[idx:]:
+            if nid in self.deleted or nid not in self.persisted:
+                break
+            block = self.page_block_in_request(nid, pos, requested_pages)
+            if block is not None:
+                end = max(end, block[1])
+        return end
 
     def mark_storage_written(self, node_id):
         self.storage_written.add(node_id)
@@ -386,6 +456,9 @@ class _FakeTreeCore:
     def is_storage_persisted(self, node_id):
         return node_id in self.persisted
 
+    def clear_storage_durable(self, node_id):
+        self.persisted.discard(node_id)
+
     def is_l3_durable(self, node_id):
         # e14 unified predicate (architect formula): storage_persisted or
         # storage_restored; this fake has no restore source.
@@ -401,25 +474,44 @@ class _FakeController:
     def __init__(self):
         self.ack_write_queue = []
         self.storage_ops = []
-        self.mem_pool_host = SimpleNamespace(available_size=lambda: 1 << 30)
+        self.mem_pool_host = SimpleNamespace(
+            available_size=lambda: 1 << 30,
+            # Alloc always fails: the cache-mode fallback then revokes, so
+            # the T15-bypass-off drain test exercises the pre-T15 path
+            # without launching any transfer.
+            alloc=lambda n: None,
+        )
+        self.prefetch_tokens_occupied = 0
         # Storage threads never started: the local drain short-circuits.
         self.prefetch_hit_queue = None
         self.ack_prefetch_queue = Queue()
         self.ack_backup_queue = Queue()
         self.host_mem_release_queue = Queue()
 
+    def append_host_mem_release(self, host_indices=None, extra_pools=None):
+        pass
+
     def write(self, device_indices, node_id=-1, extra_pools=None):
         self.ack_write_queue.append(_FakeAck([node_id]))
         return [0] * len(device_indices)
 
     def write_storage(
-        self, host_value, token_ids, hash_value, prefix_keys, extra_pools=None
+        self,
+        host_value,
+        token_ids,
+        hash_value,
+        prefix_keys,
+        extra_pools=None,
+        node_id=None,
     ):
         self.storage_ops.append(len(self.storage_ops))
         return len(self.storage_ops) - 1
 
+    def terminate_prefetch(self, operation):
+        return operation.completed_tokens, operation.hash_value
 
-def _make_cache(tree_core):
+
+def _make_cache(tree_core, *, backup_park=True):
     cache = object.__new__(UnifiedRadixCache)
     cache.disable = False
     # tree_core must exist before enable_storage: the property proxies onto it.
@@ -440,8 +532,37 @@ def _make_cache(tree_core):
     cache._storage_frontier_waiters = {}
     cache._storage_frontier_ready = set()
     cache._storage_prefetch_terminal = {}
+    cache._storage_prefetch_missed_rids = set()
+    cache._prefetch_outcome_stats = {
+        "attempts": 0,
+        "issued": 0,
+        "declined_too_short": 0,
+        "declined_rate_limited": 0,
+        "revoked_insufficient": 0,
+        "revoked_full_miss": 0,
+        "l3_demand_requests": 0,
+        "l3_miss_tokens": 0,
+        "l1l2_miss_tokens": 0,
+        "l3_demand_total_tokens": 0,
+        "l3_sum_rate_all": 0.0,
+        "l3_sum_rate_main_weighted": 0.0,
+    }
+    cache.prefetch_threshold = 256
     cache.host_memory_mode = "default"
+    cache.page_size = 1  # tokens == pages in these tests
+    cache.prefetch_loaded_tokens_by_reqid = {}
     cache._drain_write_through_depth = 0
+    cache._backup_wait_spans = {}
+    cache._demand_restore_rids = set()
+    # T15 bypass gate (P2-IO Phase 1): the park-mechanism tests run with
+    # the flag on (the harness default); the off-mode variants pass
+    # backup_park=False and assert the pre-T15 baseline classification.
+    cache.hicache_restore_backup_park = backup_park
+    # P3 Ready Horizon (3.1): off is the harness default -- the baseline
+    # behavior the existing tests assert. The reservation dict exists so
+    # the (no-op) release calls on the five removal paths stay safe.
+    cache.enable_ready_horizon = False
+    cache._prefetch_reservations = {}
     cache.cache_controller = _FakeController()
     return cache
 
@@ -813,6 +934,330 @@ class DrainReentryRegressionTest(unittest.TestCase):
         self.assertIn(30, tree_core.deleted)
         # The live gap nodes still reached L3 exactly once.
         self.assertEqual(tree_core.storage_written, {10, 20})
+
+
+class BackupPendingRevokeTests(unittest.TestCase):
+    """P2-IO T15 (corrected R1): a partial lookup outcome whose chain
+    backup pipeline is TARGETED to cover the request's end (in-flight
+    write block reaches requested_pages) while the durable frontier is
+    still behind it is recorded as revoked_backup_pending (the scheduler
+    parks the request on the backup-completion wait) instead of a
+    terminal miss. The park is the retry-phase compression: without it
+    each partial restore was denied at admission and the lookup re-issued
+    per pass.
+
+    The modeled chain [10, 20] covers the whole requested span [0..128):
+    node 10 = pages [0..64) (the persisted hit prefix), node 20 = pages
+    [64..128). Guards the drain classification only (the pure predicate
+    semantics live in test_hicache_restore.py).
+    """
+
+    def _revoke(self, chain, ongoing_backup, hit_count, requested=128, backup_park=True):
+        tree_core = _FakeTreeCore([chain]).set_chain_hashes(chain, requested)
+        tree_core.persisted.add(chain[0])  # the hit anchor is durable
+        cache = _make_cache(tree_core, backup_park=backup_park)
+        tree_core.storage_written.update(chain)
+        cache.ongoing_backup = ongoing_backup
+        cache._storage_prefetch_terminal = {}
+        operation = SimpleNamespace(
+            request_id="r1",
+            is_terminated=lambda: False,
+            storage_hit_count=hit_count,
+            token_ids=[0] * requested,
+            stats_requested_tokens=requested,
+            all_hash_values=tree_core.request_hashes(),
+            pool_storage_result=None,
+            completed_tokens=0,
+        )
+        cache.ongoing_prefetch = {
+            "r1": _OngoingPrefetch(
+                anchor_node_id=chain[0],
+                prefetch_key=[0] * requested,
+                host_indices=None,
+                operation=operation,
+                anchor_lock_params=None,
+                comp_xfers={},
+            )
+        }
+        cache.revoke_pending_prefetch("r1")
+        return cache._storage_prefetch_terminal.get("r1")
+
+    def test_partial_hit_with_pipeline_covering_request_parks(self):
+        # Node 20's L3 write is in flight and covers the request's end
+        # (target = 128 >= requested 128); the durable frontier is at 64
+        # (the anchor). Park -- the wake serves the full hit.
+        terminal = self._revoke([10, 20], {7: (20, "lock-params")}, hit_count=64)
+        self.assertEqual(terminal, "revoked_backup_pending")
+
+    def test_partial_hit_after_writes_drained_stays_miss(self):
+        # The chain's writes acked (ongoing_backup empty): a genuine
+        # partial (e.g. ring overwrite) -- the miss semantics apply
+        # unchanged (no park; the backup is never coming).
+        terminal = self._revoke([10, 20], {}, hit_count=64)
+        self.assertEqual(terminal, "revoked_miss")
+
+    def test_pipeline_stops_short_of_request_end_never_parks(self):
+        # The counter-example at the revoke level: the in-flight write
+        # covers only [64..70) of [0..128) (chain [10, 21(6 pages),
+        # 22(58)] with node 21 in flight): target = 70 < requested = 128
+        # -> no park; the current partial restore/recompute path applies.
+        chain = [10, 21, 22]
+        terminal = self._revoke(chain, {7: (21, "lock-params")}, hit_count=64)
+        self.assertEqual(terminal, "revoked_miss")
+
+    def test_zero_hit_with_write_in_flight_stays_miss(self):
+        # A zero-hit span is never parked: it may be genuinely unwritten
+        # (a fresh suffix recomputes) -- parking would idle out the T13
+        # clock for no event.
+        terminal = self._revoke([10, 20], {7: (20, "lock-params")}, hit_count=0)
+        self.assertEqual(terminal, "revoked_miss")
+
+    def test_flag_off_classifies_miss(self):
+        # T15 bypass off (the production default): the same partial-hit
+        # scenario classifies as the pre-T15 baseline -- revoked_miss --
+        # so the request recomputes (no park, no span).
+        terminal = self._revoke(
+            [10, 20], {7: (20, "lock-params")}, hit_count=64, backup_park=False
+        )
+        self.assertEqual(terminal, "revoked_miss")
+
+    def test_unrelated_chain_write_does_not_park(self):
+        # An in-flight write of a sibling chain (node 30, not on the
+        # request's chain) is not this chain's backup: no park.
+        terminal = self._revoke([10, 20], {7: (30, "lock-params")}, hit_count=64)
+        self.assertEqual(terminal, "revoked_miss")
+
+    def test_above_threshold_partial_hit_parks_at_the_drain(self):
+        # The >=threshold partial branch of the hit-queue drain: a partial
+        # hit (64/128 pages, threshold 256 -- above it, so it would
+        # normally allocate and restore) with the chain's write covering
+        # the request end must park instead of restoring the partial span.
+        # This is the exact branch that breaks the e13 retry loop (partial
+        # restore -> admission deny -> per-pass re-issue).
+        tree_core = _FakeTreeCore([[10, 20]]).set_chain_hashes([10, 20], 128)
+        tree_core.persisted.add(10)
+        cache = _make_cache(tree_core)
+        tree_core.storage_written.update([10, 20])
+        cache.ongoing_backup = {7: (20, "lock-params")}
+        cache._storage_prefetch_terminal = {}
+        operation = SimpleNamespace(
+            request_id="r1",
+            is_terminated=lambda: False,
+            storage_hit_count=64,
+            token_ids=[0] * 128,
+            stats_requested_tokens=128,
+            stats_total_tokens=128,
+            all_hash_values=tree_core.request_hashes(),
+            pool_storage_result=SimpleNamespace(
+                update_extra_pool_hit_pages=lambda *a, **k: None
+            ),
+            completed_tokens=0,
+        )
+        cache.ongoing_prefetch = {
+            "r1": _OngoingPrefetch(
+                anchor_node_id=10,
+                prefetch_key=[0] * 128,
+                host_indices=None,
+                operation=operation,
+                anchor_lock_params=None,
+                comp_xfers={},
+            )
+        }
+        cache.cache_controller.prefetch_hit_queue = Queue()
+        cache.cache_controller.prefetch_hit_queue.put(operation)
+
+        cache._drain_storage_control_queues_impl(1, 0, 0, 0, {}, False)
+
+        self.assertEqual(
+            cache._storage_prefetch_terminal.get("r1"), "revoked_backup_pending"
+        )
+        self.assertNotIn("r1", cache.ongoing_prefetch)
+
+    def test_deleted_anchor_does_not_park(self):
+        # The anchor was evicted while the write drained: the frontier
+        # walk resolves the anchor as absent; the partial degrades through
+        # the normal miss path (no park).
+        tree_core = _FakeTreeCore([[10, 20]]).set_chain_hashes([10, 20], 128)
+        cache = _make_cache(tree_core)
+        tree_core.mark_deleted(10)
+        cache.ongoing_backup = {7: (20, "lock-params")}
+        cache._storage_prefetch_terminal = {}
+        operation = SimpleNamespace(
+            request_id="r1",
+            is_terminated=lambda: False,
+            storage_hit_count=64,
+            token_ids=[0] * 128,
+            stats_requested_tokens=128,
+            all_hash_values=tree_core.request_hashes(),
+            pool_storage_result=None,
+            completed_tokens=0,
+        )
+        cache.ongoing_prefetch = {
+            "r1": _OngoingPrefetch(
+                anchor_node_id=10,
+                prefetch_key=[0] * 128,
+                host_indices=None,
+                operation=operation,
+                anchor_lock_params=None,
+                comp_xfers={},
+            )
+        }
+        cache.revoke_pending_prefetch("r1")
+        self.assertEqual(
+            cache._storage_prefetch_terminal.get("r1"), "revoked_miss"
+        )
+
+
+class BackupWaitReadyTests(unittest.TestCase):
+    """P2-IO R1 wake: backup_wait_ready flips exactly when the chain's
+    durable frontier crosses the request's end -- the wake guarantees one
+    re-lookup into the full chain. The frontier advances on the ack drain
+    (advance_storage_persisted), so the wake is ACK-driven; a deleted
+    anchor self-heals to True (the re-issue re-matches from the root).
+    """
+
+    def _parked_cache(self):
+        tree_core = _FakeTreeCore([[10, 20]]).set_chain_hashes([10, 20], 128)
+        tree_core.persisted.add(10)
+        cache = _make_cache(tree_core)
+        cache.ongoing_backup = {7: (20, "lock-params")}
+        cache._storage_prefetch_terminal = {}
+        operation = SimpleNamespace(
+            request_id="r1",
+            is_terminated=lambda: False,
+            storage_hit_count=64,
+            token_ids=[0] * 128,
+            stats_requested_tokens=128,
+            all_hash_values=tree_core.request_hashes(),
+            pool_storage_result=None,
+            completed_tokens=0,
+        )
+        cache.ongoing_prefetch = {
+            "r1": _OngoingPrefetch(
+                anchor_node_id=10,
+                prefetch_key=[0] * 128,
+                host_indices=None,
+                operation=operation,
+                anchor_lock_params=None,
+                comp_xfers={},
+            )
+        }
+        cache.revoke_pending_prefetch("r1")
+        self.assertEqual(
+            cache._storage_prefetch_terminal.get("r1"), "revoked_backup_pending"
+        )
+        return cache, tree_core
+
+    def test_not_ready_while_durable_frontier_behind(self):
+        # Parked with the durable frontier at 64 < 128: the wake must not
+        # fire (a re-lookup would hit the same partial).
+        cache, _tree_core = self._parked_cache()
+        self.assertFalse(cache.backup_wait_ready("r1"))
+
+    def test_ready_after_ack_drain_advances_frontier(self):
+        # The in-flight write's ack drains (advance_storage_persisted):
+        # the durable frontier crosses the request's end -> wake.
+        cache, tree_core = self._parked_cache()
+        tree_core.advance_storage_persisted(20)
+        self.assertTrue(cache.backup_wait_ready("r1"))
+
+    def test_deleted_anchor_self_heals_to_ready(self):
+        # The anchor was evicted since the park: self-heal (the re-issue
+        # re-matches from the root and the re-lookup decides).
+        cache, tree_core = self._parked_cache()
+        tree_core.mark_deleted(10)
+        self.assertTrue(cache.backup_wait_ready("r1"))
+
+    def test_unknown_rid_never_ready(self):
+        cache, _tree_core = self._parked_cache()
+        self.assertFalse(cache.backup_wait_ready("other-rid"))
+
+    def test_discard_ends_the_park(self):
+        # The wait ends (timeout / wake / abort): the span is popped and
+        # a later reconciliation cannot wake the request.
+        cache, tree_core = self._parked_cache()
+        tree_core.advance_storage_persisted(20)
+        cache.discard_frontier_waiter("r1")
+        self.assertFalse(cache.backup_wait_ready("r1"))
+        self.assertNotIn("r1", cache._backup_wait_spans)
+
+
+class DemandRestoreTicketTests(unittest.TestCase):
+    """P2-IO R2: the DEMAND_RESTORE ticket is granted at the T15 wake
+    re-issue and released when the prefetch leaves ongoing_prefetch; the
+    scheduler gates the wake on demand_restore_available (bounded
+    concurrency -- anti-thundering-herd for a backup-complete wake batch).
+    """
+
+    def test_inflight_starts_empty(self):
+        cache = _make_cache(_FakeTreeCore([[10, 20]]))
+        self.assertEqual(cache.demand_restore_inflight(), 0)
+
+    def test_revoke_releases_the_ticket(self):
+        # A demand re-issue whose outcome revokes (any revoke reason)
+        # releases its ticket with the ongoing_prefetch entry.
+        tree_core = _FakeTreeCore([[10, 20]]).set_chain_hashes([10, 20], 128)
+        cache = _make_cache(tree_core)
+        cache.ongoing_backup = {}
+        cache._storage_prefetch_terminal = {}
+        operation = SimpleNamespace(
+            request_id="r1",
+            is_terminated=lambda: False,
+            storage_hit_count=64,
+            token_ids=[0] * 128,
+            stats_requested_tokens=128,
+            all_hash_values=tree_core.request_hashes(),
+            pool_storage_result=None,
+            completed_tokens=0,
+        )
+        cache.ongoing_prefetch = {
+            "r1": _OngoingPrefetch(
+                anchor_node_id=10,
+                prefetch_key=[0] * 128,
+                host_indices=None,
+                operation=operation,
+                anchor_lock_params=None,
+                comp_xfers={},
+            )
+        }
+        cache._demand_restore_rids.add("r1")
+        cache.revoke_pending_prefetch("r1")
+        self.assertEqual(cache.demand_restore_inflight(), 0)
+
+    def test_abort_release_releases_the_ticket(self):
+        tree_core = _FakeTreeCore([[10, 20]]).set_chain_hashes([10, 20], 128)
+        cache = _make_cache(tree_core)
+        cache.ongoing_backup = {}
+        cache._storage_prefetch_terminal = {}
+        operation = SimpleNamespace(
+            request_id="r1",
+            is_terminated=lambda: False,
+            storage_hit_count=64,
+            token_ids=[0] * 128,
+            stats_requested_tokens=128,
+            all_hash_values=tree_core.request_hashes(),
+            pool_storage_result=SimpleNamespace(
+                update_extra_pool_hit_pages=lambda *a, **k: None
+            ),
+            completed_tokens=64,
+            hash_value=[0] * 64,
+            pool_transfers_done=True,
+            host_indices=[0] * 64,
+        )
+        cache.ongoing_prefetch = {
+            "r1": _OngoingPrefetch(
+                anchor_node_id=10,
+                prefetch_key=[0] * 128,
+                host_indices=[0] * 64,
+                operation=operation,
+                anchor_lock_params=None,
+                comp_xfers={},
+            )
+        }
+        cache._demand_restore_rids.add("r1")
+        cache.release_aborted_request("r1")
+        self.assertEqual(cache.demand_restore_inflight(), 0)
+        self.assertNotIn("r1", cache.ongoing_prefetch)
 
 
 if __name__ == "__main__":

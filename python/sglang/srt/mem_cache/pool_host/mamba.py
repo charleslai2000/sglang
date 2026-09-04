@@ -130,6 +130,12 @@ class MambaPoolHost(HostKVCache):
         self.kv_buffer = self.init_kv_buffer()
         self._init_write_back_staging_buffers()
         self.lock = threading.RLock()
+        # P3 write-back reserve (tokens): host capacity reserved for the
+        # D->H->L3 write-back staging channel in this pool's token space
+        # (mirrors HostKVCache._writeback_reserve). Also the safety margin,
+        # set by the assembler alongside the reserve.
+        self._writeback_reserve = 0
+        self._writeback_margin = 0
         self.clear()
 
     def init_kv_buffer(self):
@@ -249,10 +255,22 @@ class MambaPoolHost(HostKVCache):
 
     @synchronized
     def alloc(self, need_size: int) -> Optional[torch.Tensor]:
+        # P3 write-back reserve floor (inherited): a non-write-back alloc
+        # must leave the reserve untouched.
+        if self.available_size() - need_size < self._writeback_reserve:
+            return None
+        return self.alloc_writeback(need_size)
+
+    @synchronized
+    def alloc_writeback(self, need_size: int) -> Optional[torch.Tensor]:
+        """Write-back staging alloc; may consume the P3 write-back reserve
+        (cap pool - margin, mirroring HostKVCache.alloc_writeback)."""
         assert (
             need_size % self.page_size == 0
         ), "The requested size should be a multiple of the page size."
         if need_size > self.available_size():
+            return None
+        if self.available_size() - need_size < self._writeback_margin:
             return None
 
         if need_size > len(self.free_slots):

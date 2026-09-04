@@ -33,6 +33,7 @@ class RestoreWaitReason(Enum):
     HOST_ALLOC = auto()
     FRONTIER = auto()
     REVALIDATE = auto()
+    BACKUP_PENDING = auto()  # chain's L3 write in flight; wait for the ack drain
 
 
 class RestoreEvent(Enum):
@@ -52,6 +53,7 @@ class RestoreEvent(Enum):
     FRONTIER_READY = auto()  # T12
     TIMEOUT = auto()  # T13
     ABORT = auto()  # T14
+    BACKUP_PENDING = auto()  # T15: lookup found the chain mid-backup
 
 
 class RestoreDecision(Enum):
@@ -75,7 +77,10 @@ def next_restore(
 
     - Issue-side events land the request in RESTORING (T1, and the T11/T12
       re-issue completion).
-    - Capacity-type events (T2-T7, T10) land it in WAIT_CAPACITY.
+    - Capacity-type events (T2-T7, T10, T15) land it in WAIT_CAPACITY.
+      T15 is the backup-completion wait (P2-IO): the lookup found the
+      chain mid-backup, so the request waits for the ack drain instead of
+      restoring the partial span and re-issuing the lookup per pass.
     - T4 too-short declines only start a WAIT[REVALIDATE] from a fresh
       NONE (the device-match-decay bet, re-issuable by the paced retry);
       on a re-issue leg (T11/T12 wake) the too-short re-judgment is
@@ -152,6 +157,16 @@ def next_restore(
     if event is RestoreEvent.ABORT:  # T14
         return RestoreState.NONE, RestoreDecision.NONE
 
+    if event is RestoreEvent.BACKUP_PENDING:  # T15
+        # The lookup revealed the chain only partially in L3 while its L3
+        # write is still in flight: park on the backup-completion wait
+        # (the scheduler registers the M2 frontier waiter) instead of
+        # restoring the partial span -- the per-pass re-issue cycle that
+        # followed each partial restore was the backup-in-flight retry
+        # loop (e13 profiling: 1.7 attempts/rid, retry waits up to 33.5s).
+        # Capacity-type wait: bounded by T13, woken by the ack drain.
+        return RestoreState.WAIT_CAPACITY, RestoreDecision.WAIT
+
     return state, RestoreDecision.NONE
 
 
@@ -175,6 +190,8 @@ def wait_reason_for(
         return RestoreWaitReason.DEVICE_QUOTA
     if event is RestoreEvent.REVOKED_MISS and not genuine_miss:
         return RestoreWaitReason.HOST_ALLOC
+    if event is RestoreEvent.BACKUP_PENDING:
+        return RestoreWaitReason.BACKUP_PENDING
     return None
 
 
@@ -270,20 +287,76 @@ def promotion_wait_blocked(
     )
 
 
+# Concurrent DEMAND_RESTORE re-issues (the T15 wake path) allowed past the
+# speculative PREFETCH_BUDGET at once. The bound smooths the thundering
+# herd of backup-complete wakes (e4: 57 denied_rate_limit after wakes);
+# the prefetch IO pipeline stays serialized per thread regardless.
+DEMAND_RESTORE_MAX_INFLIGHT = 4
+
+
+def backup_wait_applies(
+    storage_hit_pages: int,
+    requested_pages: int,
+    *,
+    durable_frontier: int,
+    backup_target_frontier: int,
+) -> bool:
+    """Whether a partial prefetch lookup outcome should park the request on
+    the backup-completion wait (T15) instead of restoring the partial span.
+
+    The park is for the backup-in-flight race (e13 profiling), framed by
+    the chain's frontiers: the query saw only the already-written batches,
+    and the park is useful exactly when the backup pipeline is targeted to
+    cover the request's end -- then the wake (durable >= requested) yields
+    one re-lookup, one full hit, one restore. A pipeline that stops short
+    of the request's end (chain growth, a dropped-without-backup tail, a
+    sibling chain's write) would wake into the same partial and is not
+    parked: the current restore-or-recompute behavior applies. The
+    zero-hit guard stays: a fresh span may simply never have been written.
+    """
+    if not (0 < storage_hit_pages < requested_pages):
+        return False
+    return (
+        durable_frontier < requested_pages
+        and backup_target_frontier >= requested_pages
+    )
+
+
+def backup_wake_applies(durable_frontier: int, requested_pages: int) -> bool:
+    """Whether the backup-completion wait (T15) may wake: the chain's
+    durable frontier has crossed the request's end, so the re-lookup
+    serves the full hit (one lookup, one restore). The frontier is
+    re-read every scheduler pass (the ACK drain advances it), which is
+    the event-driven wake -- not a poll of the storage backend."""
+    return durable_frontier >= requested_pages
+
+
+def demand_restore_available(inflight: int) -> bool:
+    """Whether a DEMAND_RESTORE ticket can be granted: the wake re-issue
+    bypasses the speculative PREFETCH_BUDGET but is bounded by its own
+    concurrency (a backup-complete wake batch must not stampede the host
+    staging / IO pipeline)."""
+    return inflight < DEMAND_RESTORE_MAX_INFLIGHT
+
+
 def capacity_wake_applies(reason: Optional[RestoreWaitReason]) -> bool:
     """Whether the per-pass T11 capacity predicate can validate this WAIT
     reason (design §2.3 predicates: device charge, host prefetch budget,
     frontier anchor fallback).
 
-    DEVICE_QUOTA / PREFETCH_BUDGET / FRONTIER are testable: the predicate
-    re-checks the exact denial cause. REVALIDATE (the suffix is still below
-    the prefetch threshold) and HOST_ALLOC (the host staging alloc is still
-    failing) are not: waking them re-issues a prefetch that is declined
-    identically every pass. Those waits leave only via the paced retry
-    (poll interval > 0) or the T13 timeout.
+    DEVICE_QUOTA / PREFETCH_BUDGET / FRONTIER / BACKUP_PENDING are
+    testable: the predicate re-checks the exact denial cause (for
+    BACKUP_PENDING: whether the chain's durable frontier has crossed the
+    request end and a DEMAND_RESTORE ticket is grantable -- the ack drain
+    flips the frontier, so the wake is ACK-driven, not a poll). REVALIDATE
+    (the suffix is still below the prefetch threshold) and HOST_ALLOC (the
+    host staging alloc is still failing) are not: waking them re-issues a
+    prefetch that is declined identically every pass. Those waits leave
+    only via the paced retry (poll interval > 0) or the T13 timeout.
     """
     return reason in (
         RestoreWaitReason.DEVICE_QUOTA,
         RestoreWaitReason.PREFETCH_BUDGET,
         RestoreWaitReason.FRONTIER,
+        RestoreWaitReason.BACKUP_PENDING,
     )

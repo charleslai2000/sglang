@@ -366,6 +366,11 @@ class HiCacheController:
         self.storage_backend = None
         self.storage_backend_type = None
         self.enable_storage_metrics = enable_storage_metrics
+        # P3 Ready Horizon (M1): the speculative share of the inflight
+        # prefetch budget, as a fraction of prefetch_capacity_limit. The
+        # tree overrides this from server_args at init_hicache; the limit
+        # itself is computed at attach.
+        self.prefetch_speculative_fraction = 0.6
         # Buffer mode: wired by the tree cache after attach; the load rate
         # limiter subtracts write staging from actual pool usage.
         self.host_write_staged_tokens_fn: Optional[Callable[[], int]] = None
@@ -652,8 +657,19 @@ class HiCacheController:
             else:
                 # Budget speculative prefetch at half the host pool, leaving the rest for the write-back staging path.
                 self.prefetch_capacity_limit = int(0.5 * self.mem_pool_host.size)
+            # P3 Ready Horizon (M1): the speculative sub-budget of the
+            # inflight prefetch budget. Only speculative issues are charged
+            # against it; demand restores may use any physical budget that
+            # remains. Consulted in cache mode only.
+            self.prefetch_speculative_capacity_limit = int(
+                self.prefetch_speculative_fraction * self.prefetch_capacity_limit
+            )
             # tracking the number of tokens locked in prefetching, updated by the main scheduler thread
             self.prefetch_tokens_occupied = 0
+            # P3 Ready Horizon (M1): tokens of in-flight SPECULATIVE
+            # prefetches (a subset of prefetch_tokens_occupied), updated by
+            # the main scheduler thread via reserve/release_prefetch.
+            self.inflight_speculative_tokens = 0
 
             # Use dedicated gloo groups so storage prefetch sync is isolated
             # from other collectives and consistent across CPxTP participants.
@@ -666,7 +682,7 @@ class HiCacheController:
 
             if (
                 self.storage_backend_type
-                in ["hf3fs", "mooncake", "eic", "nixl", "simm", "mori"]
+                in ["hf3fs", "mooncake", "eic", "nixl", "simm", "mori", "extent"]
             ) or (
                 self.storage_backend_type == "dynamic"
                 and bool(self.storage_config.extra_config.get("interface_v1", 0))
@@ -835,6 +851,7 @@ class HiCacheController:
             self.ack_backup_queue.queue.clear()
             self.host_mem_release_queue.queue.clear()
             self.prefetch_tokens_occupied = 0
+            self.inflight_speculative_tokens = 0
 
         self.storage_stop_event.clear()
         # Explicit restart (control path): a previous storage-thread failure
@@ -868,7 +885,12 @@ class HiCacheController:
         """
         Back up KV caches from device memory to host memory.
         """
-        host_indices = self.mem_pool_host.alloc(len(device_indices))
+        # D->H write-back staging: the channel the P3 write-back reserve
+        # protects. May use the reserved host space (alloc_writeback), so a
+        # backup always has a landing zone even when the working set fills
+        # the pool to the reserve floor.
+        alloc = getattr(self.mem_pool_host, "alloc_writeback", self.mem_pool_host.alloc)
+        host_indices = alloc(len(device_indices))
         if host_indices is None:
             return None
         self.write_queue.append(
@@ -1258,6 +1280,14 @@ class HiCacheController:
         # todo: more sophisticated rate limiting based on storage backend performance
         return False
 
+    def prefetch_speculative_rate_limited(self) -> bool:
+        """P3 Ready Horizon (M1): the speculative sub-budget of the inflight
+        prefetch budget is exhausted. Demand restores are never charged
+        against it -- the physical prefetch_rate_limited still bounds them."""
+        return self.inflight_speculative_tokens >= (
+            self.prefetch_speculative_capacity_limit
+        )
+
     def _storage_hit_query(self, operation) -> tuple[list[str], int]:
         last_hash = operation.last_hash
         tokens_to_fetch = operation.token_ids
@@ -1326,6 +1356,7 @@ class HiCacheController:
         token_ids: List[int],
         hash_value: Optional[List[str]] = None,
         prefix_keys: Optional[List[str]] = None,
+        node_id: Optional[Any] = None,
     ) -> int:
         """
         Write KV caches from host memory to storage backend.
@@ -1333,6 +1364,7 @@ class HiCacheController:
         operation = StorageOperation(
             host_indices, token_ids, hash_value=hash_value, prefix_keys=prefix_keys
         )
+        operation.node_id = node_id
         self.backup_queue.put(operation)
         return operation.id
 

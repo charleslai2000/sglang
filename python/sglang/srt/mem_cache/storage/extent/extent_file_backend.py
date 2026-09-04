@@ -5,19 +5,25 @@
 
 Replaces HiCacheFile's per-key .bin files (a 20K-page restore is ~63K
 open/read/close syscalls) with aggregated IO: a batch of consecutive page
-writes packs into fixed-size extents (default 64 MiB), so one preadv/pwritev
-covers the whole batch. The RAM index (``ExtentAllocator``) maps storage key
--> ExtentRef{extent_id, offset, length, generation}; slot reuse or watermark
-GC bumps the generation and any stale entry fails the read-side re-verify
-(generation mismatch = miss).
+writes packs into fixed-size extents (default 64 MiB), so one pwritev covers
+the whole batch.  The extent is an *allocation* unit, not a read unit: a
+batch read sorts its requested refs by offset and preads each merged exact
+range (adjacent ranges with a gap of at most one 4KiB sector merge), so only
+the bytes the request covers are read.  The RAM index (``ExtentAllocator``)
+maps storage key -> ExtentRef{extent_id, offset, length, generation}; slot
+reuse or watermark GC bumps the generation and any stale entry fails the
+read-side re-verify (generation mismatch = miss).
 
 Durability contract is unchanged from HiCacheFile: the tree layer only trusts
 the ACK, and ACK here means pwrite success + index registration (no fsync,
 matching the current semantics; a crash leaves the file orphaned and the
 restart starts cold -- no metadata persistence). v1 is the main KV path
-(controller batches at STORAGE_BATCH_SIZE=128); v2 keeps the sidecar-pool
-semantics with per-pool component keys (``key.<pool>``) packed into their own
-extents.
+(controller batches at STORAGE_BATCH_SIZE=1024): the batch_get_v1/batch_set_v1
+zero-copy surface pread/pwrite directly into the host pool buffers that
+``get_page_buffer_meta`` describes (k/v dual blocks per page_first MHA page,
+one syscall per merged exact range), so the engine-side dummy-page allocation
+and per-page scatter loops disappear. v2 keeps the sidecar-pool semantics with
+per-pool component keys (``key.<pool>``) packed into their own extents.
 
 First slice uses buffered IO; ``SGLANG_HICACHE_EXTENT_BACKEND_DIRECT_IO`` is
 reserved for the O_DIRECT calibration tier -- page lengths are not 4KiB
@@ -26,9 +32,11 @@ aligned, so only whole-extent aligned IO could use O_DIRECT safely.
 
 from __future__ import annotations
 
+import ctypes
 import logging
 import os
 import threading
+import time
 from typing import Any, List, Optional
 
 from sglang.srt.environ import envs
@@ -50,6 +58,38 @@ logger = logging.getLogger(__name__)
 _DEFAULT_EXTENT_SIZE = 64 << 20
 # B3 single-file layout: 64 GiB sparse preallocation per rank/suffix.
 _DEFAULT_FILE_SIZE = 64 << 30
+# Read-side merge threshold: adjacent requested ranges whose gap is at most
+# one 4KiB sector are merged into a single exact pread.  Absorbing a <=4KiB
+# dead gap is bounded amplification (<= 1.13x on a ~31KB page) and keeps
+# contiguous page clusters at one syscall; larger gaps stay separate
+# exact-range reads so sparse requests never drag in extent fill.
+_MERGE_GAP_THRESHOLD = 4096
+# Linux caps iovecs per readv/pwritev syscall at IOV_MAX = UIO_MAXIOV =
+# 1024 (measured on the 3090 box and locally: 1024 iovecs OK, 1025 EINVAL).
+# The v1 batch packs 2 blocks per page, so a 1024-page batch is 2048 iovecs
+# and the IO helpers shard at this boundary.
+_IOV_MAX = 1024
+
+
+def _merge_requested_ranges(items):
+    """Coalesce requested (offset, length, index) refs into exact pread ranges.
+
+    Items are sorted by offset; the running range [start, end) absorbs the
+    next item when the gap (item.start - end) is at most _MERGE_GAP_THRESHOLD
+    bytes.  Returns a list of (start, end, [index...]) where each returned
+    range is the exact byte span one pread must cover -- never a whole
+    extent, never a span over unrequested bytes beyond the threshold.
+    """
+    ranges = []
+    for offset, length, idx in sorted(items):
+        start, end = offset, offset + length
+        if ranges and start - ranges[-1][1] <= _MERGE_GAP_THRESHOLD:
+            prev = ranges[-1]
+            prev[1] = max(prev[1], end)
+            prev[2].append(idx)
+        else:
+            ranges.append([start, end, [idx]])
+    return ranges
 
 
 def _page_byte_view(value) -> memoryview:
@@ -212,6 +252,18 @@ class ExtentFileBackend(HiCacheStorage):
             "pwrites": 0,
             "bytes_read": 0,
             "bytes_written": 0,
+            # Read-amplification accounting (P0 fix: exact-range reads).
+            # requested_bytes = ref lengths of read batches; physical_bytes_read
+            # = merged pread spans; the ratio target is < 1.2x.  prefetch_bytes_read
+            # stays 0: this backend has no prefetch logic, every pread is
+            # request-driven (engine-side proactive prefetch arrives as ordinary
+            # batch_get/batch_get_v2 and is counted like any other read).
+            "requested_bytes": 0,
+            "physical_bytes_read": 0,
+            "prefetch_bytes_read": 0,
+            "last_batch_requested_bytes": 0,
+            "last_batch_physical_bytes": 0,
+            "last_batch_preads": 0,
         }
         self._fd = os.open(self._data_path, os.O_CREAT | os.O_RDWR, 0o644)
         self._stats["opens"] += 1
@@ -224,6 +276,9 @@ class ExtentFileBackend(HiCacheStorage):
         )
 
     # ---- key scoping (same semantics as HiCacheFile) ----
+    # v1 and v2 share the same transform: the engine writes via v1 batch_set
+    # and queries via v2 batch_exists_v2, so both sides must produce the same
+    # storage key (bare keys on one side only = storage_hit always 0).
 
     def _storage_key(self, key: str) -> str:
         return key + self.config_suffix
@@ -241,13 +296,14 @@ class ExtentFileBackend(HiCacheStorage):
         target_location: Optional[Any] = None,
         target_sizes: Optional[Any] = None,
     ):
-        page = self._read_pages([key])[0]
+        storage_key = self._storage_key(key)
+        page = self._read_pages([storage_key])[0]
         if page is None or target_location is None:
             return None
         view = _target_byte_view(target_location)
         if len(view) != len(page):
             logger.warning(
-                f"ExtentFileBackend: size mismatch for {key}: "
+                f"ExtentFileBackend: size mismatch for {storage_key}: "
                 f"stored {len(page)} B vs target {len(view)} B"
             )
             return None
@@ -263,11 +319,11 @@ class ExtentFileBackend(HiCacheStorage):
     ) -> bool:
         if value is None:
             return False
-        return self._write_pages([key], [value])
+        return self._write_pages([self._storage_key(key)], [value])
 
     def exists(self, key: str) -> bool:
         with self._lock:
-            return self._allocator.lookup(key) is not None
+            return self._allocator.lookup(self._storage_key(key)) is not None
 
     # ---- v1: batched surface (main KV path) ----
 
@@ -277,7 +333,8 @@ class ExtentFileBackend(HiCacheStorage):
         target_locations: Optional[Any] = None,
         target_sizes: Optional[Any] = None,
     ) -> List[Any]:
-        pages = self._read_pages(keys)
+        storage_keys = [self._storage_key(key) for key in keys]
+        pages = self._read_pages(storage_keys)
         targets = target_locations or [None] * len(keys)
         out = []
         for page, target in zip(pages, targets):
@@ -296,6 +353,27 @@ class ExtentFileBackend(HiCacheStorage):
             out.append(target)
         return out
 
+    def _log_extent_write(
+        self, component, node_id, storage_keys, sizes
+    ) -> None:
+        """[P3] extent_write instrumentation: one record per successful
+        extent (component) batch. ``sizes`` are the per-key byte lengths.
+        Node identity comes from the caller's extra_info (instrumentation-
+        only; the write path ignores it)."""
+        try:
+            total = sum(len(v) for v in sizes)
+        except TypeError:
+            total = sum(sizes)
+        logger.info(
+            "[P3] ts_ms=%d evt=extent_write node=%s component=%s "
+            "keys_n=%d bytes=%d",
+            int(time.time() * 1000),
+            node_id,
+            component,
+            len(storage_keys),
+            total,
+        )
+
     def batch_set(
         self,
         keys: List[str],
@@ -305,16 +383,235 @@ class ExtentFileBackend(HiCacheStorage):
     ) -> bool:
         if values is None or len(values) != len(keys):
             return False
-        return self._write_pages(keys, values)
+        storage_keys = [self._storage_key(key) for key in keys]
+        ok = self._write_pages(storage_keys, values)
+        if ok:
+            self._log_extent_write("kv", None, storage_keys, values)
+        return ok
 
     def batch_exists(
         self, keys: List[str], extra_info: Optional[HiCacheStorageExtraInfo] = None
     ) -> int:
         with self._lock:
             for i, key in enumerate(keys):
-                if self._allocator.lookup(key) is None:
+                if self._allocator.lookup(self._storage_key(key)) is None:
                     return i
             return len(keys)
+
+    # ---- v1: zero-copy surface (anchor KV pool, direct-to-buffer IO) ----
+
+    def batch_get_v1(
+        self,
+        keys: List[str],
+        host_indices,
+        extra_info: Optional[HiCacheStorageExtraInfo] = None,
+    ) -> List[bool]:
+        """Zero-copy read: preadv merged exact ranges into the host pool.
+
+        The target buffers come from ``get_page_buffer_meta(host_indices)``;
+        the stored flat page bytes are the concatenation of the per-page
+        blocks in pool order (k block then v block for a page_first MHA
+        pool), so one preadv per merged exact range scatters the whole batch
+        into the pool with no intermediate page buffers.  Dead gap bytes
+        inside a merged range land in scratch bytearrays and are discarded.
+        A generation mismatch (slot reused since the snapshot) or a short
+        read marks the affected keys as misses; the engine never consumes
+        those host slots, so partially written bytes are harmless.  Returns
+        one bool per key; never raises, never returns None.
+        """
+        if len(keys) == 0:
+            return []
+        meta = self._v1_buffer_meta(keys, host_indices, "batch_get_v1")
+        if meta is None:
+            return [False] * len(keys)
+        ptr_list, size_list, blocks_per_page, _ = meta
+        storage_keys = [self._storage_key(k) for k in keys]
+        page_lens = [
+            sum(size_list[i * blocks_per_page : (i + 1) * blocks_per_page])
+            for i in range(len(keys))
+        ]
+        blocks = self._v1_host_blocks(ptr_list, size_list, blocks_per_page)
+        with self._lock:
+            refs = self._allocator.snapshot(storage_keys)
+        # A ref whose length differs from the current pool layout was written
+        # under a different layout; refusing beats scattering bytes into the
+        # wrong blocks.
+        items = [
+            (ref.offset, ref.length, i)
+            for i, ref in enumerate(refs)
+            if ref is not None and ref.length == page_lens[i]
+        ]
+        groups: dict = {}
+        for offset, length, i in items:
+            groups.setdefault(refs[i].extent_id, []).append((offset, length, i))
+        ok = [False] * len(keys)
+        requested = 0
+        physical = 0
+        preads = 0
+        for extent_id, triples in groups.items():
+            requested += sum(t[1] for t in triples)
+            for start, end, idx_list in _merge_requested_ranges(triples):
+                iovecs = []
+                prev_end = start
+                for i in idx_list:
+                    ref = refs[i]
+                    gap = ref.offset - prev_end
+                    if gap > 0:
+                        iovecs.append(bytearray(gap))
+                    iovecs.extend(blocks[i])
+                    prev_end = ref.offset + ref.length
+                if (
+                    self._preadv_full(extent_id * self._extent_size + start, iovecs)
+                    != end - start
+                ):
+                    logger.error(
+                        f"ExtentFileBackend: short pread for extent {extent_id}"
+                    )
+                    continue
+                physical += end - start
+                preads += 1
+                for i in idx_list:
+                    ok[i] = True
+        with self._lock:
+            verify_ok = self._allocator.verify(storage_keys, refs)
+            for i, key in enumerate(storage_keys):
+                if ok[i] and verify_ok[i]:
+                    self._allocator.touch(key)
+        self._stats["requested_bytes"] += requested
+        self._stats["physical_bytes_read"] += physical
+        self._stats["last_batch_requested_bytes"] = requested
+        self._stats["last_batch_physical_bytes"] = physical
+        self._stats["last_batch_preads"] = preads
+        return [o and v for o, v in zip(ok, verify_ok)]
+
+    def batch_set_v1(
+        self,
+        keys: List[str],
+        host_indices,
+        extra_info: Optional[HiCacheStorageExtraInfo] = None,
+    ) -> List[bool]:
+        """Zero-copy write: pwritev the host pool blocks into packed extents.
+
+        The per-page blocks (k block then v block for page_first MHA) are
+        pwritten in pool order at each ref, reconstructing the flat page
+        bytes the read paths and the engine's flat-page API expect.  The
+        plan -> pwrite -> commit sequence holds the index lock (same
+        all-or-nothing semantics as ``_write_pages``); a refused batch
+        returns all False.
+        """
+        if len(keys) == 0:
+            return []
+        meta = self._v1_buffer_meta(keys, host_indices, "batch_set_v1")
+        if meta is None:
+            return [False] * len(keys)
+        ptr_list, size_list, blocks_per_page, _ = meta
+        storage_keys = [self._storage_key(k) for k in keys]
+        page_lens = [
+            sum(size_list[i * blocks_per_page : (i + 1) * blocks_per_page])
+            for i in range(len(keys))
+        ]
+        blocks = self._v1_host_blocks(ptr_list, size_list, blocks_per_page)
+        with self._lock:
+            self._gc_evict()
+            refs, passed = self._allocator.plan(list(zip(storage_keys, page_lens)))
+            if any(r is None for r in refs):
+                logger.warning(
+                    "ExtentFileBackend: batch_set_v1 of %s pages refused "
+                    "(page larger than extent_size %s B)",
+                    len(keys),
+                    self._extent_size,
+                )
+                return [False] * len(keys)
+            groups: dict = {}
+            for i, ref in enumerate(refs):
+                groups.setdefault(ref.extent_id, []).append(i)
+            for extent_id, idxs in groups.items():
+                ordered = sorted(idxs, key=lambda i: refs[i].offset)
+                first = refs[ordered[0]].offset
+                iovecs = []
+                for i in ordered:
+                    iovecs.extend(blocks[i])
+                if not self._pwritev(extent_id * self._extent_size + first, iovecs):
+                    return [False] * len(keys)
+            self._allocator.commit(storage_keys, refs, passed)
+            self._log_extent_write(
+                "kv", getattr(extra_info, "node_id", None), storage_keys, page_lens
+            )
+            return [True] * len(keys)
+
+    def _v1_buffer_meta(self, keys, host_indices, op_name):
+        """Resolve the v1 host-pool buffer contract; None on any violation.
+
+        v1 targets the anchor KV pool (``register_mem_pool_host``): the pool
+        must expose ``get_page_buffer_meta``, host_indices must carry
+        page_size slots per key, and the per-key block count must divide
+        evenly.  The scatter relies on the flat page bytes being the
+        concatenation of the blocks in pool order -- true for the
+        page-first family (MHA k/v dual blocks, Mamba temporal+conv, MLA
+        single block) but not for layer_first, which interleaves per-layer
+        k/v blocks; layer_first is refused rather than corrupted.
+        """
+        pool = getattr(self, "mem_pool_host", None)
+        if pool is None or not callable(getattr(pool, "get_page_buffer_meta", None)):
+            logger.error(
+                "ExtentFileBackend %s: no host pool with get_page_buffer_meta "
+                "registered (register_mem_pool_host).",
+                op_name,
+            )
+            return None
+        page_size = getattr(pool, "page_size", 1) or 1
+        if len(host_indices) != len(keys) * page_size:
+            logger.error(
+                "ExtentFileBackend %s: host_indices length %s != keys %s x "
+                "page_size %s",
+                op_name,
+                len(host_indices),
+                len(keys),
+                page_size,
+            )
+            return None
+        if getattr(pool, "layout", "") == "layer_first":
+            logger.error(
+                "ExtentFileBackend %s: layer_first pool layout is not "
+                "supported by the v1 flat-page scatter; refusing.",
+                op_name,
+            )
+            return None
+        try:
+            ptr_list, size_list = pool.get_page_buffer_meta(host_indices)
+        except Exception as e:
+            logger.error(
+                "ExtentFileBackend %s: get_page_buffer_meta failed: %s", op_name, e
+            )
+            return None
+        if not ptr_list or len(ptr_list) != len(size_list):
+            logger.error(
+                "ExtentFileBackend %s: empty or mismatched buffer meta", op_name
+            )
+            return None
+        blocks_per_page = len(ptr_list) // len(keys)
+        if len(ptr_list) % len(keys) != 0 or blocks_per_page == 0:
+            logger.error(
+                "ExtentFileBackend %s: %s buffer blocks for %s keys is not a "
+                "whole per-key count",
+                op_name,
+                len(ptr_list),
+                len(keys),
+            )
+            return None
+        return ptr_list, size_list, blocks_per_page, page_size
+
+    def _v1_host_blocks(self, ptr_list, size_list, blocks_per_page):
+        """ctypes arrays aliasing the host pool blocks for direct fd IO."""
+        blocks = []
+        for i in range(0, len(ptr_list), blocks_per_page):
+            blocks.append(
+                [
+                    (ctypes.c_char * size_list[i + j]).from_address(ptr_list[i + j])
+                    for j in range(blocks_per_page)
+                ]
+            )
+        return blocks
 
     # ---- v2: sidecar-pool surface ----
 
@@ -339,7 +636,19 @@ class ExtentFileBackend(HiCacheStorage):
                 if final_pages == 0:
                     break
                 name = transfer.name
-                if transfer.hit_policy == PoolHitPolicy.ALL_PAGES:
+                # A PREFETCH transfer's keys are placeholders at build time
+                # (mamba_component / swa_component write node-last checkpoints;
+                # the real trailing hashes are filled only after the hit query
+                # by _sync_trailing_keys).  Such a transfer must use the
+                # TRAILING scan: these pools store only a trailing window, so
+                # reading them as ALL_PAGES -- the PoolTransfer default, which
+                # takes over when a transfer reconstruction drops the policy --
+                # fails at the first non-window page and clamps kv_hit to 0
+                # (live 3090 M4, storage_hit=0 for every hybrid prefetch).
+                placeholder_keys = bool(transfer.keys) and all(
+                    k == "__placeholder__" for k in transfer.keys
+                )
+                if transfer.hit_policy == PoolHitPolicy.ALL_PAGES and not placeholder_keys:
                     boundary = next(
                         (
                             i
@@ -432,16 +741,31 @@ class ExtentFileBackend(HiCacheStorage):
             ]
             ok = self._write_pages(storage_keys, values)
             results[transfer.name] = [ok] * len(keys)
+            if ok:
+                self._log_extent_write(
+                    transfer.name,
+                    getattr(extra_info, "node_id", None),
+                    storage_keys,
+                    values,
+                )
         return results
 
     # ---- core aggregated IO ----
 
     def _read_pages(self, keys: List[str]) -> List[Optional[memoryview]]:
-        """Aggregate-read pages: one pread per extent, page slices returned.
+        """Aggregate-read pages: one pread per merged exact range.
 
-        Snapshot refs under the lock -> pread the extent span without the
+        Snapshot refs under the lock -> pread each merged range without the
         lock -> re-verify generation under the lock (a slot reused in between
         fails verification, and its half-read data is discarded = miss).
+
+        Read amplification fix (P0, expert ruling): the extent is an
+        allocation unit, not a read unit.  Requested refs are sorted by
+        offset within each extent and merged only when the gap between
+        adjacent ranges is at most ``_MERGE_GAP_THRESHOLD`` bytes; each
+        merged range is pread exactly, so dead bytes between requested slots
+        are no longer read (M3 measured ~30x physical/requested with the
+        previous whole-extent-span read).
         """
         with self._lock:
             refs = self._allocator.snapshot(keys)
@@ -450,21 +774,33 @@ class ExtentFileBackend(HiCacheStorage):
             if ref is None:
                 continue
             groups.setdefault(ref.extent_id, []).append(i)
+        requested = 0
+        physical = 0
+        preads = 0
         scratch: dict = {}
         for extent_id, idxs in groups.items():
-            first = min(refs[i].offset for i in idxs)
-            last = max(refs[i].offset + refs[i].length for i in idxs)
-            buf = bytearray(last - first)
-            if (
-                self._pread_full(buf, extent_id * self._extent_size + first)
-                != len(buf)
-            ):
-                logger.error(
-                    f"ExtentFileBackend: short pread for extent {extent_id}"
-                )
-                scratch[extent_id] = None
-            else:
-                scratch[extent_id] = (first, buf)
+            items = sorted((refs[i].offset, refs[i].length, i) for i in idxs)
+            ranges = _merge_requested_ranges(items)
+            requested += sum(length for _, length, _ in items)
+            found: dict = {}
+            for start, end, idx_list in ranges:
+                buf = bytearray(end - start)
+                if (
+                    self._pread_full(buf, extent_id * self._extent_size + start)
+                    != len(buf)
+                ):
+                    logger.error(
+                        f"ExtentFileBackend: short pread for extent {extent_id}"
+                    )
+                    # Whole extent misses (same semantics as before); the
+                    # ranges read so far are discarded with `found`.
+                    found = {}
+                    break
+                physical += end - start
+                preads += 1
+                for i in idx_list:
+                    found[i] = (buf, refs[i].offset - start)
+            scratch.update(found)
         with self._lock:
             ok = self._allocator.verify(keys, refs)
             for i, key in enumerate(keys):
@@ -474,12 +810,17 @@ class ExtentFileBackend(HiCacheStorage):
         for i, ref in enumerate(refs):
             if ref is None or not ok[i]:
                 continue
-            entry = scratch.get(ref.extent_id)
+            entry = scratch.get(i)
             if entry is None:
                 continue
-            first, buf = entry
-            start = ref.offset - first
+            buf, start = entry
             out[i] = memoryview(buf)[start : start + ref.length]
+        # Read-amplification accounting (physical/requested < 1.2x target).
+        self._stats["requested_bytes"] += requested
+        self._stats["physical_bytes_read"] += physical
+        self._stats["last_batch_requested_bytes"] = requested
+        self._stats["last_batch_physical_bytes"] = physical
+        self._stats["last_batch_preads"] = preads
         return out
 
     def _write_pages(self, keys: List[str], values: List[Any]) -> bool:
@@ -584,14 +925,70 @@ class ExtentFileBackend(HiCacheStorage):
         self._stats["bytes_read"] += total
         return total
 
-    def _pwritev(self, offset: int, buffers: List[memoryview]) -> bool:
+    def _preadv_full(self, offset: int, buffers: List[Any]) -> int:
+        """preadv ``buffers`` sequentially at ``offset`` until full or EOF.
+
+        Buffers mix ctypes arrays aliasing host-pool memory (v1 zero-copy
+        targets) and plain bytearrays (merged-range gap scratch); a partial
+        read resumes past the already-consumed bytes.  Each syscall is
+        capped at IOV_MAX iovecs (defensive: a merged range holds 2 blocks
+        per page, so batches beyond 512 pages per range would otherwise
+        fail with EINVAL; today's batches stay well under).
+        """
+        total = sum(len(b) for b in buffers)
+        done = 0
         try:
-            total = sum(len(b) for b in buffers)
-            written = os.pwritev(self._fd, buffers, offset)
+            while done < total:
+                iov = []
+                skip = done
+                for b in buffers:
+                    if skip >= len(b):
+                        skip -= len(b)
+                        continue
+                    if len(iov) >= _IOV_MAX:
+                        break
+                    iov.append(memoryview(b)[skip:])
+                    skip = 0
+                got = os.preadv(self._fd, iov, offset + done)
+                if got == 0:
+                    break
+                done += got
         except OSError as e:
-            logger.error(f"ExtentFileBackend: pwrite failed at {offset}: {e}")
+            logger.error(f"ExtentFileBackend: pread failed at {offset}: {e}")
+            return 0
+        self._stats["preads"] += 1
+        self._stats["bytes_read"] += done
+        return done
+
+    def _pwritev(self, offset: int, buffers: List[memoryview]) -> bool:
+        """pwritev ``buffers`` at ``offset``, sharded past the IOV_MAX cap.
+
+        One syscall takes at most IOV_MAX(1024) iovecs (measured: 1024 OK,
+        1025 EINVAL); the v1 path packs 2 blocks per page, so a 1024-page
+        batch is 2048 iovecs and must split into consecutive shards whose
+        offsets advance by the bytes already written.  Each shard is its
+        own syscall and failure point: a short or failed shard returns
+        False and the caller refuses the whole batch (all-or-nothing
+        semantics unchanged).
+        """
+        total = sum(len(b) for b in buffers)
+        written = 0
+        try:
+            for start in range(0, len(buffers), _IOV_MAX):
+                chunk = buffers[start : start + _IOV_MAX]
+                got = os.pwritev(self._fd, chunk, offset + written)
+                self._stats["pwrites"] += 1
+                if got != sum(len(b) for b in chunk):
+                    logger.error(
+                        f"ExtentFileBackend: short pwrite at {offset + written}"
+                    )
+                    return False
+                written += got
+        except OSError as e:
+            logger.error(
+                f"ExtentFileBackend: pwrite failed at {offset + written}: {e}"
+            )
             self._stats["pwrites"] += 1
             return False
-        self._stats["pwrites"] += 1
         self._stats["bytes_written"] += written
         return written == total

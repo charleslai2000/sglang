@@ -2850,6 +2850,122 @@ class ServerArgs:
         ),
         NS("memory"),
     ] = 60.0
+    hicache_restore_backup_park: A[
+        bool,
+        Arg(
+            help=(
+                "Park a partial-hit prefetch outcome on the backup-completion "
+                "wait (T15, P2-IO) instead of restoring the partial span. Off "
+                "restores the pre-T15 baseline: the partial revokes as a miss "
+                "and the request recomputes. The T15 machinery stays in the "
+                "tree as dead code; this flag is its single gate."
+            ),
+        ),
+        NS("memory"),
+    ] = False
+    enable_ready_horizon: A[
+        bool,
+        Arg(
+            help=(
+                "P3 Ready Horizon v0 (M1/M2/M5): split the inflight prefetch "
+                "budget into a speculative sub-budget, classify issues as "
+                "speculative vs demand restores, and centralize the release "
+                "bookkeeping in exactly-once reservations. Off keeps the "
+                "pre-P3 single-track budget byte for byte: the speculative "
+                "counter never grows and wake re-issues keep their T15 "
+                "demand_restore semantics only."
+            ),
+        ),
+        NS("memory"),
+    ] = False
+    hicache_prefetch_speculative_fraction: A[
+        float,
+        Arg(
+            help=(
+                "Fraction of the inflight prefetch budget (prefetch_capacity_"
+                "limit) that speculative Ready-Horizon staging may occupy "
+                "(M1). Demand restores are not charged against it; the "
+                "physical budget still bounds everything. Only consulted "
+                "when --enable-ready-horizon is on."
+            ),
+        ),
+        NS("memory"),
+    ] = 0.6
+    ready_horizon_frontier_n: A[
+        int,
+        Arg(
+            help=(
+                "P3 Ready Horizon v0: how many waiting-queue requests the "
+                "ready-pool policy inspects per refill -- the staging "
+                "input is the first N in current queue order."
+            ),
+        ),
+        NS("memory"),
+    ] = 8
+    ready_host_watermark_low: A[
+        int,
+        Arg(
+            help=(
+                "P3 Ready Horizon v0 token watermark (LOW): below this many "
+                "READY_HOST-resident TOKENS (M6 strict members) the policy "
+                "refills the pool, event-driven (M3), bounded by host "
+                "headroom (M2). TOKEN semantics, not request count -- state "
+                "length varies widely (p50 11.9K / p90 34.8K / max 43.5K "
+                "tokens on the 3090 rig), so a fixed request count is not a "
+                "stable resource target (ledger 2026-09-01 adjudication #1). "
+                "Sized like 1 x State_p95. MIGRATION: the pre-token semantics "
+                "of these names was a request COUNT (low=2/high=4); to keep "
+                "that old behavior pass --ready-host-watermark-low-count / "
+                "--ready-host-watermark-high-count instead (they select "
+                "count mode and take precedence)."
+            ),
+        ),
+        NS("memory"),
+    ] = 43_513
+    ready_host_watermark_high: A[
+        int,
+        Arg(
+            help=(
+                "P3 Ready Horizon v0 token watermark (HIGH): the refill "
+                "issues at most enough staging (summing each candidate's "
+                "requested-prefix tokens) to reach this many READY_HOST-"
+                "resident TOKENS per pass -- the single-pass token cap. "
+                "Must be >= ready_host_watermark_low. Sized like "
+                "2 x State_p95 (the physical headroom gate, not this cap, "
+                "is what binds when the pool cannot hold two states). "
+                "MIGRATION: see --ready-host-watermark-low."
+            ),
+        ),
+        NS("memory"),
+    ] = 87_026
+    ready_host_watermark_low_count: A[
+        Optional[int],
+        Arg(
+            help=(
+                "P3 Ready Horizon v0 LEGACY count-mode LOW watermark: below "
+                "this many READY_HOST-resident requests the policy refills "
+                "(the pre-token-semantics behavior of "
+                "--ready-host-watermark-low). Takes precedence over the "
+                "token watermark when set; mutually exclusive with "
+                "--ready-host-watermark-high-count absent (both must be set "
+                "to enter count mode). MIGRATION compat only."
+            ),
+        ),
+        NS("memory"),
+    ] = None
+    ready_host_watermark_high_count: A[
+        Optional[int],
+        Arg(
+            help=(
+                "P3 Ready Horizon v0 LEGACY count-mode HIGH watermark: the "
+                "refill issues at most enough staging to reach this many "
+                "READY_HOST-resident requests per pass (the single-pass "
+                "count cap). Takes precedence when set with "
+                "--ready-host-watermark-low-count. MIGRATION compat only."
+            ),
+        ),
+        NS("memory"),
+    ] = None
     hicache_promotion_margin_tokens: A[
         int,
         Arg(
@@ -2864,6 +2980,92 @@ class ServerArgs:
         ),
         NS("memory"),
     ] = 2048
+    hicache_writeback_reserve_gb: A[
+        float,
+        Arg(
+            help=(
+                "LEGACY GB write-back reserve (P3): host bytes reserved for the "
+                "D->H write-back staging channel -- the host capacity that "
+                "warm/READY/speculative/demand host allocations must keep free "
+                "(free_host_after >= reserve, a harder constraint enforced "
+                "before the load-pool usage fractions); the write-back staging "
+                "path may use the reserve. MIGRATION: the token/capacity model "
+                "(ledger 2026-09-01 adjudication #2) reserves by STATE KV "
+                "TOKENS, not bytes -- --hicache-writeback-reserve-state-tokens "
+                "is the authoritative channel and this legacy GB knob applies "
+                "only when the token value is not set (0 disables it). Byte "
+                "reserve is a kv-pool-specific absolute floor that does not "
+                "track the hicache-size split (67% of the kv pool at 8G/1.5G)."
+            ),
+        ),
+        NS("memory"),
+    ] = 0.0
+    ready_horizon_safety_margin_gb: A[
+        float,
+        Arg(
+            help=(
+                "LEGACY GB safety margin (P3): the host bytes a speculative "
+                "staging must additionally keep free after the stage, on top "
+                "of the write-back reserve (free_host_after_stage >= reserve "
+                "+ margin). MIGRATION: prefer "
+                "--hicache-writeback-reserve-state-tokens + "
+                "--ready-horizon-state-p95-tokens, which express reserve and "
+                "margin in the same state-token unit the capacity model uses. "
+                "This legacy GB margin applies only when "
+                "--ready-horizon-margin-state-tokens is not set (0 disables "
+                "it)."
+            ),
+        ),
+        NS("memory"),
+    ] = 0.0
+    ready_horizon_margin_state_tokens: A[
+        Optional[int],
+        Arg(
+            help=(
+                "P3 safety-margin state-token target (authoritative): the host "
+                "KV tokens a speculative staging must additionally keep free "
+                "after the stage, on top of the write-back reserve "
+                "(free_host_after_stage >= reserve + margin). Sits between "
+                "speculative staging and the write-back reserve. Overrides "
+                "--ready-horizon-safety-margin-gb."
+            ),
+        ),
+        NS("memory"),
+    ] = None
+    hicache_writeback_reserve_state_tokens: A[
+        Optional[int],
+        Arg(
+            help=(
+                "P3 write-back reserve state-token target (authoritative): the "
+                "number of KV host tokens reserved for the D->H write-back "
+                "staging channel -- host capacity that "
+                "warm/READY/speculative/demand allocations must keep free. "
+                "Reserved by STATE, not bytes: sized to hold at least one "
+                "target write-back state's KV tokens (e.g. 1 x State_p95). The "
+                "runtime converts this to each pool's logical-token space via "
+                "the pool's own reserve setter. Overrides "
+                "--hicache-writeback-reserve-gb."
+            ),
+        ),
+        NS("memory"),
+    ] = None
+    ready_horizon_state_p95_tokens: A[
+        Optional[int],
+        Arg(
+            help=(
+                "P3 READY state p95 KV-token size (runtime input): the host "
+                "KV-token footprint of a typical READY state at the p95 "
+                "quantile. Drives the token watermarks (defaults "
+                "ready_host_watermark_low=1x/p95, high=2x/p95) and the "
+                "write-back reserve (1x/p95 unless "
+                "--hicache-writeback-reserve-state-tokens is set). Measured on "
+                "the 3090 rig: State_p95=max=43,513 tokens = 1.424 GB per "
+                "state. 0 means the fixed watermarks / reserve stand as "
+                "configured."
+            ),
+        ),
+        NS("memory"),
+    ] = 0
 
     # -------------------------------------------------------------------------
     # Hierarchical sparse attention

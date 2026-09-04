@@ -652,7 +652,13 @@ class _FakeController:
         return False
 
     def write_storage(
-        self, host_value, token_ids, hash_value, prefix_keys, extra_pools=None
+        self,
+        host_value,
+        token_ids,
+        hash_value,
+        prefix_keys,
+        extra_pools=None,
+        node_id=None,
     ):
         self.storage_ops.append(len(self.storage_ops))
         return len(self.storage_ops) - 1
@@ -675,12 +681,17 @@ class _FakeTreeCore:
         self.is_backuped = lambda node_id: False
         self.is_storage_written = lambda node_id: False
         self.is_root = lambda node_id: node_id == 0
+        # No chain model in this registry harness: no node is on a modeled
+        # request chain, so the T15 backup park never applies.
+        self.page_block_in_request = lambda node_id, pos, requested_pages: None
+        self.persisted_chain_frontier = lambda node_id, pos, requested_pages: 0
         self.persisted = set()
         # e14: the restore source of l3_durable (written chains are covered
         # by the persisted set -- acked implies durable).
         self.durable = set()
         # e15 (Y): anchors whose L3-durable belief a full-miss revoke cleared.
         self.durable_cleared = []
+        self._publish_epoch = 0
         self.page_size = 1  # facade page_size property (prompt gate math)
         # The frontier-wait registration requests the anchor chain's L3
         # persistence; this registry harness has no chain model, so the gap
@@ -715,6 +726,11 @@ class _FakeTreeCore:
         self.durable_cleared.append(node_id)
         self.durable.discard(node_id)
         self.persisted.discard(node_id)
+
+    def l3_publish_epoch(self):
+        # P3 prefetch_revoke instrumentation reads the publish epoch for the
+        # storage_generation field.
+        return self._publish_epoch
 
 
 def _make_cache(tree_core=None):
@@ -762,8 +778,20 @@ def _make_cache(tree_core=None):
     cache._storage_frontier_waiters = {}
     cache._storage_frontier_ready = set()
     cache._storage_prefetch_terminal = {}
+    cache._backup_wait_spans = {}
+    cache._demand_restore_rids = set()
+    # T15 bypass gate (P2-IO Phase 1): this registry harness never parks
+    # (no chain model), but the revoke path reads the flag -- constant True
+    # keeps the regression guard identical.
+    cache.hicache_restore_backup_park = True
+    # P3 Ready Horizon (3.1): off is the harness default -- the baseline
+    # behavior the existing tests assert. The reservation dict exists so
+    # the (no-op) release calls on the five removal paths stay safe.
+    cache.enable_ready_horizon = False
+    cache._prefetch_reservations = {}
     cache.ongoing_prefetch = {}
     cache.prefetch_threshold = 256
+    cache.page_size = 1
     cache.prefetch_stop_policy = "wait_complete"
     cache.storage_existence_cache = SimpleNamespace(
         invalidate_beyond=lambda *a, **k: None
@@ -1665,6 +1693,13 @@ class _HollowWalkTree(_FakeTreeCore):
             tracker=dict(self.drop_tracker),
         )
 
+    def detach_miss_dropped(self, node_id):
+        # The hollow-walk fixture drops nodes without a real tree parent
+        # chain, so the post-drop detach is a faithful no-op.
+        return SimpleNamespace(
+            device_frees={}, host_frees={}, tracker={}, is_dropped=True
+        )
+
 
 class _EvictNextNode:
     def __init__(self, node_id):
@@ -2113,6 +2148,12 @@ class _SplitComponent:
         if target is None or _evict_layer.DEVICE in target:
             return cd.value is not None
         return cd.host_value is not None
+
+    def discard_deleted_session_leaf(self, node):
+        # All multi-component deletion paths (e.g. _remove_leaf_from_parent)
+        # call this on every component; the e16 regression fixture has no
+        # session bookkeeping, so this is a faithful no-op.
+        pass
 
     def evict_component(
         self, node, device_frees, host_frees, target=_evict_layer.DEVICE
@@ -2658,6 +2699,243 @@ class DropToMissSafetyValveTests(unittest.TestCase):
         child.write_through_pending_id = 7  # in-flight D->H DMA
         with self.assertRaises(AssertionError):
             tree_core.drop_device_leaf_to_miss(child.id)
+
+
+class DropToMissEvictionOrderRegressionTests(unittest.TestCase):
+    """P2-1 e16: the e15 last-resort forced-miss drop (backup failed + drop
+    declined + not L3-durable) must not leave a device-less, non-host-only
+    node reachable inside a later drop_subtree_no_host traverse.
+
+    e15 regression: a descendant that was first released to a plain miss
+    (evicted + not backuped = dead) survived inside its ancestor's subtree.
+    When the ancestor's D->H backup later failed and triggered
+    drop_subtree_no_host, its traverse asserted every descendant
+    ``evicted and backuped`` (host-only) and crashed -- even though the
+    walker had already emitted forced_drop_to_miss for that descendant
+    ("node %d not host-only").
+
+    The fix has two layers:
+    - the controller detaches the freed node from its parent immediately
+      (query visibility preserved -- the parent chain backspaces the dead
+      leaf, which carried no host/L3 KV);
+    - drop_subtree_no_host additionally skips any forced-miss tombstone it
+      still encounters (belt-and-suspenders)."""
+
+    def test_interleaved_descendant_forced_drop_then_ancestor_drop_subtree(self):
+        """The crash shape: leaf B is forced-dropped to a miss inside
+        ancestor A's subtree; a later D->H backup failure of A must drop the
+        subtree WITHOUT asserting on B (drop_subtree_no_host skips the
+        tombstone and the walker's detector for a dead descendant)."""
+        tree_core = _make_real_tree()
+        a = _attach_chain(tree_core, 4)
+        tree_core._update_evictable_leaf_sets(a)
+        # Leaf B inside A's subtree, with a host-only tail long enough to
+        # stay a distinct node (no tombstone collapse would remove it).
+        b = tree_core._new_node()
+        b.parent = a
+        b.key = _RadixKey(_array("q", list(range(10, 18))), None)
+        a.children[b.key.child_key(tree_core.page_size)] = b
+        b.component_data[_component_type.FULL].value = [0] * 8
+
+        # First pass: leaf B's backup fails and A is not L3-durable; B is
+        # released to a plain miss and detached from A by the controller.
+        # Check b is not L3-durable BEFORE the detach (detach unregisters it).
+        self.assertFalse(tree_core.is_l3_durable(b.id))
+        tree_core.drop_device_leaf_to_miss(b.id)
+        self.assertTrue(b.forced_miss_tombstone)
+        tree_core.detach_miss_dropped(b.id)
+        # Detach removes b from its parent and unregisters it — consistent
+        # with a normal eviction deletion: the dead leaf carried no host/L3
+        # KV, so nothing visible is lost.
+        self.assertNotIn(b, a.children.values())
+        self.assertFalse(tree_core.node_exists(b.id))
+
+        # Second pass: A is now a D-leaf (its only descendant is gone) and
+        # its own backup fails; drop_subtree_no_host must not run the
+        # host-only assert on B (which is no longer a child anyway) and must
+        # drop A's remaining subtree cleanly.
+        tree_core._update_evictable_leaf_sets(a)
+        self.assertTrue(tree_core._is_device_leaf(a))
+        result = tree_core.drop_subtree_no_host(a.id)
+        self.assertTrue(result.is_dropped)
+        # The node is gone from the arena; the leaf sets must not hold it.
+        self.assertFalse(tree_core.node_exists(a.id))
+        self.assertNotIn(a, tree_core.evictable_device_leaves)
+
+    def test_drop_subtree_skips_forced_miss_ancestor_standalone(self):
+        """Belt-and-suspenders: a forced-miss tombstone that somehow remains
+        a descendant of the drop root is skipped (never asserted on) and
+        both the tombstone's and the sibling's KV are released."""
+        tree_core = _make_real_tree()
+        a = _attach_chain(tree_core, 4)
+        tree_core._update_evictable_leaf_sets(a)
+        b = tree_core._new_node()
+        b.parent = a
+        b.key = _RadixKey(_array("q", list(range(10, 18))), None)
+        a.children[b.key.child_key(tree_core.page_size)] = b
+        b.component_data[_component_type.FULL].value = [0] * 8
+        tree_core._update_evictable_leaf_sets(b)
+        # Force-drop B but leave it attached (as if detach were skipped).
+        tree_core.drop_device_leaf_to_miss(b.id)
+        self.assertIn(b, a.children.values())
+        # A sibling inside the same subtree that is still host-only.
+        sib = tree_core._new_node()
+        sib.parent = a
+        sib.key = _RadixKey(_array("q", list(range(20, 22))), None)
+        a.children[sib.key.child_key(tree_core.page_size)] = sib
+        sib.component_data[_component_type.FULL].value = None
+        sib.component_data[_component_type.FULL].host_value = [0] * 2
+        tree_core._update_evictable_leaf_sets(a)
+        self.assertTrue(tree_core._is_device_leaf(a))
+        result = tree_core.drop_subtree_no_host(a.id)
+        self.assertTrue(result.is_dropped)
+        self.assertTrue(b.forced_miss_tombstone)
+        self.assertFalse(tree_core.node_exists(a.id))
+
+    def test_detach_preserves_parent_chain_and_query_visibility(self):
+        """The detach must not remove content a query could still see: after
+        a forced drop, the dead leaf's KV is gone from all tiers, so its
+        detach removes nothing; the parent remains and its chain (device/root
+        backup) is untouched."""
+        tree_core = _make_real_tree()
+        a = _attach_chain(tree_core, 4)
+        tree_core._update_evictable_leaf_sets(a)
+        b = tree_core._new_node()
+        b.parent = a
+        b.key = _RadixKey(_array("q", list(range(10, 18))), None)
+        a.children[b.key.child_key(tree_core.page_size)] = b
+        b.component_data[_component_type.FULL].value = [0] * 8
+        tree_core.drop_device_leaf_to_miss(b.id)
+        # b is dead: no device / no host / no L3.
+        self.assertFalse(b.backuped)
+        self.assertFalse(tree_core.is_l3_durable(b.id))
+        tree_core.detach_miss_dropped(b.id)
+        self.assertNotIn(b, a.children.values())
+        # Detaching a dead leaf is a full deletion (its KV is gone from all
+        # tiers), so b is unregistered, exactly like a normal eviction delete.
+        self.assertFalse(tree_core.node_exists(b.id))
+        self.assertTrue(b.forced_miss_tombstone)
+        # The parent chain is intact and reachable; the node's device KV is
+        # still present (a stays a D-leaf) and the split/backspace path can
+        # still recompute b's tokens on a miss.
+        self.assertIs(a.parent, tree_core.root_node)
+        self.assertTrue(a in tree_core.evictable_device_leaves)
+
+    def test_detach_clears_orphaned_host_subtree_registrations(self):
+        """P2-1 e17: detaching a forced-miss D-leaf must not orphan its
+        host-only children. A host-only child of the drop leaf keeps its host
+        copy, aux host LRU, and host-leaf-set registrations, plus any stale
+        duplicate entry; if it becomes unreachable from the root while those
+        registrations survive, sanity_check's root-traversal membership checks
+        fire the node-68 crash shape:
+          H-leaf extra / Duplicate ghost / stale host_leaves / mamba host LRU.
+        The detach must free and deregister the whole subtree so none of the
+        four sets holds the orphan."""
+
+        def build():
+            tree_core = _make_real_tree()
+            leaf = _attach_chain(tree_core, 4)
+            # The drop leaf is backuped (its D->H copy exists) so it is a
+            # full duplicate while its own subtree is still device-resident.
+            leaf.component_data[_component_type.FULL].host_value = [0] * 4
+            tree_core._update_evictable_leaf_sets(leaf)
+            # Host-only child C of the drop leaf (device absent, host present,
+            # mamba host present). In the engine, C was a settled duplicate
+            # before its device layer was evicted, leaving a stale duplicate
+            # entry behind; simulate that stale entry directly.
+            c = tree_core._new_node()
+            c.parent = leaf
+            c.key = _RadixKey(_array("q", list(range(50, 58))), None)
+            leaf.children[c.key.child_key(tree_core.page_size)] = c
+            c.component_data[_component_type.FULL].value = None  # host-only
+            c.component_data[_component_type.FULL].host_value = [1] * 8
+            c.component_data[_component_type.MAMBA].value = None
+            c.component_data[_component_type.MAMBA].host_value = [2] * 8
+            tree_core.host_lru_lists[_component_type.MAMBA].insert_mru(c)
+            tree_core._update_evictable_leaf_sets(c)
+            tree_core.full_host_duplicates[c.id] = c  # stale settled-dup entry
+            return tree_core, leaf, c
+
+        tree_core, leaf, c = build()
+        self.assertTrue(c in tree_core.evictable_host_leaves)
+        self.assertTrue(c.id in tree_core.full_host_duplicates)
+        self.assertTrue(c.id in tree_core.host_lru_lists[_component_type.MAMBA].cache)
+        # Drop the leaf to a plain miss, then detach its subtree.
+        tree_core.drop_device_leaf_to_miss(leaf.id)
+        tree_core.detach_miss_dropped(leaf.id)
+        # The orphaned host-only child C must be gone everywhere reachability
+        # is asserted: not in the tree, not in the arena, and in none of the
+        # four registration sets.
+        self.assertNotIn(c, tree_core._collect_all_nodes())
+        self.assertFalse(tree_core.node_exists(c.id))
+        self.assertNotIn(c, tree_core.evictable_host_leaves)
+        self.assertFalse(c.id in tree_core.full_host_duplicates)
+        self.assertFalse(
+            c.id in tree_core.host_lru_lists[_component_type.MAMBA].cache
+        )
+        # The drop leaf itself is fully freed and the parent of the leaf (the
+        # root's child) is gone too -- nothing reachable from the root points
+        # into the freed subtree.
+        self.assertFalse(tree_core.node_exists(leaf.id))
+
+    def test_ancestor_drop_does_not_orphan_tombstone_host_children(self):
+        """P2-1 e23 (node-104 shutdown shape): drop_subtree_no_host's walk
+        skips a forced-miss tombstone descendant for the host-only release/
+        assert, but must NOT skip the tombstone's live host-only children.
+        The dead tombstone carries no KV, yet its subtree can still hold a
+        host-only L3-durable node (a restored anchor). Skipping that subtree
+        orphans it when the drop root is removed -- it stays in the arena and
+        in evictable_host_leaves / full_host_duplicates / the aux-mamba host
+        LRU while becoming unreachable from the root, so sanity_check's
+        root-traversal membership checks fire:
+          H-leaf extra / Duplicate ghost / stale host_leaves / mamba host LRU.
+        The drop must free and deregister the tombstone's live host-only
+        children and the tombstone itself, leaving none of the four sets
+        holding a node that is unreachable from the root."""
+        tree_core = _make_real_tree()
+        a = _attach_chain(tree_core, 4)
+        tree_core._update_evictable_leaf_sets(a)
+        # Tombstone child of a: a D-leaf released to a plain miss (dead node).
+        tomb = tree_core._new_node()
+        tomb.parent = a
+        tomb.key = _RadixKey(_array("q", list(range(10, 18))), None)
+        a.children[tomb.key.child_key(tree_core.page_size)] = tomb
+        tomb.component_data[_component_type.FULL].value = [0] * 8
+        tree_core._update_evictable_leaf_sets(tomb)
+        tree_core.drop_device_leaf_to_miss(tomb.id)
+        self.assertTrue(tomb.forced_miss_tombstone)
+        # A live host-only L3-durable child C still attached under the
+        # tombstone (the e16/e17 detach never ran for this subtree).
+        c = tree_core._new_node()
+        c.parent = tomb
+        c.key = _RadixKey(_array("q", list(range(18, 26))), None)
+        tomb.children[c.key.child_key(tree_core.page_size)] = c
+        c.component_data[_component_type.FULL].value = None  # host-only
+        c.component_data[_component_type.FULL].host_value = [1] * 8
+        c.component_data[_component_type.MAMBA].value = None
+        c.component_data[_component_type.MAMBA].host_value = [2] * 8
+        tree_core.host_lru_lists[_component_type.MAMBA].insert_mru(c)
+        c.storage_restored = True  # L3-durable restored anchor
+        tree_core._update_evictable_leaf_sets(c)
+        tree_core.full_host_duplicates[c.id] = c  # stale settled-dup entry
+        # Dropping a's subtree must free and deregister C (and the tombstone),
+        # not leave C orphaned in the arena with stale host registrations.
+        result = tree_core.drop_subtree_no_host(a.id)
+        self.assertTrue(result.is_dropped)
+        self.assertNotIn(c, tree_core._collect_all_nodes())
+        self.assertFalse(tree_core.node_exists(c.id))
+        self.assertNotIn(c, tree_core.evictable_host_leaves)
+        self.assertFalse(c.id in tree_core.full_host_duplicates)
+        self.assertFalse(
+            c.id in tree_core.host_lru_lists[_component_type.MAMBA].cache
+        )
+        self.assertFalse(tree_core.node_exists(tomb.id))
+        # Drain the drop result so the BaseEvictionResult tripwire does not
+        # warn (mirrors how the engine's _drop_subtree_no_host drains it).
+        for k in list(result.host_frees):
+            result.host_frees[k].clear()
+        for k in list(result.device_frees):
+            result.device_frees[k].clear()
 
 
 class RevokeMissDurableClearTests(unittest.TestCase):

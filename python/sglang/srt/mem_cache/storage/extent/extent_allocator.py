@@ -24,10 +24,14 @@ read-side re-verification (generation mismatch = miss).
 
 from __future__ import annotations
 
+import logging
+import time
 from collections import OrderedDict
-from typing import List, Optional, Sequence, Tuple
+from typing import Callable, List, Optional, Sequence, Tuple
 
 import msgspec
+
+logger = logging.getLogger(__name__)
 
 
 class ExtentRef(msgspec.Struct, frozen=True):
@@ -199,4 +203,16 @@ class ExtentAllocator:
         self._slot_bytes[slot] = 0
         self._cursors[slot] = 0
         self._generations[slot] += 1
+        if freed > 0:
+            # [P3] extent_recycle: a slot's generation bumped (the index
+            # entries captured before the reuse now fail the read-side
+            # generation re-verification -- a storage miss). Emitted under
+            # the allocator lock held by the backend's write path.
+            logger.info(
+                "[P3] ts_ms=%d evt=extent_recycle slot=%d generation=%d freed=%d",
+                int(time.time() * 1000),
+                slot,
+                self._generations[slot],
+                freed,
+            )
         return freed
