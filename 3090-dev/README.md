@@ -44,6 +44,40 @@
 
 - `evidence/`（gate2-k4 / k8 / k16）：Gate-2 各 batch 档的取证输出
 
+## 生产部署（22151 实录）
+
+生产部署问题记录与修复脚本，随本基线分支归档（部署实录见 `prod-deploy-issues.md`）。
+
+| 文件 | 用途 |
+|------|------|
+| `prod-deploy-issues.md` | 22151 生产部署问题记录（问题/现象/根因/修复/教训，4 项） |
+| `prod-deploy/relaunch-e1.sh` | Option B 重启脚本：env 层路径覆盖到 `sglang-patch` 后启动冻结脚本（零装包、冻结脚本零改动） |
+
+生产机与参考机：
+- 生产机：`root@175.155.64.171:22151`（RTX 3090 24GB）
+- 参考机：`root@175.155.64.171:24052`（RTX 3090 24GB，实验）
+- 冻结基线：pool64 / CUDA Graph ON（cuda-graph-max-bs 8）/ c8（max-running 8）/ RH OFF /
+  extent L3 backend / **L3=160G** / min_free 10G / 端口 8024
+
+### 5 hard gates 验证要点
+
+| Gate | 验证内容 | 通过判据 |
+|------|---------|---------|
+| gate1 | 启动 | 无致命错误；CUDA 分配成功（模型 10.36GB / Mamba 5.02GB / KV / host 8.24GB）；ExtentFileBackend 160G/10G 生效；`/health` 200 |
+| gate2 | warm prefill | 单条 warm prefill 200 OK（17 prompt / 32 completion tokens） |
+| gate3 | GPU L1 hit | 同 session 前缀复用 → `device_hit` 增量 960 |
+| gate4 | Host L2 / L3 extent restore | 8 个独立 ~30K-token session 压过 device+host 容量 → 最旧 session 从 L3 恢复，`storage_hit` 增量 30331；`extent_write` 378 次写 14G |
+| gate5 | c8 decode 吞吐 | 2048 decode / 3.24s = **631.4 tok/s**，0 错误（基线 p64-c8 = 596.5，+5.9%，短窗口噪声，待长窗口复核） |
+
+### 22151 特定部署要求
+
+- conda env 名：`sglang-patch`（冻结脚本 `/root/direct-launch-gate1.sh` 硬编码 `sglang-dev`，
+  22151 无此 env——**必须用 `prod-deploy/relaunch-e1.sh` 的 env 覆盖启动**，否则 HiCache
+  原生哈希扩展编译失败：`openssl/sha.h not found`）。
+- 模型目录须完整：整个 `Qwen3.5-9B-w4a16/` 目录文件齐全 + 逐文件 md5 一致（仅校验
+  `model.safetensors` 不够，缺 `config.json` 会启动即 crash）。
+- 部署日志：`/root/prod-deploy/relaunch-e1.log`；解析后 env：`/root/prod-deploy/relaunch-e1.env`
+
 ## 运行说明
 
 - 全部脚本在目标机（3090 实验机）的 `sglang-patch` conda 环境下运行：
