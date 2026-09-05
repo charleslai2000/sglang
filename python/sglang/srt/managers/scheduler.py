@@ -421,7 +421,7 @@ def _t38c_log(rec):
 def policy_epoch_value(policy, epochs, reason) -> int:
     """The cursor of the causal epoch a decline reason subscribes to
     (M3, user adjudication subscription table: NO_L3 -> l3_publish,
-    NO_HEADROOM -> host_headroom, SPEC_BUDGET -> spec_budget). The negative
+    NO_HEADROOM -> host_release, SPEC_BUDGET -> spec_budget). The negative
     cache records this value at the decline; re-eligibility compares the
     current value against it."""
     return getattr(epochs, policy.subscribed_epoch(reason))
@@ -1396,6 +1396,23 @@ class Scheduler(
         self._ready_horizon_epoch_prev: Optional[CausalEpochs] = None
         self._ready_horizon_last_refill_ts = 0.0
         self._ready_horizon_last_log: Optional[tuple] = None
+        # Fix A (P1): monotonic host-capacity release counter for the
+        # NO_HEADROOM subscription. Bumped on every ~pool.available_size()
+        # growth observed by the epoch snapshot (genuine host-capacity
+        # releasing event: host residency freed, ready eviction, working-
+        # state release). The counter never recedes when the working set
+        # re-consumes the freed pages, so a NO_HEADROOM park clears exactly
+        # once per release -- the transient-level subscription (available
+        # flips 0->100->0 and can never sustain past the decline cursor
+        # under a full working set) is the B-run permanent-freeze root
+        # cause.
+        self._ready_host_release_epoch = 0
+        # Ground truth for the growth test: the last observed available
+        # level. A level that INCREASED since the last snapshot is by
+        # construction a release (only free() raises the free count); the
+        # refill's own traffic only ever lowers it, so it can never
+        # self-trigger.
+        self._ready_host_release_last_level: Optional[int] = None
         # P3 M3 (user adjudication): per-rid causal negative-cache
         # (rid -> NegativeCacheEntry). A staged request that declined
         # parks here with its subscribed epoch's cursor; it is not re-
@@ -3481,19 +3498,32 @@ class Scheduler(
         return views
 
     def _ready_horizon_epochs(self, frontier_reqs, views, cc) -> CausalEpochs:
-        """The four causal-epoch snapshot values (M3, user adjudication).
-        The running batch size is deliberately absent: it flips every pass
-        under an 8-agent workload (the e7 gate breakdown) and a freed GPU
-        slot surfaces through the frontier or headroom epochs. Per-request
-        restore states are absent too: a candidate's denied WAIT
-        transition must not re-arm the check (the per-pass poll M3
+        """The five causal-epoch snapshot values (M3, user adjudication +
+        Fix A). The running batch size is deliberately absent: it flips
+        every pass under an 8-agent workload (the e7 gate breakdown) and a
+        freed GPU slot surfaces through the frontier or headroom epochs.
+        Per-request restore states are absent too: a candidate's denied
+        WAIT transition must not re-arm the check (the per-pass poll M3
         forbids). The l3_publish epoch comes from the tree's monotonic
         durability counter; host_headroom from the host pool's free pages;
-        spec_budget from the speculative inflight counter (released = it
-        drops); waiting_frontier from the frontier composition."""
+        host_release (Fix A) from the monotonic release counter, bumped
+        when the observed available level GREW since the last snapshot --
+        by construction a release (only free() raises the free count; the
+        refill's own traffic only ever lowers it, so it can never
+        self-trigger); spec_budget from the speculative inflight counter
+        (released = it drops); waiting_frontier from the frontier
+        composition."""
+        host_release = self._ready_host_release_epoch
+        last_level = self._ready_host_release_last_level
+        available = cc.mem_pool_host.available_size()
+        if last_level is not None and available > last_level:
+            host_release += 1
+        self._ready_host_release_epoch = host_release
+        self._ready_host_release_last_level = available
         return CausalEpochs(
             l3_publish=self.tree_cache.l3_publish_epoch(),
-            host_headroom=cc.mem_pool_host.available_size(),
+            host_headroom=available,
+            host_release=host_release,
             spec_budget=cc.inflight_speculative_tokens,
             waiting_frontier=tuple(r.rid for r in frontier_reqs),
         )

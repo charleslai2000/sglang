@@ -27,8 +27,9 @@ NOT an epoch_sig + cooldown patch):
     l3_publish advance (or identity/fuse) clears it (the e7 1289-issue /
     9.04s spin regression).
   * Epoch subscription: NO_L3 -> l3_publish, NO_HEADROOM ->
-    host_headroom, SPEC_BUDGET -> spec_budget. A non-subscribed epoch
-    advancing does NOT clear the park.
+    host_release (Fix A: the MONOTONIC capacity-release counter, not the
+    transient available level), SPEC_BUDGET -> spec_budget. A
+    non-subscribed epoch advancing does NOT clear the park.
   * At most one staging attempt per rid per causal epoch.
   * Causal epochs gate the refill: only L3 published / host pages
     released / budget released / frontier changed fire an event; the
@@ -210,12 +211,14 @@ def _epochs(
     headroom=10**9,
     spec=0,
     frontier=("r1",),
+    release=0,
 ):
     return CausalEpochs(
         l3_publish=l3,
         host_headroom=headroom,
         spec_budget=spec,
         waiting_frontier=tuple(frontier),
+        host_release=release,
     )
 
 
@@ -381,17 +384,42 @@ class NegativeCacheTests(unittest.TestCase):
         epochs = _epochs(l3=5, headroom=10**9 + 100, spec=0, frontier=("r1",))
         self.assertFalse(self._cleared(entry, epochs=epochs))
 
-    def test_no_headroom_cleared_only_by_host_headroom(self):
-        # Parked at host_headroom=100. An L3 publish advance does not free
-        # host pages: the headroom gate still fails.
-        entry = _neg(reason=NO_HEADROOM, cursor=100)
-        self.assertFalse(self._cleared(entry, epochs=_epochs(l3=500, headroom=100)))
-        # Host pages released (150 > 100): the headroom gate can now pass.
-        self.assertTrue(self._cleared(entry, epochs=_epochs(headroom=150)))
-        # Budget release is not causal for headroom.
+    def test_no_headroom_cleared_only_by_host_release(self):
+        # Fix A: NO_HEADROOM subscribes to the MONOTONIC host_release
+        # counter, NOT the transient available level. The park is recorded
+        # at the release counter cursor observed at the decline.
+        entry = _neg(reason=NO_HEADROOM, cursor=3)
+        # An available-level rise is NOT causal: it is the transient signal
+        # that flips 0->100->0 under a full working set and can never
+        # sustain past the decline cursor (the B-run permanent freeze).
         self.assertFalse(
-            self._cleared(entry, epochs=_epochs(headroom=100, spec=0))
+            self._cleared(entry, epochs=_epochs(l3=0, headroom=150, release=3))
         )
+        # An L3 publish advance does not free the host pages: not causal.
+        self.assertFalse(self._cleared(entry, epochs=_epochs(l3=500, release=3)))
+        # Budget release is not causal for headroom.
+        self.assertFalse(self._cleared(entry, epochs=_epochs(release=3, spec=0)))
+        # A genuine host-capacity-releasing event advanced the release
+        # counter past the decline cursor: the park clears.
+        self.assertTrue(self._cleared(entry, epochs=_epochs(release=4)))
+        # Same level, same counter: still parked.
+        self.assertFalse(self._cleared(entry, epochs=_epochs(headroom=150, release=3)))
+
+    def test_no_headroom_not_cleared_by_level_only_when_release_stalls(self):
+        # The B-run freeze shape: headroom oscillates (0 -> 100 -> 0) with
+        # no releasing event. The available LEVEL alone must never clear the
+        # park, exactly as it never did in the OLD host_headroom-sample
+        # subscription (the transient rise to 100 recorded a cursor that
+        # the next alloc re-crossed before the refill ever ran).
+        entry = _neg(reason=NO_HEADROOM, cursor=7)
+        for level in (80, 100, 0, 100, 0):
+            self.assertFalse(
+                self._cleared(
+                    entry, epochs=_epochs(headroom=level, release=7, spec=0)
+                )
+            )
+        # The FIRST genuine release (counter 8) clears the park.
+        self.assertTrue(self._cleared(entry, epochs=_epochs(release=8)))
 
     def test_spec_budget_cleared_only_by_budget_release(self):
         # Parked when inflight was 20 (the budget was exhausted). An L3
@@ -590,8 +618,14 @@ class CausalEpochEventTests(unittest.TestCase):
     deltas (L3 published / host pages released / budget released / frontier
     changed) fire; the refill's own issue traffic never does."""
 
-    def _epoch(self, l3=0, headroom=1000, spec=0, frontier=("r1",)):
-        return CausalEpochs(l3_publish=l3, host_headroom=headroom, spec_budget=spec, waiting_frontier=frontier)
+    def _epoch(self, l3=0, headroom=1000, spec=0, frontier=("r1",), release=0):
+        return CausalEpochs(
+            l3_publish=l3,
+            host_headroom=headroom,
+            spec_budget=spec,
+            waiting_frontier=frontier,
+            host_release=release,
+        )
 
     def test_first_pass_is_event(self):
         self.assertTrue(_policy().epoch_event(None, self._epoch()))
@@ -616,6 +650,33 @@ class CausalEpochEventTests(unittest.TestCase):
         prev = self._epoch(headroom=900)
         after = self._epoch(headroom=1000)
         self.assertTrue(_policy().epoch_event(prev, after))
+
+    def test_host_release_counter_advance_is_event(self):
+        # Fix A: a genuine capacity-releasing event (host residency freed,
+        # ready eviction, working-state release) -- even at a FLAT
+        # available level (the freed pages were immediately re-consumed by
+        # the working set) -- advances the release counter and must fire
+        # the refill event gate.
+        prev = self._epoch(headroom=100, release=0)
+        after = self._epoch(headroom=100, release=1)
+        self.assertTrue(_policy().epoch_event(prev, after))
+
+    def test_host_release_counter_stall_releases_only_once(self):
+        # The B-run freeze shape quantized: available bounces 0->100->0 at
+        # a STALLED release counter. The event gate may fire on a level
+        # rise (that is a legitimate refill-check trigger), but the PARK
+        # (test_no_headroom_* below) is what must not clear: it subscribes
+        # to the MONOTONIC release counter, so a release epoch advance
+        # (0 -> 1) fires exactly once -- the next identical snapshot does
+        # not fire again (no per-pass spin from a counter that never
+        # recedes).
+        prev = self._epoch(headroom=0, release=0)
+        self.assertTrue(_policy().epoch_event(prev, self._epoch(headroom=0, release=1)))
+        # Same release epoch, same level: no NEW event (the refill already
+        # ran on the 0->1 advance).
+        self.assertFalse(
+            _policy().epoch_event(self._epoch(headroom=0, release=1), self._epoch(headroom=0, release=1))
+        )
 
     def test_l3_published_is_event(self):
         prev = self._epoch(l3=0)
@@ -735,6 +796,12 @@ class ReadyHorizonPassTests(unittest.TestCase):
     def _run(self, scheduler):
         scheduler._ready_horizon_pass()
 
+    def _clock_patch(self):
+        clock = _FakeClock()
+        return mock.patch(
+            "sglang.srt.managers.scheduler.time.perf_counter", new=clock
+        ), clock
+
     def test_pass_issues_candidates_via_prefetch_kvcache(self):
         scheduler = _pass_scheduler(
             queue=[
@@ -780,6 +847,105 @@ class ReadyHorizonPassTests(unittest.TestCase):
         self._run(scheduler)
         self.assertEqual(scheduler.issued, [])
         self.assertEqual(scheduler.evicted, [])
+
+    def test_no_headroom_park_wakes_on_release_epoch_not_level(self):
+        # Fix A end-to-end (the B-run permanent-freeze regression):
+        # 1) host headroom insufficient -> NO_HEADROOM park recorded at the
+        #    release counter cursor;
+        # 2) the level bounces (0 -> X -> 0) with NO release counter advance
+        #    -> the park holds even past the safety fuse: no re-probe per
+        #    pass (no busy loop), no silent release (the B-run freeze);
+        # 3) a GENUINE release (available grew since the last snapshot ->
+        #    the monotonic release counter advanced) wakes the waiter: the
+        #    rid is re-probed and staged exactly once.
+        patch, clock = self._clock_patch()
+        with patch:
+            cc = _Cc(spec_inflight=CHAIN_TOKENS, available=0)
+            scheduler = _pass_scheduler(queue=[_req("r1", NONE)], cc=cc)
+            epoch = scheduler.ready_horizon
+
+            # Step 1: headroom gate fails (0 free + CHAIN_TOKENS inflight
+            # + no READY footprint does not fit 0 headroom) -> the decline
+            # parks r1 at release cursor 0.
+            scheduler._ready_horizon_pass()
+            self.assertEqual(scheduler.issued, [])
+            entry = scheduler._ready_horizon_negatives.get("r1")
+            self.assertIsNotNone(entry, "NO_HEADROOM decline must park the rid")
+            self.assertEqual(entry.reason, NO_HEADROOM)
+            self.assertEqual(entry.epoch_cursor, 0)  # release counter cursor
+
+            # Step 2: the B-run shape quantized -- available oscillates
+            # with no release-counter advance (the snapshot never sees a
+            # sustained level rise), even past the safety fuse. The park
+            # holds: no re-probe, no issue.
+            for _ in range(3):
+                clock.advance(10.0)
+                cc.available = 0
+                scheduler._ready_horizon_pass()
+                self.assertEqual(scheduler.issued, [])
+                self.assertEqual(
+                    scheduler._ready_horizon_negatives["r1"].epoch_cursor,
+                    0,
+                    "no release epoch -> the park must not clear",
+                )
+
+            # Step 3: host residency freed / working-state released: the
+            # available level GREW since the last snapshot -> the release
+            # counter advances 0 -> 1 (a causal event). The park clears and
+            # r1 is re-probed and staged once (past the fuse).
+            clock.advance(10.0)
+            cc.available = CHAIN_TOKENS
+            scheduler._ready_horizon_pass()
+            self.assertEqual(scheduler.issued, ["r1"])
+            self.assertEqual(scheduler._ready_host_release_epoch, 1)
+
+    def test_release_counter_monotonic_survives_reconsumption(self):
+        # Fix A monotonicity at the pass level: a release (available grew
+        # since the last snapshot -> counter 0 -> 1) that is IMMEDIATELY
+        # re-consumed by the working set (available back to 0) must NOT
+        # undo the park clear. The OLD host_headroom-LEVEL cursor would
+        # re-park at the higher level and freeze (the B-run permanent
+        # freeze root: a transient rise was each time recorded as a higher
+        # cursor that the next alloc re-crossed before any re-probe).
+        # New behavior: the release epoch advances ONCE; the park that was
+        # at cursor 0 clears against cursor 1 even though the level
+        # returned to 0; at most one fresh probe per release epoch.
+        patch, clock = self._clock_patch()
+        with patch:
+            cc = _Cc(spec_inflight=CHAIN_TOKENS, available=0)
+            scheduler = _pass_scheduler(queue=[_req("r1", NONE)], cc=cc)
+            scheduler._ready_horizon_pass()
+            self.assertEqual(
+                scheduler._ready_horizon_negatives["r1"].epoch_cursor, 0
+            )
+
+            # Release observed (level rose), THEN the working set re-
+            # consumes the freed pages before the refill ever runs: the
+            # next snapshot sees available back at 0. The release epoch
+            # advanced 0 -> 1 and stays there; the level is again 0.
+            scheduler._ready_host_release_last_level = 0
+            cc.available = CHAIN_TOKENS
+            scheduler._ready_horizon_pass()  # snapshot: level rose (release)
+            cc.available = 0
+            clock.advance(10.0)  # past the safety fuse
+            scheduler._ready_horizon_pass()  # snapshot: level fell (no release)
+            self.assertEqual(scheduler._ready_host_release_epoch, 1)
+            # The release epoch advanced past the park cursor 0 -> 1; the
+            # headroom STILL fails (0 free) so the re-probe declines and
+            # re-parks at the NEW cursor 1. No issue, no busy loop.
+            self.assertEqual(scheduler.issued, [])
+            self.assertEqual(
+                scheduler._ready_horizon_negatives["r1"].epoch_cursor, 1
+            )
+            # The next identical pass (level 0, release epoch 1, fuse
+            # expired): the re-park holds -- at most one probe per release
+            # epoch, no freeze, no spin.
+            clock.advance(10.0)
+            scheduler._ready_horizon_pass()
+            self.assertEqual(scheduler.issued, [])
+            self.assertEqual(
+                scheduler._ready_horizon_negatives["r1"].epoch_cursor, 1
+            )
 
     def test_off_mode_is_a_noop(self):
         scheduler = _pass_scheduler(queue=[_req("r1", NONE)], enable=False)
