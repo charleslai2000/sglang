@@ -35,9 +35,11 @@ from typing import Any, Callable, Dict, Optional
 from transformers import PretrainedConfig
 
 from sglang.srt.configs.muse_glimmer import MuseGlimmerConfig
+from sglang.srt.configs.qwen35_gguf import build_qwen35_gguf_config
 
 GGUF_NATIVE_CONFIG_BUILDERS: Dict[str, Callable[[str], PretrainedConfig]] = {
     "muse-glimmer": MuseGlimmerConfig.from_gguf,
+    "qwen35": build_qwen35_gguf_config,
 }
 
 
@@ -74,6 +76,10 @@ _GPT4O_SPLIT_REGEX = (
 )
 
 _PRE_TOKENIZER_REGEX = {
+    "qwen35": (
+        r"(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?[\p{L}\p{M}]+|\p{N}|"
+        r" ?[^\s\p{L}\p{M}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"
+    ),
     # LLAMA_VOCAB_PRE_TYPE_LLAMA3
     "llama-bpe": (
         r"(?:'[sS]|'[tT]|'[rR][eE]|'[vV][eE]|'[mM]|'[lL][lL]|'[dD])|"
@@ -154,8 +160,32 @@ def build_gguf_tokenizer(gguf_path: str, **kwargs: Any):
     control_ids = [
         i for i, t in enumerate(token_types) if t == _GGML_TOKEN_TYPE_CONTROL
     ]
+    added_ids = control_ids
+    special_ids = set(control_ids)
+    if pre_name == "qwen35":
+        added_ids = [i for i, t in enumerate(token_types) if t in (3, 4)]
+        # Qwen's FIM markers are added tokens but are retained by skip_special_tokens.
+        special_ids = {
+            i
+            for i in control_ids
+            if tokens[i]
+            not in (
+                "<|fim_prefix|>",
+                "<|fim_middle|>",
+                "<|fim_suffix|>",
+                "<|fim_pad|>",
+                "<|repo_name|>",
+                "<|file_sep|>",
+            )
+        }
     control = set(control_ids)
-    vocab = {tok: i for i, tok in enumerate(tokens) if i not in control}
+    # qwen35 has control tokens inside a padded vocabulary. Removing them makes
+    # tokenizers append the added tokens after the padding and changes their IDs.
+    vocab = {
+        tok: i
+        for i, tok in enumerate(tokens)
+        if pre_name == "qwen35" or i not in control
+    }
 
     def token_of(key):
         idx = meta.get(f"tokenizer.ggml.{key}")
@@ -175,11 +205,11 @@ def build_gguf_tokenizer(gguf_path: str, **kwargs: Any):
                 "lstrip": False,
                 "rstrip": False,
                 "normalized": False,
-                "special": True,
+                "special": i in special_ids,
             }
-            for i in control_ids
+            for i in added_ids
         ],
-        "normalizer": None,
+        "normalizer": {"type": "NFC"} if pre_name == "qwen35" else None,
         "pre_tokenizer": {
             "type": "Sequence",
             "pretokenizers": [
@@ -192,7 +222,7 @@ def build_gguf_tokenizer(gguf_path: str, **kwargs: Any):
                 {
                     "type": "ByteLevel",
                     "add_prefix_space": False,
-                    "trim_offsets": True,
+                    "trim_offsets": pre_name != "qwen35",
                     "use_regex": False,
                 },
             ],
@@ -212,7 +242,7 @@ def build_gguf_tokenizer(gguf_path: str, **kwargs: Any):
             "end_of_word_suffix": None,
             "fuse_unk": False,
             "byte_fallback": False,
-            "ignore_merges": True,
+            "ignore_merges": pre_name != "qwen35",
             "vocab": vocab,
             "merges": [list(m) for m in merges],
         },
@@ -244,7 +274,7 @@ def build_gguf_tokenizer(gguf_path: str, **kwargs: Any):
         token_of("padding_token_id"),
         token_of("unknown_token_id"),
     }
-    additional = [tokens[i] for i in control_ids if tokens[i] not in named]
+    additional = [tokens[i] for i in sorted(special_ids) if tokens[i] not in named]
 
     return PreTrainedTokenizerFast(
         tokenizer_object=backend,

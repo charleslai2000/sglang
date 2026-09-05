@@ -47,6 +47,7 @@ def chunk_fwd_kernel_o(
     BV: tl.constexpr,
     USE_G: tl.constexpr,
     IS_VARLEN: tl.constexpr,
+    TILED_V_HEADS: tl.constexpr = False,
 ):
     i_v, i_t, i_bh = tl.program_id(0), tl.program_id(1), tl.program_id(2)
     i_b, i_h = i_bh // H, i_bh % H
@@ -67,8 +68,8 @@ def chunk_fwd_kernel_o(
         bos, eos = i_b * T, i_b * T + T
 
     # offset calculation
-    q += (bos * Hg + i_h // (H // Hg)) * K
-    k += (bos * Hg + i_h // (H // Hg)) * K
+    q += (bos * Hg + (i_h % Hg if TILED_V_HEADS else i_h // (H // Hg))) * K
+    k += (bos * Hg + (i_h % Hg if TILED_V_HEADS else i_h // (H // Hg))) * K
     v += (bos * H + i_h) * V
     o += (bos * H + i_h) * V
     h += (i_tg * H + i_h).to(tl.int64) * V * K
@@ -132,6 +133,7 @@ def chunk_fwd_o(
     scale: Optional[float] = None,
     cu_seqlens: Optional[torch.LongTensor] = None,
     chunk_size: int = 64,
+    tiled_v_heads: bool = False,
 ) -> torch.Tensor:
     B, T, Hg, K, V = *q.shape, v.shape[-1]
     H = v.shape[-2]
@@ -170,5 +172,6 @@ def chunk_fwd_o(
         IS_VARLEN=cu_seqlens is not None,
         num_warps=4,
         num_stages=2,
+        TILED_V_HEADS=tiled_v_heads,
     )
     return o

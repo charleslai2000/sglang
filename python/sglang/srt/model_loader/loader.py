@@ -3202,6 +3202,20 @@ class GGUFModelLoader(BaseModelLoader):
     ) -> nn.Module:
 
         local_model_path = self._prepare_weights(model_config.model_path)
+        text_config = getattr(
+            model_config.hf_config, "text_config", model_config.hf_config
+        )
+        is_qwen35 = text_config.model_type == "qwen3_5_text"
+        if is_qwen35:
+            from sglang.srt.utils.hf_transformers.gguf_native import (
+                read_gguf_architecture,
+            )
+
+            if read_gguf_architecture(local_model_path) != "qwen35":
+                raise ValueError("Qwen3.5 text config requires a qwen35 GGUF")
+            if get_parallel().tp_size != 1 or get_parallel().pp_size != 1:
+                raise ValueError("Tiled qwen35 GGUF currently requires TP=1 and PP=1")
+            text_config.gdn_v_head_layout = "tiled"
         gguf_weights_map = self._get_gguf_weights_map(model_config)
         # we can only know if tie word embeddings after mapping weights
         if "lm_head.weight" in get_gguf_extra_tensor_names(
@@ -3213,10 +3227,28 @@ class GGUFModelLoader(BaseModelLoader):
         quant_config = _get_quantization_config(model_config, self.load_config)
         with set_default_torch_dtype(model_config.dtype):
             with target_device:
-                model = _initialize_model(model_config, self.load_config, quant_config)
-            model.load_weights(
-                self._get_weights_iterator(local_model_path, gguf_weights_map)
-            )
+                model = _initialize_model(
+                    model_config,
+                    self.load_config,
+                    quant_config,
+                )
+            if is_qwen35:
+                from sglang.srt.model_loader.qwen35_gguf import (
+                    qwen35_gguf_weights_iterator,
+                )
+
+                loaded = model.load_weights(
+                    qwen35_gguf_weights_iterator(local_model_path, gguf_weights_map)
+                )
+                missing = set(dict(model.named_parameters())) - loaded
+                if missing:
+                    raise ValueError(
+                        f"Unloaded qwen35 GGUF parameters: {sorted(missing)}"
+                    )
+            else:
+                model.load_weights(
+                    self._get_weights_iterator(local_model_path, gguf_weights_map)
+                )
 
             for _, module in model.named_modules():
                 quant_method = getattr(module, "quant_method", None)

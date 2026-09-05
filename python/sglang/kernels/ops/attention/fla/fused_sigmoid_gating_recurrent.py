@@ -70,6 +70,7 @@ def fused_sigmoid_gating_delta_rule_update_kernel(
     MAX_CACHE_LEN: tl.constexpr = 0,
     CACHE_RING: tl.constexpr = False,
     USE_GDC: tl.constexpr = False,
+    TILED_V_HEADS: tl.constexpr = False,
 ):
     """
     Fused kernel that combines sigmoid gating computation with recurrent delta rule update.
@@ -85,7 +86,7 @@ def fused_sigmoid_gating_delta_rule_update_kernel(
 
     i_k, i_v, i_nh = tl.program_id(0), tl.program_id(1), tl.program_id(2)
     i_n, i_hv = i_nh // HV, i_nh % HV
-    i_h = i_hv // (HV // H)
+    i_h = i_hv % H if TILED_V_HEADS else i_hv // (HV // H)
 
     if IS_VARLEN:
         bos, eos = (
@@ -372,6 +373,7 @@ def fused_sigmoid_gating_delta_rule_update(
     replayssm_rawk: Optional[torch.Tensor] = None,
     replayssm_g: Optional[torch.Tensor] = None,
     replayssm_beta: Optional[torch.Tensor] = None,
+    tiled_v_heads: bool = False,
 ):
     """
     Fused triton implementation of sigmoid gating delta rule update.
@@ -519,6 +521,7 @@ def fused_sigmoid_gating_delta_rule_update(
         num_warps=num_warps,
         num_stages=num_stages,
         **pdl_kwargs,
+        TILED_V_HEADS=tiled_v_heads,
     )
     o = o.squeeze(0)
     return o

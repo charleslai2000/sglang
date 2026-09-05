@@ -397,6 +397,7 @@ class Qwen3_5GatedDeltaNet(nn.Module):
             activation=self.activation,
             A_log=self.A_log,
             dt_bias=self.dt_bias,
+            gdn_v_head_layout=getattr(config, "gdn_v_head_layout", "grouped"),
         )
 
         self.norm = RMSNormGated(
@@ -449,7 +450,14 @@ class Qwen3_5GatedDeltaNet(nn.Module):
 
     def _bind_packed_weight_loaders(self, module):
         """Bind packed-checkpoint-aware loaders to all relevant params of a merged module."""
-        for attr_name in ("weight", "weight_scale_inv", "weight_scale", "input_scale"):
+        for attr_name in (
+            "weight",
+            "weight_scale_inv",
+            "weight_scale",
+            "input_scale",
+            "qweight",
+            "qweight_type",
+        ):
             param = getattr(module, attr_name, None)
             if param is None:
                 continue
@@ -490,6 +498,11 @@ class Qwen3_5GatedDeltaNet(nn.Module):
             # Only intercept split-checkpoint tuple shards.
             # int shard_id and None should preserve original behavior.
             if isinstance(loaded_shard_id, tuple):
+                if getattr(param, "is_gguf_weight_type", False):
+                    # The GGUF merged loader assigns each type into a scalar slot.
+                    for idx in loaded_shard_id:
+                        original_weight_loader(param, loaded_weight.reshape(()), idx)
+                    return
                 split_sizes = cls._get_split_sizes_for_param(
                     module, param, loaded_shard_id
                 )
@@ -1449,6 +1462,11 @@ class Qwen3_5ForCausalLM(nn.Module):
                 config.vocab_size,
                 config.hidden_size,
                 org_num_embeddings=config.vocab_size,
+                quant_config=(
+                    quant_config
+                    if quant_config is not None and quant_config.get_name() == "gguf"
+                    else None
+                ),
                 enable_tp=not is_dp_attention_enabled(),
             )
         else:

@@ -28,6 +28,8 @@ from typing import Callable, Dict
 
 from transformers import PretrainedConfig
 
+from sglang.srt.model_loader.qwen35_gguf import build_qwen35_name_map
+
 # Sandwich naming: ffn_norm is the pre-FFN norm.
 _MUSE_GLIMMER_LAYER_TENSORS = {
     "attn_norm": "input_layernorm",
@@ -69,4 +71,6 @@ def build_muse_glimmer_name_map(config: PretrainedConfig) -> Dict[str, str]:
 # llama.cpp spells the arch "muse-glimmer" while the HF config says "muse_glimmer".
 GGUF_HF_NAME_MAP_BUILDERS: Dict[str, Callable[[PretrainedConfig], Dict[str, str]]] = {
     "muse_glimmer": build_muse_glimmer_name_map,
+    "qwen3_5_text": build_qwen35_name_map,
+    "qwen3_5": build_qwen35_name_map,
 }
