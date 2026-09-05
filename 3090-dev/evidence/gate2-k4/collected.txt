@@ -1,0 +1,1389 @@
+# HELP sglang:prefill_effective_tokens_total Effective prefill tokens with retracted-request re-counts excluded, updated on each log interval. mode: device_hit, host_hit, storage_hit, input. Windowed prefix cache hit rate = rate(sum of *_hit) / rate(sum of all modes); per-tier rate uses a single *_hit mode in the numerator.
+# TYPE sglang:prefill_effective_tokens_total counter
+sglang:prefill_effective_tokens_total{engine_type="unified",mode="input",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 375969.0
+sglang:prefill_effective_tokens_total{engine_type="unified",mode="device_hit",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 436017.0
+sglang:prefill_effective_tokens_total{engine_type="unified",mode="host_hit",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 476264.0
+sglang:prefill_effective_tokens_total{engine_type="unified",mode="storage_hit",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:hicache_dropped_tokens_total The number of device KV tokens destroyed without a host backup, by pool (kv, swa, ...) and reason (e.g. write-back backup failure under host memory pressure).
+# TYPE sglang:hicache_dropped_tokens_total counter
+sglang:hicache_dropped_tokens_total{cache_type="UnifiedRadixCache",pool="kv",reason="host_pressure"} 0.0
+sglang:hicache_dropped_tokens_total{cache_type="UnifiedRadixCache",pool="mamba",reason="host_pressure"} 0.0
+# HELP sglang:cuda_graph_passes_total Total number of forward passes categorized by CUDA graph.
+# TYPE sglang:cuda_graph_passes_total counter
+sglang:cuda_graph_passes_total{engine_type="unified",mode="prefill_cuda_graph",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 211.0
+sglang:cuda_graph_passes_total{engine_type="unified",mode="decode_cuda_graph",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 2151.0
+sglang:cuda_graph_passes_total{engine_type="unified",mode="prefill_none",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 2.0
+# HELP sglang:realtime_tokens_total Total number of tokens processed (updated on each log interval). mode: prefill_compute, prefill_cache, decode.
+# TYPE sglang:realtime_tokens_total counter
+sglang:realtime_tokens_total{engine_type="unified",mode="prefill_compute",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 375969.0
+sglang:realtime_tokens_total{engine_type="unified",mode="decode",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 3082.0
+sglang:realtime_tokens_total{engine_type="unified",mode="prefill_cache",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 912281.0
+# HELP sglang:hicache_backup_tokens_total The number of tokens backed up from GPU to local host DRAM (L2), by host pool (kv, swa, mamba, ...). Covers all D->H backups regardless of --hicache-write-policy. Distinct from the host-to-storage (L3) sglang:backuped_tokens_total.
+# TYPE sglang:hicache_backup_tokens_total counter
+sglang:hicache_backup_tokens_total{cache_type="UnifiedRadixCache",pool="kv"} 797595.0
+sglang:hicache_backup_tokens_total{cache_type="UnifiedRadixCache",pool="mamba"} 209.0
+# HELP sglang:hicache_backup_bytes_total Bytes backed up from GPU to local host DRAM (L2), all pools combined, including draft/sidecar transfers that the token counter excludes. Divided by the rate of hicache_backup_duration_seconds_sum, gives the achieved D->H bandwidth while transferring.
+# TYPE sglang:hicache_backup_bytes_total counter
+sglang:hicache_backup_bytes_total{cache_type="UnifiedRadixCache"} 3.6901453824e+10
+# HELP sglang:evicted_tokens_total The number of device KV token slots freed by eviction, regardless of whether the data was backed up to host (see sglang:hicache_backup_tokens_total) or destroyed (see sglang:hicache_dropped_tokens_total).
+# TYPE sglang:evicted_tokens_total counter
+sglang:evicted_tokens_total{cache_type="UnifiedRadixCache"} 747227.0
+# HELP sglang:backuped_tokens_total Number of backuped tokens.
+# TYPE sglang:backuped_tokens_total counter
+sglang:backuped_tokens_total{attn_cp_rank="0",attn_cp_size="1",dp_rank="0",pp_rank="0",pp_size="1",storage_backend="extent",tp_rank="0"} 335341.0
+# HELP sglang:load_back_tokens_total The number of tokens loaded back from local host DRAM (L2) to GPU, by host pool (kv, swa, mamba, ...).
+# TYPE sglang:load_back_tokens_total counter
+sglang:load_back_tokens_total{cache_type="UnifiedRadixCache",pool="kv"} 441763.0
+sglang:load_back_tokens_total{cache_type="UnifiedRadixCache",pool="mamba"} 72.0
+# HELP sglang:load_back_bytes_total Bytes loaded back from local host DRAM (L2) to GPU, all pools combined, including draft/sidecar transfers that the token counter excludes. Divided by the rate of load_back_duration_seconds_sum, gives the achieved H->D bandwidth while transferring.
+# TYPE sglang:load_back_bytes_total counter
+sglang:load_back_bytes_total{cache_type="UnifiedRadixCache"} 1.8184503296e+10
+# HELP sglang:process_cpu_seconds_total Total CPU time consumed by this process (user + system)
+# TYPE sglang:process_cpu_seconds_total counter
+sglang:process_cpu_seconds_total{component="tokenizer"} 18.32
+sglang:process_cpu_seconds_total{component="detokenizer"} 1.06
+# HELP sglang:http_requests_total Total number of HTTP requests by endpoint and method
+# TYPE sglang:http_requests_total counter
+sglang:http_requests_total{endpoint="/model_info",method="GET"} 1.0
+sglang:http_requests_total{endpoint="/v1/chat/completions",method="POST"} 49.0
+sglang:http_requests_total{endpoint="/freeze_gc",method="POST"} 1.0
+sglang:http_requests_total{endpoint="/health",method="GET"} 2.0
+sglang:http_requests_total{endpoint="/metrics",method="GET"} 165.0
+# HELP sglang:http_responses_total Total number of HTTP responses by endpoint and status code
+# TYPE sglang:http_responses_total counter
+sglang:http_responses_total{endpoint="/model_info",method="GET",status_code="200"} 1.0
+sglang:http_responses_total{endpoint="/v1/chat/completions",method="POST",status_code="200"} 49.0
+sglang:http_responses_total{endpoint="/freeze_gc",method="POST",status_code="200"} 1.0
+sglang:http_responses_total{endpoint="/health",method="GET",status_code="200"} 2.0
+sglang:http_responses_total{endpoint="/metrics",method="GET",status_code="200"} 164.0
+# HELP sglang:prompt_tokens_total Number of prefill tokens processed.
+# TYPE sglang:prompt_tokens_total counter
+sglang:prompt_tokens_total{engine_type="unified",is_streaming="false",model_name="qwen3.5-9b-gptq"} 80.0
+sglang:prompt_tokens_total{engine_type="unified",is_streaming="true",model_name="qwen3.5-9b-gptq"} 1.288168e+06
+# HELP sglang:generation_tokens_total Number of generation tokens processed.
+# TYPE sglang:generation_tokens_total counter
+sglang:generation_tokens_total{engine_type="unified",is_streaming="false",model_name="qwen3.5-9b-gptq"} 8.0
+sglang:generation_tokens_total{engine_type="unified",is_streaming="true",model_name="qwen3.5-9b-gptq"} 3072.0
+# HELP sglang:num_requests_total Number of requests processed.
+# TYPE sglang:num_requests_total counter
+sglang:num_requests_total{engine_type="unified",is_streaming="false",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:num_requests_total{engine_type="unified",is_streaming="true",model_name="qwen3.5-9b-gptq"} 48.0
+# HELP sglang:cached_tokens_total Number of cached prompt tokens by source (device/host/storage).
+# TYPE sglang:cached_tokens_total counter
+sglang:cached_tokens_total{cache_source="device",engine_type="unified",model_name="qwen3.5-9b-gptq"} 436017.0
+sglang:cached_tokens_total{cache_source="host",engine_type="unified",model_name="qwen3.5-9b-gptq"} 476264.0
+# HELP sglang:routing_keys_active Number of unique routing keys with active requests
+# TYPE sglang:routing_keys_active gauge
+sglang:routing_keys_active 0.0
+# HELP sglang:http_requests_active Number of currently active HTTP requests
+# TYPE sglang:http_requests_active gauge
+sglang:http_requests_active{endpoint="/model_info",method="GET"} 0.0
+sglang:http_requests_active{endpoint="/v1/chat/completions",method="POST"} 0.0
+sglang:http_requests_active{endpoint="/freeze_gc",method="POST"} 0.0
+sglang:http_requests_active{endpoint="/health",method="GET"} 0.0
+sglang:http_requests_active{endpoint="/metrics",method="GET"} 1.0
+# HELP sglang:time_to_first_token_seconds Histogram of time to first token in seconds.
+# TYPE sglang:time_to_first_token_seconds histogram
+sglang:time_to_first_token_seconds_sum{engine_type="unified",is_streaming="false",model_name="qwen3.5-9b-gptq"} 1.5012226320104674
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="false",le="0.1",model_name="qwen3.5-9b-gptq"} 0.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="false",le="0.2",model_name="qwen3.5-9b-gptq"} 0.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="false",le="0.4",model_name="qwen3.5-9b-gptq"} 0.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="false",le="0.6",model_name="qwen3.5-9b-gptq"} 0.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="false",le="0.8",model_name="qwen3.5-9b-gptq"} 0.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="false",le="1.0",model_name="qwen3.5-9b-gptq"} 0.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="false",le="2.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="false",le="4.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="false",le="6.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="false",le="8.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="false",le="10.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="false",le="20.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="false",le="40.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="false",le="60.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="false",le="80.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="false",le="100.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="false",le="200.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="false",le="400.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="false",le="+Inf",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:time_to_first_token_seconds_count{engine_type="unified",is_streaming="false",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:time_to_first_token_seconds_sum{engine_type="unified",is_streaming="true",model_name="qwen3.5-9b-gptq"} 932.335276570986
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="true",le="0.1",model_name="qwen3.5-9b-gptq"} 0.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="true",le="0.2",model_name="qwen3.5-9b-gptq"} 0.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="true",le="0.4",model_name="qwen3.5-9b-gptq"} 6.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="true",le="0.6",model_name="qwen3.5-9b-gptq"} 9.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="true",le="0.8",model_name="qwen3.5-9b-gptq"} 9.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="true",le="1.0",model_name="qwen3.5-9b-gptq"} 9.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="true",le="2.0",model_name="qwen3.5-9b-gptq"} 18.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="true",le="4.0",model_name="qwen3.5-9b-gptq"} 24.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="true",le="6.0",model_name="qwen3.5-9b-gptq"} 28.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="true",le="8.0",model_name="qwen3.5-9b-gptq"} 28.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="true",le="10.0",model_name="qwen3.5-9b-gptq"} 30.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="true",le="20.0",model_name="qwen3.5-9b-gptq"} 35.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="true",le="40.0",model_name="qwen3.5-9b-gptq"} 36.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="true",le="60.0",model_name="qwen3.5-9b-gptq"} 36.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="true",le="80.0",model_name="qwen3.5-9b-gptq"} 48.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="true",le="100.0",model_name="qwen3.5-9b-gptq"} 48.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="true",le="200.0",model_name="qwen3.5-9b-gptq"} 48.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="true",le="400.0",model_name="qwen3.5-9b-gptq"} 48.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="true",le="+Inf",model_name="qwen3.5-9b-gptq"} 48.0
+sglang:time_to_first_token_seconds_count{engine_type="unified",is_streaming="true",model_name="qwen3.5-9b-gptq"} 48.0
+# HELP sglang:e2e_request_latency_seconds Histogram of End-to-end request latency in seconds
+# TYPE sglang:e2e_request_latency_seconds histogram
+sglang:e2e_request_latency_seconds_sum{engine_type="unified",is_streaming="false",model_name="qwen3.5-9b-gptq"} 1.5012255039764568
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="0.1",model_name="qwen3.5-9b-gptq"} 0.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="0.2",model_name="qwen3.5-9b-gptq"} 0.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="0.4",model_name="qwen3.5-9b-gptq"} 0.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="0.6",model_name="qwen3.5-9b-gptq"} 0.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="0.8",model_name="qwen3.5-9b-gptq"} 0.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="1.0",model_name="qwen3.5-9b-gptq"} 0.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="2.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="4.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="6.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="8.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="10.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="20.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="40.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="60.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="80.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="100.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="200.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="400.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="600.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="1200.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="1800.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="2400.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="+Inf",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:e2e_request_latency_seconds_count{engine_type="unified",is_streaming="false",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:e2e_request_latency_seconds_sum{engine_type="unified",is_streaming="true",model_name="qwen3.5-9b-gptq"} 1014.2108256680076
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="true",le="0.1",model_name="qwen3.5-9b-gptq"} 0.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="true",le="0.2",model_name="qwen3.5-9b-gptq"} 0.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="true",le="0.4",model_name="qwen3.5-9b-gptq"} 0.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="true",le="0.6",model_name="qwen3.5-9b-gptq"} 0.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="true",le="0.8",model_name="qwen3.5-9b-gptq"} 0.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="true",le="1.0",model_name="qwen3.5-9b-gptq"} 2.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="true",le="2.0",model_name="qwen3.5-9b-gptq"} 7.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="true",le="4.0",model_name="qwen3.5-9b-gptq"} 19.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="true",le="6.0",model_name="qwen3.5-9b-gptq"} 25.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="true",le="8.0",model_name="qwen3.5-9b-gptq"} 27.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="true",le="10.0",model_name="qwen3.5-9b-gptq"} 28.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="true",le="20.0",model_name="qwen3.5-9b-gptq"} 34.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="true",le="40.0",model_name="qwen3.5-9b-gptq"} 36.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="true",le="60.0",model_name="qwen3.5-9b-gptq"} 36.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="true",le="80.0",model_name="qwen3.5-9b-gptq"} 48.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="true",le="100.0",model_name="qwen3.5-9b-gptq"} 48.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="true",le="200.0",model_name="qwen3.5-9b-gptq"} 48.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="true",le="400.0",model_name="qwen3.5-9b-gptq"} 48.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="true",le="600.0",model_name="qwen3.5-9b-gptq"} 48.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="true",le="1200.0",model_name="qwen3.5-9b-gptq"} 48.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="true",le="1800.0",model_name="qwen3.5-9b-gptq"} 48.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="true",le="2400.0",model_name="qwen3.5-9b-gptq"} 48.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="true",le="+Inf",model_name="qwen3.5-9b-gptq"} 48.0
+sglang:e2e_request_latency_seconds_count{engine_type="unified",is_streaming="true",model_name="qwen3.5-9b-gptq"} 48.0
+# HELP sglang:prompt_tokens_histogram Histogram of prompt token length.
+# TYPE sglang:prompt_tokens_histogram histogram
+sglang:prompt_tokens_histogram_sum{engine_type="unified",model_name="qwen3.5-9b-gptq"} 1.288248e+06
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="100.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="300.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="500.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="700.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="1000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="1500.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="2000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="3000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="4000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="5000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="6000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="7000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="8000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="9000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="10000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="12500.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="15000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="17500.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="20000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="22500.0",model_name="qwen3.5-9b-gptq"} 25.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="25000.0",model_name="qwen3.5-9b-gptq"} 25.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="27500.0",model_name="qwen3.5-9b-gptq"} 25.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="30000.0",model_name="qwen3.5-9b-gptq"} 37.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="35000.0",model_name="qwen3.5-9b-gptq"} 45.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="40000.0",model_name="qwen3.5-9b-gptq"} 45.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="60000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="80000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="100000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="200000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="300000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="400000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="600000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="800000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="1e+06",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="1.1e+06",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="+Inf",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:prompt_tokens_histogram_count{engine_type="unified",model_name="qwen3.5-9b-gptq"} 49.0
+# HELP sglang:uncached_prompt_tokens_histogram Histogram of uncached (compute) prompt token length.
+# TYPE sglang:uncached_prompt_tokens_histogram histogram
+sglang:uncached_prompt_tokens_histogram_sum{engine_type="unified",model_name="qwen3.5-9b-gptq"} 375967.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="100.0",model_name="qwen3.5-9b-gptq"} 10.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="300.0",model_name="qwen3.5-9b-gptq"} 10.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="500.0",model_name="qwen3.5-9b-gptq"} 11.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="700.0",model_name="qwen3.5-9b-gptq"} 11.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="1000.0",model_name="qwen3.5-9b-gptq"} 11.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="1500.0",model_name="qwen3.5-9b-gptq"} 12.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="2000.0",model_name="qwen3.5-9b-gptq"} 12.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="3000.0",model_name="qwen3.5-9b-gptq"} 12.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="4000.0",model_name="qwen3.5-9b-gptq"} 16.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="5000.0",model_name="qwen3.5-9b-gptq"} 26.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="6000.0",model_name="qwen3.5-9b-gptq"} 28.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="7000.0",model_name="qwen3.5-9b-gptq"} 28.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="8000.0",model_name="qwen3.5-9b-gptq"} 28.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="9000.0",model_name="qwen3.5-9b-gptq"} 28.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="10000.0",model_name="qwen3.5-9b-gptq"} 28.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="12500.0",model_name="qwen3.5-9b-gptq"} 42.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="15000.0",model_name="qwen3.5-9b-gptq"} 43.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="17500.0",model_name="qwen3.5-9b-gptq"} 44.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="20000.0",model_name="qwen3.5-9b-gptq"} 44.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="22500.0",model_name="qwen3.5-9b-gptq"} 48.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="25000.0",model_name="qwen3.5-9b-gptq"} 48.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="27500.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="30000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="35000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="40000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="60000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="80000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="100000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="200000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="300000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="400000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="600000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="800000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="1e+06",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="1.1e+06",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="+Inf",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:uncached_prompt_tokens_histogram_count{engine_type="unified",model_name="qwen3.5-9b-gptq"} 49.0
+# HELP sglang:generation_tokens_histogram Histogram of generation token length.
+# TYPE sglang:generation_tokens_histogram histogram
+sglang:generation_tokens_histogram_sum{engine_type="unified",model_name="qwen3.5-9b-gptq"} 3080.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="100.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="300.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="500.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="700.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="1000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="1500.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="2000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="3000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="4000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="5000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="6000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="7000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="8000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="9000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="10000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="12500.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="15000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="17500.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="20000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="22500.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="25000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="27500.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="30000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="35000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="40000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="60000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="80000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="100000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="200000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="300000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="400000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="600000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="800000.0",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="1e+06",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="1.1e+06",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="+Inf",model_name="qwen3.5-9b-gptq"} 49.0
+sglang:generation_tokens_histogram_count{engine_type="unified",model_name="qwen3.5-9b-gptq"} 49.0
+# HELP sglang:inter_token_latency_seconds Histogram of inter-token latency in seconds.
+# TYPE sglang:inter_token_latency_seconds histogram
+sglang:inter_token_latency_seconds_sum{engine_type="unified",model_name="qwen3.5-9b-gptq"} 81.80777504964499
+sglang:inter_token_latency_seconds_bucket{engine_type="unified",le="0.002",model_name="qwen3.5-9b-gptq"} 102.0
+sglang:inter_token_latency_seconds_bucket{engine_type="unified",le="0.004",model_name="qwen3.5-9b-gptq"} 106.0
+sglang:inter_token_latency_seconds_bucket{engine_type="unified",le="0.006",model_name="qwen3.5-9b-gptq"} 110.0
+sglang:inter_token_latency_seconds_bucket{engine_type="unified",le="0.008",model_name="qwen3.5-9b-gptq"} 122.0
+sglang:inter_token_latency_seconds_bucket{engine_type="unified",le="0.01",model_name="qwen3.5-9b-gptq"} 149.0
+sglang:inter_token_latency_seconds_bucket{engine_type="unified",le="0.015",model_name="qwen3.5-9b-gptq"} 2948.0
+sglang:inter_token_latency_seconds_bucket{engine_type="unified",le="0.02",model_name="qwen3.5-9b-gptq"} 2978.0
+sglang:inter_token_latency_seconds_bucket{engine_type="unified",le="0.025",model_name="qwen3.5-9b-gptq"} 2995.0
+sglang:inter_token_latency_seconds_bucket{engine_type="unified",le="0.03",model_name="qwen3.5-9b-gptq"} 2995.0
+sglang:inter_token_latency_seconds_bucket{engine_type="unified",le="0.035",model_name="qwen3.5-9b-gptq"} 2996.0
+sglang:inter_token_latency_seconds_bucket{engine_type="unified",le="0.04",model_name="qwen3.5-9b-gptq"} 2996.0
+sglang:inter_token_latency_seconds_bucket{engine_type="unified",le="0.06",model_name="qwen3.5-9b-gptq"} 2996.0
+sglang:inter_token_latency_seconds_bucket{engine_type="unified",le="0.08",model_name="qwen3.5-9b-gptq"} 2997.0
+sglang:inter_token_latency_seconds_bucket{engine_type="unified",le="0.1",model_name="qwen3.5-9b-gptq"} 2998.0
+sglang:inter_token_latency_seconds_bucket{engine_type="unified",le="0.2",model_name="qwen3.5-9b-gptq"} 3008.0
+sglang:inter_token_latency_seconds_bucket{engine_type="unified",le="0.4",model_name="qwen3.5-9b-gptq"} 3011.0
+sglang:inter_token_latency_seconds_bucket{engine_type="unified",le="0.6",model_name="qwen3.5-9b-gptq"} 3012.0
+sglang:inter_token_latency_seconds_bucket{engine_type="unified",le="0.8",model_name="qwen3.5-9b-gptq"} 3012.0
+sglang:inter_token_latency_seconds_bucket{engine_type="unified",le="1.0",model_name="qwen3.5-9b-gptq"} 3013.0
+sglang:inter_token_latency_seconds_bucket{engine_type="unified",le="2.0",model_name="qwen3.5-9b-gptq"} 3015.0
+sglang:inter_token_latency_seconds_bucket{engine_type="unified",le="4.0",model_name="qwen3.5-9b-gptq"} 3021.0
+sglang:inter_token_latency_seconds_bucket{engine_type="unified",le="6.0",model_name="qwen3.5-9b-gptq"} 3023.0
+sglang:inter_token_latency_seconds_bucket{engine_type="unified",le="8.0",model_name="qwen3.5-9b-gptq"} 3023.0
+sglang:inter_token_latency_seconds_bucket{engine_type="unified",le="+Inf",model_name="qwen3.5-9b-gptq"} 3024.0
+sglang:inter_token_latency_seconds_count{engine_type="unified",model_name="qwen3.5-9b-gptq"} 3024.0
+# HELP sglang:num_retracted_reqs The number of retracted requests.
+# TYPE sglang:num_retracted_reqs gauge
+sglang:num_retracted_reqs{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pid="287480",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:num_paused_reqs The number of paused requests by async weight sync.
+# TYPE sglang:num_paused_reqs gauge
+sglang:num_paused_reqs{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pid="287480",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:per_stage_req_latency_seconds The latency of each stage of requests.
+# TYPE sglang:per_stage_req_latency_seconds histogram
+sglang:per_stage_req_latency_seconds_sum{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 2.122230834211223
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.001",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.0016200000000000001",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 11.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.0026244000000000007",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 27.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.004251528",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 40.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.006887475360000002",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 41.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.011157710083200004",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 41.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.018075490334784006",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 41.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.029282294342350097",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 41.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.047437316834607154",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 43.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.07684845327206359",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 47.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.12449449430074302",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 48.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.20168108076720373",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 48.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.3267233508428701",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 48.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.5292918283654495",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 50.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.8574527619520282",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 51.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="1.389073474362286",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 51.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="2.2502990284669036",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 51.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="3.6454844261163837",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 51.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="5.905684770308542",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 51.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="9.567209327899839",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 51.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="15.49887911119774",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 51.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="25.10818416014034",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 51.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="40.67525833942735",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 51.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="65.89391850987231",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 51.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="106.74814798599316",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 51.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="172.93199973730896",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 51.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="280.1498395744405",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 51.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="453.84274011059364",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 51.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="735.2252389791618",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 51.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="1191.064887146242",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 51.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="+Inf",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 51.0
+sglang:per_stage_req_latency_seconds_count{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 51.0
+sglang:per_stage_req_latency_seconds_sum{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 116.3148191717919
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.001",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 0.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.0016200000000000001",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 0.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.0026244000000000007",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 0.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.004251528",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 0.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.006887475360000002",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 0.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.011157710083200004",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 0.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.018075490334784006",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 0.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.029282294342350097",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 0.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.047437316834607154",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 0.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.07684845327206359",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 9.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.12449449430074302",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 11.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.20168108076720373",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 12.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.3267233508428701",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 12.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.5292918283654495",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 12.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.8574527619520282",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 12.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="1.389073474362286",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 22.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="2.2502990284669036",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 30.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="3.6454844261163837",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 39.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="5.905684770308542",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 48.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="9.567209327899839",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 51.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="15.49887911119774",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 51.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="25.10818416014034",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 51.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="40.67525833942735",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 51.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="65.89391850987231",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 51.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="106.74814798599316",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 51.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="172.93199973730896",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 51.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="280.1498395744405",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 51.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="453.84274011059364",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 51.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="735.2252389791618",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 51.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="1191.064887146242",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 51.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="+Inf",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 51.0
+sglang:per_stage_req_latency_seconds_count{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 51.0
+sglang:per_stage_req_latency_seconds_sum{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="chunked_prefill",tp_rank="0"} 102.47825806681067
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.001",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="chunked_prefill",tp_rank="0"} 0.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.0016200000000000001",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="chunked_prefill",tp_rank="0"} 0.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.0026244000000000007",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="chunked_prefill",tp_rank="0"} 0.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.004251528",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="chunked_prefill",tp_rank="0"} 0.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.006887475360000002",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="chunked_prefill",tp_rank="0"} 0.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.011157710083200004",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="chunked_prefill",tp_rank="0"} 0.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.018075490334784006",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="chunked_prefill",tp_rank="0"} 0.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.029282294342350097",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="chunked_prefill",tp_rank="0"} 0.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.047437316834607154",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="chunked_prefill",tp_rank="0"} 0.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.07684845327206359",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="chunked_prefill",tp_rank="0"} 0.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.12449449430074302",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="chunked_prefill",tp_rank="0"} 0.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.20168108076720373",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="chunked_prefill",tp_rank="0"} 0.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.3267233508428701",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="chunked_prefill",tp_rank="0"} 0.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.5292918283654495",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="chunked_prefill",tp_rank="0"} 32.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.8574527619520282",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="chunked_prefill",tp_rank="0"} 165.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="1.389073474362286",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="chunked_prefill",tp_rank="0"} 171.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="2.2502990284669036",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="chunked_prefill",tp_rank="0"} 171.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="3.6454844261163837",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="chunked_prefill",tp_rank="0"} 171.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="5.905684770308542",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="chunked_prefill",tp_rank="0"} 171.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="9.567209327899839",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="chunked_prefill",tp_rank="0"} 171.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="15.49887911119774",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="chunked_prefill",tp_rank="0"} 171.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="25.10818416014034",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="chunked_prefill",tp_rank="0"} 171.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="40.67525833942735",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="chunked_prefill",tp_rank="0"} 171.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="65.89391850987231",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="chunked_prefill",tp_rank="0"} 171.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="106.74814798599316",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="chunked_prefill",tp_rank="0"} 171.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="172.93199973730896",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="chunked_prefill",tp_rank="0"} 171.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="280.1498395744405",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="chunked_prefill",tp_rank="0"} 171.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="453.84274011059364",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="chunked_prefill",tp_rank="0"} 171.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="735.2252389791618",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="chunked_prefill",tp_rank="0"} 171.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="1191.064887146242",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="chunked_prefill",tp_rank="0"} 171.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="+Inf",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="chunked_prefill",tp_rank="0"} 171.0
+sglang:per_stage_req_latency_seconds_count{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="chunked_prefill",tp_rank="0"} 171.0
+# HELP sglang:queue_time_seconds Histogram of queueing time in seconds.
+# TYPE sglang:queue_time_seconds histogram
+sglang:queue_time_seconds_sum{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 797.7567386120209
+sglang:queue_time_seconds_bucket{engine_type="unified",le="0.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="0.001",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 1.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="0.005",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 7.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="0.01",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 11.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="0.05",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 20.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="0.1",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 25.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="0.2",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 27.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="0.5",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 28.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="1.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 30.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="2.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 31.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="3.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 31.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="4.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 33.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="5.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 33.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="10.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 36.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="15.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 38.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="20.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 38.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="30.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 39.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="40.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 39.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="50.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 39.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="60.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 42.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="70.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 51.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="80.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 51.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="90.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 51.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="100.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 51.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="200.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 51.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="300.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 51.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="400.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 51.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="500.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 51.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="600.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 51.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="700.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 51.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="800.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 51.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="900.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 51.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="1000.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 51.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="1200.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 51.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="1400.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 51.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="1600.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 51.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="1800.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 51.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="2000.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 51.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="2500.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 51.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="3000.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 51.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="+Inf",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 51.0
+sglang:queue_time_seconds_count{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 51.0
+# HELP sglang:hicache_backup_duration_seconds Time taken to back up KV cache from GPU to local host DRAM (L2) in seconds, per merged write op. Covers all D->H backups regardless of --hicache-write-policy. Distinct from the host-to-storage (L3) sglang:backuped_tokens_total.
+# TYPE sglang:hicache_backup_duration_seconds histogram
+sglang:hicache_backup_duration_seconds_sum{cache_type="UnifiedRadixCache"} 5.472591837711633
+sglang:hicache_backup_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.001"} 28.0
+sglang:hicache_backup_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.002"} 32.0
+sglang:hicache_backup_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.005"} 68.0
+sglang:hicache_backup_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.01"} 136.0
+sglang:hicache_backup_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.02"} 470.0
+sglang:hicache_backup_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.05"} 489.0
+sglang:hicache_backup_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.1"} 489.0
+sglang:hicache_backup_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.2"} 489.0
+sglang:hicache_backup_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.5"} 489.0
+sglang:hicache_backup_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="1.0"} 489.0
+sglang:hicache_backup_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="2.0"} 489.0
+sglang:hicache_backup_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="5.0"} 489.0
+sglang:hicache_backup_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="10.0"} 489.0
+sglang:hicache_backup_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="30.0"} 489.0
+sglang:hicache_backup_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="60.0"} 489.0
+sglang:hicache_backup_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="+Inf"} 489.0
+sglang:hicache_backup_duration_seconds_count{cache_type="UnifiedRadixCache"} 489.0
+# HELP sglang:eviction_duration_seconds End-to-end time of a device eviction pass in seconds; under --hicache-write-policy write_back this includes the blocking D->H backup (see sglang:hicache_backup_duration_seconds for the copy alone).
+# TYPE sglang:eviction_duration_seconds histogram
+sglang:eviction_duration_seconds_sum{cache_type="UnifiedRadixCache"} 6.961535521666519
+sglang:eviction_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.001"} 45.0
+sglang:eviction_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.002"} 47.0
+sglang:eviction_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.003"} 48.0
+sglang:eviction_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.004"} 48.0
+sglang:eviction_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.005"} 49.0
+sglang:eviction_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.006"} 49.0
+sglang:eviction_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.007"} 49.0
+sglang:eviction_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.008"} 52.0
+sglang:eviction_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.009"} 52.0
+sglang:eviction_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.01"} 54.0
+sglang:eviction_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.02"} 123.0
+sglang:eviction_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.03"} 133.0
+sglang:eviction_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.04"} 148.0
+sglang:eviction_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.05"} 159.0
+sglang:eviction_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.1"} 169.0
+sglang:eviction_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.2"} 177.0
+sglang:eviction_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.5"} 180.0
+sglang:eviction_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="1.0"} 183.0
+sglang:eviction_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="2.0"} 183.0
+sglang:eviction_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="5.0"} 183.0
+sglang:eviction_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="10.0"} 183.0
+sglang:eviction_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="30.0"} 183.0
+sglang:eviction_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="60.0"} 183.0
+sglang:eviction_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="+Inf"} 183.0
+sglang:eviction_duration_seconds_count{cache_type="UnifiedRadixCache"} 183.0
+# HELP sglang:load_back_duration_seconds Time taken to load KV cache from CPU back to GPU in seconds.
+# TYPE sglang:load_back_duration_seconds histogram
+sglang:load_back_duration_seconds_sum{cache_type="UnifiedRadixCache"} 1.7714319019317626
+sglang:load_back_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.001"} 0.0
+sglang:load_back_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.002"} 0.0
+sglang:load_back_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.003"} 0.0
+sglang:load_back_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.004"} 0.0
+sglang:load_back_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.005"} 0.0
+sglang:load_back_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.006"} 0.0
+sglang:load_back_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.007"} 0.0
+sglang:load_back_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.008"} 0.0
+sglang:load_back_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.009"} 1.0
+sglang:load_back_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.01"} 2.0
+sglang:load_back_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.02"} 7.0
+sglang:load_back_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.03"} 13.0
+sglang:load_back_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.04"} 15.0
+sglang:load_back_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.05"} 17.0
+sglang:load_back_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.1"} 34.0
+sglang:load_back_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.2"} 36.0
+sglang:load_back_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.5"} 36.0
+sglang:load_back_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="1.0"} 36.0
+sglang:load_back_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="+Inf"} 36.0
+sglang:load_back_duration_seconds_count{cache_type="UnifiedRadixCache"} 36.0
+# HELP sglang:max_total_num_tokens Maximum total number of tokens in the KV cache pool.
+# TYPE sglang:max_total_num_tokens gauge
+sglang:max_total_num_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 65536.0
+# HELP sglang:weight_memory_usage_gb Memory used by model weights in GB.
+# TYPE sglang:weight_memory_usage_gb gauge
+sglang:weight_memory_usage_gb{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 10.35546875
+# HELP sglang:kv_cache_memory_usage_gb Memory used by the KV cache pools in GB.
+# TYPE sglang:kv_cache_memory_usage_gb gauge
+sglang:kv_cache_memory_usage_gb{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 2.000030517578125
+# HELP sglang:graph_memory_usage_gb Memory used by captured device graphs in GB.
+# TYPE sglang:graph_memory_usage_gb gauge
+sglang:graph_memory_usage_gb{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",phase="prefill",pp_rank="0",tp_rank="0"} 0.63671875
+sglang:graph_memory_usage_gb{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",phase="decode",pp_rank="0",tp_rank="0"} 0.080078125
+sglang:graph_memory_usage_gb{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",phase="target_verify",pp_rank="0",tp_rank="0"} 0.0
+sglang:graph_memory_usage_gb{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",phase="draft_prefill",pp_rank="0",tp_rank="0"} 0.0
+sglang:graph_memory_usage_gb{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",phase="draft_decode",pp_rank="0",tp_rank="0"} 0.0
+sglang:graph_memory_usage_gb{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",phase="draft_extend",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:page_size KV cache page size in tokens.
+# TYPE sglang:page_size gauge
+sglang:page_size{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 1.0
+# HELP sglang:num_pages Number of KV cache pages.
+# TYPE sglang:num_pages gauge
+sglang:num_pages{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 65536.0
+# HELP sglang:context_len Maximum context length.
+# TYPE sglang:context_len gauge
+sglang:context_len{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 262144.0
+# HELP sglang:startup_available_gpu_memory_gb Available GPU memory in GB at startup.
+# TYPE sglang:startup_available_gpu_memory_gb gauge
+sglang:startup_available_gpu_memory_gb{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 4.5555419921875
+# HELP sglang:num_running_reqs The number of running requests.
+# TYPE sglang:num_running_reqs gauge
+sglang:num_running_reqs{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:num_queue_reqs The number of requests in the waiting queue.
+# TYPE sglang:num_queue_reqs gauge
+sglang:num_queue_reqs{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:num_grammar_queue_reqs The number of requests in the grammar waiting queue.
+# TYPE sglang:num_grammar_queue_reqs gauge
+sglang:num_grammar_queue_reqs{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:gen_throughput The generation throughput (token/s).
+# TYPE sglang:gen_throughput gauge
+sglang:gen_throughput{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:cache_hit_rate The prefix cache hit rate.
+# TYPE sglang:cache_hit_rate gauge
+sglang:cache_hit_rate{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:decode_sum_seq_lens The sum of all sequence lengths in decode.
+# TYPE sglang:decode_sum_seq_lens gauge
+sglang:decode_sum_seq_lens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 20944.0
+# HELP sglang:token_usage The token usage.
+# TYPE sglang:token_usage gauge
+sglang:token_usage{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:full_token_usage The token usage for full attention layers.
+# TYPE sglang:full_token_usage gauge
+sglang:full_token_usage{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:swa_token_usage The token usage for SWA layers.
+# TYPE sglang:swa_token_usage gauge
+sglang:swa_token_usage{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:mamba_usage The token usage for Mamba layers.
+# TYPE sglang:mamba_usage gauge
+sglang:mamba_usage{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:num_used_tokens The number of used tokens.
+# TYPE sglang:num_used_tokens gauge
+sglang:num_used_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:kv_available_tokens Number of free token slots in the KV cache pool.
+# TYPE sglang:kv_available_tokens gauge
+sglang:kv_available_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 841.0
+# HELP sglang:kv_evictable_tokens Number of evictable (radix-cached) token slots in the KV cache pool.
+# TYPE sglang:kv_evictable_tokens gauge
+sglang:kv_evictable_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 64695.0
+# HELP sglang:kv_used_tokens Number of actively used token slots in the KV cache pool.
+# TYPE sglang:kv_used_tokens gauge
+sglang:kv_used_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:swa_available_tokens Number of free token slots in the SWA pool (hybrid-SWA only).
+# TYPE sglang:swa_available_tokens gauge
+sglang:swa_available_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:swa_evictable_tokens Number of evictable (radix-cached) token slots in the SWA pool.
+# TYPE sglang:swa_evictable_tokens gauge
+sglang:swa_evictable_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:swa_used_tokens Number of actively used token slots in the SWA pool.
+# TYPE sglang:swa_used_tokens gauge
+sglang:swa_used_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:mamba_available_tokens Number of free state slots in the mamba SSM pool (hybrid-SSM only).
+# TYPE sglang:mamba_available_tokens gauge
+sglang:mamba_available_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 91.0
+# HELP sglang:mamba_evictable_tokens Number of evictable (radix-cached) state slots in the mamba SSM pool.
+# TYPE sglang:mamba_evictable_tokens gauge
+sglang:mamba_evictable_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 15.0
+# HELP sglang:mamba_used_tokens Number of actively used state slots in the mamba SSM pool.
+# TYPE sglang:mamba_used_tokens gauge
+sglang:mamba_used_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:spec_accept_length Mean acceptance length of speculative decoding (accepted drafts + bonus token per forward).
+# TYPE sglang:spec_accept_length gauge
+sglang:spec_accept_length{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:spec_accept_rate Speculative acceptance rate (`accepted drafts / proposed drafts` in batch).
+# TYPE sglang:spec_accept_rate gauge
+sglang:spec_accept_rate{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:spec_cap_length Mean DSpark confidence-scheduled verify window per verify step, incl the bonus slot (0 when no cap is scheduled).
+# TYPE sglang:spec_cap_length gauge
+sglang:spec_cap_length{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:spec_block_accept_length Mean uncapped full-block accept length per verify step (accept + cap-trimmed drafts; exact only in DSpark cap-accept mode).
+# TYPE sglang:spec_block_accept_length gauge
+sglang:spec_block_accept_length{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:spec_num_steps Currently active speculative_num_steps.
+# TYPE sglang:spec_num_steps gauge
+sglang:spec_num_steps{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:spec_num_draft_tokens Currently active speculative_num_draft_tokens (decouples from steps under topk>1).
+# TYPE sglang:spec_num_draft_tokens gauge
+sglang:spec_num_draft_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:num_prefill_bootstrap_queue_reqs The number of requests in the prefill bootstrap queue.
+# TYPE sglang:num_prefill_bootstrap_queue_reqs gauge
+sglang:num_prefill_bootstrap_queue_reqs{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:num_prefill_inflight_queue_reqs The number of requests in the prefill inflight queue.
+# TYPE sglang:num_prefill_inflight_queue_reqs gauge
+sglang:num_prefill_inflight_queue_reqs{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:num_decode_prealloc_queue_reqs The number of requests in the decode prealloc queue.
+# TYPE sglang:num_decode_prealloc_queue_reqs gauge
+sglang:num_decode_prealloc_queue_reqs{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:num_decode_transfer_queue_reqs The number of requests in the decode transfer queue.
+# TYPE sglang:num_decode_transfer_queue_reqs gauge
+sglang:num_decode_transfer_queue_reqs{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:pending_prealloc_token_usage The token usage for pending preallocated tokens (not preallocated yet).
+# TYPE sglang:pending_prealloc_token_usage gauge
+sglang:pending_prealloc_token_usage{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:utilization The utilization.
+# TYPE sglang:utilization gauge
+sglang:utilization{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:fwd_occupancy Forward pass GPU occupancy percentage.
+# TYPE sglang:fwd_occupancy gauge
+sglang:fwd_occupancy{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} NaN
+# HELP sglang:new_token_ratio The new token ratio.
+# TYPE sglang:new_token_ratio gauge
+sglang:new_token_ratio{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.7
+# HELP sglang:is_cuda_graph Whether the batch is using CUDA graph.
+# TYPE sglang:is_cuda_graph gauge
+sglang:is_cuda_graph{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:hicache_host_used_tokens Number of tokens currently used in the host KV cache.
+# TYPE sglang:hicache_host_used_tokens gauge
+sglang:hicache_host_used_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 96654.0
+# HELP sglang:hicache_host_total_tokens Total capacity of the host KV cache in tokens.
+# TYPE sglang:hicache_host_total_tokens gauge
+sglang:hicache_host_total_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 98305.0
+# HELP sglang:hicache_kv_pool_tokens KV host pool capacity in tokens (the anchor pool).
+# TYPE sglang:hicache_kv_pool_tokens gauge
+sglang:hicache_kv_pool_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 98305.0
+# HELP sglang:hicache_writeback_reserve_tokens Write-back reserve in KV host tokens -- capacity protected for the D->H write-back staging channel.
+# TYPE sglang:hicache_writeback_reserve_tokens gauge
+sglang:hicache_writeback_reserve_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:hicache_ready_resident_tokens KV host tokens held by M6 READY pool members (physically resident full prefixes).
+# TYPE sglang:hicache_ready_resident_tokens gauge
+sglang:hicache_ready_resident_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:hicache_working_tokens KV host tokens committed to the active/warm working set: pool usage minus the READY footprint.
+# TYPE sglang:hicache_working_tokens gauge
+sglang:hicache_working_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 96654.0
+# HELP sglang:hicache_spec_inflight_tokens Speculative Ready-Horizon staging tokens in flight (inflight_speculative_tokens).
+# TYPE sglang:hicache_spec_inflight_tokens gauge
+sglang:hicache_spec_inflight_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:hicache_usable_tokens KV host usable capacity in tokens: pool - write-back reserve - safety margin. The capacity model admits working + ready + spec-inflight <= usable.
+# TYPE sglang:hicache_usable_tokens gauge
+sglang:hicache_usable_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 98305.0
+# HELP sglang:hicache_kv_host_usable_tokens KV host pool usable tokens (pool - reserve - margin), the per-pool usable for the capacity invariance.
+# TYPE sglang:hicache_kv_host_usable_tokens gauge
+sglang:hicache_kv_host_usable_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 98305.0
+# HELP sglang:hicache_mamba_host_usable_tokens Mamba host pool usable tokens (pool - reserve - margin), the per-pool usable for the capacity invariance.
+# TYPE sglang:hicache_mamba_host_usable_tokens gauge
+sglang:hicache_mamba_host_usable_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 160.0
+# HELP sglang:hicache_ready_state_max_tokens Largest KV-token footprint of a READY state seen this run (for the usable >= work + 2*READY_max check).
+# TYPE sglang:hicache_ready_state_max_tokens gauge
+sglang:hicache_ready_state_max_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:num_unique_running_routing_keys Number of unique routing keys in running batch.
+# TYPE sglang:num_unique_running_routing_keys gauge
+sglang:num_unique_running_routing_keys{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:routing_key_running_req_count Distribution of routing keys by running request count (gt < count <= le).
+# TYPE sglang:routing_key_running_req_count gauge
+sglang:routing_key_running_req_count{engine_type="unified",gt="0",le="1",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:routing_key_running_req_count{engine_type="unified",gt="1",le="2",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:routing_key_running_req_count{engine_type="unified",gt="2",le="3",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:routing_key_running_req_count{engine_type="unified",gt="3",le="5",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:routing_key_running_req_count{engine_type="unified",gt="5",le="7",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:routing_key_running_req_count{engine_type="unified",gt="7",le="10",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:routing_key_running_req_count{engine_type="unified",gt="10",le="20",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:routing_key_running_req_count{engine_type="unified",gt="20",le="50",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:routing_key_running_req_count{engine_type="unified",gt="50",le="100",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:routing_key_running_req_count{engine_type="unified",gt="100",le="200",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:routing_key_running_req_count{engine_type="unified",gt="200",le="+Inf",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:routing_key_all_req_count Distribution of routing keys by running+waiting request count (gt < count <= le).
+# TYPE sglang:routing_key_all_req_count gauge
+sglang:routing_key_all_req_count{engine_type="unified",gt="0",le="1",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:routing_key_all_req_count{engine_type="unified",gt="1",le="2",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:routing_key_all_req_count{engine_type="unified",gt="2",le="3",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:routing_key_all_req_count{engine_type="unified",gt="3",le="5",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:routing_key_all_req_count{engine_type="unified",gt="5",le="7",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:routing_key_all_req_count{engine_type="unified",gt="7",le="10",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:routing_key_all_req_count{engine_type="unified",gt="10",le="20",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:routing_key_all_req_count{engine_type="unified",gt="20",le="50",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:routing_key_all_req_count{engine_type="unified",gt="50",le="100",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:routing_key_all_req_count{engine_type="unified",gt="100",le="200",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:routing_key_all_req_count{engine_type="unified",gt="200",le="+Inf",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:startup_time_seconds Engine startup duration by phase in seconds.
+# TYPE sglang:startup_time_seconds gauge
+sglang:startup_time_seconds{engine_type="unified",model_name="qwen3.5-9b-gptq",phase="load_weight"} 15.812196615035646
+sglang:startup_time_seconds{engine_type="unified",model_name="qwen3.5-9b-gptq",phase="kv_cache_allocation"} 0.017929630004800856
+sglang:startup_time_seconds{engine_type="unified",model_name="qwen3.5-9b-gptq",phase="scheduler_e2e"} 78.53724369796691
+sglang:startup_time_seconds{engine_type="unified",model_name="qwen3.5-9b-gptq",phase="tokenizer_e2e"} 88.17533881799318
+# HELP sglang:startup_cuda_graph_time_seconds CUDA graph capture duration by phase in seconds.
+# TYPE sglang:startup_cuda_graph_time_seconds gauge
+sglang:startup_cuda_graph_time_seconds{engine_type="unified",model_name="qwen3.5-9b-gptq",phase="prefill"} 16.281079856969882
+sglang:startup_cuda_graph_time_seconds{engine_type="unified",model_name="qwen3.5-9b-gptq",phase="decode"} 1.5802942480077036
+sglang:startup_cuda_graph_time_seconds{engine_type="unified",model_name="qwen3.5-9b-gptq",phase="target_verify"} 0.0
+sglang:startup_cuda_graph_time_seconds{engine_type="unified",model_name="qwen3.5-9b-gptq",phase="draft_prefill"} 0.0
+sglang:startup_cuda_graph_time_seconds{engine_type="unified",model_name="qwen3.5-9b-gptq",phase="draft_decode"} 0.0
+sglang:startup_cuda_graph_time_seconds{engine_type="unified",model_name="qwen3.5-9b-gptq",phase="draft_extend"} 0.0
+# HELP sglang:prefill_effective_tokens_total Effective prefill tokens with retracted-request re-counts excluded, updated on each log interval. mode: device_hit, host_hit, storage_hit, input. Windowed prefix cache hit rate = rate(sum of *_hit) / rate(sum of all modes); per-tier rate uses a single *_hit mode in the numerator.
+# TYPE sglang:prefill_effective_tokens_total counter
+sglang:prefill_effective_tokens_total{engine_type="unified",mode="input",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 82.0
+sglang:prefill_effective_tokens_total{engine_type="unified",mode="device_hit",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:prefill_effective_tokens_total{engine_type="unified",mode="host_hit",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:prefill_effective_tokens_total{engine_type="unified",mode="storage_hit",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:hicache_dropped_tokens_total The number of device KV tokens destroyed without a host backup, by pool (kv, swa, ...) and reason (e.g. write-back backup failure under host memory pressure).
+# TYPE sglang:hicache_dropped_tokens_total counter
+sglang:hicache_dropped_tokens_total{cache_type="UnifiedRadixCache",pool="kv",reason="host_pressure"} 0.0
+sglang:hicache_dropped_tokens_total{cache_type="UnifiedRadixCache",pool="mamba",reason="host_pressure"} 0.0
+# HELP sglang:cuda_graph_passes_total Total number of forward passes categorized by CUDA graph.
+# TYPE sglang:cuda_graph_passes_total counter
+sglang:cuda_graph_passes_total{engine_type="unified",mode="prefill_cuda_graph",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 1.0
+sglang:cuda_graph_passes_total{engine_type="unified",mode="decode_cuda_graph",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 10.0
+sglang:cuda_graph_passes_total{engine_type="unified",mode="prefill_none",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 2.0
+# HELP sglang:realtime_tokens_total Total number of tokens processed (updated on each log interval). mode: prefill_compute, prefill_cache, decode.
+# TYPE sglang:realtime_tokens_total counter
+sglang:realtime_tokens_total{engine_type="unified",mode="prefill_compute",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 82.0
+sglang:realtime_tokens_total{engine_type="unified",mode="decode",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 10.0
+# HELP sglang:process_cpu_seconds_total Total CPU time consumed by this process (user + system)
+# TYPE sglang:process_cpu_seconds_total counter
+sglang:process_cpu_seconds_total{component="tokenizer"} 1.33
+sglang:process_cpu_seconds_total{component="detokenizer"} 0.10999999999999788
+# HELP sglang:http_requests_total Total number of HTTP requests by endpoint and method
+# TYPE sglang:http_requests_total counter
+sglang:http_requests_total{endpoint="/model_info",method="GET"} 1.0
+sglang:http_requests_total{endpoint="/v1/chat/completions",method="POST"} 1.0
+sglang:http_requests_total{endpoint="/freeze_gc",method="POST"} 1.0
+sglang:http_requests_total{endpoint="/health",method="GET"} 2.0
+sglang:http_requests_total{endpoint="/metrics",method="GET"} 1.0
+# HELP sglang:http_responses_total Total number of HTTP responses by endpoint and status code
+# TYPE sglang:http_responses_total counter
+sglang:http_responses_total{endpoint="/model_info",method="GET",status_code="200"} 1.0
+sglang:http_responses_total{endpoint="/v1/chat/completions",method="POST",status_code="200"} 1.0
+sglang:http_responses_total{endpoint="/freeze_gc",method="POST",status_code="200"} 1.0
+sglang:http_responses_total{endpoint="/health",method="GET",status_code="200"} 2.0
+# HELP sglang:prompt_tokens_total Number of prefill tokens processed.
+# TYPE sglang:prompt_tokens_total counter
+sglang:prompt_tokens_total{engine_type="unified",is_streaming="false",model_name="qwen3.5-9b-gptq"} 80.0
+# HELP sglang:generation_tokens_total Number of generation tokens processed.
+# TYPE sglang:generation_tokens_total counter
+sglang:generation_tokens_total{engine_type="unified",is_streaming="false",model_name="qwen3.5-9b-gptq"} 8.0
+# HELP sglang:num_requests_total Number of requests processed.
+# TYPE sglang:num_requests_total counter
+sglang:num_requests_total{engine_type="unified",is_streaming="false",model_name="qwen3.5-9b-gptq"} 1.0
+# HELP sglang:routing_keys_active Number of unique routing keys with active requests
+# TYPE sglang:routing_keys_active gauge
+sglang:routing_keys_active 0.0
+# HELP sglang:http_requests_active Number of currently active HTTP requests
+# TYPE sglang:http_requests_active gauge
+sglang:http_requests_active{endpoint="/model_info",method="GET"} 0.0
+sglang:http_requests_active{endpoint="/v1/chat/completions",method="POST"} 0.0
+sglang:http_requests_active{endpoint="/freeze_gc",method="POST"} 0.0
+sglang:http_requests_active{endpoint="/health",method="GET"} 0.0
+sglang:http_requests_active{endpoint="/metrics",method="GET"} 1.0
+# HELP sglang:time_to_first_token_seconds Histogram of time to first token in seconds.
+# TYPE sglang:time_to_first_token_seconds histogram
+sglang:time_to_first_token_seconds_sum{engine_type="unified",is_streaming="false",model_name="qwen3.5-9b-gptq"} 1.5012226320104674
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="false",le="0.1",model_name="qwen3.5-9b-gptq"} 0.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="false",le="0.2",model_name="qwen3.5-9b-gptq"} 0.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="false",le="0.4",model_name="qwen3.5-9b-gptq"} 0.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="false",le="0.6",model_name="qwen3.5-9b-gptq"} 0.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="false",le="0.8",model_name="qwen3.5-9b-gptq"} 0.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="false",le="1.0",model_name="qwen3.5-9b-gptq"} 0.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="false",le="2.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="false",le="4.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="false",le="6.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="false",le="8.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="false",le="10.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="false",le="20.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="false",le="40.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="false",le="60.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="false",le="80.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="false",le="100.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="false",le="200.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="false",le="400.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:time_to_first_token_seconds_bucket{engine_type="unified",is_streaming="false",le="+Inf",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:time_to_first_token_seconds_count{engine_type="unified",is_streaming="false",model_name="qwen3.5-9b-gptq"} 1.0
+# HELP sglang:e2e_request_latency_seconds Histogram of End-to-end request latency in seconds
+# TYPE sglang:e2e_request_latency_seconds histogram
+sglang:e2e_request_latency_seconds_sum{engine_type="unified",is_streaming="false",model_name="qwen3.5-9b-gptq"} 1.5012255039764568
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="0.1",model_name="qwen3.5-9b-gptq"} 0.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="0.2",model_name="qwen3.5-9b-gptq"} 0.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="0.4",model_name="qwen3.5-9b-gptq"} 0.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="0.6",model_name="qwen3.5-9b-gptq"} 0.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="0.8",model_name="qwen3.5-9b-gptq"} 0.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="1.0",model_name="qwen3.5-9b-gptq"} 0.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="2.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="4.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="6.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="8.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="10.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="20.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="40.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="60.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="80.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="100.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="200.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="400.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="600.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="1200.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="1800.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="2400.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:e2e_request_latency_seconds_bucket{engine_type="unified",is_streaming="false",le="+Inf",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:e2e_request_latency_seconds_count{engine_type="unified",is_streaming="false",model_name="qwen3.5-9b-gptq"} 1.0
+# HELP sglang:prompt_tokens_histogram Histogram of prompt token length.
+# TYPE sglang:prompt_tokens_histogram histogram
+sglang:prompt_tokens_histogram_sum{engine_type="unified",model_name="qwen3.5-9b-gptq"} 80.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="100.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="300.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="500.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="700.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="1000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="1500.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="2000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="3000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="4000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="5000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="6000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="7000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="8000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="9000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="10000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="12500.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="15000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="17500.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="20000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="22500.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="25000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="27500.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="30000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="35000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="40000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="60000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="80000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="100000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="200000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="300000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="400000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="600000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="800000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="1e+06",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="1.1e+06",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_bucket{engine_type="unified",le="+Inf",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:prompt_tokens_histogram_count{engine_type="unified",model_name="qwen3.5-9b-gptq"} 1.0
+# HELP sglang:uncached_prompt_tokens_histogram Histogram of uncached (compute) prompt token length.
+# TYPE sglang:uncached_prompt_tokens_histogram histogram
+sglang:uncached_prompt_tokens_histogram_sum{engine_type="unified",model_name="qwen3.5-9b-gptq"} 80.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="100.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="300.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="500.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="700.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="1000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="1500.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="2000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="3000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="4000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="5000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="6000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="7000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="8000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="9000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="10000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="12500.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="15000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="17500.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="20000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="22500.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="25000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="27500.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="30000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="35000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="40000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="60000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="80000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="100000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="200000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="300000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="400000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="600000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="800000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="1e+06",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="1.1e+06",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:uncached_prompt_tokens_histogram_bucket{engine_type="unified",le="+Inf",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:uncached_prompt_tokens_histogram_count{engine_type="unified",model_name="qwen3.5-9b-gptq"} 1.0
+# HELP sglang:generation_tokens_histogram Histogram of generation token length.
+# TYPE sglang:generation_tokens_histogram histogram
+sglang:generation_tokens_histogram_sum{engine_type="unified",model_name="qwen3.5-9b-gptq"} 8.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="100.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="300.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="500.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="700.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="1000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="1500.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="2000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="3000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="4000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="5000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="6000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="7000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="8000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="9000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="10000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="12500.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="15000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="17500.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="20000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="22500.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="25000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="27500.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="30000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="35000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="40000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="60000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="80000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="100000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="200000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="300000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="400000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="600000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="800000.0",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="1e+06",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="1.1e+06",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:generation_tokens_histogram_bucket{engine_type="unified",le="+Inf",model_name="qwen3.5-9b-gptq"} 1.0
+sglang:generation_tokens_histogram_count{engine_type="unified",model_name="qwen3.5-9b-gptq"} 1.0
+# HELP sglang:num_retracted_reqs The number of retracted requests.
+# TYPE sglang:num_retracted_reqs gauge
+sglang:num_retracted_reqs{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pid="287480",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:num_paused_reqs The number of paused requests by async weight sync.
+# TYPE sglang:num_paused_reqs gauge
+sglang:num_paused_reqs{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pid="287480",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:per_stage_req_latency_seconds The latency of each stage of requests.
+# TYPE sglang:per_stage_req_latency_seconds histogram
+sglang:per_stage_req_latency_seconds_sum{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 0.00587513402570039
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.001",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 2.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.0016200000000000001",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 2.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.0026244000000000007",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 2.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.004251528",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 2.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.006887475360000002",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.011157710083200004",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.018075490334784006",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.029282294342350097",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.047437316834607154",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.07684845327206359",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.12449449430074302",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.20168108076720373",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.3267233508428701",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.5292918283654495",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.8574527619520282",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="1.389073474362286",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="2.2502990284669036",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="3.6454844261163837",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="5.905684770308542",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="9.567209327899839",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="15.49887911119774",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="25.10818416014034",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="40.67525833942735",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="65.89391850987231",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="106.74814798599316",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="172.93199973730896",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="280.1498395744405",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="453.84274011059364",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="735.2252389791618",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="1191.064887146242",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="+Inf",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_count{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="request_process",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_sum{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 1.2817620629793964
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.001",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 0.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.0016200000000000001",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 0.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.0026244000000000007",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 0.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.004251528",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 0.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.006887475360000002",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 0.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.011157710083200004",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 0.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.018075490334784006",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 0.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.029282294342350097",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 0.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.047437316834607154",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 0.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.07684845327206359",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 1.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.12449449430074302",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 2.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.20168108076720373",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 2.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.3267233508428701",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 2.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.5292918283654495",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 2.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="0.8574527619520282",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 2.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="1.389073474362286",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="2.2502990284669036",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="3.6454844261163837",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="5.905684770308542",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="9.567209327899839",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="15.49887911119774",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="25.10818416014034",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="40.67525833942735",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="65.89391850987231",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="106.74814798599316",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="172.93199973730896",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="280.1498395744405",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="453.84274011059364",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="735.2252389791618",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="1191.064887146242",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_bucket{engine_type="unified",le="+Inf",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 3.0
+sglang:per_stage_req_latency_seconds_count{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",stage="prefill_forward",tp_rank="0"} 3.0
+# HELP sglang:queue_time_seconds Histogram of queueing time in seconds.
+# TYPE sglang:queue_time_seconds histogram
+sglang:queue_time_seconds_sum{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.005778945982456207
+sglang:queue_time_seconds_bucket{engine_type="unified",le="0.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="0.001",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 1.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="0.005",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 3.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="0.01",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 3.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="0.05",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 3.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="0.1",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 3.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="0.2",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 3.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="0.5",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 3.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="1.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 3.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="2.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 3.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="3.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 3.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="4.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 3.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="5.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 3.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="10.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 3.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="15.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 3.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="20.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 3.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="30.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 3.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="40.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 3.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="50.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 3.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="60.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 3.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="70.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 3.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="80.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 3.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="90.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 3.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="100.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 3.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="200.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 3.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="300.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 3.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="400.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 3.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="500.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 3.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="600.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 3.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="700.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 3.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="800.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 3.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="900.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 3.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="1000.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 3.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="1200.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 3.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="1400.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 3.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="1600.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 3.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="1800.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 3.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="2000.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 3.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="2500.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 3.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="3000.0",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 3.0
+sglang:queue_time_seconds_bucket{engine_type="unified",le="+Inf",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 3.0
+sglang:queue_time_seconds_count{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 3.0
+# HELP sglang:max_total_num_tokens Maximum total number of tokens in the KV cache pool.
+# TYPE sglang:max_total_num_tokens gauge
+sglang:max_total_num_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 65536.0
+# HELP sglang:weight_memory_usage_gb Memory used by model weights in GB.
+# TYPE sglang:weight_memory_usage_gb gauge
+sglang:weight_memory_usage_gb{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 10.35546875
+# HELP sglang:kv_cache_memory_usage_gb Memory used by the KV cache pools in GB.
+# TYPE sglang:kv_cache_memory_usage_gb gauge
+sglang:kv_cache_memory_usage_gb{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 2.000030517578125
+# HELP sglang:graph_memory_usage_gb Memory used by captured device graphs in GB.
+# TYPE sglang:graph_memory_usage_gb gauge
+sglang:graph_memory_usage_gb{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",phase="prefill",pp_rank="0",tp_rank="0"} 0.63671875
+sglang:graph_memory_usage_gb{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",phase="decode",pp_rank="0",tp_rank="0"} 0.080078125
+sglang:graph_memory_usage_gb{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",phase="target_verify",pp_rank="0",tp_rank="0"} 0.0
+sglang:graph_memory_usage_gb{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",phase="draft_prefill",pp_rank="0",tp_rank="0"} 0.0
+sglang:graph_memory_usage_gb{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",phase="draft_decode",pp_rank="0",tp_rank="0"} 0.0
+sglang:graph_memory_usage_gb{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",phase="draft_extend",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:page_size KV cache page size in tokens.
+# TYPE sglang:page_size gauge
+sglang:page_size{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 1.0
+# HELP sglang:num_pages Number of KV cache pages.
+# TYPE sglang:num_pages gauge
+sglang:num_pages{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 65536.0
+# HELP sglang:context_len Maximum context length.
+# TYPE sglang:context_len gauge
+sglang:context_len{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 262144.0
+# HELP sglang:startup_available_gpu_memory_gb Available GPU memory in GB at startup.
+# TYPE sglang:startup_available_gpu_memory_gb gauge
+sglang:startup_available_gpu_memory_gb{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 4.5555419921875
+# HELP sglang:num_running_reqs The number of running requests.
+# TYPE sglang:num_running_reqs gauge
+sglang:num_running_reqs{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:num_queue_reqs The number of requests in the waiting queue.
+# TYPE sglang:num_queue_reqs gauge
+sglang:num_queue_reqs{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:num_grammar_queue_reqs The number of requests in the grammar waiting queue.
+# TYPE sglang:num_grammar_queue_reqs gauge
+sglang:num_grammar_queue_reqs{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:gen_throughput The generation throughput (token/s).
+# TYPE sglang:gen_throughput gauge
+sglang:gen_throughput{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:cache_hit_rate The prefix cache hit rate.
+# TYPE sglang:cache_hit_rate gauge
+sglang:cache_hit_rate{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:decode_sum_seq_lens The sum of all sequence lengths in decode.
+# TYPE sglang:decode_sum_seq_lens gauge
+sglang:decode_sum_seq_lens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:token_usage The token usage.
+# TYPE sglang:token_usage gauge
+sglang:token_usage{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:full_token_usage The token usage for full attention layers.
+# TYPE sglang:full_token_usage gauge
+sglang:full_token_usage{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:swa_token_usage The token usage for SWA layers.
+# TYPE sglang:swa_token_usage gauge
+sglang:swa_token_usage{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:mamba_usage The token usage for Mamba layers.
+# TYPE sglang:mamba_usage gauge
+sglang:mamba_usage{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:num_used_tokens The number of used tokens.
+# TYPE sglang:num_used_tokens gauge
+sglang:num_used_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:kv_available_tokens Number of free token slots in the KV cache pool.
+# TYPE sglang:kv_available_tokens gauge
+sglang:kv_available_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 65472.0
+# HELP sglang:kv_evictable_tokens Number of evictable (radix-cached) token slots in the KV cache pool.
+# TYPE sglang:kv_evictable_tokens gauge
+sglang:kv_evictable_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 64.0
+# HELP sglang:kv_used_tokens Number of actively used token slots in the KV cache pool.
+# TYPE sglang:kv_used_tokens gauge
+sglang:kv_used_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:swa_available_tokens Number of free token slots in the SWA pool (hybrid-SWA only).
+# TYPE sglang:swa_available_tokens gauge
+sglang:swa_available_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:swa_evictable_tokens Number of evictable (radix-cached) token slots in the SWA pool.
+# TYPE sglang:swa_evictable_tokens gauge
+sglang:swa_evictable_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:swa_used_tokens Number of actively used token slots in the SWA pool.
+# TYPE sglang:swa_used_tokens gauge
+sglang:swa_used_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:mamba_available_tokens Number of free state slots in the mamba SSM pool (hybrid-SSM only).
+# TYPE sglang:mamba_available_tokens gauge
+sglang:mamba_available_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 105.0
+# HELP sglang:mamba_evictable_tokens Number of evictable (radix-cached) state slots in the mamba SSM pool.
+# TYPE sglang:mamba_evictable_tokens gauge
+sglang:mamba_evictable_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 1.0
+# HELP sglang:mamba_used_tokens Number of actively used state slots in the mamba SSM pool.
+# TYPE sglang:mamba_used_tokens gauge
+sglang:mamba_used_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:spec_accept_length Mean acceptance length of speculative decoding (accepted drafts + bonus token per forward).
+# TYPE sglang:spec_accept_length gauge
+sglang:spec_accept_length{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:spec_accept_rate Speculative acceptance rate (`accepted drafts / proposed drafts` in batch).
+# TYPE sglang:spec_accept_rate gauge
+sglang:spec_accept_rate{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:spec_cap_length Mean DSpark confidence-scheduled verify window per verify step, incl the bonus slot (0 when no cap is scheduled).
+# TYPE sglang:spec_cap_length gauge
+sglang:spec_cap_length{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:spec_block_accept_length Mean uncapped full-block accept length per verify step (accept + cap-trimmed drafts; exact only in DSpark cap-accept mode).
+# TYPE sglang:spec_block_accept_length gauge
+sglang:spec_block_accept_length{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:spec_num_steps Currently active speculative_num_steps.
+# TYPE sglang:spec_num_steps gauge
+sglang:spec_num_steps{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:spec_num_draft_tokens Currently active speculative_num_draft_tokens (decouples from steps under topk>1).
+# TYPE sglang:spec_num_draft_tokens gauge
+sglang:spec_num_draft_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:num_prefill_bootstrap_queue_reqs The number of requests in the prefill bootstrap queue.
+# TYPE sglang:num_prefill_bootstrap_queue_reqs gauge
+sglang:num_prefill_bootstrap_queue_reqs{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:num_prefill_inflight_queue_reqs The number of requests in the prefill inflight queue.
+# TYPE sglang:num_prefill_inflight_queue_reqs gauge
+sglang:num_prefill_inflight_queue_reqs{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:num_decode_prealloc_queue_reqs The number of requests in the decode prealloc queue.
+# TYPE sglang:num_decode_prealloc_queue_reqs gauge
+sglang:num_decode_prealloc_queue_reqs{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:num_decode_transfer_queue_reqs The number of requests in the decode transfer queue.
+# TYPE sglang:num_decode_transfer_queue_reqs gauge
+sglang:num_decode_transfer_queue_reqs{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:pending_prealloc_token_usage The token usage for pending preallocated tokens (not preallocated yet).
+# TYPE sglang:pending_prealloc_token_usage gauge
+sglang:pending_prealloc_token_usage{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:utilization The utilization.
+# TYPE sglang:utilization gauge
+sglang:utilization{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:fwd_occupancy Forward pass GPU occupancy percentage.
+# TYPE sglang:fwd_occupancy gauge
+sglang:fwd_occupancy{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} NaN
+# HELP sglang:new_token_ratio The new token ratio.
+# TYPE sglang:new_token_ratio gauge
+sglang:new_token_ratio{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.7
+# HELP sglang:is_cuda_graph Whether the batch is using CUDA graph.
+# TYPE sglang:is_cuda_graph gauge
+sglang:is_cuda_graph{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:hicache_host_used_tokens Number of tokens currently used in the host KV cache.
+# TYPE sglang:hicache_host_used_tokens gauge
+sglang:hicache_host_used_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:hicache_host_total_tokens Total capacity of the host KV cache in tokens.
+# TYPE sglang:hicache_host_total_tokens gauge
+sglang:hicache_host_total_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 98305.0
+# HELP sglang:hicache_kv_pool_tokens KV host pool capacity in tokens (the anchor pool).
+# TYPE sglang:hicache_kv_pool_tokens gauge
+sglang:hicache_kv_pool_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 98305.0
+# HELP sglang:hicache_writeback_reserve_tokens Write-back reserve in KV host tokens -- capacity protected for the D->H write-back staging channel.
+# TYPE sglang:hicache_writeback_reserve_tokens gauge
+sglang:hicache_writeback_reserve_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:hicache_ready_resident_tokens KV host tokens held by M6 READY pool members (physically resident full prefixes).
+# TYPE sglang:hicache_ready_resident_tokens gauge
+sglang:hicache_ready_resident_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:hicache_working_tokens KV host tokens committed to the active/warm working set: pool usage minus the READY footprint.
+# TYPE sglang:hicache_working_tokens gauge
+sglang:hicache_working_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:hicache_spec_inflight_tokens Speculative Ready-Horizon staging tokens in flight (inflight_speculative_tokens).
+# TYPE sglang:hicache_spec_inflight_tokens gauge
+sglang:hicache_spec_inflight_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:hicache_usable_tokens KV host usable capacity in tokens: pool - write-back reserve - safety margin. The capacity model admits working + ready + spec-inflight <= usable.
+# TYPE sglang:hicache_usable_tokens gauge
+sglang:hicache_usable_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 98305.0
+# HELP sglang:hicache_kv_host_usable_tokens KV host pool usable tokens (pool - reserve - margin), the per-pool usable for the capacity invariance.
+# TYPE sglang:hicache_kv_host_usable_tokens gauge
+sglang:hicache_kv_host_usable_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 98305.0
+# HELP sglang:hicache_mamba_host_usable_tokens Mamba host pool usable tokens (pool - reserve - margin), the per-pool usable for the capacity invariance.
+# TYPE sglang:hicache_mamba_host_usable_tokens gauge
+sglang:hicache_mamba_host_usable_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 160.0
+# HELP sglang:hicache_ready_state_max_tokens Largest KV-token footprint of a READY state seen this run (for the usable >= work + 2*READY_max check).
+# TYPE sglang:hicache_ready_state_max_tokens gauge
+sglang:hicache_ready_state_max_tokens{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:num_unique_running_routing_keys Number of unique routing keys in running batch.
+# TYPE sglang:num_unique_running_routing_keys gauge
+sglang:num_unique_running_routing_keys{engine_type="unified",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:routing_key_running_req_count Distribution of routing keys by running request count (gt < count <= le).
+# TYPE sglang:routing_key_running_req_count gauge
+sglang:routing_key_running_req_count{engine_type="unified",gt="0",le="1",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:routing_key_running_req_count{engine_type="unified",gt="1",le="2",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:routing_key_running_req_count{engine_type="unified",gt="2",le="3",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:routing_key_running_req_count{engine_type="unified",gt="3",le="5",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:routing_key_running_req_count{engine_type="unified",gt="5",le="7",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:routing_key_running_req_count{engine_type="unified",gt="7",le="10",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:routing_key_running_req_count{engine_type="unified",gt="10",le="20",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:routing_key_running_req_count{engine_type="unified",gt="20",le="50",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:routing_key_running_req_count{engine_type="unified",gt="50",le="100",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:routing_key_running_req_count{engine_type="unified",gt="100",le="200",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:routing_key_running_req_count{engine_type="unified",gt="200",le="+Inf",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:routing_key_all_req_count Distribution of routing keys by running+waiting request count (gt < count <= le).
+# TYPE sglang:routing_key_all_req_count gauge
+sglang:routing_key_all_req_count{engine_type="unified",gt="0",le="1",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:routing_key_all_req_count{engine_type="unified",gt="1",le="2",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:routing_key_all_req_count{engine_type="unified",gt="2",le="3",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:routing_key_all_req_count{engine_type="unified",gt="3",le="5",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:routing_key_all_req_count{engine_type="unified",gt="5",le="7",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:routing_key_all_req_count{engine_type="unified",gt="7",le="10",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:routing_key_all_req_count{engine_type="unified",gt="10",le="20",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:routing_key_all_req_count{engine_type="unified",gt="20",le="50",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:routing_key_all_req_count{engine_type="unified",gt="50",le="100",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:routing_key_all_req_count{engine_type="unified",gt="100",le="200",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+sglang:routing_key_all_req_count{engine_type="unified",gt="200",le="+Inf",model_name="qwen3.5-9b-gptq",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.0
+# HELP sglang:startup_time_seconds Engine startup duration by phase in seconds.
+# TYPE sglang:startup_time_seconds gauge
+sglang:startup_time_seconds{engine_type="unified",model_name="qwen3.5-9b-gptq",phase="load_weight"} 15.812196615035646
+sglang:startup_time_seconds{engine_type="unified",model_name="qwen3.5-9b-gptq",phase="kv_cache_allocation"} 0.017929630004800856
+sglang:startup_time_seconds{engine_type="unified",model_name="qwen3.5-9b-gptq",phase="scheduler_e2e"} 78.53724369796691
+sglang:startup_time_seconds{engine_type="unified",model_name="qwen3.5-9b-gptq",phase="tokenizer_e2e"} 88.17533881799318
+# HELP sglang:startup_cuda_graph_time_seconds CUDA graph capture duration by phase in seconds.
+# TYPE sglang:startup_cuda_graph_time_seconds gauge
+sglang:startup_cuda_graph_time_seconds{engine_type="unified",model_name="qwen3.5-9b-gptq",phase="prefill"} 16.281079856969882
+sglang:startup_cuda_graph_time_seconds{engine_type="unified",model_name="qwen3.5-9b-gptq",phase="decode"} 1.5802942480077036
+sglang:startup_cuda_graph_time_seconds{engine_type="unified",model_name="qwen3.5-9b-gptq",phase="target_verify"} 0.0
+sglang:startup_cuda_graph_time_seconds{engine_type="unified",model_name="qwen3.5-9b-gptq",phase="draft_prefill"} 0.0
+sglang:startup_cuda_graph_time_seconds{engine_type="unified",model_name="qwen3.5-9b-gptq",phase="draft_decode"} 0.0
+sglang:startup_cuda_graph_time_seconds{engine_type="unified",model_name="qwen3.5-9b-gptq",phase="draft_extend"} 0.0
+[2026-09-04 09:45:31] [P2A] ts_ms=1788486331839 evt=restore_disposition rid=2d75311645f84e65a955d10a2375163c disposition=RECOMPUTE requested=79 granted=0 reason=too_short
+[2026-09-04 09:45:37] [P2A] ts_ms=1788486337691 evt=restore_disposition rid=HEALTH_CHECK_0463f64d2e1c40c18e4d1796bdbbeb94 disposition=RECOMPUTE requested=0 granted=0 reason=too_short
+[2026-09-04 09:45:38] [P2A] ts_ms=1788486338131 evt=restore_disposition rid=HEALTH_CHECK_79c7ed972dd0497d8312ac6b42f37c9a disposition=RECOMPUTE requested=0 granted=0 reason=too_short
+[2026-09-04 09:45:40] [P2A] ts_ms=1788486340499 evt=restore_disposition rid=34cb8e5b21f04e6bacb5c6e6147eebde disposition=RECOMPUTE requested=20910 granted=0 reason=revoked:miss
+[2026-09-04 09:45:41] [P2A] ts_ms=1788486341951 evt=restore_disposition rid=3c0fdfb7bc0247e380d2286a37d20aeb disposition=RECOMPUTE requested=20910 granted=0 reason=revoked:miss
+[2026-09-04 09:45:43] [P2A] ts_ms=1788486343416 evt=restore_disposition rid=8adb25e1c07d4734893dcb274c9e189a disposition=RECOMPUTE requested=20910 granted=0 reason=revoked:miss
+[2026-09-04 09:45:44] [P2A] ts_ms=1788486344442 evt=restore_disposition rid=ce191bf42cb64300b9d72aeae7d9cf3a disposition=RECOMPUTE requested=20910 granted=0 reason=revoked:miss
+[2026-09-04 09:45:56] [P2A] ts_ms=1788486356599 evt=restore_disposition rid=ce191bf42cb64300b9d72aeae7d9cf3a disposition=RECOMPUTE requested=20910 granted=0 reason=revoked:miss
+[2026-09-04 09:45:57] [P3] ts_ms=1788486357094 evt=extent_write node=None component=kv keys_n=3 bytes=98304
+[2026-09-04 09:45:57] [P3] ts_ms=1788486357183 evt=extent_write node=None component=mamba keys_n=1 bytes=51511296
+[2026-09-04 09:45:57] [P3] ts_ms=1788486357186 evt=extent_write node=None component=kv keys_n=61 bytes=1998848
+[2026-09-04 09:45:57] [P3] ts_ms=1788486357225 evt=extent_write node=None component=kv keys_n=6 bytes=196608
+[2026-09-04 09:45:57] [P3] ts_ms=1788486357295 evt=extent_write node=None component=mamba keys_n=1 bytes=51511296
+[2026-09-04 09:45:57] [P3] ts_ms=1788486357316 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 09:45:57] [P3] ts_ms=1788486357336 evt=extent_write node=None component=kv keys_n=1015 bytes=33259520
+[2026-09-04 09:45:57] [P3] ts_ms=1788486357406 evt=extent_write node=None component=mamba keys_n=1 bytes=51511296
+[2026-09-04 09:45:57] [P3] ts_ms=1788486357426 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 09:45:57] [P3] ts_ms=1788486357445 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 09:45:57] [P3] ts_ms=1788486357518 evt=extent_write node=None component=mamba keys_n=1 bytes=51511296
+[2026-09-04 09:45:57] [P3] ts_ms=1788486357538 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 09:45:57] [P3] ts_ms=1788486357557 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 09:45:57] [P3] ts_ms=1788486357630 evt=extent_write node=None component=mamba keys_n=1 bytes=51511296
+[2026-09-04 09:45:57] [P3] ts_ms=1788486357650 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 09:45:57] [P3] ts_ms=1788486357669 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 09:45:57] [P3] ts_ms=1788486357741 evt=extent_write node=None component=mamba keys_n=1 bytes=51511296
+[2026-09-04 09:45:57] [P3] ts_ms=1788486357762 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 09:45:57] [P3] ts_ms=1788486357781 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 09:45:57] [P3] ts_ms=1788486357851 evt=extent_write node=None component=mamba keys_n=1 bytes=51511296
+[2026-09-04 09:45:57] [P3] ts_ms=1788486357871 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 09:45:57] [P3] ts_ms=1788486357888 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 09:45:57] [P3] ts_ms=1788486357960 evt=extent_write node=None component=mamba keys_n=1 bytes=51511296
+[2026-09-04 09:45:57] [P3] ts_ms=1788486357981 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 09:45:58] [P3] ts_ms=1788486358000 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 09:45:58] [P3] ts_ms=1788486358070 evt=extent_write node=None component=mamba keys_n=1 bytes=51511296
+[2026-09-04 09:45:58] [P3] ts_ms=1788486358091 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 09:45:58] [P3] ts_ms=1788486358110 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 09:45:58] [P3] ts_ms=1788486358182 evt=extent_write node=None component=mamba keys_n=1 bytes=51511296
+[2026-09-04 09:45:58] [P3] ts_ms=1788486358203 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 09:45:58] [P3] ts_ms=1788486358222 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 09:45:58] [P3] ts_ms=1788486358295 evt=extent_write node=None component=mamba keys_n=1 bytes=51511296
+[2026-09-04 09:45:58] [P3] ts_ms=1788486358315 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 09:45:58] [P3] ts_ms=1788486358333 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 09:45:58] [P3] ts_ms=1788486358403 evt=extent_write node=None component=mamba keys_n=1 bytes=51511296
+[2026-09-04 09:45:58] [P3] ts_ms=1788486358412 evt=extent_write node=None component=kv keys_n=384 bytes=12582912
+[2026-09-04 09:45:58] [P2A] ts_ms=1788486358473 evt=restore_disposition rid=db994115cd4947fdb8de0971975fc6d6 disposition=RECOMPUTE requested=11427 granted=0 reason=revoked:miss
+[2026-09-04 09:45:58] [P3] ts_ms=1788486358482 evt=extent_write node=None component=mamba keys_n=1 bytes=51511296
+[2026-09-04 09:45:58] [P3] ts_ms=1788486358503 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 09:45:58] [P3] ts_ms=1788486358506 evt=extent_write node=None component=kv keys_n=119 bytes=3899392
+[2026-09-04 09:45:58] [P3] ts_ms=1788486358574 evt=extent_write node=None component=mamba keys_n=1 bytes=51511296
+[2026-09-04 09:45:58] [P3] ts_ms=1788486358595 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 09:45:58] [P3] ts_ms=1788486358615 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 09:45:58] [P3] ts_ms=1788486358617 evt=extent_write node=None component=kv keys_n=34 bytes=1114112
+[2026-09-04 09:45:58] [P3] ts_ms=1788486358685 evt=extent_write node=None component=mamba keys_n=1 bytes=51511296
+[2026-09-04 09:45:58] [P3] ts_ms=1788486358706 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 09:45:58] [P3] ts_ms=1788486358726 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 09:45:58] [P3] ts_ms=1788486358798 evt=extent_write node=None component=mamba keys_n=1 bytes=51511296
+[2026-09-04 09:45:58] [P3] ts_ms=1788486358820 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 09:45:58] [P3] ts_ms=1788486358838 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 09:45:58] [P3] ts_ms=1788486358910 evt=extent_write node=None component=mamba keys_n=1 bytes=51511296
+[2026-09-04 09:45:58] [P3] ts_ms=1788486358932 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 09:44:02] server_args={'model_path': '/root/models/Qwen3.5-9B-w4a16', 'tokenizer_path': '/root/models/Qwen3.5-9B-w4a16', 'tokenizer_mode': 'auto', 'tokenizer_backend': 'huggingface', 'tokenizer_worker_num': 1, 'detokenizer_worker_num': 1, 'skip_tokenizer_init': False, 'load_format': 'auto', 'model_loader_extra_config': '{}', 'trust_remote_code': True, 'context_length': None, 'is_embedding': False, 'enable_multimodal': None, 'revision': None, 'model_impl': 'auto', 'model_config_parser': 'auto', 'json_model_override_args': '{}', 'dtype': 'auto', 'quantization': None, 'quantization_param_path': None, 'kv_cache_dtype': 'bf16', 'enable_fp32_lm_head': False, 'modelopt_quant': None, 'modelopt_checkpoint_restore_path': None, 'modelopt_checkpoint_save_path': None, 'modelopt_export_path': None, 'quantize_and_serve': False, 'rl_quant_profile': None, 'enable_tf32_matmul': False, 'mem_fraction_static': 0.92, 'max_running_requests': 8, 'max_queued_requests': None, 'max_total_tokens': 65536, 'chunked_prefill_size': 2048, 'prefill_decode_interval': 0, 'enable_dynamic_chunking': False, 'max_prefill_tokens': 16384, 'prefill_max_requests': None, 'schedule_policy': 'fcfs', 'enable_priority_scheduling': False, 'disable_priority_preemption': False, 'default_priority_value': None, 'abort_on_priority_when_disabled': False, 'schedule_low_priority_values_first': False, 'priority_scheduling_preemption_threshold': 10, 'retraction_policy': 'length', 'schedule_conservativeness': 1.0, 'page_size': 1, 'c128_page_size': 16, 'swa_full_tokens_ratio': 0.8, 'disable_hybrid_swa_memory': False, 'radix_eviction_policy': 'lru', 'prefill_only_disable_kv_cache': False, 'disable_radix_cache': False, 'enable_page_major_kv_layout': False, 'enable_unified_memory': False, 'disable_chunked_prefix_cache': False, 'disable_overlap_schedule': False, 'num_continuous_decode_steps': 1, 'scheduler_recv_interval': 1, 'enable_mixed_chunk': False, 'nccl_port': None, 'dist_timeout': None, 'dist_init_addr': None, 'gated_launch_port': None, 'nnodes': 1, 'node_rank': 0, 'tp_size': 1, 'dcp_size': 1, 'pp_size': 1, 'pp_max_micro_batch_size': None, 'pp_async_batch_depth': 0, 'dp_size': 1, 'load_balance_method': 'round_robin', 'attn_cp_size': 1, 'moe_dp_size': 1, 'dwdp_size': 1, 'dcp_comm_backend': 'ag_rs', 'dcp_replicate_q_proj': None, 'enable_prefill_cp': False, 'cp_strategy': None, 'enable_dsa_cache_layer_split': False, 'enable_dsa_prefill_context_parallel': False, 'dsa_prefill_cp_mode': 'round-robin-split', 'enable_prefill_context_parallel': False, 'prefill_cp_mode': 'in-seq-split', 'enable_cp_decode_attn_tp': False, 'enable_dp_attention': False, 'enable_dp_attention_local_control_broadcast': False, 'enable_dp_lm_head': False, 'enable_tp_lm_head_all_to_all': False, 'enable_attn_tp_input_scattered': False, 'enable_shared_experts_attn_tp': False, 'enable_dense_mlp_attn_tp': False, 'disable_attn_tp_gather': False, 'enable_p2p_check': False, 'device': 'cuda', 'base_gpu_id': 0, 'gpu_id_step': 1, 'random_seed': 962467403, 'mlx_enable_sampling': False, 'watchdog_timeout': 300, 'soft_watchdog_timeout': None, 'sleep_on_idle': False, 'use_ray': False, 'custom_sigquit_handler': None, 'numa_node': None, 'gc_threshold': None, 'host': '0.0.0.0', 'port': 8024, 'fastapi_root_path': '', 'smg_grpc_mode': False, 'grpc_mode': False, 'grpc_port': None, 'grpc_worker_threads': 4, 'sidecar': None, 'sidecar_args': None, 'skip_server_warmup': False, 'warmups': None, 'enable_http2': False, 'http2_max_concurrent_streams': 200, 'ssl_keyfile': None, 'ssl_certfile': None, 'ssl_ca_certs': None, 'ssl_keyfile_password': None, 'enable_ssl_refresh': False, 'api_key': None, 'admin_api_key': '9aa6b870f64caeb09e4786a8b84383ac7b0a2b14a36484735f503521c14e3a6b', 'served_model_name': 'qwen3.5-9b-gptq', 'weight_version': 'default', 'chat_template': None, 'hf_chat_template_name': None, 'completion_template': None, 'file_storage_path': 'sglang_storage', 'enable_cache_report': True, 'reasoning_parser': 'qwen3', 'default_chat_template_kwargs': None, 'strip_thinking_cache': False, 'enable_strict_thinking': False, 'tool_call_parser': 'qwen3_coder', 'tool_server': None, 'sampling_defaults': 'model', 'asr_max_buffer_seconds': 60, 'asr_max_concurrent_sessions': 32, 'preferred_sampling_params': None, 'allow_auto_truncate': False, 'stream_interval': 1, 'batch_notify_size': 16, 'stream_response_default_include_usage': False, 'incremental_streaming_output': False, 'enable_streaming_session': False, 'enable_session_radix_cache': False, 'log_level': 'info', 'log_level_http': None, 'log_requests': False, 'log_requests_level': 2, 'log_requests_format': 'text', 'log_requests_target': None, 'uvicorn_access_log_exclude_prefixes': [], 'crash_dump_folder': None, 'show_time_cost': False, 'enable_metrics': True, 'smg_http_sidecar_port': None, 'enable_mfu_metrics': False, 'enable_metrics_for_all_schedulers': False, 'load_snapshot_publish_interval': 15, 'tokenizer_metrics_custom_labels_header': 'x-custom-labels', 'tokenizer_metrics_allowed_custom_labels': None, 'extra_metric_labels': None, 'bucket_time_to_first_token': None, 'bucket_inter_token_latency': None, 'bucket_e2e_request_latency': None, 'prompt_tokens_buckets': None, 'generation_tokens_buckets': None, 'gc_warning_threshold_secs': 0.0, 'decode_log_interval': 40, 'enable_request_time_stats_logging': False, 'kv_events_config': None, 'load_publish_endpoint': None, 'enable_forward_pass_metrics': False, 'forward_pass_metrics_worker_id': '', 'forward_pass_metrics_ipc_name': None, 'enable_trace': False, 'trace_modules': 'request', 'otlp_traces_endpoint': 'localhost:4317', 'export_metrics_to_file': False, 'export_metrics_to_file_dir': None, 'stat_loggers': None, 'constrained_json_whitespace_pattern': None, 'constrained_json_disable_any_whitespace': False, 'attention_backend': 'flashinfer', 'decode_attention_backend': None, 'prefill_attention_backend': None, 'sampling_backend': 'flashinfer', 'grammar_backend': 'xgrammar', 'radix_cache_backend': None, 'mm_attention_backend': None, 'fp8_gemm_runner_backend': 'auto', 'fp4_gemm_runner_backend': 'auto', 'bf16_gemm_backend': 'auto', 'dsa_prefill_backend': None, 'dsv4_prefill_backend': 'auto', 'dsa_decode_backend': None, 'dsa_paged_mqa_logits_backend': 'auto', 'dsa_topk_backend': 'sgl-kernel', 'disable_flashinfer_autotune': False, 'flashinfer_autotune_skip_ops': None, 'mamba_backend': 'triton', 'cuda_graph_config': {'decode': {'backend': 'full', 'max_bs': 8, 'bs': [1, 2, 4, 8], 'tc_compiler': 'eager', 'full_prefill_max_req': None, 'full_prefill_prefix_chunk_tokens': None}, 'prefill': {'backend': 'breakable', 'max_bs': 2048, 'bs': [4, 8, 12, 16, 20, 24, 28, 32, 48, 64, 80, 96, 112, 128, 144, 160, 176, 192, 208, 224, 240, 256, 288, 320, 352, 384, 416, 448, 480, 512, 576, 640, 704, 768, 832, 896, 960, 1024, 1280, 1536, 1792, 2048], 'tc_compiler': 'eager', 'full_prefill_max_req': None, 'full_prefill_prefix_chunk_tokens': None}}, 'cuda_graph_backend_decode': None, 'cuda_graph_backend_prefill': None, 'cuda_graph_max_bs_decode': 8, 'cuda_graph_max_bs_prefill': None, 'cuda_graph_bs_decode': None, 'cuda_graph_bs_prefill': None, 'cuda_graph_tc_compiler': None, 'disable_prefill_cuda_graph': False, 'disable_decode_cuda_graph': False, 'disable_cuda_graph': False, 'disable_cuda_graph_padding': False, 'enable_profile_cuda_graph': False, 'enable_cudagraph_gc': False, 'debug_cuda_graph': False, 'enable_layerwise_nvtx_marker': False, 'enable_nccl_nvls': False, 'enable_symm_mem': False, 'triton_attention_reduce_in_fp32': False, 'triton_attention_num_kv_splits': 8, 'triton_attention_split_tile_size': None, 'flashinfer_mla_disable_ragged': False, 'enable_fused_qk_norm_rope': False, 'enable_precise_embedding_interpolation': False, 'enable_fused_moe_sum_all_reduce': False, 'enable_deepseek_v4_fp4_indexer': False, 'disable_custom_all_reduce': False, 'enable_mscclpp': False, 'enable_torch_symm_mem': False, 'enable_scattered_sconv': False, 'pre_warm_nccl': False, 'enable_quant_communications': False, 'enable_flashinfer_allreduce_fusion': False, 'enforce_disable_flashinfer_allreduce_fusion': False, 'flashinfer_allreduce_fusion_backend': None, 'enable_aiter_allreduce_fusion': False, 'enable_torch_compile': False, 'enable_torch_compile_debug_mode': False, 'torch_compile_max_bs': 32, 'speculative_algorithm': None, 'speculative_draft_model_path': None, 'speculative_draft_model_revision': None, 'speculative_draft_load_format': None, 'speculative_num_steps': None, 'speculative_eagle_topk': None, 'speculative_num_draft_tokens': None, 'speculative_dflash_block_size': None, 'speculative_dspark_block_size': None, 'speculative_dspark_sps_table_path': None, 'speculative_dspark_confidence_sts_path': None, 'speculative_dspark_align_verify_tokens_to_graph_tier': False, 'speculative_accept_threshold_single': 1.0, 'speculative_accept_threshold_acc': 1.0, 'speculative_use_rejection_sampling': False, 'speculative_token_map': None, 'speculative_attention_mode': 'prefill', 'speculative_draft_attention_backend': None, 'speculative_dsa_topk_backend': 'sgl-kernel', 'speculative_draft_kv_cache_dtype': None, 'speculative_draft_window_size': None, 'speculative_moe_runner_backend': 'auto', 'speculative_moe_a2a_backend': None, 'speculative_draft_model_quantization': None, '_speculative_draft_quantization_explicitly_set': False, 'speculative_skip_dp_mlp_sync': False, 'enable_multi_layer_eagle': False, 'speculative_adaptive': False, 'speculative_adaptive_config': None, 'decoupled_spec_bind_endpoint': None, 'decoupled_spec_connect_endpoints': None, 'decoupled_spec_rank': None, 'decoupled_spec_role': 'null', 'spec_trace_dir': None, 'speculative_ngram_min_bfs_breadth': 1, 'speculative_ngram_max_bfs_breadth': 10, 'speculative_ngram_match_type': 'BFS', 'speculative_ngram_max_trie_depth': 18, 'speculative_ngram_capacity': 10000000, 'speculative_ngram_external_corpus_path': None, 'speculative_ngram_external_sam_budget': 0, 'speculative_ngram_external_corpus_max_tokens': 10000000, 'ep_size': 1, 'moe_a2a_backend': 'none', 'enable_w4a4_mxfp4_megamoe': False, 'deepep_v2_mode': 'direct', 'moe_runner_backend': 'auto', 'flashinfer_mxfp4_moe_precision': 'default', 'deepep_mode': 'auto', 'fuseep_mode': 2, 'deepep_dispatcher_output_dtype': 'auto', 'ep_num_redundant_experts': 0, 'ep_dispatch_algorithm': None, 'init_expert_location': 'trivial', 'enable_eplb': False, 'eplb_algorithm': 'auto', 'eplb_rebalance_num_iterations': 1000, 'eplb_rebalance_layers_per_chunk': None, 'eplb_min_rebalancing_utilization_threshold': 1.0, 'expert_distribution_recorder_mode': None, 'expert_distribution_recorder_buffer_size': 1000, 'expert_balancedness_report_mode': 'off', 'deepep_config': None, 'moe_dense_tp_size': None, 'elastic_ep_backend': None, 'enable_elastic_expert_backup': False, 'mooncake_ib_device': None, 'enable_waterfill': False, 'ep_join_mode': None, 'ep_join_rank_offset': 0, 'elastic_ep_initial_size': None, 'max_ep_size': None, 'elastic_ep_scale_timeout': 600, 'elastic_ep_rejoin': False, 'disable_flashinfer_cutlass_moe_fp4_allgather': False, 'disable_shared_experts_fusion': False, 'enforce_shared_experts_fusion': False, 'max_mamba_cache_size': None, 'mamba_ssm_dtype': 'float32', 'mamba_max_states_per_path': -1, 'enable_mamba_cache_stochastic_rounding': False, 'mamba_cache_philox_rounds': 0, 'mamba_full_memory_ratio': 0.9, 'mamba_radix_cache_strategy': 'extra_buffer', 'uses_mamba_radix_cache': True, 'mamba_track_interval': 256, 'enable_int8_mamba_checkpoint': False, 'int8_mamba_ckpt_size': None, 'linear_attn_backend': 'triton', 'linear_attn_decode_backend': 'triton', 'linear_attn_prefill_backend': 'triton', 'linear_attn_verify_backend': None, 'enable_linear_replayssm': False, 'linear_replayssm_cache_len': 16, 'enable_linear_replayssm_spec': False, 'enable_hierarchical_cache': True, 'hicache_host_memory_mode': 'cache', 'hicache_ratio': 1.5, 'hicache_size': 0, 'hicache_write_policy': 'write_back', 'hicache_io_backend': 'kernel', 'hicache_mem_layout': 'page_first', 'hicache_storage_backend': 'extent', 'hicache_storage_prefetch_policy': 'wait_complete', 'hicache_storage_backend_extra_config': '{"max_size": "20G", "min_free_space": "10G"}', 'hicache_storage_prefetch_retry_poll_interval': 0, 'hicache_storage_prefetch_retry_max_attempts': 4, 'hicache_restore_wait_timeout_s': 60.0, 'hicache_restore_backup_park': False, 'enable_ready_horizon': False, 'hicache_prefetch_speculative_fraction': 0.6, 'ready_horizon_frontier_n': 8, 'ready_host_watermark_low': 43513, 'ready_host_watermark_high': 87026, 'ready_host_watermark_low_count': None, 'ready_host_watermark_high_count': None, 'hicache_promotion_margin_tokens': 2048, 'hicache_writeback_reserve_gb': 0.0, 'ready_horizon_safety_margin_gb': 0.0, 'ready_horizon_margin_state_tokens': None, 'hicache_writeback_reserve_state_tokens': None, 'ready_horizon_state_p95_tokens': 0, 'enable_hisparse': False, 'hisparse_config': None, 'enable_broadcast_mm_inputs_process': False, 'enable_prefix_mm_cache': False, 'mm_enable_dp_encoder': False, 'mm_process_config': {}, 'mm_processor_worker_num': 0, 'mm_io_worker_num': 0, 'allowed_media_domains': [], 'media_url_max_file_size_mb': 64, 'mm_preprocess_cache_size_mb': None, 'trust_mm_content_hashes': False, 'limit_mm_data_per_request': None, 'enable_mm_global_cache': False, 'image_processor_backend': 'auto', 'mm_global_cache_backend': 'mooncake', 'disable_fast_image_processor': False, 'mm_feature_transport': 'cpu', 'keep_mm_feature_on_device': False, 'enable_lora': None, 'enable_lora_overlap_loading': None, 'max_lora_rank': None, 'lora_target_modules': None, 'lora_paths': None, 'max_loaded_loras': None, 'max_loras_per_batch': 8, 'lora_eviction_policy': 'lru', 'lora_backend': 'csgmv', 'max_lora_chunk_size': 16, 'experts_shared_outer_loras': None, 'lora_use_virtual_experts': False, 'lora_strict_loading': False, 'lora_drain_wait_threshold': 0.0, 'enable_two_batch_overlap': False, 'enable_single_batch_overlap': False, 'tbo_token_distribution_threshold': 0.48, 'cpu_offload_gb': 0, 'offload_group_size': -1, 'offload_num_in_group': 1, 'offload_prefetch_step': 1, 'offload_mode': 'cpu', 'enable_lmcache': False, 'lmcache_config_file': None, 'enable_flexkv': False, 'flexkv_config_file': None, 'kt_weight_path': None, 'kt_method': 'AMXINT4', 'kt_cpuinfer': None, 'kt_threadpool_count': 2, 'kt_num_gpu_experts': None, 'kt_max_deferred_experts_per_token': None, 'dllm_algorithm': None, 'dllm_algorithm_config': None, 'dllm_fdfo': True, 'disaggregation_mode': 'null', 'disaggregation_transfer_backend': 'mooncake', 'disaggregation_bootstrap_port': 8998, 'disaggregation_ib_device': None, 'disaggregation_decode_enable_radix_cache': False, 'disaggregation_decode_enable_offload_kvcache': False, 'disaggregation_decode_retraction_backup': None, 'num_reserved_decode_tokens': 512, 'disaggregation_decode_extra_slots': None, 'disaggregation_decode_polling_interval': 1, 'optimistic_prefill_attempts': 0, 'encoder_only': False, 'language_only': False, 'language_model_only': False, 'encoder_transfer_backend': 'zmq_to_scheduler', 'encoder_urls': [], 'encoder_bootstrap_port': 8997, 'encoder_register_urls': [], 'enable_adaptive_dispatch_to_encoder': False, 'enable_pdmux': False, 'pdmux_config_path': None, 'sm_group_num': 8, 'startup_weight_load_mode': 'serial', 'custom_weight_loader': [], 'weight_loader_disable_mmap': False, 'weight_loader_prefetch_checkpoints': False, 'weight_loader_prefetch_num_threads': 4, 'weight_loader_drop_cache_after_load': False, 'remote_instance_weight_loader_seed_instance_ip': None, 'remote_instance_weight_loader_seed_instance_service_port': None, 'remote_instance_weight_loader_send_weights_group_ports': None, 'remote_instance_weight_loader_backend': 'nccl', 'remote_instance_weight_loader_start_seed_via_transfer_engine': False, 'engine_info_bootstrap_port': 6789, 'modelexpress_config': None, 'download_dir': None, 'model_checksum': None, 'delete_ckpt_after_loading': False, 'decrypted_config_file': None, 'decrypted_draft_config_file': None, 'checkpoint_engine_wait_weights_before_ready': False, 'enable_prefill_delayer': False, 'prefill_delayer_max_delay_passes': 30, 'prefill_delayer_token_usage_low_watermark': None, 'prefill_delayer_forward_passes_buckets': None, 'prefill_delayer_wait_seconds_buckets': None, 'prefill_delayer_queue_min_ratio': None, 'prefill_delayer_max_delay_ms': None, 'min_free_slots_delay': None, 'enable_deterministic_inference': False, 'rl_on_policy_target': None, 'kv_canary': 'none', 'kv_canary_real_data': 'none', 'kv_canary_sweep_interval': 0, 'enable_dynamic_batch_tokenizer': False, 'dynamic_batch_tokenizer_batch_size': 32, 'dynamic_batch_tokenizer_batch_timeout': 0.002, 'enable_tokenizer_batch_encode': False, 'disable_tokenizer_batch_decode': False, 'debug_tensor_dump_output_folder': None, 'debug_tensor_dump_layers': None, 'debug_tensor_dump_input_file': None, 'enable_memory_saver': False, 'enable_weights_cpu_backup': False, 'enable_draft_weights_cpu_backup': False, 'enable_custom_logit_processor': False, 'enable_return_hidden_states': False, 'return_hidden_states_mode': None, 'enable_return_routed_experts': False, 'enable_return_indexer_topk': False, 'disable_outlines_disk_cache': False, 'enable_mis': False, 'weight_cache_mode': 'off', 'weight_cache_socket': None, 'weight_cache_timeout': 1800, 'forward_hooks': None, 'msprobe_dump_config': None}
+[2026-09-04 09:45:03] Mamba Cache is allocated. max_mamba_cache_size: 106, conv_state size: 0.12GB, ssm_state size: 5.02GB 
+Traceback (most recent call last):
+  File "/root/gate2_load.py", line 275, in <module>
+    sys.exit(main())
+  File "/root/gate2_load.py", line 267, in main
+    run_dir = run_phase(args.agents, args.write_turns, args.read_turns,
+  File "/root/gate2_load.py", line 198, in run_phase
+    w.writerow(r)
+  File "/root/miniconda3/envs/sglang-patch/lib/python3.10/csv.py", line 154, in writerow
+    return self.writer.writerow(self._dict_to_list(rowdict))
+  File "/root/miniconda3/envs/sglang-patch/lib/python3.10/csv.py", line 149, in _dict_to_list
+    raise ValueError("dict contains fields not in fieldnames: "
+ValueError: dict contains fields not in fieldnames: 'sglang:load_back_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.003"}', 'sglang:hicache_backup_tokens_total{cache_type="UnifiedRadixCache",pool="kv"}', 'sglang:load_back_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.5"}', 'sglang:load_back_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.05"}', 'sglang:load_back_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.008"}', 'sglang:load_back_tokens_total{cache_type="UnifiedRadixCache",pool="mamba"}', 'sglang:load_back_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.02"}', 'sglang:load_back_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.001"}', 'sglang:load_back_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.002"}', 'sglang:load_back_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.2"}', 'sglang:evicted_tokens_total{cache_type="UnifiedRadixCache"}', 'sglang:load_back_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.006"}', 'sglang:load_back_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.004"}', 'sglang:cached_tokens_total{cache_source="device",engine_type="unified",model_name="qwen3.5-9b-gptq"}', 'sglang:load_back_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.005"}', 'sglang:load_back_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.007"}', 'sglang:load_back_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.01"}', 'sglang:load_back_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.1"}', 'sglang:backuped_tokens_total{attn_cp_rank="0",attn_cp_size="1",dp_rank="0",pp_rank="0",pp_size="1",storage_backend="extent",tp_rank="0"}', 'sglang:load_back_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="+Inf"}', 'sglang:load_back_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.03"}', 'sglang:hicache_backup_tokens_total{cache_type="UnifiedRadixCache",pool="mamba"}', 'sglang:load_back_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="1.0"}', 'sglang:load_back_tokens_total{cache_type="UnifiedRadixCache",pool="kv"}', 'sglang:load_back_duration_seconds_count{cache_type="UnifiedRadixCache"}', 'sglang:load_back_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.04"}', 'sglang:load_back_duration_seconds_bucket{cache_type="UnifiedRadixCache",le="0.009"}', 'sglang:cached_tokens_total{cache_source="host",engine_type="unified",model_name="qwen3.5-9b-gptq"}'

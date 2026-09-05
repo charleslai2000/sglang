@@ -1,0 +1,11 @@
+{
+ "status": "done",
+ "agents": 8,
+ "write_turns": 4,
+ "read_turns": 8,
+ "requests_total": 96,
+ "run_dir": "/root/evidence-gate2-k8/run-20260904-100048",
+ "ts_start": 1788487248.755,
+ "ts_end": 1788487751.969,
+ "elapsed_s": 503.2
+}
