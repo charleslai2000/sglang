@@ -21,15 +21,23 @@ epoch_sig + cooldown patch.
   evicts.
 - M3 event-driven refill: a check may run only on a causal-epoch event
   plus a low-frequency periodic safety reconciliation (seconds), never a
-  per-pass poll. The events are the four causal epochs:
+  per-pass poll. The events are the five causal epochs:
     l3_publish       -- L3 durable/publish advance (monotonic),
-    host_headroom    -- host available pages (release = up),
+    host_headroom    -- host available pages (level signal; up = release),
+    host_release     -- MONOTONIC host-capacity release counter (genuine
+                        releasing events: host residency freed, ready
+                        eviction, working-state release) -- Fix A: the
+                        NO_HEADROOM waiter subscribes to THIS, not the
+                        transient available level, which flips on every
+                        alloc/free and can never sustain past the decline
+                        cursor under a full working set (the B-run
+                        permanent freeze),
     spec_budget      -- speculative budget in flight (release = down),
     waiting_frontier -- the frontier composition (a candidate entered/left).
   Each decline reason subscribes to exactly the epoch that can change its
   outcome:
     NO_L3       -> l3_publish
-    NO_HEADROOM -> host_headroom
+    NO_HEADROOM -> host_release
     SPEC_BUDGET -> spec_budget
   Identity events (request prefix changed, request generation changed) are
   causal for every park: they change what the rid is asking for, so the
@@ -80,7 +88,13 @@ SAFETY_RECONCILE_INTERVAL_S = 5.0
 #: for anomalous retry storms only. The correct-path retry cadence is
 #: causal (the subscribed epoch advanced), never time -- a deterministic
 #: L3 miss stays a miss no matter how long you wait. The fuse bounds only
-#: a pathological repeat-fail loop.
+#: a pathological repeat-fail loop. It is ALSO the no-headroom re-probe
+#: debounce (Fix A requirement: repeated wakeup must be debounced): a
+#: NO_HEADROOM park that clears on a release epoch still holds for the
+#: fuse window after the decline, so a structurally-exhausted headroom
+#: (working set at full, release after release) re-probes at most once per
+#: fuse window instead of on every tiny release (one probe per release
+#: epoch, at most one per fuse window).
 SAFETY_FUSE_S = 1.0
 
 
@@ -145,14 +159,20 @@ class RefillPlan(msgspec.Struct):
 
 
 class CausalEpochs(msgspec.Struct):
-    """The four causal-epoch snapshot values the policy subscribes to.
+    """The five causal-epoch snapshot values the policy subscribes to.
     Built each pass by the scheduler; epoch_event compares it
     directionally against the previous pass's snapshot. Only the
     subscribed-epoch deltas are events; the refill's own traffic (issues
     raise inflight, consume headroom) is not."""
 
     l3_publish: int  # monotonic L3 durable/publish counter (up = event)
-    host_headroom: int  # host available pages (up = event)
+    host_headroom: int  # host available pages (up = event; level signal)
+    host_release: int  # monotonic host-capacity release counter (up = event;
+    # genuine capacity-releasing events -- host residency freed, ready
+    # eviction, working-state release -- NOT the available level, which
+    # flips on every alloc/free and can never sustain past the decline
+    # cursor under a full working set (Fix A: the NO_HEADROOM waiter
+    # subscribes to the release epoch, not the transient level).)
     spec_budget: int  # speculative inflight tokens (down = event)
     waiting_frontier: tuple  # frontier rids, any change = event
 
@@ -260,12 +280,17 @@ class ReadyHorizonPolicy:
     def subscribed_epoch(reason: DeclineReason) -> str:
         """The single causal epoch whose advance can change this decline
         reason's outcome (user adjudication subscription table):
-        NO_L3 -> l3_publish, NO_HEADROOM -> host_headroom,
+        NO_L3 -> l3_publish, NO_HEADROOM -> host_release (the MONOTONIC
+        release counter -- Fix A: a park that is declined because host
+        headroom could not fit the stage clears only on a genuine
+        capacity-releasing event, not on the transient available level,
+        which flips on every alloc/free and can never sustain past the
+        decline cursor under a full working set),
         SPEC_BUDGET -> spec_budget."""
         if reason is DeclineReason.NO_L3:
             return "l3_publish"
         if reason is DeclineReason.NO_HEADROOM:
-            return "host_headroom"
+            return "host_release"
         return "spec_budget"
 
     @staticmethod
@@ -297,8 +322,14 @@ class ReadyHorizonPolicy:
             # L3 durable/publish advanced past the decline cursor.
             if cur > entry.epoch_cursor:
                 return True
-        else:  # host_headroom
-            # Host pages released: available grew past the decline cursor.
+        else:  # host_release (Fix A)
+            # A genuine host-capacity-releasing event advanced the release
+            # counter past the decline cursor. The counter is MONOTONIC --
+            # it never recedes when the working set re-consumes the freed
+            # pages (unlike the available level, which flips 0->100->0 and
+            # can never sustain past the cursor under a full working set).
+            # A park therefore clears exactly once per release-epoch
+            # advance; the headroom debounce fuse bounds the re-probe rate.
             if cur > entry.epoch_cursor:
                 return True
         # Identity events are causal for every park.
@@ -449,15 +480,18 @@ class ReadyHorizonPolicy:
         """M3 event gate: whether a causal-epoch change since the last
         pass warrants reconsidering the pool. Only availability-improving
         deltas fire it -- L3 published (counter up), host pages released
-        (available up), budget released (inflight down), a new request
-        entered the frontier (composition changed). The refill's own
-        traffic (issues raise inflight and lower free pages) never fires
-        it (the e7 spin root cause)."""
+        (available up OR the monotonic release counter advanced: genuine
+        capacity-releasing events -- host residency freed, ready eviction,
+        working-state release -- Fix A), budget released (inflight down), a
+        new request entered the frontier (composition changed). The
+        refill's own traffic (issues raise inflight and lower free pages)
+        never fires it (the e7 spin root cause)."""
         if prev is None:
             return True
         return (
             cur.l3_publish > prev.l3_publish
             or cur.host_headroom > prev.host_headroom
+            or cur.host_release > prev.host_release
             or cur.spec_budget < prev.spec_budget
             or cur.waiting_frontier != prev.waiting_frontier
         )
