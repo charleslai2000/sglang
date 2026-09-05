@@ -319,7 +319,18 @@ class ExtentFileBackend(HiCacheStorage):
     ) -> bool:
         if value is None:
             return False
-        return self._write_pages([self._storage_key(key)], [value])
+        storage_keys = [self._storage_key(key)]
+        ok = self._write_pages(storage_keys, [value])
+        if ok:
+            # Telemetry parity (P1 hygiene): the single-key set() must be
+            # metered exactly like batch_set / batch_set_v1 / batch_set_v2,
+            # or a future single-key write path (e.g. a mamba 51.5MB page)
+            # would silently undercount the extent_write bytes (~34% of the
+            # write volume at 90G/1341 slots in the A/B evidence). The write
+            # path ignores node identity, so None is passed (same as the
+            # batch kv path).
+            self._log_extent_write("kv", None, storage_keys, [value])
+        return ok
 
     def exists(self, key: str) -> bool:
         with self._lock:
