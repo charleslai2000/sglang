@@ -3164,6 +3164,8 @@ class GGUFModelLoader(BaseModelLoader):
             model_type = "command-r"
         elif model_type == "qwen3_moe":
             model_type = "qwen3moe"
+        elif model_type in ("qwen3_5_text", "qwen3_5"):
+            model_type = "qwen35"
         arch = None
         for key, value in gguf.MODEL_ARCH_NAMES.items():
             if value == model_type:
