@@ -225,6 +225,7 @@ from sglang.srt.managers.scheduler_components.hicache_restore import (
     RestoreWaitReason,
     capacity_wake_applies,
     demand_restore_available,
+    device_quota_degraded,
     next_restore,
     promotion_budget_fits,
     promotion_wait_blocked,
@@ -3156,6 +3157,15 @@ class Scheduler(
                 continue
             if timeout_s > 0 and now - req.hicache_restore_state_ts > timeout_s:
                 self.tree_cache.discard_frontier_waiter(req.rid)
+                # Fix B (P1): count a DEVICE_QUOTA timeout against the
+                # episode's bounded-degradation budget. The timeout degrades
+                # to recompute (NONE); if admission re-denies for the same
+                # device quota, the re-arm site refuses to re-enter
+                # WAIT[DEVICE_QUOTA] once the cap is reached, so the
+                # WAIT -> timeout -> recompute -> ADMISSION_DENY -> WAIT
+                # loop (B run: 9,102 miss recomputes) cannot run forever.
+                if req.hicache_restore_wait_reason is RestoreWaitReason.DEVICE_QUOTA:
+                    req.hicache_restore_device_quota_timeouts += 1
                 decision = self._apply_restore_event(req, RestoreEvent.TIMEOUT)
                 if decision is RestoreDecision.ADMIT_RECOMPUTE:
                     self._log_restore_recompute(req, "timeout")
@@ -4454,6 +4464,11 @@ class Scheduler(
                         req.rid,
                         loaded_tokens,
                     )
+                    # Fix B (P1): a genuine restore hit resets the episode's
+                    # DEVICE_QUOTA timeout budget (a healthy chain that needs
+                    # several capacity waits across its life is never starved
+                    # by the bounded-degradation cap).
+                    req.hicache_restore_device_quota_timeouts = 0
 
             req.init_next_round_input(self.tree_cache)
             if (
@@ -4490,7 +4505,27 @@ class Scheduler(
                         # batch_is_full -- the request is not admitted and
                         # does not stall the queue behind it; the WAIT skip
                         # above holds it until a T11 wake).
-                        self._apply_restore_event(req, RestoreEvent.ADMISSION_DENY)
+                        #
+                        # Fix B (P1) bounded degradation: a request that has
+                        # already survived DEVICE_QUOTA_MAX_TIMEOUTS T13
+                        # timeouts this episode must NOT re-enter the same
+                        # DEVICE_QUOTA WAIT -- re-waiting would idle out yet
+                        # another T13 clock, timeout, recompute into the
+                        # thrash-invalidated L3 (revoked:miss), and re-deny
+                        # (the B-run 9,102-miss WAIT -> timeout -> recompute
+                        # -> ADMISSION_DENY -> WAIT loop). Skip the re-arm
+                        # and let the request proceed as a plain recompute
+                        # when capacity frees (no restore intent); this is
+                        # the forward path. Correctness is preserved: we do
+                        # not admit into a full pool here -- we merely stop
+                        # choosing to WAIT instead of recomputing, which is
+                        # exactly the no-progress the cap exists to break.
+                        if not device_quota_degraded(
+                            req.hicache_restore_device_quota_timeouts
+                        ):
+                            self._apply_restore_event(
+                                req, RestoreEvent.ADMISSION_DENY
+                            )
                         self._cleanup_not_added_req(req, adder)
                         continue
                     _p2a_trace("[P2A] ts_ms=%d evt=no_token rid=%s res=%s can_run=%d", int(time.time() * 1000), req.rid, res, len(adder.can_run_list))
