@@ -662,7 +662,7 @@ class TooShortWakeSchedulerFeedTests(unittest.TestCase):
         return scheduler
 
     def _req(self):
-        return SimpleNamespace(
+        req = SimpleNamespace(
             rid="r1",
             last_host_node=42,
             hicache_restore_state=RestoreState.WAIT_CAPACITY,
@@ -677,12 +677,18 @@ class TooShortWakeSchedulerFeedTests(unittest.TestCase):
             sampling_params=SimpleNamespace(max_new_tokens=16),
             prefix_indices=[],
         )
+        # P4 gate reads the current match geometry via the real helper: the
+        # default extend layout caps the match at input_len - 1 (logprob),
+        # so match_end = len(fill_ids) - 1 for a fresh prefix match.
+        req._compute_max_prefix_len = lambda input_len: max(input_len - 1, 0)
+        return req
 
-    def _capacity_tree(self, qualifies):
+    def _capacity_tree(self, qualifies, prefetch_threshold=256):
         # DEVICE_QUOTA wake path stubs: no cache controller (rate-limit
         # bypass), a promotion allocator with full capacity (budget fits,
         # and the default non-SWA/non-mamba branch of
-        # available_and_evictable_tokens), and the never-case gate verdict.
+        # available_and_evictable_tokens), the never-case gate verdict, and
+        # the prefetch_threshold the P4 current-suffix gate reads.
         alloc = SimpleNamespace(size_full=4096, available_size=lambda: 4096)
         return SimpleNamespace(
             cache_controller=None,
@@ -691,6 +697,7 @@ class TooShortWakeSchedulerFeedTests(unittest.TestCase):
             inflight_promotion_reserved=0,
             supports_mamba=lambda: False,
             evictable_size=lambda: 0,
+            prefetch_threshold=prefetch_threshold,
         ), alloc
 
     def test_sub_threshold_never_case_not_woken(self):
@@ -705,10 +712,11 @@ class TooShortWakeSchedulerFeedTests(unittest.TestCase):
         self.assertFalse(scheduler._restore_wait_capacity_fits(req))
 
     def test_qualifying_prompt_still_wakes(self):
-        # A prompt whose max suffix reaches the threshold keeps its capacity
-        # wake (the device-match-decay REVALIDATE bet is not killed): it can
-        # grow its suffix above the threshold once the device match decays.
-        # The capacity predicate itself passes (charge < available).
+        # population A (regression point 2): a prompt whose CURRENT suffix
+        # already reaches the threshold keeps its capacity wake -- the
+        # capacity release is the true rejection cause and the re-issue has
+        # real output. Current suffix here = match_end(299) - (prefix 0 +
+        # host 0) = 299 >= 256.
         tree, alloc = self._capacity_tree(qualifies=True)
         scheduler = self._scheduler(tree)
         scheduler.req_to_token_pool = alloc
@@ -727,6 +735,76 @@ class TooShortWakeSchedulerFeedTests(unittest.TestCase):
         req.full_untruncated_fill_ids = list(range(15))
         for _ in range(3):
             self.assertFalse(scheduler._restore_wait_capacity_fits(req))
+
+    def test_revalidate_bet_subthreshold_current_not_woken(self):
+        # P4 gate (test 1): a REVALIDATE-bet waiter whose max suffix
+        # qualifies (prompt_can_qualify True, so has_restore_potential is
+        # preserved) but whose CURRENT suffix is still sub-threshold must
+        # NOT be capacity-woken. Capacity release does not change the
+        # inevitable declined_too_short result. Here prompt 1000, host 0,
+        # device prefix match 750 -> current suffix 249 < 256; max suffix
+        # 1000 >= 256 (qualifies=True).
+        tree, alloc = self._capacity_tree(qualifies=True)
+        scheduler = self._scheduler(tree)
+        scheduler.page_size = 1
+        scheduler.req_to_token_pool = alloc
+        req = self._req()
+        req.full_untruncated_fill_ids = list(range(1000))
+        req.prefix_indices = list(range(750))
+        self.assertFalse(scheduler._restore_wait_capacity_fits(req))
+
+    def test_revalidate_bet_reward_after_current_suffix_grows(self):
+        # P4 gate (test 2, bet reward): once the device match decays and the
+        # CURRENT suffix grows past the threshold, the waiter IS woken -- the
+        # re-issue now has real output and can be granted. Same prompt/host,
+        # device match shortened from 750 to 740 -> current suffix 259 >= 256.
+        tree, alloc = self._capacity_tree(qualifies=True)
+        scheduler = self._scheduler(tree)
+        scheduler.page_size = 1
+        scheduler.req_to_token_pool = alloc
+        req = self._req()
+        req.full_untruncated_fill_ids = list(range(1000))
+        req.prefix_indices = list(range(740))
+        self.assertTrue(scheduler._restore_wait_capacity_fits(req))
+
+    def test_p4_gate_page_aligned(self):
+        # P4 gate reuses the page-aligned suffix geometry of
+        # prompt_can_qualify_for_prefetch: with page_size 16, a current
+        # suffix of 255 aligns to 240 < 256 (held), while 256 aligns to 256
+        # >= 256 (woken).
+        tree, alloc = self._capacity_tree(qualifies=True)
+        scheduler = self._scheduler(tree)
+        scheduler.page_size = 16
+        scheduler.req_to_token_pool = alloc
+        req = self._req()
+        # current suffix 255 -> aligned 240 < 256 -> held.
+        req.full_untruncated_fill_ids = list(range(256))
+        req.prefix_indices = []
+        self.assertFalse(scheduler._restore_wait_capacity_fits(req))
+        # current suffix 256 -> aligned 256 >= 256 -> woken.
+        req.full_untruncated_fill_ids = list(range(257))
+        req.prefix_indices = []
+        self.assertTrue(scheduler._restore_wait_capacity_fits(req))
+
+    def test_p4_current_suffix_helper_direct(self):
+        # Direct helper coverage: the helper reads the CURRENT match geometry
+        # (match_end - (prefix + host)) and page-aligns it against the
+        # threshold, independent of the capacity predicate.
+        tree, alloc = self._capacity_tree(qualifies=True)
+        scheduler = self._scheduler(tree)
+        scheduler.page_size = 1
+        scheduler.req_to_token_pool = alloc
+        req = self._req()
+        req.full_untruncated_fill_ids = list(range(1000))
+        # host material 200 + device prefix 500 -> matched 700; current
+        # suffix = 999 - 700 = 299 >= 256 -> not below threshold.
+        req.host_hit_length = 200
+        req.prefix_indices = list(range(500))
+        self.assertFalse(scheduler._current_prefetch_suffix_lt_threshold(req))
+        # device match deepens: prefix 800 -> current suffix 999 - 1000 -> 0
+        # < 256 -> below threshold.
+        req.prefix_indices = list(range(800))
+        self.assertTrue(scheduler._current_prefetch_suffix_lt_threshold(req))
 
 
 if __name__ == "__main__":
