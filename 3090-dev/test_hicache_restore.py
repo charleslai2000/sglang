@@ -46,6 +46,7 @@ backup_wake_applies = _MOD.backup_wake_applies
 capacity_wake_applies = _MOD.capacity_wake_applies
 demand_restore_available = _MOD.demand_restore_available
 device_quota_degraded = _MOD.device_quota_degraded
+miss_rearm_allowed = _MOD.miss_rearm_allowed
 next_restore = _MOD.next_restore
 too_short_wait_armed = _MOD.too_short_wait_armed
 wait_clock_next = _MOD.wait_clock_next
@@ -55,6 +56,7 @@ NONE = RestoreState.NONE
 WAIT = RestoreState.WAIT_CAPACITY
 RESTORING = RestoreState.RESTORING
 READY = RestoreState.READY
+MISS = RestoreState.MISS_RECOMPUTE
 
 
 class RestoreStateMachineTests(unittest.TestCase):
@@ -216,11 +218,16 @@ class RestoreStateMachineTests(unittest.TestCase):
     # -- T9: genuine miss degrades to recompute (never waits) --------------
 
     def test_t9_revoked_miss_degrades_to_recompute(self):
+        # P1 sticky miss: a definitive miss parks the request in
+        # MISS_RECOMPUTE (never WAIT -- miss != capacity) and always degrades
+        # to ADMIT_RECOMPUTE so the request recomputes forward. The sticky
+        # state (not NONE) carries the negative evidence that the admission
+        # re-arm gate reads.
         for from_state in (RESTORING, WAIT, READY, NONE):
             state, decision = next_restore(
                 from_state, RestoreEvent.REVOKED_MISS, genuine_miss=True
             )
-            self.assertIs(state, NONE, f"from {from_state}")
+            self.assertIs(state, MISS, f"from {from_state}")
             self.assertIs(decision, RestoreDecision.ADMIT_RECOMPUTE)
 
     def test_t9_revoked_non_miss_is_capacity_wait(self):
@@ -364,7 +371,7 @@ class RestoreStateMachineTests(unittest.TestCase):
         state, decision = next_restore(
             state, RestoreEvent.REVOKED_MISS, genuine_miss=True
         )
-        self.assertIs(state, NONE)
+        self.assertIs(state, MISS)
         self.assertIs(decision, RestoreDecision.ADMIT_RECOMPUTE)
 
     def test_t15_clock_armed_like_any_wait(self):
@@ -393,10 +400,11 @@ class RestoreStateMachineTests(unittest.TestCase):
 
     def test_genuine_miss_chain_never_waits(self):
         # T9 after a re-issue: a true miss degrades to recompute even from
-        # a WAIT-derived RESTORING.
+        # a WAIT-derived RESTORING, parking in the sticky MISS_RECOMPUTE
+        # state (never WAIT, never plain NONE -- the re-arm gate reads it).
         state = next_restore(WAIT, RestoreEvent.CAPACITY_FITS, capacity_fits=True)[0]
         state, decision = next_restore(state, RestoreEvent.REVOKED_MISS, genuine_miss=True)
-        self.assertIs(state, NONE)
+        self.assertIs(state, MISS)
         self.assertIs(decision, RestoreDecision.ADMIT_RECOMPUTE)
 
     def test_frontier_wake_miss_degrades_to_recompute(self):
@@ -404,8 +412,89 @@ class RestoreStateMachineTests(unittest.TestCase):
         state = next_restore(WAIT, RestoreEvent.FRONTIER_READY)[0]
         self.assertIs(state, RESTORING)
         state, decision = next_restore(state, RestoreEvent.REVOKED_MISS, genuine_miss=True)
-        self.assertIs(state, NONE)
+        self.assertIs(state, MISS)
         self.assertIs(decision, RestoreDecision.ADMIT_RECOMPUTE)
+
+    def test_miss_stays_sticky_across_admission_denies(self):
+        # P1: after a genuine miss the request sits in MISS_RECOMPUTE. A T6
+        # ADMISSION_DENY on that state with the re-arm gate closed
+        # (rearm_allowed=False -- same L3 publish epoch, same generation)
+        # must NOT re-arm WAIT: the state machine keeps it sticky, so a
+        # same-probe capacity loop cannot spin it back into WAIT -> RESTORING
+        # -> miss -> WAIT (the ~13ms churn). The request recomputes forward.
+        state = next_restore(RESTORING, RestoreEvent.REVOKED_MISS, genuine_miss=True)[0]
+        self.assertIs(state, MISS)
+        for _ in range(5):
+            state, decision = next_restore(
+                state, RestoreEvent.ADMISSION_DENY, rearm_allowed=False
+            )
+            self.assertIs(state, MISS, "sticky miss must survive ADMISSION_DENY")
+            self.assertIs(decision, RestoreDecision.NONE)
+
+    def test_miss_rearm_override_clears_sticky(self):
+        # P1: when the re-arm gate decides the miss is overridden (epoch
+        # advance / generation change, rearm_allowed=True), the scheduler
+        # feeds ADMISSION_DENY to re-arm WAIT. The state machine must leave
+        # MISS and enter WAIT_CAPACITY.
+        state, decision = next_restore(MISS, RestoreEvent.ADMISSION_DENY)
+        self.assertIs(state, WAIT)
+        self.assertIs(decision, RestoreDecision.WAIT)
+
+    def test_miss_forward_ready_ends_sticky(self):
+        # P1 healthy chain: the sticky miss never starves a chain that
+        # actually succeeds. The override re-arms WAIT, the wake re-issues,
+        # the prefetch finalizes -- T8 -> READY. FINALIZED itself only lands
+        # READY from RESTORING; from MISS it is a defensive no-op.
+        state, decision = next_restore(MISS, RestoreEvent.FINALIZED)
+        self.assertIs(state, MISS)
+        self.assertIs(decision, RestoreDecision.NONE)
+        # The override path that actually succeeds:
+        state, decision = next_restore(MISS, RestoreEvent.ADMISSION_DENY)
+        self.assertIs(state, WAIT)
+        state, decision = next_restore(
+            state, RestoreEvent.CAPACITY_FITS, capacity_fits=True
+        )
+        self.assertIs(state, RESTORING)
+        self.assertIs(decision, RestoreDecision.RETRY_PREFETCH)
+        state, decision = next_restore(state, RestoreEvent.FINALIZED)
+        self.assertIs(state, READY)
+
+    def test_miss_abort_clears(self):
+        state, decision = next_restore(MISS, RestoreEvent.ABORT)
+        self.assertIs(state, NONE)
+        self.assertIs(decision, RestoreDecision.NONE)
+
+
+class StickyMissRearmGateTests(unittest.TestCase):
+    """P1: miss_rearm_allowed -- the admission re-arm gate. A definitive
+    miss is re-armable only when the L3 publish epoch has advanced (the
+    cache coverage genuinely changed) or the identity (session generation)
+    changed; otherwise the same probe would miss again (the churn)."""
+
+    def test_no_miss_epoch_is_rearmable(self):
+        # Defensive: no recorded miss epoch (should not be MISS then).
+        self.assertTrue(miss_rearm_allowed(None, 10, None, None))
+
+    def test_same_epoch_not_rearmable(self):
+        self.assertFalse(miss_rearm_allowed(5, 5, 1, 1))
+
+    def test_epoch_advanced_rearmable(self):
+        self.assertTrue(miss_rearm_allowed(5, 6, 1, 1))
+
+    def test_generation_changed_rearmable(self):
+        self.assertTrue(miss_rearm_allowed(5, 5, 1, 2))
+
+    def test_generation_none_never_overrides(self):
+        # Neither side carries a generation: epoch is the only signal.
+        self.assertFalse(miss_rearm_allowed(5, 5, None, None))
+        self.assertTrue(miss_rearm_allowed(5, 6, None, None))
+
+    def test_idempotent_across_repeats(self):
+        # Repeated invocation with unchanged state must stay refused --
+        # the forward path (recompute) is the only correct exit; the gate
+        # never flips on its own.
+        for _ in range(3):
+            self.assertFalse(miss_rearm_allowed(5, 5, 1, 1))
 
 
 class RestoreWaitReasonMappingTests(unittest.TestCase):

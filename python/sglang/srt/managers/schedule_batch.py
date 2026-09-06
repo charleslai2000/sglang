@@ -1053,6 +1053,15 @@ class Req(ReqDllmMixin):
         # (restore_success / READY) in the scheduler's restore_success
         # handler, so a healthy chain is never starved by the cap.
         self.hicache_restore_device_quota_timeouts: int = 0
+        # P1 sticky-miss negative evidence (RestoreState.MISS_RECOMPUTE):
+        # the L3 publish epoch at which the request's prefix was proven
+        # L3-missing, and the session generation (identity) at that probe.
+        # The admission re-arm refuses to re-enter WAIT while the current
+        # l3_publish_epoch is unchanged and the generation matches -- the
+        # same-probe restore churn gate. Cleared when the miss is overridden
+        # (epoch/generation advance) or the episode ends forward (READY).
+        self.hicache_restore_miss_epoch: Optional[int] = None
+        self.hicache_restore_miss_generation: Optional[int] = None
         # The node to lock until for swa radix tree lock ref
         self.swa_uuid_for_lock: Optional[int] = None
         # Whether the prefill-time SWA tree lock has been released early
