@@ -1536,6 +1536,33 @@ class FrontierWaiterRegistryTests(unittest.TestCase):
         self.assertTrue(cache.prompt_can_qualify_for_prefetch(300, 0))
         self.assertFalse(cache.prompt_can_qualify_for_prefetch(300, 100))
 
+    def test_prompt_can_qualify_page_aligns_suffix(self):
+        # phase2-p0fix Q2: the gate's suffix is page-aligned the same way
+        # prefetch_from_storage aligns keys. With page_size 16, a geometric
+        # suffix of e.g. 265 (>= threshold 256) would "qualify" on a raw
+        # comparison, but the aligned suffix (265 // 16 * 16 = 256) is what
+        # the outbound query actually sees. The gate must agree with the
+        # outbound aligned length -- it must NOT over-permit a suffix whose
+        # aligned length is below threshold.
+        cache = _make_cache()
+        cache.page_size = 16
+        cache.prefetch_threshold = 256
+        # Aligned suffix 256 (16 pages) exactly reaches threshold: qualifies.
+        self.assertTrue(cache.prompt_can_qualify_for_prefetch(271, 0))
+        # Geometric suffix 265 -> aligned 256 >= 256: qualifies (boundary).
+        self.assertTrue(cache.prompt_can_qualify_for_prefetch(265, 0))
+        # Geometric suffix 259 -> aligned 256 still qualifies (>= threshold).
+        self.assertTrue(cache.prompt_can_qualify_for_prefetch(259, 0))
+        # Geometric suffix 256 -> aligned 256 qualifies.
+        self.assertTrue(cache.prompt_can_qualify_for_prefetch(256, 0))
+        # Geometric suffix 255 -> aligned 240 < 256: the outbound query would
+        # be declined_too_short, so the gate must NOT qualify it -- this is
+        # the alignment the too_short 保底门 relies on (no over-permit).
+        self.assertFalse(cache.prompt_can_qualify_for_prefetch(255, 0))
+        # Host match reduces the aligned suffix the same way.
+        self.assertFalse(cache.prompt_can_qualify_for_prefetch(271, 16))
+        self.assertTrue(cache.prompt_can_qualify_for_prefetch(272, 16))
+
     def test_short_prompt_never_has_restore_potential(self):
         # Regression (tester e10): HEALTH_CHECK-class short prompts were
         # misjudged True via the root-anchor clause, entered WAIT[REVALIDATE]
@@ -3998,6 +4025,94 @@ class PerAnchorVersionTests(unittest.TestCase):
         dead = 999999
         self.assertEqual(tree_core.anchor_storage_version(dead), 0)
         self.assertEqual(tree_core.anchor_storage_version(None), 0)
+
+
+class DeepestDurableAncestorTests(unittest.TestCase):
+    """phase2-p0fix Q1: the no-material fast-forward judgment resolves the
+    anchor to its deepest durable ancestor before judging the storage facts.
+    The shallow anchor can be non-durable (host prefix split by an L3 write
+    ack) while a deeper ancestor's pages ARE durable -- judging on the shallow
+    node's missing flags would mis-forward a restorable request."""
+
+    @staticmethod
+    def _make_chain():
+        params = SimpleNamespace(
+            page_size=1,
+            is_eagle=False,
+            enable_session_radix_cache=False,
+            eviction_policy="lru",
+            token_to_kv_pool_allocator=None,
+            enable_kv_cache_events=False,
+        )
+        tree_core = _RealTreeCore(
+            params,
+            {
+                _component_type.FULL: SimpleNamespace(tree_core=None),
+                _component_type.MAMBA: SimpleNamespace(tree_core=None),
+            },
+        )
+        tree_core.is_write_back = True
+        nodes = []
+        parent = tree_core.root_node
+        for i in range(3):
+            n = tree_core._new_node()
+            n.parent = parent
+            n.key = _RadixKey(_array("q", [1, 2]), None)
+            parent.children[f"n{i}"] = n
+            nodes.append(n)
+            parent = n
+        return tree_core, nodes
+
+    def _cache(self, tree_core):
+        # deepest_durable_ancestor lives on the UnifiedRadixCache facade,
+        # delegating to tree_core -- wrap the real tree in the facade harness.
+        return _make_cache(tree_core)
+
+    def test_shallow_non_durable_resolves_to_deeper_durable_ancestor(self):
+        # Chain root -> a -> b -> c. c is the shallow anchor, non-durable; a
+        # is durable (a deeper ancestor). deepest_durable_ancestor(c) must
+        # return a (the most rootward durable), not skip to root (root is not
+        # durable by default -- storage_persisted False).
+        tree_core, (a, b, c) = self._make_chain()
+        tree_core.advance_storage_persisted(a.id)
+        self.assertTrue(tree_core.is_l3_durable(a.id))
+        self.assertFalse(tree_core.is_l3_durable(b.id))
+        self.assertFalse(tree_core.is_l3_durable(c.id))
+        cache = self._cache(tree_core)
+        self.assertEqual(cache.deepest_durable_ancestor(c.id), a.id)
+
+    def test_durable_anchor_is_its_own_deepest_ancestor(self):
+        tree_core, (a, b, c) = self._make_chain()
+        # Promote the whole chain root->a->b->c so c is itself durable.
+        tree_core.advance_storage_persisted(a.id)
+        tree_core.advance_storage_persisted(b.id)
+        tree_core.advance_storage_persisted(c.id)
+        self.assertTrue(tree_core.is_l3_durable(c.id))
+        # c durable: its deepest durable ancestor is itself.
+        cache = self._cache(tree_core)
+        self.assertEqual(cache.deepest_durable_ancestor(c.id), c.id)
+
+    def test_pure_device_chain_has_no_durable_ancestor(self):
+        # No node on the chain is durable; root storage_persisted defaults
+        # False, so walking to the root returns None -> no-material holds.
+        tree_core, (a, b, c) = self._make_chain()
+        cache = self._cache(tree_core)
+        self.assertIsNone(cache.deepest_durable_ancestor(c.id))
+        self.assertIsNone(cache.deepest_durable_ancestor(a.id))
+
+    def test_root_is_not_reported_as_durable(self):
+        # The root's storage_persisted defaults False: it must never be
+        # returned as a durable ancestor (a pure device chain stays no-material
+        # even though it terminates at the root).
+        tree_core, (a, b, c) = self._make_chain()
+        cache = self._cache(tree_core)
+        self.assertIsNone(cache.deepest_durable_ancestor(b.id))
+
+    def test_dead_anchor_returns_none(self):
+        tree_core, (a, b, c) = self._make_chain()
+        cache = self._cache(tree_core)
+        self.assertIsNone(cache.deepest_durable_ancestor(999999))
+        self.assertIsNone(cache.deepest_durable_ancestor(None))
 
 
 class NoMaterialFastForwardUnitTests(unittest.TestCase):

@@ -2411,6 +2411,37 @@ class UnifiedRadixCache(BasePrefixCache):
             return False
         return self.tree_core.has_acked_descendant(node_id)
 
+    def deepest_durable_ancestor(self, node_id: NodeId) -> Optional[NodeId]:
+        """The most-rootward ancestor of `node_id` that is L3-durable, or
+        None when no ancestor (including the anchor itself and the root, whose
+        storage_persisted defaults False) is durable.
+
+        phase2-p0fix Q1: the anchor-resolution step for the no-material
+        fast-forward judgment. A request's suffix is served from a page range
+        under `node_id`; when the host prefix was split by an L3 write ack
+        (D->H commit), the shallow anchor can be non-durable while a deeper
+        ancestor's pages ARE durable. Judging no-material on the shallow
+        node's missing flags would mis-forward a request that could restore
+        from the deeper durable pages. Walking the parent chain to the most
+        rootward durable ancestor aligns the judgment with the restore
+        coverage. Returns the ORIGINAL anchor when it is itself durable; None
+        (a pure device chain with no L3 content, or a dead anchor) means
+        no-material holds. O(depth) per call -- never O(subtree)."""
+        if not self.tree_core.node_exists(node_id):
+            return None
+        cur = node_id
+        while cur is not None and self.tree_core.node_exists(cur):
+            if self.tree_core.is_l3_durable(cur):
+                return cur
+            cur_node = self.tree_core.node_by_id(cur)
+            if cur_node is None:
+                break
+            parent = cur_node.parent
+            if parent is None:
+                break
+            cur = parent.id
+        return None
+
     def chain_backup_frontiers(
         self,
         node_id: NodeId,
