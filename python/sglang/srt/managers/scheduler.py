@@ -3718,6 +3718,26 @@ class Scheduler(
         cc = self.tree_cache.cache_controller
         if cc is not None and cc.prefetch_rate_limited():
             return False
+        # too_short churn (independent P, defense-in-depth): a DEVICE_QUOTA
+        # waiter whose current restore suffix is already sub-threshold AND
+        # can never grow back above it (the can-never-qualify prompt -- the
+        # theoretical-max suffix is sub-threshold too) must not be woken by
+        # the capacity predicate. Waking re-issues an inevitably
+        # declined_too_short prefetch (granted=0) and re-parks on the next
+        # pass's capacity check -- the tight wake->re-issue->declined->re-WAIT
+        # loop. The request is released to recompute its tail directly
+        # instead (the admission main fix already keeps it out of this WAIT
+        # on the forward path; this predicate is the defense for any
+        # DEVICE_QUOTA waiter that entered before the fix). REVALIDATE /
+        # device-match-decay semantics are untouched: a prompt that CAN grow
+        # its suffix above the threshold keeps its capacity wake.
+        if req.hicache_restore_wait_reason is RestoreWaitReason.DEVICE_QUOTA:
+            if req.full_untruncated_fill_ids is not None and not (
+                self.tree_cache.prompt_can_qualify_for_prefetch(
+                    len(req.full_untruncated_fill_ids), req.host_hit_length
+                )
+            ):
+                return False
         # P2-1c promotion-budget item (design §3.4): a DEVICE_QUOTA waiter
         # whose next step is a FULL-KV promotion (host material ready) must
         # not wake while the device promotion budget cannot hold it --
