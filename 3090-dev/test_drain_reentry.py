@@ -286,6 +286,9 @@ class _FakeTreeCore:
         self.deleted = set()
         self.enable_storage = False  # mirrored by the cache's property
         self._publish_epoch = 0
+        # P3 (phase2-p3-fix): deferred-ACK reconciliation scans this set each
+        # flush. The harness never models a deferred-ACK node, so it is empty.
+        self.deferred_acked_nodes = lambda: []
 
     def l3_publish_epoch(self):
         # P3 prefetch_revoke instrumentation reads the publish epoch for the

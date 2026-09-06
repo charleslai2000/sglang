@@ -495,6 +495,11 @@ class UnifiedRadixCache(BasePrefixCache):
         self._storage_gap_skipped_nokv_count = 0
         # Re-entry guard for _drain_write_through_acks (see its entry check).
         self._drain_write_through_depth = 0
+        # P3 (phase2-p3-fix): deferred-ACK reconciliation re-entrancy guard
+        # (see _reconcile_deferred_acked) -- write_backup_storage re-enters
+        # _flush_pending_storage_writes, so the scan must run at most once
+        # per outermost flush.
+        self._reconcile_depth = 0
         self.ongoing_load_back: dict[int, _OngoingLoadBack] = {}
         # P2-1c promotion admission: net reservation counter (device token
         # level, "reserved counts only the not-yet-locked part"), its peak,
@@ -2121,6 +2126,79 @@ class UnifiedRadixCache(BasePrefixCache):
                 # Backstop: the node or a gap ancestor died between the
                 # existence check and the arena lookups; nothing to persist.
                 self._skip_stale_storage_persist(node_id)
+        # P3 (phase2-p3-fix): deferred-ACK reconciliation. A node whose L3
+        # write acked while its parent chain was not persisted is left
+        # deferred (storage_acked && !storage_persisted) by
+        # advance_storage_persisted. If its parent chain is later cleared
+        # (revoke-miss clear_storage_durable) or physically deleted
+        # (eviction/tombstone), nothing re-promotes it without a fresh IO
+        # -- the permanent frontier HOL (T13 60s timeout). This pass
+        # rescans deferred_acked_nodes each drain and re-fills each
+        # surviving node's chain from the nearest persisted ancestor / root
+        # (collect_storage_gap), then re-promotes through a real write ack.
+        # Idempotent: collect_storage_gap skips already-written nodes,
+        # write_backup_storage skips is_storage_written / dead nodes, and
+        # advance_storage_persisted returns early for persisted nodes; a
+        # single pass re-fills each broken chain once. Reconciliation never
+        # sets storage_persisted itself -- promotion stays a real-ack /
+        # real-restore fact.
+        self._reconcile_deferred_acked()
+
+    def _reconcile_deferred_acked(self) -> None:
+        """P3 A3: re-fill and re-promote every deferred-ACK node (acked but
+        not persisted) whose chain is broken by a cleared / deleted parent.
+        One ancestors-first sweep per outermost _flush_pending_storage_writes;
+        per-node gap fill is idempotent (see _flush_pending_storage_writes).
+        Re-entrancy guarded: write_backup_storage itself calls
+        _flush_pending_storage_writes at its tail, so without a depth guard a
+        deferred node that is not resolved in one fill (ack in flight, or an
+        unfillable chain) would re-enter this scan from inside itself,
+        unboundedly."""
+        if getattr(self, "_reconcile_depth", 0) > 0:
+            return
+        self._reconcile_depth = getattr(self, "_reconcile_depth", 0) + 1
+        try:
+            self._reconcile_deferred_acked_inner()
+        finally:
+            self._reconcile_depth -= 1
+
+    def _reconcile_deferred_acked_inner(self) -> None:
+        if not self.enable_storage or self.cache_controller is None:
+            return
+        deferred = self.tree_core.deferred_acked_nodes()
+        if not deferred:
+            return
+        for node_id in deferred:
+            if not self.tree_core.node_exists(node_id):
+                self._skip_stale_storage_persist(node_id)
+                continue
+            try:
+                # 1) Fill any broken parent gap: re-write the nodes whose
+                #    parent chain was physically deleted (tombstone / host
+                #    eviction) from the nearest persisted ancestor / root.
+                #    collect_storage_gap skips already-written nodes, so this
+                #    is a no-op for a node whose write is already complete.
+                self.write_backup_storage(node_id)
+            except KeyError:
+                # A gap ancestor died between the scan and the arena lookups.
+                self._skip_stale_storage_persist(node_id)
+                continue
+            # 2) Re-run promotion on the already-acked node. Its write is
+            #    real and acked; it was only deferred because the parent
+            #    chain was not contiguous when the ack arrived. Now that the
+            #    chain is contiguous (parent persisted, or the node re-anchored
+            #    to root after its parent was deleted), re-invoking the same
+            #    promotion entry the ack drain uses promotes the node and its
+            #    acked descendants. This is the reverse-path repair -- it does
+            #    not fabricate durability (advance_storage_persisted only
+            #    promotes when the parent chain is contiguous), and it is
+            #    idempotent (advance returns early for an already-persisted
+            #    node). Waking frontier waiters mirrors the ack drain: a
+            #    freshly promoted anchor can serve its waiters, closing the
+            #    loop that the T13 timeout path used to cut short.
+            promoted = self.tree_core.advance_storage_persisted(node_id)
+            for promoted_id in promoted:
+                self._wake_frontier_waiters(promoted_id)
 
     def _skip_stale_storage_persist(self, node_id: NodeId) -> None:
         """Count and log a deferred L3 persist whose node is no longer alive."""
