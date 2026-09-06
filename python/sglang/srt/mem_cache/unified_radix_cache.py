@@ -3121,13 +3121,26 @@ class UnifiedRadixCache(BasePrefixCache):
         restore material (design §2.5-1): host material, an in-flight or
         registered restore intent, or an L3-queryable anchor chain. A prompt
         too short to ever qualify for a storage prefetch has no restore
-        intent (declined_too_short is terminal for it)."""
-        if host_hit_length > 0:
-            return True
+        intent (declined_too_short is terminal for it).
+
+        too_short churn (independent P): the never-case gate applies even
+        when host material is present. When BOTH the current restore suffix
+        and the theoretical-max suffix are below the prefetch threshold (a
+        can-never-qualify prompt), no storage prefetch can ever be granted,
+        so parking WAIT[DEVICE_QUOTA] would only re-issue an inevitably
+        declined_too_short prefetch on every capacity wake (the tight
+        wake -> re-issue -> declined -> re-WAIT loop). Host material alone
+        no longer wins there -- the request recomputes its tail directly.
+        The device-match-decay REVALIDATE bet is preserved: a prompt whose
+        max suffix still reaches the threshold (prompt_can_qualify True)
+        keeps its restore potential, because its current sub-threshold
+        suffix may grow back above threshold once the device match decays."""
         if prompt_len is not None and not self.prompt_can_qualify_for_prefetch(
             prompt_len, host_hit_length
         ):
             return False
+        if host_hit_length > 0:
+            return True
         if req_id in self.ongoing_prefetch or req_id in self._storage_prefetch_missed_rids:
             return True
         if not self.tree_core.node_exists(anchor_node_id):

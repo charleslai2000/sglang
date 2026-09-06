@@ -353,5 +353,97 @@ class P1StickyMissSchedulerFeedTests(unittest.TestCase):
             self.assertIsNone(req.hicache_restore_wait_reason)
 
 
+class TooShortWakeSchedulerFeedTests(unittest.TestCase):
+    """too_short churn (independent P, T11 defense-in-depth): the per-pass
+    capacity wake must not wake a DEVICE_QUOTA waiter whose current restore
+    suffix is already sub-threshold AND can never grow back above it (the
+    can-never-qualify prompt) -- waking would re-issue an inevitably
+    declined_too_short prefetch (granted=0) and re-WAIT on the next pass
+    (the tight wake->re-issue->declined->re-WAIT loop). The request is
+    released to recompute its tail directly instead. The device-match-decay
+    REVALIDATE bet is preserved: a prompt that CAN grow its suffix above the
+    threshold keeps its capacity wake."""
+
+    def _scheduler(self, tree_cache):
+        scheduler = Scheduler.__new__(Scheduler)
+        scheduler.server_args = SimpleNamespace(
+            hicache_restore_wait_timeout_s=60.0,
+            hicache_promotion_margin_tokens=2048,
+        )
+        scheduler.tree_cache = tree_cache
+        scheduler.enable_hicache_storage = True
+        scheduler.enable_ready_horizon = False
+        scheduler.page_size = 1
+        return scheduler
+
+    def _req(self):
+        return SimpleNamespace(
+            rid="r1",
+            last_host_node=42,
+            hicache_restore_state=RestoreState.WAIT_CAPACITY,
+            hicache_restore_wait_reason=RestoreWaitReason.DEVICE_QUOTA,
+            hicache_restore_state_ts=0.0,
+            hicache_restore_miss_epoch=None,
+            hicache_restore_miss_generation=None,
+            hicache_restore_device_quota_timeouts=0,
+            session_generation=None,
+            host_hit_length=0,
+            full_untruncated_fill_ids=None,
+            output_ids=[],
+            sampling_params=SimpleNamespace(max_new_tokens=16),
+            prefix_indices=[],
+        )
+
+    def _capacity_tree(self, qualifies):
+        # DEVICE_QUOTA wake path stubs: no cache controller (rate-limit
+        # bypass), a promotion allocator with full capacity (budget fits,
+        # and the default non-SWA/non-mamba branch of
+        # available_and_evictable_tokens), and the never-case gate verdict.
+        alloc = SimpleNamespace(size_full=4096, available_size=lambda: 4096)
+        return SimpleNamespace(
+            cache_controller=None,
+            prompt_can_qualify_for_prefetch=lambda prompt_len, host_hit: qualifies,
+            token_to_kv_pool_allocator=alloc,
+            inflight_promotion_reserved=0,
+            supports_mamba=lambda: False,
+            evictable_size=lambda: 0,
+        ), alloc
+
+    def test_sub_threshold_never_case_not_woken(self):
+        # Current and theoretical-max suffix both sub-threshold (prompt 15,
+        # host 0, prefetch_threshold 256): the capacity wake must hold --
+        # the re-issued prefetch can never be granted.
+        tree, alloc = self._capacity_tree(qualifies=False)
+        scheduler = self._scheduler(tree)
+        scheduler.req_to_token_pool = alloc
+        req = self._req()
+        req.full_untruncated_fill_ids = list(range(15))
+        self.assertFalse(scheduler._restore_wait_capacity_fits(req))
+
+    def test_qualifying_prompt_still_wakes(self):
+        # A prompt whose max suffix reaches the threshold keeps its capacity
+        # wake (the device-match-decay REVALIDATE bet is not killed): it can
+        # grow its suffix above the threshold once the device match decays.
+        # The capacity predicate itself passes (charge < available).
+        tree, alloc = self._capacity_tree(qualifies=True)
+        scheduler = self._scheduler(tree)
+        scheduler.req_to_token_pool = alloc
+        req = self._req()
+        req.full_untruncated_fill_ids = list(range(300))
+        self.assertTrue(scheduler._restore_wait_capacity_fits(req))
+
+    def test_never_case_gate_idempotent(self):
+        # The wake gate is a pure predicate: repeated checks with unchanged
+        # inputs never flip (the request is held every time, so the tight
+        # loop cannot start).
+        tree, alloc = self._capacity_tree(qualifies=False)
+        scheduler = self._scheduler(tree)
+        scheduler.req_to_token_pool = alloc
+        req = self._req()
+        req.full_untruncated_fill_ids = list(range(15))
+        for _ in range(3):
+            self.assertFalse(scheduler._restore_wait_capacity_fits(req))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

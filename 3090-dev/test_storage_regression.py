@@ -1539,13 +1539,46 @@ class FrontierWaiterRegistryTests(unittest.TestCase):
         # does not override the can-never-qualify gate either.
         cache._storage_prefetch_missed_rids.add("r1")
         self.assertFalse(cache.has_restore_potential("r1", 0, 0, prompt_len=3))
-        # Host material wins even for a short prompt (load-back restore).
-        self.assertTrue(cache.has_restore_potential("r1", 0, host_hit_length=10, prompt_len=3))
+        # too_short churn (independent P): host material no longer overrides
+        # the can-never-qualify gate -- a 15-token suffix (host match ate the
+        # prompt) can never become a granted storage prefetch, so it must not
+        # park WAIT[DEVICE_QUOTA] and loop on the capacity wake.
+        self.assertFalse(cache.has_restore_potential("r1", 0, host_hit_length=10, prompt_len=3))
         # Long prompts keep the legacy clauses.
         cache._storage_prefetch_missed_rids.add("r1")
         self.assertTrue(cache.has_restore_potential("r1", 0, 0, prompt_len=300))
         # prompt_len unset = legacy behavior (existing callers unchanged).
         self.assertTrue(cache.has_restore_potential("r1", 0, 0))
+
+    def test_never_case_gate_beats_host_material_for_sub_threshold_prompt(self):
+        # too_short churn (main fix): a prompt whose BOTH current suffix and
+        # theoretical-max suffix are below prefetch_threshold (256, page_size
+        # 1 here) must NOT park WAIT[DEVICE_QUOTA] even though host material
+        # is present -- its storage prefetch can never be granted, so the
+        # capacity wake would only re-issue an inevitably declined_too_short
+        # prefetch (wake -> re-issue -> declined -> re-WAIT tight loop). It
+        # recomputes its tail directly.
+        cache = _make_cache()
+        # Current suffix (prompt_len - host_hit = 3-3 = 0) and max suffix
+        # (3-3 = 0) both sub-threshold; host material present.
+        self.assertFalse(cache.has_restore_potential("r1", 42, host_hit_length=3, prompt_len=3))
+        # Host match ate nearly the whole prompt: only a 15-token tail left.
+        self.assertFalse(cache.has_restore_potential("r1", 42, host_hit_length=300, prompt_len=315))
+
+    def test_revalidate_bet_preserved_when_decay_can_grow_suffix(self):
+        # too_short churn must NOT kill the device-match-decay REVALIDATE bet:
+        # a prompt whose current suffix is sub-threshold but whose
+        # theoretical-max suffix (prompt beyond the fixed host match) still
+        # reaches the threshold can grow its suffix back above it once the
+        # device match decays -- it keeps its restore potential.
+        cache = _make_cache()
+        # Current device match absorbs 100 tokens: suffix 300-10-100 = 190
+        # < 256, but max suffix 300-10 = 290 >= 256 qualifies.
+        self.assertTrue(cache.has_restore_potential("r1", 42, host_hit_length=10, prompt_len=300))
+        # Boundary: max suffix exactly at the threshold still qualifies.
+        self.assertTrue(cache.has_restore_potential("r1", 42, host_hit_length=100, prompt_len=356))
+        # Max suffix just below the threshold: never-case, no restore intent.
+        self.assertFalse(cache.has_restore_potential("r1", 42, host_hit_length=100, prompt_len=355))
 
 
 # ---------------------------------------------------------------------------
