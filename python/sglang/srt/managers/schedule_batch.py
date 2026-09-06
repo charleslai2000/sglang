@@ -1043,16 +1043,6 @@ class Req(ReqDllmMixin):
         self.hicache_restore_state: Optional[RestoreState] = None
         self.hicache_restore_wait_reason: Optional[RestoreWaitReason] = None
         self.hicache_restore_state_ts: float = 0.0
-        # Fix B (P1): DEVICE_QUOTA bounded-degradation counter -- the number
-        # of T13 timeouts the current restore episode has survived while
-        # parked in WAIT[DEVICE_QUOTA]. The admission re-arm site refuses to
-        # enter WAIT[DEVICE_QUOTA] once DEVICE_QUOTA_MAX_TIMEOUTS is
-        # reached, so a capacity-choked chain cannot churn
-        # WAIT -> timeout -> recompute -> ADMISSION_DENY -> WAIT forever
-        # (the B-run 9,102-miss loop). Reset on a genuine forward step
-        # (restore_success / READY) in the scheduler's restore_success
-        # handler, so a healthy chain is never starved by the cap.
-        self.hicache_restore_device_quota_timeouts: int = 0
         # P1 sticky-miss negative evidence (RestoreState.MISS_RECOMPUTE):
         # the L3 publish epoch at which the request's prefix was proven
         # L3-missing, and the session generation (identity) at that probe.

@@ -199,33 +199,6 @@ def next_restore(
     return state, RestoreDecision.NONE
 
 
-#: DEVICE_QUOTA bounded-degradation cap (Fix B, P1): the maximum number of
-#: DEVICE_QUOTA timeouts a single restore episode may survive before the
-#: scheduler stops re-arming WAIT[DEVICE_QUOTA] at admission and lets the
-#: request proceed as a plain recompute (the forward path). Tester
-#: forensics (B run): the capacity loop is WAIT[DEVICE_QUOTA] -> T13
-#: timeout -> NONE (recompute) -> admission NO_TOKEN -> ADMISSION_DENY ->
-#: re-WAIT[DEVICE_QUOTA] -- each lap idle-out a full T13 clock while the
-#: device stays full and the extent thrash invalidates the restored keys
-#: (9,122 restore_recompute, 9,102 cause=miss). After this many timeouts
-#: the re-arm is refused: the request is admitted as a normal request when
-#: capacity frees (no restore intent), never re-entering the same
-#: DEVICE_QUOTA WAIT. The cap is per EPISODE: it resets on a genuine
-#: forward step (READY / restore_success), so a healthy chain that needs
-#: several capacity waits across its life is never starved.
-DEVICE_QUOTA_MAX_TIMEOUTS = 2
-
-
-def device_quota_degraded(attempts: int) -> bool:
-    """Whether a DEVICE_QUOTA waiter has exhausted its bounded-degradation
-    budget (Fix B): ``attempts`` prior timeouts in the episode have reached
-    ``DEVICE_QUOTA_MAX_TIMEOUTS``. When True the scheduler MUST NOT re-arm
-    WAIT[DEVICE_QUOTA] at admission -- the request proceeds as a plain
-    recompute (the forward path) instead of churning another WAIT ->
-    timeout -> recompute -> revoked:miss -> WAIT lap."""
-    return attempts >= DEVICE_QUOTA_MAX_TIMEOUTS
-
-
 def wait_reason_for(
     event: RestoreEvent, *, genuine_miss: bool = False
 ) -> Optional[RestoreWaitReason]:
