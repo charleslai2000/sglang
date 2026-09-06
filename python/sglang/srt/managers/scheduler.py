@@ -3761,12 +3761,34 @@ class Scheduler(
         # device-match-decay semantics are untouched: a prompt that CAN grow
         # its suffix above the threshold keeps its capacity wake.
         if req.hicache_restore_wait_reason is RestoreWaitReason.DEVICE_QUOTA:
-            if req.full_untruncated_fill_ids is not None and not (
-                self.tree_cache.prompt_can_qualify_for_prefetch(
-                    len(req.full_untruncated_fill_ids), req.host_hit_length
-                )
-            ):
-                return False
+            if req.full_untruncated_fill_ids is not None:
+                if not (
+                    self.tree_cache.prompt_can_qualify_for_prefetch(
+                        len(req.full_untruncated_fill_ids), req.host_hit_length
+                    )
+                ):
+                    return False
+                # P4 gate (no-heuristic): the CURRENT actually-prefetchable
+                # suffix must also clear the threshold. The can-never-qualify
+                # gate above uses the theoretical-max suffix
+                # (prompt_len - host_hit_length, after the device match has
+                # fully decayed); a REVALIDATE-bet / never-case-residue
+                # waiter passes it (max suffix >= threshold) yet its current
+                # suffix (match_end - (prefix match + host match)) is still
+                # sub-threshold. Capacity-waking such a waiter re-issues an
+                # inevitably declined_too_short prefetch every pass (the
+                # tight wake->re-issue->declined->re-WAIT loop); capacity
+                # release does not change that result, so capacity is not a
+                # wake source for it. Its only legal re-trigger is the
+                # current suffix growing past the threshold (device match
+                # decay, observed on the fresh-geometry re-entry after the
+                # bounded T13 recompute) or the T13 fallback recompute
+                # itself. REVALIDATE-bet restore potential is untouched
+                # (has_restore_potential is not modified) -- only the
+                # capacity wake is suppressed. population A (current suffix
+                # already qualifies) is not held.
+                if self._current_prefetch_suffix_lt_threshold(req):
+                    return False
         # P2-1c promotion-budget item (design §3.4): a DEVICE_QUOTA waiter
         # whose next step is a FULL-KV promotion (host material ready) must
         # not wake while the device promotion budget cannot hold it --
@@ -3802,6 +3824,28 @@ class Scheduler(
         )
         return charge < available_and_evictable_tokens(
             self.req_to_token_pool, self.tree_cache
+        )
+
+    def _current_prefetch_suffix_lt_threshold(self, req) -> bool:
+        """P4 gate (no-heuristic): whether the CURRENT actually-prefetchable
+        suffix is below prefetch_threshold (page_size aligned).
+
+        Same geometry as prompt_can_qualify_for_prefetch but on the CURRENT
+        match (match_end - (len(prefix_indices) + host_hit_length)) rather
+        than the theoretical max (prompt_len - host_hit_length): the current
+        suffix is exactly the span prefetch_from_storage would re-issue
+        (new_input_tokens = fill_ids[matched_len:match_end]). A sub-threshold
+        current suffix means the re-issue is inevitably declined_too_short,
+        so capacity is not a legal wake source for this waiter (its
+        re-trigger is current-suffix growth past threshold via device match
+        decay -- observed on the fresh-geometry re-entry after the bounded
+        T13 recompute -- or the T13 fallback recompute itself)."""
+        matched_len = len(req.prefix_indices) + req.host_hit_length
+        match_end = req._compute_max_prefix_len(len(req.full_untruncated_fill_ids))
+        current_suffix = max(0, match_end - matched_len)
+        return (
+            current_suffix // self.page_size * self.page_size
+            < self.tree_cache.prefetch_threshold
         )
 
     def _restore_potential_for(self, req) -> bool:
