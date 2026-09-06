@@ -219,6 +219,7 @@ from sglang.srt.managers.scheduler_components.batch_result_processor import (
     SchedulerBatchResultProcessor,
 )
 from sglang.srt.managers.scheduler_components.hicache_restore import (
+    FrontierAnchorInfo,
     RestoreDecision,
     RestoreEvent,
     RestoreState,
@@ -227,6 +228,7 @@ from sglang.srt.managers.scheduler_components.hicache_restore import (
     demand_restore_available,
     miss_rearm_allowed,
     next_restore,
+    no_material_fast_forward,
     promotion_budget_fits,
     promotion_wait_blocked,
     too_short_wait_armed,
@@ -3064,6 +3066,21 @@ class Scheduler(
                 if not buffer_mode and self.tree_cache.prompt_can_qualify_for_prefetch(
                     len(req.full_untruncated_fill_ids), req.host_hit_length
                 ):
+                    # phase2-peranchor no-material fast-forward: the anchor is
+                    # not gate-ok (not root / not L3-durable / not backuped).
+                    # If it has NO recoverable material at all AND nothing in
+                    # flight can ever make it durable (no pending write ack, no
+                    # deferred-ACK descendant for the P3 reconcile, no in-flight
+                    # restore), the frontier wait is zero-expectation and would
+                    # only idle out the full 60s T13 (the 9d8b5428 shape).
+                    # Recompute forward immediately. This is distinct from
+                    # prompt_can_qualify_for_prefetch (suffix-geometry): a
+                    # candidate can qualify yet still have no material to wait
+                    # on. Any in-flight producer / deferred descendant keeps the
+                    # normal P3 reconcile + frontier wait path.
+                    if self._no_material_fast_forward_for(req, last_host_node):
+                        self._log_restore_recompute(req, "no_material")
+                        return
                     self._apply_restore_event(req, RestoreEvent.GATE_SKIP_FRONTIER)
                     tree_cache.register_frontier_waiter(req.rid, last_host_node)
                     logger.info(
@@ -3214,13 +3231,22 @@ class Scheduler(
         else:  # "revoked_miss"
             event, genuine_miss = RestoreEvent.REVOKED_MISS, True
         if event is RestoreEvent.REVOKED_MISS and genuine_miss:
-            # P1 sticky-miss evidence: record the L3 publish epoch at which
-            # this request's prefix was proven L3-missing, plus the identity
+            # P1 sticky-miss evidence (phase2-peranchor): record the ANCHOR's
+            # per-anchor storage_version at which this request's prefix was
+            # proven L3-missing, plus the anchor node and the identity
             # (session generation). The admission re-arm (T6) refuses to
-            # re-enter WAIT while the epoch is unchanged and the generation
-            # matches -- the same-probe restore churn gate. A later epoch
-            # advance or generation change overrides the miss (re-armable).
-            req.hicache_restore_miss_epoch = self.tree_cache.l3_publish_epoch()
+            # re-enter WAIT while that SAME anchor's version is unchanged and
+            # the generation matches -- the same-probe restore churn gate.
+            # Only THIS anchor's substantive durability change (or a
+            # generation/prefix/anchor change) overrides the miss: an
+            # unrelated chain's write ack bumps only the global diagnostic
+            # counter and never re-arms. `anchor` is the deepest durable
+            # ancestor the miss probe covered (the request's last_host_node /
+            # the restore target anchor it was revoked on); `anchor_version`
+            # is defensive when the anchor is gone (self-heal to re-match).
+            anchor = getattr(req, "last_host_node", None)
+            req.hicache_restore_miss_epoch = self._anchor_version_or_zero(anchor)
+            req.hicache_restore_miss_anchor = anchor
             req.hicache_restore_miss_generation = getattr(
                 req, "session_generation", None
             )
@@ -3230,16 +3256,20 @@ class Scheduler(
             and genuine_miss
             and self.enable_ready_horizon
         ):
-            # P3 M3 (user adjudication): a deterministic miss means the
-            # full requested prefix is not in L3. The ready horizon records
-            # the NO_L3 negative-cache park (cursor = the l3_publish epoch
-            # right now) so this NONE request is not re-probed next pass --
-            # the miss is not transient and its revoke just released the
-            # budget (the e7 spin arm). A later L3 durable/publish advance
-            # or an identity change (prefix/generation) clears it.
+            # P3 M3 (user adjudication) + phase2-peranchor: a deterministic
+            # miss means the full requested prefix is not in L3. The ready
+            # horizon records the NO_L3 negative-cache park keyed on the
+            # ANCHOR's per-anchor storage_version (not the global l3_publish
+            # diagnostic counter) so this NONE request is not re-probed next
+            # pass -- the miss is not transient and its revoke just released
+            # the budget (the e7 spin arm). Only THAT anchor's substantive
+            # durability change, an identity change (prefix/generation/anchor),
+            # or the fuse expiry clears it; an unrelated chain's write ack
+            # does not.
+            anchor = getattr(req, "last_host_node", None)
             self._ready_horizon_negatives[req.rid] = NegativeCacheEntry(
                 reason=DeclineReason.NO_L3,
-                epoch_cursor=self.tree_cache.l3_publish_epoch(),
+                epoch_cursor=self._anchor_version_or_zero(anchor),
                 fuse_expiry=time.perf_counter()
                 + self.ready_horizon.safety_fuse_s,
                 prefix_len=(
@@ -3248,6 +3278,7 @@ class Scheduler(
                     else 0
                 ),
                 generation=getattr(req, "session_generation", None),
+                anchor=anchor,
             )
         if event is RestoreEvent.BACKUP_PENDING:
             # The lookup found the chain mid-backup: park on the M2 frontier
@@ -3337,6 +3368,7 @@ class Scheduler(
             # negative evidence -- the miss no longer binds the request.
             req.hicache_restore_miss_epoch = None
             req.hicache_restore_miss_generation = None
+            req.hicache_restore_miss_anchor = None
         # The wait clock is armed at the first WAIT entry of the episode and
         # never re-armed by a re-decline: re-arming was what let the
         # capacity loop evade the T13 timeout (state_ts reset every pass).
@@ -3469,14 +3501,21 @@ class Scheduler(
         fingerprint, and the safety-fuse expiry (the anomalous repeat-fail
         bound). The rid is not re-eligible until the subscribed epoch
         advances or the identity changes (or the fuse expires)."""
+        anchor = getattr(getattr(view, "req", None), "last_host_node", None)
+        cursor = policy_epoch_value(self.ready_horizon, epochs, reason)
+        if reason is DeclineReason.NO_L3:
+            # phase2-peranchor: the NO_L3 negative cache subscribes to the
+            # ANCHOR's per-anchor storage_version, not the global l3_publish
+            # diagnostic counter -- an unrelated chain's durability event
+            # must not clear the park.
+            cursor = self._anchor_version_or_zero(anchor)
         entry = NegativeCacheEntry(
             reason=reason,
-            epoch_cursor=policy_epoch_value(
-                self.ready_horizon, epochs, reason
-            ),
+            epoch_cursor=cursor,
             fuse_expiry=now + self.ready_horizon.safety_fuse_s,
             prefix_len=view.prefix_len,
             generation=view.generation,
+            anchor=anchor,
         )
         self._ready_horizon_negatives[rid] = entry
 
@@ -3775,6 +3814,102 @@ class Scheduler(
             req.host_hit_length,
             len(req.full_untruncated_fill_ids),
         )
+
+    def _no_material_fast_forward_for(self, req, anchor) -> bool:
+        """phase2-peranchor: whether the FRONTIER waiter's anchor has NO
+        recoverable material and nothing in flight can make it durable, so
+        the frontier wait is zero-expectation and the request should
+        ADMIT_RECOMPUTE immediately instead of idling out the full 60s T13.
+
+        Assembles the 5 no-material facts (host / storage / pending-ACK /
+        deferred-descendant / restorable-epoch-change) into a
+        FrontierAnchorInfo and delegates to the pure
+        no_material_fast_forward predicate. The judgment is deliberately NOT
+        "storage_hit == 0 => recompute": each fact is checked on its own, and
+        the presence of ANY in-flight producer or deferred descendant keeps
+        the P3 reconcile + frontier wait path (never fast-forwards).
+        """
+        tc = self.tree_cache
+        # 1) Host material: host copy / host hit present for the candidate.
+        host_material = bool(getattr(req, "host_hit_length", 0) > 0)
+        # 2) Storage material: the anchor is L3-durable or the root (a root
+        #    anchor is always prefetch-issuable -- never a no-material dead-end).
+        storage_material = False
+        if anchor is not None:
+            node_exists = getattr(tc, "node_exists", None)
+            if callable(node_exists) and node_exists(anchor):
+                storage_material = tc.is_l3_durable(anchor) or tc.is_root(anchor)
+        # 3) Pending durable ACK: an L3 write for this anchor's chain is in
+        #    flight (ongoing_backup), OR the node is already marked
+        #    storage_written (a submitted write whose ack could promote it).
+        pending_durable_ack = False
+        if anchor is not None:
+            node_exists = getattr(tc, "node_exists", None)
+            if callable(node_exists) and node_exists(anchor):
+                is_sw = getattr(tc, "is_storage_written", None)
+                if callable(is_sw):
+                    pending_durable_ack = bool(is_sw(anchor))
+        ongoing_backup = getattr(tc, "ongoing_backup", None)
+        if ongoing_backup:
+            for op_node, _lock in ongoing_backup.values():
+                if op_node == anchor:
+                    pending_durable_ack = True
+                    break
+        # 4) Deferred durable descendant: the anchor still anchors a
+        #    storage_acked && !storage_persisted node (a P3 reconcile
+        #    promotion source that could make it durable).
+        deferred_durable_desc = False
+        if anchor is not None:
+            node_exists = getattr(tc, "node_exists", None)
+            if callable(node_exists) and node_exists(anchor):
+                has_desc = getattr(tc, "has_acked_descendant", None)
+                if callable(has_desc):
+                    deferred_durable_desc = bool(has_desc(anchor))
+        # 5) Restorable epoch change: a per-anchor durability event that could
+        #    make a currently-unredeemable restore redeemable -- either an
+        #    in-flight restore read-back (load_back) for this anchor node, or
+        #    the anchor's own per-anchor version has moved at all (it has L3
+        #    durability history, e.g. it was durable and just got cleared, so
+        #    a re-restore may be redeemable). Both are conservative: they keep
+        #    the frontier wait rather than fast-forward.
+        restorable_epoch_change = False
+        if anchor is not None:
+            ongoing_load_back = getattr(tc, "ongoing_load_back", None)
+            if ongoing_load_back and anchor in ongoing_load_back:
+                restorable_epoch_change = True
+            av = getattr(tc, "anchor_storage_version", None)
+            if callable(av):
+                try:
+                    if int(av(anchor)) > 0:
+                        restorable_epoch_change = True
+                except Exception:
+                    restorable_epoch_change = False
+        return no_material_fast_forward(
+            FrontierAnchorInfo(
+                host_material=host_material,
+                storage_material=storage_material,
+                pending_durable_ack=pending_durable_ack,
+                deferred_durable_desc=deferred_durable_desc,
+                restorable_epoch_change=restorable_epoch_change,
+            )
+        )
+
+    def _anchor_version_or_zero(self, anchor) -> int:
+        """The per-anchor storage_version of `anchor` (0 when absent / the
+        node is gone / no per-anchor API -- a dead anchor self-heals to a
+        re-match from root, a new candidate, so its old negative evidence no
+        longer binds). phase2-peranchor: the anchor-local causal signal for
+        the P1 miss re-arm gate and the NO_L3 cursor; never the global
+        diagnostic epoch."""
+        if anchor is None:
+            return 0
+        fn = getattr(self.tree_cache, "anchor_storage_version", None)
+        if not callable(fn):
+            return 0
+        try:
+            return int(fn(anchor))
+        except Exception:
+            return 0
 
     def _cleanup_not_added_req(self, req, adder) -> None:
         """Revert matched mamba idx state when add_one_req rejected the
@@ -4530,24 +4665,32 @@ class Scheduler(
                         # does not stall the queue behind it; the WAIT skip
                         # above holds it until a T11 wake).
                         #
-                        # P1 restore re-arm churn gate: a request parked in
-                        # MISS_RECOMPUTE (proven L3-missing this episode)
-                        # MUST NOT re-enter WAIT[DEVICE_QUOTA] while the L3
-                        # publish epoch is unchanged and the generation
-                        # matches -- re-arming would re-probe the same
-                        # missing prefix and miss again (the ~13ms
-                        # WAIT -> RESTORING -> revoked:miss ->
-                        # ADMISSION_DENY -> WAIT churn). Skip the re-arm and
-                        # let the request proceed as a plain recompute when
-                        # capacity frees (the forward path). A later L3
-                        # publish advance or a generation change clears the
-                        # sticky miss (re-armable -- the cache may really
-                        # cover the prefix now).
+                        # P1 restore re-arm churn gate (phase2-peranchor): a
+                        # request parked in MISS_RECOMPUTE (proven L3-missing
+                        # this episode) MUST NOT re-enter WAIT[DEVICE_QUOTA]
+                        # while the ANCHOR's per-anchor storage version is
+                        # unchanged and the generation matches -- re-arming
+                        # would re-probe the same missing prefix and miss
+                        # again (the ~13ms WAIT -> RESTORING -> revoked:miss
+                        # -> ADMISSION_DENY -> WAIT churn). Only THIS anchor's
+                        # substantive durability change (write ack promotion /
+                        # restore read-back / durable-belief clear), a change
+                        # of the anchor itself (re-anchored to a different
+                        # node / deleted-anchor self-heal to a new candidate),
+                        # or a generation change overrides the sticky miss
+                        # (re-armable -- this candidate's L3 coverage may
+                        # really cover the prefix now). An unrelated chain's
+                        # write ack advances only the global diagnostic
+                        # counter and never re-arms.
                         miss_rearm = miss_rearm_allowed(
                             req.hicache_restore_miss_epoch,
-                            self.tree_cache.l3_publish_epoch(),
+                            self._anchor_version_or_zero(
+                                getattr(req, "last_host_node", None)
+                            ),
                             req.hicache_restore_miss_generation,
                             getattr(req, "session_generation", None),
+                            miss_anchor=req.hicache_restore_miss_anchor,
+                            current_anchor=getattr(req, "last_host_node", None),
                         )
                         self._apply_restore_event(
                             req,

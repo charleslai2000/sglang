@@ -594,6 +594,10 @@ from sglang.srt.mem_cache.unified_cache.unified_tree_core import (
     UnifiedTreeCore as _RealTreeCore,
 )
 from sglang.srt.managers.scheduler_components.hicache_restore import (
+    FrontierAnchorInfo as _frontier_anchor_info,
+    no_material_fast_forward as _no_material_fast_forward,
+)
+from sglang.srt.managers.scheduler_components.hicache_restore import (
     RestoreDecision as _restore_decision,
     RestoreEvent as _restore_event,
     RestoreState as _restore_state,
@@ -3865,6 +3869,164 @@ class PromotionSerializationIntegrationTests(unittest.TestCase):
         cache.loading_check(finish_count=2)
         self.assertEqual(cache.inflight_promotion_reserved, 0)
         self.assertEqual(cache.ongoing_load_back, {})
+
+
+# ---------------------------------------------------------------------------
+# phase2-peranchor: per-anchor storage version (real tree core)
+# ---------------------------------------------------------------------------
+
+
+@unittest.skipIf(torch is None, "real UnifiedTreeCore needs torch")
+class PerAnchorVersionTests(unittest.TestCase):
+    """phase2-peranchor: the per-anchor storage_version is bumped only by a
+    durability event local to a node's OWN chain (write ack promotion /
+    restore read-back / durable-belief clear), never by an unrelated chain's
+    event (which bumps only the global diagnostic epoch)."""
+
+    @staticmethod
+    def _make_chain():
+        params = SimpleNamespace(
+            page_size=1,
+            is_eagle=False,
+            enable_session_radix_cache=False,
+            eviction_policy="lru",
+            token_to_kv_pool_allocator=None,
+            enable_kv_cache_events=False,
+        )
+        tree_core = _RealTreeCore(
+            params,
+            {
+                _component_type.FULL: SimpleNamespace(tree_core=None),
+                _component_type.MAMBA: SimpleNamespace(tree_core=None),
+            },
+        )
+        tree_core.is_write_back = True
+        nodes = []
+        parent = tree_core.root_node
+        for i in range(2):
+            n = tree_core._new_node()
+            n.parent = parent
+            n.key = _RadixKey(_array("q", [1, 2]), None)
+            parent.children[f"n{i}"] = n
+            nodes.append(n)
+            parent = n
+        return tree_core, nodes
+
+    def test_promotion_bumps_only_promoted_nodes_version(self):
+        # Two sibling chains ack independently: promoting chain A bumps A's
+        # version but NOT B's (the unrelated chain's durability event must not
+        # re-arm a request parked on B).
+        tree_core, (a, b) = self._make_chain()
+        # A second sibling chain under the root.
+        c = tree_core._new_node()
+        c.parent = tree_core.root_node
+        c.key = _RadixKey(_array("q", [9]), None)
+        tree_core.root_node.children["c"] = c
+
+        self.assertEqual(tree_core.anchor_storage_version(a.id), 0)
+        self.assertEqual(tree_core.anchor_storage_version(c.id), 0)
+
+        # a ack promotes a (root is the persisted parent).
+        tree_core.advance_storage_persisted(a.id)
+        self.assertEqual(tree_core.anchor_storage_version(a.id), 1)
+        # Unrelated chain c's version untouched.
+        self.assertEqual(tree_core.anchor_storage_version(c.id), 0)
+        # b is a descendant of a (a's child): promoting b does not bump a
+        # again (a was already promoted); b bumps its own version.
+        tree_core.advance_storage_persisted(b.id)
+        self.assertEqual(tree_core.anchor_storage_version(b.id), 1)
+        # a's version still 1 (its own promotion was the only local event).
+        self.assertEqual(tree_core.anchor_storage_version(a.id), 1)
+
+        # c's own ack promotes only c.
+        tree_core.advance_storage_persisted(c.id)
+        self.assertEqual(tree_core.anchor_storage_version(c.id), 1)
+        self.assertEqual(tree_core.anchor_storage_version(a.id), 1)
+        self.assertEqual(tree_core.anchor_storage_version(b.id), 1)
+
+    def test_restore_read_back_bumps_own_anchor_only(self):
+        tree_core, (a, b) = self._make_chain()
+        c = tree_core._new_node()
+        c.parent = tree_core.root_node
+        c.key = _RadixKey(_array("q", [9]), None)
+        tree_core.root_node.children["c"] = c
+
+        tree_core.mark_storage_restored(a.id)
+        self.assertEqual(tree_core.anchor_storage_version(a.id), 1)
+        self.assertEqual(tree_core.anchor_storage_version(c.id), 0)
+
+        tree_core.mark_storage_restored(c.id)
+        self.assertEqual(tree_core.anchor_storage_version(c.id), 1)
+        # a unaffected by c's read-back.
+        self.assertEqual(tree_core.anchor_storage_version(a.id), 1)
+
+    def test_clear_bumps_version_on_actual_clear(self):
+        tree_core, (a, b) = self._make_chain()
+        tree_core.advance_storage_persisted(a.id)
+        self.assertEqual(tree_core.anchor_storage_version(a.id), 1)
+        self.assertTrue(tree_core.is_l3_durable(a.id))
+
+        # Clear with no acked-deferred descendant: the durable belief drops
+        # and the version bumps (the anchor's L3 state substantively changed).
+        tree_core.clear_storage_durable(a.id)
+        self.assertFalse(tree_core.is_l3_durable(a.id))
+        self.assertEqual(tree_core.anchor_storage_version(a.id), 2)
+
+    def test_clear_guarded_by_deferred_descendant_does_not_bump(self):
+        # P3 B guard: with an acked-deferred descendant the clear (and the
+        # bump) are suppressed -- P3 reconciliation semantics preserved.
+        tree_core, (a, b) = self._make_chain()
+        tree_core.advance_storage_persisted(a.id)  # a durable anchor
+        self.assertEqual(tree_core.anchor_storage_version(a.id), 1)
+        # b acks under a's now-clear... but first clear a so b is deferred.
+        tree_core.clear_storage_durable(a.id)
+        # b acks while a is unpersisted: b deferred (acked, not persisted).
+        tree_core.advance_storage_persisted(b.id)
+        self.assertTrue(b.storage_acked)
+        self.assertFalse(tree_core.is_storage_persisted(b.id))
+        # a's version bumped on the clear (2); a still durable-belief-cleared.
+        self.assertEqual(tree_core.anchor_storage_version(a.id), 2)
+
+        # Clearing a again with b deferred: B guard suppresses the clear, so
+        # a's version is NOT bumped again.
+        tree_core.clear_storage_durable(a.id)
+        self.assertEqual(tree_core.anchor_storage_version(a.id), 2)
+
+    def test_dead_anchor_version_reads_zero(self):
+        # A deleted anchor reads version 0 -- a self-heal to a new candidate.
+        tree_core, (a, b) = self._make_chain()
+        dead = 999999
+        self.assertEqual(tree_core.anchor_storage_version(dead), 0)
+        self.assertEqual(tree_core.anchor_storage_version(None), 0)
+
+
+class NoMaterialFastForwardUnitTests(unittest.TestCase):
+    """The 5-fact no-material judgment against the pure predicate (via the
+    real-tree module import): ALL facts absent -> fast-forward; ANY fact
+    present -> keep the wait. Never a bare storage_hit==0 shortcut."""
+
+    def _info(self, **kw):
+        return _frontier_anchor_info(**kw)
+
+    def test_all_absent_fast_forwards(self):
+        self.assertTrue(_no_material_fast_forward(self._info()))
+
+    def test_any_present_keeps_wait(self):
+        self.assertFalse(
+            _no_material_fast_forward(self._info(host_material=True))
+        )
+        self.assertFalse(
+            _no_material_fast_forward(self._info(storage_material=True))
+        )
+        self.assertFalse(
+            _no_material_fast_forward(self._info(pending_durable_ack=True))
+        )
+        self.assertFalse(
+            _no_material_fast_forward(self._info(deferred_durable_desc=True))
+        )
+        self.assertFalse(
+            _no_material_fast_forward(self._info(restorable_epoch_change=True))
+        )
 
 
 if __name__ == "__main__":

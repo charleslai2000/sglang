@@ -2381,10 +2381,35 @@ class UnifiedRadixCache(BasePrefixCache):
     def l3_publish_epoch(self) -> int:
         """The current monotonic L3 durable/publish epoch (P3 M3): bumped
         on every durability advance (write ack promotion / restore
-        read-back). The scheduler's l3_publish causal-epoch signal; a
-        value that never moved means the L3 coverage a NO_L3-parked rid
-        missed on is unchanged, so the park does not clear."""
+        read-back). phase2-peranchor: this global counter is retained for
+        DIAGNOSTIC STATISTICS ONLY -- the P1 miss re-arm gate and the NO_L3
+        cursor read the per-anchor storage_version, not this global count."""
         return self.tree_core.l3_publish_epoch()
+
+    def anchor_storage_version(self, node_id: NodeId) -> int:
+        """The per-anchor durability version of node_id (phase2-peranchor):
+        bumped only on a durability event local to THIS node's chain (write
+        ack promotion / restore read-back / durable-belief clear). The P1
+        miss re-arm gate and the NO_L3 cursor compare the version recorded at
+        the miss against this; an advance means THIS anchor's L3 coverage
+        genuinely changed. A dead/absent anchor reads 0 (self-heal to a
+        re-match from root, a new candidate)."""
+        return self.tree_core.anchor_storage_version(node_id)
+
+    def is_storage_written(self, node_id: NodeId) -> bool:
+        """Whether the node's KV was already submitted to L3 (dedupe guard /
+        a submitted write whose ack could still promote it durable)."""
+        return self.tree_core.is_storage_written(node_id)
+
+    def has_acked_descendant(self, node_id: NodeId) -> bool:
+        """Whether node_id's subtree contains a storage_acked &&
+        !storage_persisted descendant (a deferred-ACK node). The no-material
+        fast-forward judgment's deferred-durable-dependency fact: such a
+        descendant is a P3 reconcile promotion source that could make the
+        anchor durable, so the anchor is not a no-material dead-end."""
+        if not self.tree_core.node_exists(node_id):
+            return False
+        return self.tree_core.has_acked_descendant(node_id)
 
     def chain_backup_frontiers(
         self,

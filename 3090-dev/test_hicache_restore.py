@@ -40,12 +40,14 @@ RestoreEvent = _MOD.RestoreEvent
 RestoreState = _MOD.RestoreState
 RestoreWaitReason = _MOD.RestoreWaitReason
 DEMAND_RESTORE_MAX_INFLIGHT = _MOD.DEMAND_RESTORE_MAX_INFLIGHT
+FrontierAnchorInfo = _MOD.FrontierAnchorInfo
 backup_wait_applies = _MOD.backup_wait_applies
 backup_wake_applies = _MOD.backup_wake_applies
 capacity_wake_applies = _MOD.capacity_wake_applies
 demand_restore_available = _MOD.demand_restore_available
 miss_rearm_allowed = _MOD.miss_rearm_allowed
 next_restore = _MOD.next_restore
+no_material_fast_forward = _MOD.no_material_fast_forward
 too_short_wait_armed = _MOD.too_short_wait_armed
 wait_clock_next = _MOD.wait_clock_next
 wait_reason_for = _MOD.wait_reason_for
@@ -464,35 +466,139 @@ class RestoreStateMachineTests(unittest.TestCase):
 
 
 class StickyMissRearmGateTests(unittest.TestCase):
-    """P1: miss_rearm_allowed -- the admission re-arm gate. A definitive
-    miss is re-armable only when the L3 publish epoch has advanced (the
-    cache coverage genuinely changed) or the identity (session generation)
-    changed; otherwise the same probe would miss again (the churn)."""
+    """P1 (phase2-peranchor): miss_rearm_allowed -- the admission re-arm
+    gate. A definitive miss is re-armable only when the SAME anchor's
+    per-anchor storage version has advanced (its own chain's durability
+    genuinely changed), the request re-anchored to a different node, or the
+    identity (session generation) changed; otherwise the same probe would
+    miss again (the churn). The GLOBAL l3_publish epoch is diagnostic only
+    and NEVER re-arms a miss (the frozen root cause)."""
 
     def test_no_miss_epoch_is_rearmable(self):
         # Defensive: no recorded miss epoch (should not be MISS then).
         self.assertTrue(miss_rearm_allowed(None, 10, None, None))
 
-    def test_same_epoch_not_rearmable(self):
-        self.assertFalse(miss_rearm_allowed(5, 5, 1, 1))
+    def test_same_anchor_version_not_rearmable(self):
+        self.assertFalse(
+            miss_rearm_allowed(5, 5, 1, 1, miss_anchor=1, current_anchor=1)
+        )
 
-    def test_epoch_advanced_rearmable(self):
-        self.assertTrue(miss_rearm_allowed(5, 6, 1, 1))
+    def test_anchor_version_advanced_rearmable(self):
+        # The SAME anchor's per-anchor version advanced: its L3 coverage
+        # genuinely changed.
+        self.assertTrue(
+            miss_rearm_allowed(5, 6, 1, 1, miss_anchor=1, current_anchor=1)
+        )
+
+    def test_global_epoch_advance_alone_never_rearms(self):
+        # FROZEN ROOT CAUSE regression guard: the global l3_publish epoch
+        # advanced (an unrelated chain's write ack bumped it to 99) but this
+        # anchor's per-anchor version is unchanged (5). The miss must NOT
+        # re-arm -- the unrelated durability event is not causal for this
+        # candidate. (Here `current_version` is the per-anchor version 5.)
+        self.assertFalse(
+            miss_rearm_allowed(5, 5, 1, 1, miss_anchor=1, current_anchor=1)
+        )
 
     def test_generation_changed_rearmable(self):
-        self.assertTrue(miss_rearm_allowed(5, 5, 1, 2))
+        self.assertTrue(
+            miss_rearm_allowed(5, 5, 1, 2, miss_anchor=1, current_anchor=1)
+        )
+
+    def test_reanchored_to_different_anchor_rearmable(self):
+        # A new candidate (different anchor node): the old miss evidence does
+        # not apply, even with an unchanged version.
+        self.assertTrue(
+            miss_rearm_allowed(5, 5, 1, 1, miss_anchor=1, current_anchor=2)
+        )
 
     def test_generation_none_never_overrides(self):
-        # Neither side carries a generation: epoch is the only signal.
-        self.assertFalse(miss_rearm_allowed(5, 5, None, None))
-        self.assertTrue(miss_rearm_allowed(5, 6, None, None))
+        # Neither side carries a generation: only the anchor version signal.
+        self.assertFalse(
+            miss_rearm_allowed(5, 5, None, None, miss_anchor=1, current_anchor=1)
+        )
+        self.assertTrue(
+            miss_rearm_allowed(5, 6, None, None, miss_anchor=1, current_anchor=1)
+        )
 
     def test_idempotent_across_repeats(self):
         # Repeated invocation with unchanged state must stay refused --
         # the forward path (recompute) is the only correct exit; the gate
         # never flips on its own.
         for _ in range(3):
-            self.assertFalse(miss_rearm_allowed(5, 5, 1, 1))
+            self.assertFalse(
+                miss_rearm_allowed(5, 5, 1, 1, miss_anchor=1, current_anchor=1)
+            )
+
+
+class NoMaterialFastForwardTests(unittest.TestCase):
+    """phase2-peranchor: the 5-fact no-material fast-forward judgment. A
+    FRONTIER waiter with NO recoverable material AND no in-flight causal
+    producer (nothing that could ever make its anchor durable) must
+    ADMIT_RECOMPUTE immediately instead of idling out the 60s T13. ALL five
+    facts must be absent to fast-forward -- the negative is never implied by
+    a bare storage_hit == 0."""
+
+    def _info(
+        self,
+        host=False,
+        storage=False,
+        pending=False,
+        deferred=False,
+        change=False,
+    ):
+        return FrontierAnchorInfo(
+            host_material=host,
+            storage_material=storage,
+            pending_durable_ack=pending,
+            deferred_durable_desc=deferred,
+            restorable_epoch_change=change,
+        )
+
+    def test_no_material_fast_forwards(self):
+        # All five facts absent: nothing to restore, nothing in flight that
+        # could ever make it durable -- the wait is zero-expectation.
+        self.assertTrue(no_material_fast_forward(self._info()))
+
+    def test_host_material_never_fast_forwards(self):
+        # Host material exists (host_hit_length > 0): a re-probe may serve a
+        # restore, keep the frontier wait.
+        self.assertFalse(no_material_fast_forward(self._info(host=True)))
+
+    def test_storage_material_never_fast_forwards(self):
+        # The anchor is L3-durable or the root: prefetch-issuable.
+        self.assertFalse(no_material_fast_forward(self._info(storage=True)))
+
+    def test_pending_durable_ack_never_fast_forwards(self):
+        # An L3 write for this anchor's chain is in flight: its ack could
+        # promote the anchor durable -- keep waiting for it (P3 reconcile).
+        self.assertFalse(no_material_fast_forward(self._info(pending=True)))
+
+    def test_deferred_durable_descendant_never_fast_forwards(self):
+        # The anchor anchors a storage_acked && !storage_persisted descendant
+        # (a P3 reconcile promotion source): not a dead-end.
+        self.assertFalse(no_material_fast_forward(self._info(deferred=True)))
+
+    def test_restorable_epoch_change_never_fast_forwards(self):
+        # A per-anchor durability event (write ack / restore read-back /
+        # clear) could make a currently-unredeemable restore redeemable.
+        self.assertFalse(no_material_fast_forward(self._info(change=True)))
+
+    def test_multiple_facts_never_fast_forward(self):
+        # Any combination keeps the wait -- even when every OTHER fact is
+        # absent.
+        self.assertFalse(
+            no_material_fast_forward(
+                self._info(host=True, pending=True, deferred=True)
+            )
+        )
+
+    def test_not_just_storage_hit_zero(self):
+        # The judgment is structurally NOT "storage_hit == 0 => recompute":
+        # a deferred descendant or pending ack with zero storage hit MUST
+        # keep the wait (the P3 HOL fix depends on it).
+        self.assertFalse(no_material_fast_forward(self._info(deferred=True)))
+        self.assertFalse(no_material_fast_forward(self._info(pending=True)))
 
 
 class RestoreWaitReasonMappingTests(unittest.TestCase):

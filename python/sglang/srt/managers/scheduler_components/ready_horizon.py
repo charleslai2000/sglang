@@ -114,13 +114,22 @@ class NegativeCacheEntry(msgspec.Struct):
     """The per-rid causal park: the subscribed epoch's cursor at the
     decline, the request identity fingerprint (a prefix/generation change
     is causal for every park), and the safety-fuse expiry bounding an
-    anomalous repeat-fail loop."""
+    anomalous repeat-fail loop.
+
+    phase2-peranchor: for a NO_L3 park the cursor is the ANCHOR's
+    per-anchor storage_version at the decline (not the global l3_publish
+    epoch), and `anchor` records the anchor node the miss was proven on.
+    Re-eligibility clears only when THAT anchor's version advances (its own
+    chain's durability genuinely changed), or the request re-anchored to a
+    different anchor / changed identity / the fuse expired -- never on an
+    unrelated chain's durability event."""
 
     reason: DeclineReason
     epoch_cursor: int
     fuse_expiry: float
     prefix_len: int
     generation: Optional[int] = None
+    anchor: Optional[int] = None
 
 
 class ReadyHorizonView(msgspec.Struct):
@@ -303,35 +312,68 @@ class ReadyHorizonPolicy:
         view: ReadyHorizonView,
         epochs: CausalEpochs,
         now: float,
+        *,
+        anchor_version: Optional[int] = None,
+        anchor: Optional[int] = None,
     ) -> bool:
         """Whether a parked rid may be re-considered: the subscribed
         causal epoch advanced past the decline cursor, OR the request
         identity changed (prefix/generation -- a new question deserves a
         new probe), OR the safety fuse expired (the anomalous repeat-fail
         bound). A deterministic L3 miss is not transient: it stays parked
-        until exactly one of these causal events occurs."""
+        until exactly one of these causal events occurs.
+
+        phase2-peranchor: `anchor_version` is the CURRENT per-anchor
+        storage_version of the request's anchor (None when the caller does
+        not anchor it / the anchor is gone), and `anchor` is the current
+        anchor node id. For a NO_L3 park the comparison is per-anchor: the
+        park clears only when the SAME anchor's version advanced (its own
+        chain's durability genuinely changed), OR the request re-anchored to
+        a different anchor node (a new candidate -- the old miss evidence
+        does not apply), OR the identity / fuse cleared. An unrelated
+        chain's write ack advances only the global diagnostic epoch and does
+        NOT clear this park."""
         if now < entry.fuse_expiry:
             return False
         name = ReadyHorizonPolicy.subscribed_epoch(entry.reason)
-        cur = ReadyHorizonPolicy._epoch_value(epochs, name)
-        if name == "spec_budget":
-            # Budget released: inflight dropped below the decline cursor.
-            if cur < entry.epoch_cursor:
+        if name == "l3_publish":
+            # Per-anchor L3 coverage (phase2-peranchor): the miss was proven
+            # at the declined anchor's version; re-eligibility requires that
+            # either the SAME anchor's version advanced or the request now
+            # anchors a DIFFERENT node.
+            if entry.anchor is not None and anchor is None:
+                # The declined anchor was physically deleted / evicted:
+                # self-heal to a re-match from root -- a new candidate, so the
+                # old miss evidence no longer binds (mirrors frontier_anchor_ready
+                # node_exists -> True).
                 return True
-        elif name == "l3_publish":
-            # L3 durable/publish advanced past the decline cursor.
-            if cur > entry.epoch_cursor:
-                return True
-        else:  # host_release (Fix A)
-            # A genuine host-capacity-releasing event advanced the release
-            # counter past the decline cursor. The counter is MONOTONIC --
-            # it never recedes when the working set re-consumes the freed
-            # pages (unlike the available level, which flips 0->100->0 and
-            # can never sustain past the cursor under a full working set).
-            # A park therefore clears exactly once per release-epoch
-            # advance; the headroom debounce fuse bounds the re-probe rate.
-            if cur > entry.epoch_cursor:
-                return True
+            if entry.anchor is not None and anchor != entry.anchor:
+                return True  # re-anchored to a different node: new candidate
+            if entry.anchor is not None:
+                # Same anchor: its own per-anchor version must have advanced.
+                cur = 0 if anchor_version is None else anchor_version
+                if cur > entry.epoch_cursor:
+                    return True
+            # entry.anchor is None (miss recorded without anchor context):
+            # no anchor binding to verify, so NO version signal -- hold
+            # (identity / fuse still apply). Never re-probed by the global
+            # diagnostic epoch (the phase2-peranchor contract).
+        else:
+            cur = ReadyHorizonPolicy._epoch_value(epochs, name)
+            if name == "spec_budget":
+                # Budget released: inflight dropped below the decline cursor.
+                if cur < entry.epoch_cursor:
+                    return True
+            else:  # host_release (Fix A)
+                # A genuine host-capacity-releasing event advanced the release
+                # counter past the decline cursor. The counter is MONOTONIC --
+                # it never recedes when the working set re-consumes the freed
+                # pages (unlike the available level, which flips 0->100->0 and
+                # can never sustain past the cursor under a full working set).
+                # A park therefore clears exactly once per release-epoch
+                # advance; the headroom debounce fuse bounds the re-probe rate.
+                if cur > entry.epoch_cursor:
+                    return True
         # Identity events are causal for every park.
         if view.prefix_len != entry.prefix_len:
             return True
@@ -345,15 +387,24 @@ class ReadyHorizonPolicy:
         view: ReadyHorizonView,
         epochs: CausalEpochs,
         now: float,
+        *,
+        anchor_version: Optional[int] = None,
+        anchor: Optional[int] = None,
     ) -> bool:
         """Whether a candidate whose last attempt declined (parked) may be
         staged now. No entry = never attempted = eligible for its one
         fresh probe. The park clears only on its subscribed epoch's
         advance or an identity change; the READY pool / running batch /
-        plain scheduler pass never clears it."""
+        plain scheduler pass never clears it.
+
+        phase2-peranchor: `anchor_version` / `anchor` are the candidate's
+        current per-anchor version and anchor node (None when not anchored),
+        forwarded to entry_cleared for the NO_L3 per-anchor comparison."""
         if entry is None:
             return True
-        return ReadyHorizonPolicy.entry_cleared(entry, view, epochs, now)
+        return ReadyHorizonPolicy.entry_cleared(
+            entry, view, epochs, now, anchor_version=anchor_version, anchor=anchor
+        )
 
     def _state_funnel(self, view) -> bool:
         """The WAIT/NONE state funnel: NONE with restore potential, or
@@ -400,7 +451,16 @@ class ReadyHorizonPolicy:
             if view.rid in tree.ongoing_prefetch:
                 continue
             entry = negatives.get(view.rid)
-            if not self.subscribe_decline(entry, view, epochs, now):
+            # phase2-peranchor: derive the candidate's current anchor version
+            # + anchor node for the NO_L3 per-anchor re-eligibility comparison.
+            anchor = getattr(getattr(view, "req", None), "last_host_node", None)
+            anchor_version = None
+            if anchor is not None:
+                av = getattr(tree, "anchor_storage_version", None)
+                anchor_version = av(anchor) if callable(av) else None
+            if not self.subscribe_decline(
+                entry, view, epochs, now, anchor_version=anchor_version, anchor=anchor
+            ):
                 continue
             if self._state_funnel(view):
                 out.append(view)
