@@ -2136,10 +2136,66 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         must stop trusting the dead chain. Anchor-precise by contract:
         descendants keep their own flags (their durability is a separate
         fact; global consistency is out of scope). A later write ack
-        re-sets the belief."""
+        re-sets the belief.
+
+        P3 B guard (phase2-p3-fix): the anchor is NOT cleared when it
+        still anchors a storage_acked && !storage_persisted descendant
+        (a deferred ack). Clearing the parent would permanently strand
+        that descendant -- its promotion requires a contiguous persisted
+        parent chain -- leaving an unrecoverable frontier that times out
+        (T13, 60s). Instead the clear is deferred: the anchor's durable
+        belief is preserved and the per-pass deferred-ACK reconciliation
+        (radix_cache A3) re-writes the chain from the nearest persisted
+        ancestor / root and re-promotes it through a real L3 write ack.
+        A node with no acked-deferred descendant is cleared exactly as
+        before (the common, low-cost case)."""
         node = self.node_by_id(node_id)
+        if self._has_deferred_acked_descendant(node):
+            return
         node.storage_persisted = False
         node.storage_restored = False
+
+    def has_acked_descendant(self, node_id: NodeId) -> bool:
+        """Whether node_id's subtree contains a storage_acked &&
+        !storage_persisted descendant (a deferred-ACK node anchored by
+        this node's persisted chain). P3 B-guard predicate for
+        clear_storage_durable: such a descendant must not be stranded by
+        clearing its anchor. O(subtree), early-returning; the caller
+        (revoke-miss clear) is a rare path."""
+        node = self.node_by_id(node_id)
+        return self._has_deferred_acked_descendant(node)
+
+    def _has_deferred_acked_descendant(
+        self, node: UnifiedTreeNode
+    ) -> bool:
+        """DFS over the subtree rooted at *node* (strict descendants) for
+        any storage_acked && !storage_persisted node. No pruning by the
+        child's own acked/persisted flags: a non-acked or persisted
+        subtree can still hold an acked-deferred descendant during the
+        deferred-persist window, and skipping it would clear an anchor the
+        descendant depends on (the exact P3 bug). Early-returns on the
+        first hit; the caller is rare."""
+        for child in node.children.values():
+            if child.storage_acked and not child.storage_persisted:
+                return True
+            if self._has_deferred_acked_descendant(child):
+                return True
+        return False
+
+    def deferred_acked_nodes(self) -> list[NodeId]:
+        """Every live node whose KV write acked but whose persisted anchor
+        chain is not yet contiguous (storage_acked && !storage_persisted).
+        The P3 deferred-ACK reconciliation pass (radix_cache A3) rescans
+        this set each pass and re-fills each node's chain from the nearest
+        persisted ancestor / root, so an acked node is never permanently
+        stranded by a cleared or physically deleted parent. Reconciliation
+        never promotes on its own: promotion still only happens on a real
+        L3 write ack or a real restore read-back."""
+        return [
+            node_id
+            for node_id, node in self._node_arena.items()
+            if node.storage_acked and not node.storage_persisted
+        ]
 
     def is_l3_durable(self, node_id: NodeId) -> bool:
         """Whether the node's KV is confirmed present in L3 (P2-1 e14):
