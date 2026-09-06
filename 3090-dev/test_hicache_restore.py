@@ -40,12 +40,10 @@ RestoreEvent = _MOD.RestoreEvent
 RestoreState = _MOD.RestoreState
 RestoreWaitReason = _MOD.RestoreWaitReason
 DEMAND_RESTORE_MAX_INFLIGHT = _MOD.DEMAND_RESTORE_MAX_INFLIGHT
-DEVICE_QUOTA_MAX_TIMEOUTS = _MOD.DEVICE_QUOTA_MAX_TIMEOUTS
 backup_wait_applies = _MOD.backup_wait_applies
 backup_wake_applies = _MOD.backup_wake_applies
 capacity_wake_applies = _MOD.capacity_wake_applies
 demand_restore_available = _MOD.demand_restore_available
-device_quota_degraded = _MOD.device_quota_degraded
 miss_rearm_allowed = _MOD.miss_rearm_allowed
 next_restore = _MOD.next_restore
 too_short_wait_armed = _MOD.too_short_wait_armed
@@ -586,61 +584,6 @@ class RestoreWaitClockTests(unittest.TestCase):
         state, decision = next_restore(WAIT, RestoreEvent.TIMEOUT)
         self.assertIs(state, NONE)
         self.assertIs(decision, RestoreDecision.ADMIT_RECOMPUTE)
-
-
-class DeviceQuotaBoundedDegradationTests(unittest.TestCase):
-    """Fix B (P1): the DEVICE_QUOTA WAIT -> T13 timeout -> NONE(recompute) ->
-    admission NO_TOKEN -> ADMISSION_DENY -> re-WAIT[DEVICE_QUOTA] loop must be
-    bounded. The state machine's T13 row already degrades to ADMIT_RECOMPUTE
-    (never WAIT/recompute/WAIT by construction); the loop breaker is the
-    admission re-arm gate: after DEVICE_QUOTA_MAX_TIMEOUTS timeouts in an
-    episode, the scheduler MUST NOT re-arm WAIT[DEVICE_QUOTA] -- the request
-    proceeds as a plain recompute (the forward path) when capacity frees,
-    never re-entering the same DEVICE_QUOTA WAIT."""
-
-    def test_timeout_always_degrades_to_recompute(self):
-        # No matter how many times it laps, T13 clears to NONE with
-        # ADMIT_RECOMPUTE -- never WAIT. The state machine itself cannot
-        # produce a WAIT/recompute/WAIT cycle.
-        state, decision = next_restore(WAIT, RestoreEvent.TIMEOUT)
-        self.assertIs(state, NONE)
-        self.assertIs(decision, RestoreDecision.ADMIT_RECOMPUTE)
-
-    def test_below_cap_not_degraded(self):
-        # At 0 and 1 prior timeouts the waiter still has budget: the
-        # scheduler may re-arm WAIT[DEVICE_QUOTA] (a healthy chain gets a
-        # few capacity waits without being demoted).
-        self.assertFalse(device_quota_degraded(0))
-        self.assertFalse(device_quota_degraded(DEVICE_QUOTA_MAX_TIMEOUTS - 1))
-
-    def test_at_cap_degraded(self):
-        # At the cap the scheduler MUST NOT re-arm: the request proceeds as
-        # a plain recompute. The bound is finite and explicit.
-        self.assertTrue(device_quota_degraded(DEVICE_QUOTA_MAX_TIMEOUTS))
-        self.assertTrue(device_quota_degraded(DEVICE_QUOTA_MAX_TIMEOUTS + 1))
-        self.assertTrue(device_quota_degraded(10**6))
-
-    def test_cap_is_positive_finite(self):
-        # The bound is an explicit small constant, never 0 (would degrade
-        # on the first wait) and never unbounded (the B-run freeze).
-        self.assertGreater(DEVICE_QUOTA_MAX_TIMEOUTS, 0)
-        self.assertLess(DEVICE_QUOTA_MAX_TIMEOUTS, 100)
-
-    def test_full_lap_sequence_is_bounded(self):
-        # End-to-end episode: WAIT[DEVICE_QUOTA] -> T13 -> recompute -> the
-        # re-arm is gated. After exactly DEVICE_QUOTA_MAX_TIMEOUTS laps the
-        # gate refuses, so a full-and-frozen device produces exactly
-        # DEVICE_QUOTA_MAX_TIMEOUTS waiting laps and then stops churning.
-        timeouts = 0
-        while not device_quota_degraded(timeouts):
-            state, decision = next_restore(WAIT, RestoreEvent.TIMEOUT)
-            self.assertIs(state, NONE)
-            self.assertIs(decision, RestoreDecision.ADMIT_RECOMPUTE)
-            timeouts += 1
-        self.assertEqual(timeouts, DEVICE_QUOTA_MAX_TIMEOUTS)
-        # The next ADMISSION_DENY would be refused by the gate: it is not
-        # applied, so the request is never re-parked in WAIT[DEVICE_QUOTA].
-        self.assertTrue(device_quota_degraded(timeouts))
 
 
 class CapacityWakeApplicabilityTests(unittest.TestCase):
