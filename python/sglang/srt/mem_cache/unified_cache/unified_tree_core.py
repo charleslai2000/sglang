@@ -151,6 +151,16 @@ class UnifiedTreeNode:
         # is_l3_durable = storage_persisted or storage_restored; consumers
         # never distinguish the source.
         self.storage_restored = False
+        # per-anchor L3 durability version (phase2-peranchor): a monotonic
+        # counter bumped ONLY on a durability event that is causally local to
+        # THIS node's persisted chain -- a write ack promotion of this node or
+        # a restore read-back of this node, and a clear of this node's durable
+        # belief. It is the per-anchor analog of the (diagnostic-only) global
+        # l3_publish_epoch: the causal signal that "this anchor's L3 coverage
+        # genuinely changed" for the P1 miss re-arm gate and the ready-horizon
+        # NO_L3 cursor, which must NOT be re-armed by an unrelated chain's
+        # durability event. Monotonic; 0 = no local durability event yet.
+        self.storage_version = 0
         # P2-1 e16: a node whose device layers were released to a plain miss
         # by force (backup failed + drop declined + not L3-durable). The node
         # carries no device/host/L3 KV; it is a tombstone that must not be
@@ -2115,19 +2125,53 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         flag and storage_persisted; consumers never distinguish sources."""
         self.node_by_id(node_id).storage_restored = True
         self._bump_l3_publish()
+        self._bump_anchor_storage_version(node_id)
 
     def _bump_l3_publish(self) -> None:
         """Advance the monotonic L3 durable/publish epoch (P3 M3). One bump
         per durability event -- a write ack that promoted a persisted span
         or a restore read-back that confirmed L3 presence. The scheduler
         compares this across passes to detect "the L3 coverage changed"
-        (the causal event that clears a NO_L3 negative-cache park)."""
+        (the causal event that clears a NO_L3 negative-cache park).
+
+        phase2-peranchor: this global counter is retained for DIAGNOSTIC
+        STATISTICS ONLY -- it is a monotonic proxy for overall L3 write
+        throughput and never participates in any re-arm / negative-cache
+        gate. The per-anchor eligibility gates read the anchor-local
+        storage_version (_anchor_storage_version / _bump_anchor_storage_version)
+        instead, so an unrelated chain's durability event no longer re-arms
+        this request's miss or NO_L3 park."""
         self._l3_publish_epoch += 1
 
     def l3_publish_epoch(self) -> int:
         """The current L3 durable/publish epoch value (P3 M3). Monotonic;
-        identical values across passes mean no L3 durability advanced."""
+        identical values across passes mean no L3 durability advanced.
+        Diagnostic statistics only (phase2-peranchor): eligibility gates use
+        the per-anchor storage_version, not this global count."""
         return self._l3_publish_epoch
+
+    def _bump_anchor_storage_version(self, node_id: NodeId) -> None:
+        """Advance the per-anchor durability version of the node whose L3
+        durability genuinely changed (phase2-peranchor). node_id must be a
+        live node; dead ids must not be dereferenced.
+
+        This is the anchor-local causal signal for the P1 miss re-arm gate
+        and the ready-horizon NO_L3 cursor: only a durability event local to
+        this node's own chain re-arms a request parked on it -- an unrelated
+        chain's write ack / restore read-back bumps only the GLOBAL
+        diagnostic counter, never this node's version."""
+        self.node_by_id(node_id).storage_version += 1
+
+    def anchor_storage_version(self, node_id: NodeId) -> int:
+        """The per-anchor durability version of node_id (phase2-peranchor).
+        Miss / NO_L3 re-arm gates compare the version recorded at the miss
+        against this value; an advance means THIS anchor's L3 coverage
+        genuinely changed. A dead/absent anchor reads 0 (self-heal to
+        re-match from root -- an absent anchor is a new candidate, so the
+        old negative evidence no longer binds it)."""
+        if node_id is None or not self.node_exists(node_id):
+            return 0
+        return self.node_by_id(node_id).storage_version
 
     def clear_storage_durable(self, node_id: NodeId) -> None:
         """Drop the node's L3-durable belief (P2-1 e15 Y): a restore whose
@@ -2154,6 +2198,15 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
             return
         node.storage_persisted = False
         node.storage_restored = False
+        # phase2-peranchor (Open Decision 1): an actual clear IS a substantive
+        # change to THIS anchor's L3-durable state (durable -> not durable),
+        # so bump its anchor version -- any miss / NO_L3 park that depended on
+        # the old durable belief must be re-evaluated, and any future write
+        # ack re-setting the belief will bump again. Under the B guard above a
+        # deferred-ACK descendant suppresses the clear and therefore the bump
+        # (P3 semantics preserved). The global diagnostic counter is left
+        # untouched here (no promotion, no read-back).
+        node.storage_version += 1
 
     def has_acked_descendant(self, node_id: NodeId) -> bool:
         """Whether node_id's subtree contains a storage_acked &&
@@ -2238,6 +2291,11 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         descendant acked later is promoted by its own ack drain."""
         promoted = [node.id]
         node.storage_persisted = True
+        # phase2-peranchor: a promotion IS a durability event local to this
+        # node's own chain, so bump this node's anchor version (a miss / NO_L3
+        # park on this exact anchor must re-arm). The global diagnostic counter
+        # is bumped once for the whole promotion batch below.
+        node.storage_version += 1
         for child in node.children.values():
             if child.storage_acked and not child.storage_persisted:
                 promoted.extend(self._promote_persisted_subtree(child))

@@ -77,10 +77,10 @@ POOL_TOKENS = 2 * 21_392
 PREFIX_LEN = 100  # default identity fingerprint in the test views
 
 
-def _req(rid, state=None, reason=None, host_hit=0, generation=None):
+def _req(rid, state=None, reason=None, host_hit=0, generation=None, anchor=1):
     return SimpleNamespace(
         rid=rid,
-        last_host_node=1,
+        last_host_node=anchor,
         full_untruncated_fill_ids=[1] * PREFIX_LEN,
         hicache_restore_state=state,
         hicache_restore_wait_reason=reason,
@@ -138,6 +138,7 @@ def _neg(
     fuse_expiry=0.0,
     prefix_len=PREFIX_LEN,
     generation=None,
+    anchor=None,
 ):
     """A negative-cache park input; rid is cosmetic (dict key carries it)."""
     return NegativeCacheEntry(
@@ -146,6 +147,7 @@ def _neg(
         fuse_expiry=fuse_expiry,
         prefix_len=prefix_len,
         generation=generation,
+        anchor=anchor,
     )
 
 
@@ -180,16 +182,24 @@ class _Cc:
         )
 
 
-def _tree(ongoing=(), l3_publish=0):
+def _tree(ongoing=(), l3_publish=0, anchor_versions=None, anchor_exists=True):
     terminal: dict = {}
+    _av = anchor_versions if anchor_versions is not None else {}
+
+    def _anchor_version(node_id):
+        if not anchor_exists:
+            return 0
+        return _av.get(node_id, 0)
+
     tree = SimpleNamespace(
         ongoing_prefetch=set(ongoing),
         has_restore_potential=lambda *a, **k: True,
         l3_publish_epoch=lambda: l3_publish,
+        anchor_storage_version=_anchor_version,
         _storage_prefetch_terminal=terminal,
         # stale `_final_storage_survivability` (P3 instrumentation): the
         # recompute log reads these off the tree cache.
-        node_exists=lambda *a, **k: False,
+        node_exists=lambda *a, **k: anchor_exists,
         is_l3_durable=lambda *a, **k: False,
     )
     # Mirror the real unified_radix_cache terminal-outcome methods so the
@@ -359,30 +369,85 @@ class NegativeCacheTests(unittest.TestCase):
     identity changed / fuse expired). Nothing else -- next pass, READY pool
     change, running batch change -- clears it."""
 
-    def _cleared(self, entry, view=None, epochs=None, now=10.0):
+    def _cleared(self, entry, view=None, epochs=None, now=10.0, anchor_version=None):
         view = view or _view("r1", NONE, eligible=True)
         return _policy().entry_cleared(
-            entry, view, epochs or _epochs(frontier=("r1",)), now
+            entry,
+            view,
+            epochs or _epochs(frontier=("r1",)),
+            now,
+            anchor_version=anchor_version,
+            anchor=view.req.last_host_node,
         )
 
     def test_same_cursor_not_cleared(self):
-        # Park at l3_publish=5; the cursors are unchanged (5): the miss is
-        # deterministic and the L3 coverage has not advanced.
-        entry = _neg(reason=NO_L3, cursor=5)
-        epochs = _epochs(l3=5, frontier=("r1",))
-        self.assertFalse(self._cleared(entry, epochs=epochs))
+        # Park at the anchor's per-anchor version 5; the same anchor's
+        # version is unchanged (5): the miss is deterministic and THIS
+        # anchor's L3 coverage has not advanced.
+        entry = _neg(reason=NO_L3, cursor=5, anchor=1)
+        epochs = _epochs(frontier=("r1",))
+        self.assertFalse(
+            self._cleared(entry, epochs=epochs, anchor_version=5)
+        )
 
-    def test_l3_publish_advance_clears_no_l3(self):
-        entry = _neg(reason=NO_L3, cursor=5)
-        epochs = _epochs(l3=6, frontier=("r1",))
-        self.assertTrue(self._cleared(entry, epochs=epochs))
+    def test_anchor_version_advance_clears_no_l3(self):
+        # The SAME anchor's per-anchor storage version advanced past the
+        # decline cursor: THIS anchor's L3 coverage genuinely changed (a
+        # write ack / restore read-back on its own chain), so the park
+        # clears.
+        entry = _neg(reason=NO_L3, cursor=5, anchor=1)
+        epochs = _epochs(frontier=("r1",))
+        self.assertTrue(
+            self._cleared(entry, epochs=epochs, anchor_version=6)
+        )
+
+    def test_global_l3_publish_advance_does_not_clear_no_l3(self):
+        # phase2-peranchor: the GLOBAL l3_publish diagnostic epoch advanced
+        # (an unrelated chain wrote) but this anchor's per-anchor version is
+        # unchanged -- the park must NOT clear. This is the frozen root
+        # cause regression guard: previously the global advance re-armed the
+        # park (the obsolesced-agent churn).
+        entry = _neg(reason=NO_L3, cursor=5, anchor=1)
+        epochs = _epochs(l3=99, frontier=("r1",))
+        self.assertFalse(
+            self._cleared(entry, epochs=epochs, anchor_version=5)
+        )
+
+    def test_reanchored_to_different_anchor_clears_no_l3(self):
+        # The request now anchors a DIFFERENT node (miss proven on anchor 1,
+        # now anchored on 2): a new candidate -- the old negative evidence
+        # does not apply.
+        entry = _neg(reason=NO_L3, cursor=5, anchor=1)
+        epochs = _epochs(frontier=("r1",))
+        view = _view("r1", NONE, eligible=True, req=_req("r1", anchor=2))
+        self.assertTrue(
+            self._cleared(
+                entry,
+                view=view,
+                epochs=epochs,
+                anchor_version=5,
+            )
+        )
+
+    def test_no_anchor_context_never_cleared_on_epoch(self):
+        # No anchor context on the park (an old-style entry with anchor=None)
+        # but the request has an anchor now: conservative -- it is not
+        # re-probed by the global epoch either (phase2-peranchor contract:
+        # the global diagnostic counter never clears a NO_L3 park).
+        entry = _neg(reason=NO_L3, cursor=5, anchor=None)
+        epochs = _epochs(l3=99, frontier=("r1",))
+        self.assertFalse(
+            self._cleared(entry, epochs=epochs, anchor_version=7)
+        )
 
     def test_no_l3_not_cleared_by_other_epochs(self):
         # A host-headroom or budget release is NOT causal for an L3 miss:
         # the full prefix is still not in L3.
-        entry = _neg(reason=NO_L3, cursor=5)
-        epochs = _epochs(l3=5, headroom=10**9 + 100, spec=0, frontier=("r1",))
-        self.assertFalse(self._cleared(entry, epochs=epochs))
+        entry = _neg(reason=NO_L3, cursor=5, anchor=1)
+        epochs = _epochs(headroom=10**9 + 100, spec=0, frontier=("r1",))
+        self.assertFalse(
+            self._cleared(entry, epochs=epochs, anchor_version=5)
+        )
 
     def test_no_headroom_cleared_only_by_host_release(self):
         # Fix A: NO_HEADROOM subscribes to the MONOTONIC host_release
@@ -450,10 +515,22 @@ class NegativeCacheTests(unittest.TestCase):
         # The fuse is NOT the retry cadence (a deterministic miss stays a
         # miss no matter how long you wait -- time alone never clears the
         # park). It only bounds a pathological repeat-fail loop once the
-        # causal condition is otherwise met.
-        entry = _neg(reason=NO_L3, cursor=5, fuse_expiry=20.0)
-        self.assertFalse(self._cleared(entry, epochs=_epochs(l3=8), now=10.0))
-        self.assertTrue(self._cleared(entry, epochs=_epochs(l3=8), now=25.0))
+        # causal condition is otherwise met. Here the causal condition is the
+        # SAME anchor's version advancing (5 -> 8), not the global epoch.
+        entry = _neg(reason=NO_L3, cursor=5, fuse_expiry=20.0, anchor=1)
+        # Fuse not expired: not cleared even with the anchor version advanced.
+        self.assertFalse(
+            self._cleared(entry, epochs=_epochs(), now=10.0, anchor_version=8)
+        )
+        # Fuse expired AND the anchor's version advanced: cleared.
+        self.assertTrue(
+            self._cleared(entry, epochs=_epochs(), now=25.0, anchor_version=8)
+        )
+        # Fuse expired but the anchor's version is UNCHANGED (5): still held
+        # -- the deterministic miss is not transient, time alone never clears.
+        self.assertFalse(
+            self._cleared(entry, epochs=_epochs(), now=25.0, anchor_version=5)
+        )
 
     def test_subscribe_decline_no_entry_eligible(self):
         # No park = never attempted = eligible for the one fresh probe.
@@ -462,16 +539,43 @@ class NegativeCacheTests(unittest.TestCase):
         )
 
     def test_staging_candidates_excludes_parked_rid(self):
+        # The rid is parked on NO_L3 at anchor 1 version 5; the tree's anchor
+        # 1 version is still 5, so it stays parked (not re-probed) -- even
+        # though the global l3_publish epoch is high.
         views = _views(("r1", NONE, None, 0, 0, True))
-        negs = {"r1": _neg(reason=NO_L3, cursor=5)}
-        epochs = _epochs(l3=5, frontier=("r1",))
+        negs = {"r1": _neg(reason=NO_L3, cursor=5, anchor=1)}
+        epochs = _epochs(l3=99, frontier=("r1",))
         got = [
             v.rid
             for v in _policy().staging_candidates(
-                views, tree=_tree(), cc=_Cc(), negatives=negs, epochs=epochs, now=0.0
+                views,
+                tree=_tree(anchor_versions={1: 5}),
+                cc=_Cc(),
+                negatives=negs,
+                epochs=epochs,
+                now=0.0,
             )
         ]
         self.assertEqual(got, [])
+
+    def test_staging_candidates_includes_rearmed_rid(self):
+        # The SAME anchor's version advanced to 6 past the decline cursor: the
+        # park clears and the rid is re-eligible for its one fresh probe.
+        views = _views(("r1", NONE, None, 0, 0, True))
+        negs = {"r1": _neg(reason=NO_L3, cursor=5, anchor=1)}
+        epochs = _epochs(frontier=("r1",))
+        got = [
+            v.rid
+            for v in _policy().staging_candidates(
+                views,
+                tree=_tree(anchor_versions={1: 6}),
+                cc=_Cc(),
+                negatives=negs,
+                epochs=epochs,
+                now=0.0,
+            )
+        ]
+        self.assertEqual(got, ["r1"])
 
 
 class WatermarkMathTests(unittest.TestCase):
@@ -748,6 +852,7 @@ def _pass_scheduler(
     enable=True,
     tree_cache=None,
     l3_publish=0,
+    anchor_versions=None,
 ):
     scheduler = Scheduler.__new__(Scheduler)
     scheduler.server_args = SimpleNamespace(
@@ -766,7 +871,9 @@ def _pass_scheduler(
     scheduler.enable_ready_horizon = enable
     scheduler.init_ready_horizon()
     scheduler.waiting_queue = list(queue)
-    scheduler.tree_cache = tree_cache or _tree(l3_publish=l3_publish)
+    scheduler.tree_cache = tree_cache or _tree(
+        l3_publish=l3_publish, anchor_versions=anchor_versions
+    )
     scheduler.tree_cache.cache_controller = cc or _Cc()
     scheduler.tree_cache.staged_prefetch_tokens = lambda rid: 0
     scheduler.tree_cache.peek_prefetch_loaded_tokens = lambda rid: 0
@@ -1016,9 +1123,14 @@ class DeterministicMissParkTests(unittest.TestCase):
             "sglang.srt.managers.scheduler.time.perf_counter", new=clock
         ), clock
 
-    def _make_scheduler(self, cc=None, l3_publish=0):
+    def _make_scheduler(self, cc=None, l3_publish=0, anchor_versions=None):
         cc = cc or _Cc()
-        scheduler = _pass_scheduler(queue=[_req("r1", NONE)], cc=cc, l3_publish=l3_publish)
+        scheduler = _pass_scheduler(
+            queue=[_req("r1", NONE)],
+            cc=cc,
+            l3_publish=l3_publish,
+            anchor_versions=anchor_versions,
+        )
 
         def charge(req, *, demand_restore=False):
             cc.inflight_speculative_tokens += CHAIN_TOKENS
@@ -1056,11 +1168,53 @@ class DeterministicMissParkTests(unittest.TestCase):
             scheduler._ready_horizon_pass()
             self.assertEqual(scheduler.issued, ["r1"])  # not re-probed
 
-    def test_l3_publish_advance_clears_and_reprobes_once(self):
+    def test_anchor_version_advance_clears_and_reprobes_once(self):
+        # phase2-peranchor: the park records the anchor's per-anchor version
+        # (0 initially); a GLOBAL l3_publish advance alone does NOT clear it
+        # (the frozen root cause -- the unrelated-chain bump), but the SAME
+        # anchor's per-anchor version advancing (its own chain's durability
+        # changed) + the expired fuse clears it and grants one fresh probe.
         patch, clock = self._clock_patch()
         with patch:
             cc = _Cc()
-            scheduler, _ = self._make_scheduler(cc=cc, l3_publish=0)
+            scheduler, _ = self._make_scheduler(
+                cc=cc, l3_publish=0, anchor_versions={1: 0}
+            )
+            scheduler._ready_horizon_pass()
+            self.assertEqual(scheduler.issued, ["r1"])
+            scheduler.waiting_queue[0].hicache_restore_state = NONE
+            scheduler.tree_cache.record_storage_prefetch_terminal("r1", "revoked_miss")
+            scheduler._feed_restore_terminal(scheduler.waiting_queue[0])
+            entry = scheduler._ready_horizon_negatives["r1"]
+            self.assertEqual(entry.reason, NO_L3)
+            self.assertEqual(entry.epoch_cursor, 0)
+            self.assertEqual(entry.anchor, 1)
+
+            # Fuse still live: even with the anchor's version advanced the
+            # park holds (the rate bound, not the retry cadence).
+            scheduler.tree_cache.anchor_storage_version = lambda n: 3
+            cc.inflight_speculative_tokens = 0
+            scheduler._ready_horizon_pass()
+            self.assertEqual(scheduler.issued, ["r1"])
+
+            # Fuse expired AND the SAME anchor's version advanced: the park
+            # clears and the rid gets its one fresh probe.
+            clock.advance(10.0)
+            scheduler._ready_horizon_pass()
+            self.assertEqual(scheduler.issued, ["r1", "r1"])
+
+    def test_unrelated_chain_global_bump_never_clears_no_l3(self):
+        # The frozen root cause regression: the global l3_publish epoch
+        # advanced to 3 (an unrelated chain's write ack / restore) while
+        # THIS anchor's per-anchor version is still 0. The NO_L3 park must
+        # hold even past the fuse -- the unrelated durability event is not
+        # causal for this candidate's miss.
+        patch, clock = self._clock_patch()
+        with patch:
+            cc = _Cc()
+            scheduler, _ = self._make_scheduler(
+                cc=cc, l3_publish=0, anchor_versions={1: 0}
+            )
             scheduler._ready_horizon_pass()
             self.assertEqual(scheduler.issued, ["r1"])
             scheduler.waiting_queue[0].hicache_restore_state = NONE
@@ -1068,24 +1222,20 @@ class DeterministicMissParkTests(unittest.TestCase):
             scheduler._feed_restore_terminal(scheduler.waiting_queue[0])
             self.assertEqual(scheduler._ready_horizon_negatives["r1"].reason, NO_L3)
 
-            # Fuse still live: even with the L3 counter advanced the park
-            # holds (the rate bound, not the retry cadence).
-            scheduler.tree_cache.l3_publish_epoch = lambda: 3
+            # Unrelated-chain global bump + fuse expired.
+            scheduler.tree_cache.l3_publish_epoch = lambda: 42
             cc.inflight_speculative_tokens = 0
-            scheduler._ready_horizon_pass()
-            self.assertEqual(scheduler.issued, ["r1"])
-
-            # Fuse expired AND the L3 durable counter advanced: the park
-            # clears and the rid gets its one fresh probe.
             clock.advance(10.0)
             scheduler._ready_horizon_pass()
-            self.assertEqual(scheduler.issued, ["r1", "r1"])
+            self.assertEqual(scheduler.issued, ["r1"], "unrelated global bump must not re-arm")
 
     def test_after_reprobe_miss_reparks_at_new_cursor(self):
         patch, clock = self._clock_patch()
         with patch:
             cc = _Cc()
-            scheduler, _ = self._make_scheduler(cc=cc, l3_publish=0)
+            scheduler, _ = self._make_scheduler(
+                cc=cc, l3_publish=0, anchor_versions={1: 0}
+            )
             scheduler._ready_horizon_pass()
             self.assertEqual(scheduler.issued, ["r1"])
             scheduler.waiting_queue[0].hicache_restore_state = NONE
@@ -1094,15 +1244,15 @@ class DeterministicMissParkTests(unittest.TestCase):
             entry1 = scheduler._ready_horizon_negatives["r1"]
             self.assertEqual(entry1.epoch_cursor, 0)
 
-            # L3 publishes once and the fuse expires: the rid reprobes,
-            # misses again, and re-parks at the NEW cursor.
-            scheduler.tree_cache.l3_publish_epoch = lambda: 1
+            # The SAME anchor's version advances and the fuse expires: the
+            # rid reprobes, misses again, and re-parks at the NEW cursor.
+            scheduler.tree_cache.anchor_storage_version = lambda n: 1
             cc.inflight_speculative_tokens = 0
             clock.advance(10.0)
             scheduler._ready_horizon_pass()
             self.assertEqual(scheduler.issued, ["r1", "r1"])
             # The second miss lands (the drain records the revoked_miss
-            # terminal); the re-park records the NEW l3_publish cursor.
+            # terminal); the re-park records the NEW anchor version cursor.
             scheduler.waiting_queue[0].hicache_restore_state = NONE
             scheduler.tree_cache.record_storage_prefetch_terminal("r1", "revoked_miss")
             scheduler._feed_restore_terminal(scheduler.waiting_queue[0])
@@ -1110,8 +1260,9 @@ class DeterministicMissParkTests(unittest.TestCase):
             self.assertEqual(entry2.epoch_cursor, 1)
 
             # Same causal epoch (cursor still 1) even with the fuse expired
-            # again: the next event pass holds the park -- at most one
-            # staging attempt per rid per causal epoch.
+            # again and an unrelated global bump: the next event pass holds
+            # the park -- at most one staging attempt per rid per causal
+            # anchor-version.
             clock.advance(10.0)
             scheduler.waiting_queue[0].hicache_restore_state = NONE
             cc.inflight_speculative_tokens = 0

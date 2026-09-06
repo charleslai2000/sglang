@@ -212,6 +212,7 @@ class P1StickyMissSchedulerFeedTests(unittest.TestCase):
             hicache_restore_state_ts=0.0,
             hicache_restore_miss_epoch=None,
             hicache_restore_miss_generation=None,
+            hicache_restore_miss_anchor=None,
             session_generation=generation,
             host_hit_length=0,
             full_untruncated_fill_ids=[0, 1, 2, 3, 4, 5, 6, 7],
@@ -219,12 +220,14 @@ class P1StickyMissSchedulerFeedTests(unittest.TestCase):
 
     def test_genuine_miss_records_epoch_and_generation(self):
         # The drain terminal revoked_miss: _feed_restore_terminal must land
-        # the request in MISS_RECOMPUTE and record the L3 publish epoch at
-        # which the miss was proven plus the identity generation.
+        # the request in MISS_RECOMPUTE and record the ANCHOR's per-anchor
+        # storage version at which the miss was proven (phase2-peranchor)
+        # plus the anchor node and the identity generation.
         tree_cache = SimpleNamespace(
             pop_storage_prefetch_terminal=lambda rid: "revoked_miss",
             l3_publish_epoch=lambda: 7,
             node_exists=lambda nid: False,
+            anchor_storage_version=lambda nid: 9,
         )
         scheduler = self._scheduler(tree_cache)
         req = self._req(generation=3)
@@ -233,7 +236,8 @@ class P1StickyMissSchedulerFeedTests(unittest.TestCase):
         scheduler._feed_restore_terminal(req)
 
         self.assertIs(req.hicache_restore_state, RestoreState.MISS_RECOMPUTE)
-        self.assertEqual(req.hicache_restore_miss_epoch, 7)
+        self.assertEqual(req.hicache_restore_miss_epoch, 9)
+        self.assertEqual(req.hicache_restore_miss_anchor, 42)
         self.assertEqual(req.hicache_restore_miss_generation, 3)
 
     def test_same_epoch_miss_not_rearmed(self):
@@ -350,6 +354,228 @@ class P1StickyMissSchedulerFeedTests(unittest.TestCase):
             )
             self.assertIs(req.hicache_restore_state, RestoreState.MISS_RECOMPUTE)
             self.assertIsNone(req.hicache_restore_wait_reason)
+
+    def _rearm_scheduler(self, tree_cache):
+        """A scheduler whose T6 re-arm reads the tree's anchor version via
+        the real `_anchor_version_or_zero` helper."""
+        scheduler = self._scheduler(tree_cache)
+        return scheduler
+
+    def _rearm_gate(self, scheduler, req):
+        """Compute the per-anchor re-arm verdict exactly as the admission
+        loop does (scheduler.py T6) and feed it into the state machine."""
+        miss_rearm = scheduler_mod.miss_rearm_allowed(
+            req.hicache_restore_miss_epoch,
+            scheduler._anchor_version_or_zero(getattr(req, "last_host_node", None)),
+            req.hicache_restore_miss_generation,
+            getattr(req, "session_generation", None),
+            miss_anchor=req.hicache_restore_miss_anchor,
+            current_anchor=getattr(req, "last_host_node", None),
+        )
+        return scheduler._apply_restore_event(
+            req, RestoreEvent.ADMISSION_DENY, rearm_allowed=miss_rearm
+        )
+
+    def test_global_epoch_advance_does_not_rearm_same_anchor(self):
+        # phase2-peranchor (frozen root cause): the GLOBAL l3_publish epoch
+        # advanced (an unrelated chain's write ack bumped it to 99) while
+        # THIS request's anchor version is unchanged (still 5). The T6 re-arm
+        # must NOT re-enter WAIT -- the unrelated durability event is not
+        # causal for this candidate's miss. Previously this re-armed (the
+        # current_epoch > miss_epoch global test) -- the churn.
+        tree_cache = SimpleNamespace(
+            pop_storage_prefetch_terminal=lambda rid: None,
+            l3_publish_epoch=lambda: 99,  # unrelated global bump
+            anchor_storage_version=lambda nid: 5,  # this anchor unchanged
+            node_exists=lambda nid: True,
+        )
+        scheduler = self._rearm_scheduler(tree_cache)
+        req = self._req(generation=3)
+        req.hicache_restore_state = RestoreState.MISS_RECOMPUTE
+        req.hicache_restore_miss_epoch = 5
+        req.hicache_restore_miss_anchor = 42
+        req.hicache_restore_miss_generation = 3
+
+        self._rearm_gate(scheduler, req)
+
+        self.assertIs(req.hicache_restore_state, RestoreState.MISS_RECOMPUTE)
+        self.assertIsNone(req.hicache_restore_wait_reason)
+        self.assertEqual(req.hicache_restore_miss_epoch, 5)
+
+    def test_same_anchor_version_advance_rearms(self):
+        # The SAME anchor's per-anchor version advanced past the miss probe
+        # (5 -> 6): THIS anchor's L3 coverage genuinely changed (a write ack
+        # promotion / restore read-back / clear on its own chain), so the
+        # miss no longer binds and the request re-arms into WAIT.
+        tree_cache = SimpleNamespace(
+            pop_storage_prefetch_terminal=lambda rid: None,
+            l3_publish_epoch=lambda: 5,
+            anchor_storage_version=lambda nid: 6,
+            node_exists=lambda nid: True,
+        )
+        scheduler = self._rearm_scheduler(tree_cache)
+        req = self._req(generation=3)
+        req.hicache_restore_state = RestoreState.MISS_RECOMPUTE
+        req.hicache_restore_miss_epoch = 5
+        req.hicache_restore_miss_anchor = 42
+        req.hicache_restore_miss_generation = 3
+
+        self._rearm_gate(scheduler, req)
+
+        self.assertIs(req.hicache_restore_state, RestoreState.WAIT_CAPACITY)
+        self.assertIs(
+            req.hicache_restore_wait_reason, RestoreWaitReason.DEVICE_QUOTA
+        )
+
+    def test_reanchor_to_different_node_rearms(self):
+        # The request re-anchored to a DIFFERENT node (was 42, now 77): a
+        # new candidate -- the old miss evidence does not apply, so it
+        # re-arms even with an unchanged version.
+        tree_cache = SimpleNamespace(
+            pop_storage_prefetch_terminal=lambda rid: None,
+            l3_publish_epoch=lambda: 5,
+            anchor_storage_version=lambda nid: 5,
+            node_exists=lambda nid: True,
+        )
+        scheduler = self._rearm_scheduler(tree_cache)
+        req = self._req(generation=3)
+        req.last_host_node = 77
+        req.hicache_restore_state = RestoreState.MISS_RECOMPUTE
+        req.hicache_restore_miss_epoch = 5
+        req.hicache_restore_miss_anchor = 42
+        req.hicache_restore_miss_generation = 3
+
+        self._rearm_gate(scheduler, req)
+
+        self.assertIs(req.hicache_restore_state, RestoreState.WAIT_CAPACITY)
+        self.assertIs(
+            req.hicache_restore_wait_reason, RestoreWaitReason.DEVICE_QUOTA
+        )
+
+    def test_generation_change_rearms_even_same_anchor(self):
+        # Same anchor version but a new identity (generation 4 vs miss 3):
+        # the old miss evidence does not apply to this prefix's new identity,
+        # so it re-arms.
+        tree_cache = SimpleNamespace(
+            pop_storage_prefetch_terminal=lambda rid: None,
+            l3_publish_epoch=lambda: 7,
+            anchor_storage_version=lambda nid: 7,
+            node_exists=lambda nid: True,
+        )
+        scheduler = self._rearm_scheduler(tree_cache)
+        req = self._req(generation=4)
+        req.hicache_restore_state = RestoreState.MISS_RECOMPUTE
+        req.hicache_restore_miss_epoch = 7
+        req.hicache_restore_miss_anchor = 42
+        req.hicache_restore_miss_generation = 3
+
+        self._rearm_gate(scheduler, req)
+
+        self.assertIs(req.hicache_restore_state, RestoreState.WAIT_CAPACITY)
+        self.assertIs(
+            req.hicache_restore_wait_reason, RestoreWaitReason.DEVICE_QUOTA
+        )
+
+
+class NoMaterialFastForwardSchedulerTests(unittest.TestCase):
+    """phase2-peranchor: the GATE_SKIP_FRONTIER no-material fast-forward
+    wiring. `_no_material_fast_forward_for` must return True only when ALL 5
+    facts are absent, and False when any in-flight producer / deferred
+    descendant / material / relevant change is present -- so the scheduler
+    ADMIT_RECOMPUTEs a no-material frontier wait instead of idling the 60s
+    T13, while keeping the P3 reconcile + frontier wait for every case with
+    an in-flight causal producer."""
+
+    def _scheduler(self, tree_cache):
+        scheduler = Scheduler.__new__(Scheduler)
+        scheduler.server_args = SimpleNamespace(hicache_restore_wait_timeout_s=60.0)
+        scheduler.tree_cache = tree_cache
+        scheduler.enable_hicache_storage = True
+        scheduler.enable_ready_horizon = False
+        return scheduler
+
+    def _req(self, anchor=42, host_hit=0):
+        return SimpleNamespace(
+            rid="r1",
+            last_host_node=anchor,
+            host_hit_length=host_hit,
+            full_untruncated_fill_ids=[0, 1, 2, 3, 4, 5, 6, 7],
+        )
+
+    def _tree(
+        self,
+        *,
+        node_exists=True,
+        is_l3_durable=False,
+        is_root=False,
+        is_storage_written=False,
+        has_deferred_desc=False,
+        anchor_version=0,
+        ongoing_backup=(),
+        ongoing_load_back=(),
+    ):
+        return SimpleNamespace(
+            node_exists=lambda nid: node_exists,
+            is_l3_durable=lambda nid: is_l3_durable,
+            is_root=lambda nid: is_root,
+            is_storage_written=lambda nid: is_storage_written,
+            has_acked_descendant=lambda nid: has_deferred_desc,
+            anchor_storage_version=lambda nid: anchor_version,
+            ongoing_backup=dict(ongoing_backup),
+            ongoing_load_back=set(ongoing_load_back),
+        )
+
+    def test_no_material_fast_forwards(self):
+        # All five facts absent: recompute forward (no 60s idle).
+        scheduler = self._scheduler(self._tree())
+        self.assertTrue(scheduler._no_material_fast_forward_for(self._req(), 42))
+
+    def test_host_material_keeps_wait(self):
+        scheduler = self._scheduler(self._tree())
+        self.assertFalse(
+            scheduler._no_material_fast_forward_for(self._req(host_hit=8), 42)
+        )
+
+    def test_storage_material_keeps_wait(self):
+        # L3-durable anchor: prefetch-issuable, keep the frontier wait.
+        scheduler = self._scheduler(self._tree(is_l3_durable=True))
+        self.assertFalse(
+            scheduler._no_material_fast_forward_for(self._req(), 42)
+        )
+
+    def test_pending_write_ack_keeps_wait(self):
+        # An L3 write for this anchor is in flight (storage_written): its ack
+        # could promote the anchor durable -- must NOT fast-forward.
+        scheduler = self._scheduler(self._tree(is_storage_written=True))
+        self.assertFalse(
+            scheduler._no_material_fast_forward_for(self._req(), 42)
+        )
+        # Or via the ongoing_backup table.
+        scheduler2 = self._scheduler(self._tree(ongoing_backup={1: (42, None)}))
+        self.assertFalse(
+            scheduler2._no_material_fast_forward_for(self._req(), 42)
+        )
+
+    def test_deferred_descendant_keeps_wait(self):
+        # The anchor anchors a deferred-ACK node (a P3 reconcile promotion
+        # source): the P3 HOL fix depends on keeping this wait.
+        scheduler = self._scheduler(self._tree(has_deferred_desc=True))
+        self.assertFalse(
+            scheduler._no_material_fast_forward_for(self._req(), 42)
+        )
+
+    def test_restorable_epoch_change_keeps_wait(self):
+        # The anchor has L3 durability history (version > 0): a re-restore may
+        # be redeemable, keep the wait.
+        scheduler = self._scheduler(self._tree(anchor_version=3))
+        self.assertFalse(
+            scheduler._no_material_fast_forward_for(self._req(), 42)
+        )
+        # An in-flight restore read-back for this anchor also keeps the wait.
+        scheduler2 = self._scheduler(self._tree(ongoing_load_back=(42,)))
+        self.assertFalse(
+            scheduler2._no_material_fast_forward_for(self._req(), 42)
+        )
 
 
 class TooShortWakeSchedulerFeedTests(unittest.TestCase):

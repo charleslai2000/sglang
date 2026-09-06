@@ -17,6 +17,7 @@ admission re-arm refuses to re-enter WAIT until that epoch advances or the
 identity (generation) changes.
 """
 
+from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Optional, Tuple
 
@@ -199,6 +200,73 @@ def next_restore(
     return state, RestoreDecision.NONE
 
 
+@dataclass(frozen=True)
+class FrontierAnchorInfo:
+    """The frozen, caller-supplied facts a no-material fast-forward judgment
+    reads about the FRONTIER waiter's anchor (phase2-peranchor). It is the
+    no-material state's `anchor_binding` snapshot for the unified restore
+    eligibility contract (phase2-re-unified-architect-e1 §3) -- the bridge to
+    the future state machine without restructuring it.
+
+    Fields (the 5 no-material facts, each precomputed by the caller so the
+    predicate stays pure / testable):
+      host_material  -- host copy / host hit present for the candidate
+      storage_material -- anchor is L3-durable (written+acked / restored) or
+                          the root (a root anchor is always prefetch-issuable)
+      pending_durable_ack -- an L3 write for this anchor's chain is in flight
+                          (its ACK could promote the anchor to durable)
+      deferred_durable_desc -- the anchor still anchors a storage_acked &&
+                          !storage_persisted descendant (a P3 reconcile
+                          promotion source that could make the anchor durable)
+      restorable_epoch_change -- a per-anchor durability event since this
+                          candidate was judged no-material (write ack /
+                          restore read-back / durable-belief clear) that could
+                          grant a currently-unredeemable restore
+    """
+
+    host_material: bool = False
+    storage_material: bool = False
+    pending_durable_ack: bool = False
+    deferred_durable_desc: bool = False
+    restorable_epoch_change: bool = False
+
+
+def no_material_fast_forward(info: FrontierAnchorInfo) -> bool:
+    """phase2-peranchor: whether a FRONTIER waiter's anchor has NO recoverable
+    material at all AND nothing in flight can ever make it durable, so the
+    wait is zero-expectation and the request should ADMIT_RECOMPUTE
+    immediately instead of idling out the full 60s T13.
+
+    The 5-fact judgment (user adjudication -- ALL must hold to fast-forward;
+    the negative is never implied by storage_hit=0 alone):
+      1. no host material (host_hit_length == 0 / no host copy),
+      2. no storage material (anchor is not L3-durable and not the root),
+      3. no pending durable ACK (no L3 write in flight for this anchor's
+         chain whose ack could promote it durable),
+      4. no deferred durable descendant (the anchor does not anchor a
+         storage_acked && !storage_persisted node -- no P3 reconcile
+         promotion source),
+      5. no restorable epoch change since the no-material judgment (no write
+         ack / restore read-back / durable-belief clear that could make a
+         currently-unredeemable restore redeemable).
+    When ANY fact is present (host material, storage material, an in-flight
+    writer, a deferred descendant, or a relevant per-anchor change) the
+    request must keep the normal frontier wait / P3 reconcile path -- never a
+    bare storage_hit==0 shortcut.
+    """
+    if info.host_material:
+        return False
+    if info.storage_material:
+        return False
+    if info.pending_durable_ack:
+        return False
+    if info.deferred_durable_desc:
+        return False
+    if info.restorable_epoch_change:
+        return False
+    return True
+
+
 def wait_reason_for(
     event: RestoreEvent, *, genuine_miss: bool = False
 ) -> Optional[RestoreWaitReason]:
@@ -225,25 +293,42 @@ def wait_reason_for(
 
 
 def miss_rearm_allowed(
-    miss_epoch: Optional[int],
-    current_epoch: int,
+    miss_version: Optional[int],
+    current_version: int,
     miss_generation: Optional[int],
     current_generation: Optional[int],
+    miss_anchor: Optional[int] = None,
+    current_anchor: Optional[int] = None,
 ) -> bool:
-    """P1: whether a request parked in MISS_RECOMPUTE may be re-armed at
-    admission (the restore re-arm churn gate).
+    """P1 (phase2-peranchor): whether a request parked in MISS_RECOMPUTE may
+    be re-armed at admission (the restore re-arm churn gate).
 
-    A definitive miss proves the request's prefix L3-missing at the L3
-    publish epoch it was probed; re-probing the same prefix at the same
-    epoch is guaranteed to miss again (the ~13ms churn). Re-arm is therefore
-    allowed only when the L3 publish epoch has advanced (the cache coverage
-    genuinely changed) or the identity (session generation) changed -- either
-    invalidates the old miss evidence. A request with no recorded miss epoch
-    (defensive; the state should not be MISS then) is treated as re-armable.
+    A definitive miss proves the request's prefix L3-missing at the ANCHOR's
+    per-anchor storage version it was probed; re-probing the same prefix at
+    the same anchor version is guaranteed to miss again (the ~13ms churn).
+    Re-arm is therefore allowed only when THIS anchor's storage version has
+    advanced (its own chain's durability genuinely changed -- a write ack
+    promotion / restore read-back / durable-belief clear on that anchor), the
+    request re-anchored to a DIFFERENT anchor node (a new candidate -- the
+    old miss evidence does not apply), or the identity (session generation)
+    changed -- any of these invalidates the old miss evidence. The GLOBAL
+    l3_publish epoch is diagnostic only and never re-arms a miss: an
+    unrelated chain's durability event must not re-arm this request.
+
+    A request with no recorded miss version (defensive; the state should not
+    be MISS then) is treated as re-armable.
     """
-    if miss_epoch is None:
+    if miss_version is None:
         return True
-    if current_epoch > miss_epoch:
+    # Re-anchored to a different node: a new candidate, old evidence void.
+    if (
+        miss_anchor is not None
+        and current_anchor is not None
+        and current_anchor != miss_anchor
+    ):
+        return True
+    # The SAME anchor's per-anchor durability version advanced.
+    if current_version > miss_version:
         return True
     if current_generation is not None and current_generation != miss_generation:
         return True
