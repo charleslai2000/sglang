@@ -9,7 +9,12 @@ touched here.
 Invariant the transitions encode: a capacity denial (quota / budget / host
 staging / frontier wait) is transient and retryable (WAIT_CAPACITY), while a
 true L3 miss is terminal (ADMIT_RECOMPUTE) -- miss decisions and capacity
-decisions are separate (design §0.1).
+decisions are separate (design §0.1). P1 (restore re-arm churn): a definitive
+miss parks the request in the sticky MISS_RECOMPUTE state (instead of
+collapsing back to NONE) so the negative evidence -- "this prefix was just
+proven L3-missing at this episode's L3 publish epoch" -- survives, and the
+admission re-arm refuses to re-enter WAIT until that epoch advances or the
+identity (generation) changes.
 """
 
 from enum import Enum, auto
@@ -23,6 +28,9 @@ class RestoreState(Enum):
     WAIT_CAPACITY = auto()  # denied for capacity; woken by T11/T12, bounded by T13
     RESTORING = auto()  # prefetch issued (or re-issued), in flight
     READY = auto()  # prefetch finalized; admission consumes the loaded tokens
+    MISS_RECOMPUTE = auto()  # P1 sticky-miss: proven L3-missing this episode;
+    # NOT re-armed until the L3 publish epoch advances or the identity
+    # (generation) changes -- the request recomputes forward meanwhile
 
 
 class RestoreWaitReason(Enum):
@@ -72,6 +80,7 @@ def next_restore(
     *,
     capacity_fits: bool = False,
     genuine_miss: bool = False,
+    rearm_allowed: bool = True,
 ) -> Tuple[RestoreState, RestoreDecision]:
     """Pure transition-table lookup for the design §2.2 state machine.
 
@@ -87,8 +96,14 @@ def next_restore(
       definitive and clears the state with ADMIT_RECOMPUTE, exactly like a
       genuine miss -- re-waiting would only idle out the old T13 clock.
     - T8 finalize lands RESTORING in READY.
-    - T9 genuine miss and T13 timeout clear it to NONE with the
-      ADMIT_RECOMPUTE decision (degrade to recompute; never wait).
+    - T9 genuine miss parks the request in MISS_RECOMPUTE (P1 sticky miss:
+      the negative evidence survives), with the ADMIT_RECOMPUTE decision
+      (degrade to recompute; never wait). It leaves MISS_RECOMPUTE only when
+      the L3 publish epoch advances or the identity/generation changes (the
+      re-arm epoch gate) or a later restore_success (T8) lands -- never by
+      re-arm alone, so the same-probe churn cannot recur.
+    - T13 timeout clears WAIT_CAPACITY to NONE with the ADMIT_RECOMPUTE
+      decision (degrade to recompute; never wait).
     - T14 abort is a no-op here: the request object is destroyed by the
       scheduler and the tree-side registries are cleared by
       release_aborted_request.
@@ -117,6 +132,16 @@ def next_restore(
     if event is RestoreEvent.GATE_SKIP_FRONTIER:  # T5
         return RestoreState.WAIT_CAPACITY, RestoreDecision.WAIT
     if event is RestoreEvent.ADMISSION_DENY:  # T6
+        if state is RestoreState.MISS_RECOMPUTE and not rearm_allowed:
+            # P1 sticky miss: a definitive miss proves this prefix
+            # L3-missing at the episode's L3 publish epoch; re-arming into
+            # WAIT[DEVICE_QUOTA] would re-probe the same missing prefix and
+            # miss again (the ~13ms churn). The scheduler passes
+            # rearm_allowed=False while the epoch is unchanged and the
+            # generation matches -- the request stays sticky and recomputes
+            # forward instead of re-arming. An epoch/generation advance
+            # (rearm_allowed=True) lets it leave MISS and re-arm.
+            return state, RestoreDecision.NONE
         return RestoreState.WAIT_CAPACITY, RestoreDecision.WAIT
     if event is RestoreEvent.LOAD_BACK_FAIL:  # T7
         return RestoreState.WAIT_CAPACITY, RestoreDecision.WAIT
@@ -130,9 +155,13 @@ def next_restore(
 
     if event is RestoreEvent.REVOKED_MISS:  # T9
         if genuine_miss:
-            # True miss / below-threshold hit: restore has no benefit, so
-            # degrade to recompute and do not wait (miss != capacity).
-            return RestoreState.NONE, RestoreDecision.ADMIT_RECOMPUTE
+            # P1 sticky miss: park in MISS_RECOMPUTE (degrade to recompute,
+            # never wait). Unlike the pre-P1 collapse to NONE, the sticky
+            # state carries the negative evidence so the admission re-arm
+            # cannot re-enter WAIT at the same L3 publish epoch (the churn).
+            # It leaves only on an epoch/generation advance (the re-arm
+            # gate) or a later restore_success (T8 -> READY).
+            return RestoreState.MISS_RECOMPUTE, RestoreDecision.ADMIT_RECOMPUTE
         # Capacity-type revoke (e.g. host staging shortfall): retryable.
         return RestoreState.WAIT_CAPACITY, RestoreDecision.WAIT
 
@@ -220,6 +249,32 @@ def wait_reason_for(
     if event is RestoreEvent.BACKUP_PENDING:
         return RestoreWaitReason.BACKUP_PENDING
     return None
+
+
+def miss_rearm_allowed(
+    miss_epoch: Optional[int],
+    current_epoch: int,
+    miss_generation: Optional[int],
+    current_generation: Optional[int],
+) -> bool:
+    """P1: whether a request parked in MISS_RECOMPUTE may be re-armed at
+    admission (the restore re-arm churn gate).
+
+    A definitive miss proves the request's prefix L3-missing at the L3
+    publish epoch it was probed; re-probing the same prefix at the same
+    epoch is guaranteed to miss again (the ~13ms churn). Re-arm is therefore
+    allowed only when the L3 publish epoch has advanced (the cache coverage
+    genuinely changed) or the identity (session generation) changed -- either
+    invalidates the old miss evidence. A request with no recorded miss epoch
+    (defensive; the state should not be MISS then) is treated as re-armable.
+    """
+    if miss_epoch is None:
+        return True
+    if current_epoch > miss_epoch:
+        return True
+    if current_generation is not None and current_generation != miss_generation:
+        return True
+    return False
 
 
 def wait_clock_next(

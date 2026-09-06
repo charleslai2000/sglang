@@ -363,8 +363,15 @@ class ReadyHorizonPolicy:
         FRONTIER / BACKUP_PENDING are ACK-event-driven wakes (re-issuing
         them duplicates the T11/T12 wake re-issue) and REVALIDATE /
         HOST_ALLOC are not testable by the horizon; the paced retry and
-        T13 own them."""
-        if view.state is RestoreState.NONE:
+        T13 own them.
+
+        P1: a MISS_RECOMPUTE request (proven L3-missing) is treated like
+        NONE here -- the ready horizon's OWN NO_L3 negative cache (keyed on
+        the l3_publish cursor) is the authoritative retry gate, clearing
+        only on an l3_publish advance / identity change / fuse expiry. That
+        cleared re-probe is the legitimate re-arm, so the sticky miss state
+        alone must not block the horizon's staging once its park clears."""
+        if view.state in (RestoreState.NONE, RestoreState.MISS_RECOMPUTE):
             return bool(view.staging_eligible)
         if view.state is not RestoreState.WAIT_CAPACITY:
             return False

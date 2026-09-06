@@ -226,6 +226,7 @@ from sglang.srt.managers.scheduler_components.hicache_restore import (
     capacity_wake_applies,
     demand_restore_available,
     device_quota_degraded,
+    miss_rearm_allowed,
     next_restore,
     promotion_budget_fits,
     promotion_wait_blocked,
@@ -3222,6 +3223,17 @@ class Scheduler(
             event, genuine_miss = RestoreEvent.BACKUP_PENDING, False
         else:  # "revoked_miss"
             event, genuine_miss = RestoreEvent.REVOKED_MISS, True
+        if event is RestoreEvent.REVOKED_MISS and genuine_miss:
+            # P1 sticky-miss evidence: record the L3 publish epoch at which
+            # this request's prefix was proven L3-missing, plus the identity
+            # (session generation). The admission re-arm (T6) refuses to
+            # re-enter WAIT while the epoch is unchanged and the generation
+            # matches -- the same-probe restore churn gate. A later epoch
+            # advance or generation change overrides the miss (re-armable).
+            req.hicache_restore_miss_epoch = self.tree_cache.l3_publish_epoch()
+            req.hicache_restore_miss_generation = getattr(
+                req, "session_generation", None
+            )
         self._apply_restore_event(req, event, genuine_miss=genuine_miss)
         if (
             event is RestoreEvent.REVOKED_MISS
@@ -3305,6 +3317,7 @@ class Scheduler(
         *,
         capacity_fits: bool = False,
         genuine_miss: bool = False,
+        rearm_allowed: bool = True,
     ) -> RestoreDecision:
         """Feed a restore event into the request's state machine and apply
         the transition (Req fields only; the decision is returned for the
@@ -3317,6 +3330,7 @@ class Scheduler(
             event,
             capacity_fits=capacity_fits,
             genuine_miss=genuine_miss,
+            rearm_allowed=rearm_allowed,
         )
         if next_state is req.hicache_restore_state and decision is RestoreDecision.NONE:
             return decision
@@ -3327,6 +3341,12 @@ class Scheduler(
             )
         else:
             req.hicache_restore_wait_reason = None
+        if next_state is not RestoreState.MISS_RECOMPUTE:
+            # P1: leaving the sticky-miss state (a re-arm override, an
+            # abort, a forward READY, or a re-issued restore) drops the
+            # negative evidence -- the miss no longer binds the request.
+            req.hicache_restore_miss_epoch = None
+            req.hicache_restore_miss_generation = None
         # The wait clock is armed at the first WAIT entry of the episode and
         # never re-armed by a re-decline: re-arming was what let the
         # capacity loop evade the T13 timeout (state_ts reset every pass).
@@ -4506,6 +4526,20 @@ class Scheduler(
                         # does not stall the queue behind it; the WAIT skip
                         # above holds it until a T11 wake).
                         #
+                        # P1 restore re-arm churn gate: a request parked in
+                        # MISS_RECOMPUTE (proven L3-missing this episode)
+                        # MUST NOT re-enter WAIT[DEVICE_QUOTA] while the L3
+                        # publish epoch is unchanged and the generation
+                        # matches -- re-arming would re-probe the same
+                        # missing prefix and miss again (the ~13ms
+                        # WAIT -> RESTORING -> revoked:miss ->
+                        # ADMISSION_DENY -> WAIT churn). Skip the re-arm and
+                        # let the request proceed as a plain recompute when
+                        # capacity frees (the forward path). A later L3
+                        # publish advance or a generation change clears the
+                        # sticky miss (re-armable -- the cache may really
+                        # cover the prefix now).
+                        #
                         # Fix B (P1) bounded degradation: a request that has
                         # already survived DEVICE_QUOTA_MAX_TIMEOUTS T13
                         # timeouts this episode must NOT re-enter the same
@@ -4520,11 +4554,19 @@ class Scheduler(
                         # not admit into a full pool here -- we merely stop
                         # choosing to WAIT instead of recomputing, which is
                         # exactly the no-progress the cap exists to break.
+                        miss_rearm = miss_rearm_allowed(
+                            req.hicache_restore_miss_epoch,
+                            self.tree_cache.l3_publish_epoch(),
+                            req.hicache_restore_miss_generation,
+                            getattr(req, "session_generation", None),
+                        )
                         if not device_quota_degraded(
                             req.hicache_restore_device_quota_timeouts
                         ):
                             self._apply_restore_event(
-                                req, RestoreEvent.ADMISSION_DENY
+                                req,
+                                RestoreEvent.ADMISSION_DENY,
+                                rearm_allowed=miss_rearm,
                             )
                         self._cleanup_not_added_req(req, adder)
                         continue

@@ -46,6 +46,8 @@ class BackupPendingSchedulerFeedTests(unittest.TestCase):
             hicache_restore_state=None,
             hicache_restore_wait_reason=None,
             hicache_restore_state_ts=0.0,
+            hicache_restore_miss_epoch=None,
+            hicache_restore_miss_generation=None,
         )
 
     def test_backup_pending_terminal_parks_and_registers_waiter(self):
@@ -185,6 +187,170 @@ class BackupPendingSchedulerFeedTests(unittest.TestCase):
         self.assertIs(
             req.hicache_restore_wait_reason, RestoreWaitReason.DEVICE_QUOTA
         )
+
+
+class P1StickyMissSchedulerFeedTests(unittest.TestCase):
+    """P1 restore re-arm churn: the T9 miss records the L3 publish epoch +
+    generation evidence, and the T6 admission re-arm gate refuses to re-arm
+    WAIT while the sticky miss holds (same epoch, same generation) -- the
+    request recomputes forward instead of churning."""
+
+    def _scheduler(self, tree_cache):
+        scheduler = Scheduler.__new__(Scheduler)
+        scheduler.server_args = SimpleNamespace(hicache_restore_wait_timeout_s=60.0)
+        scheduler.tree_cache = tree_cache
+        scheduler.enable_hicache_storage = True
+        scheduler.enable_ready_horizon = False
+        return scheduler
+
+    def _req(self, generation=None):
+        return SimpleNamespace(
+            rid="r1",
+            last_host_node=42,
+            hicache_restore_state=None,
+            hicache_restore_wait_reason=None,
+            hicache_restore_state_ts=0.0,
+            hicache_restore_miss_epoch=None,
+            hicache_restore_miss_generation=None,
+            hicache_restore_device_quota_timeouts=0,
+            session_generation=generation,
+            host_hit_length=0,
+            full_untruncated_fill_ids=[0, 1, 2, 3, 4, 5, 6, 7],
+        )
+
+    def test_genuine_miss_records_epoch_and_generation(self):
+        # The drain terminal revoked_miss: _feed_restore_terminal must land
+        # the request in MISS_RECOMPUTE and record the L3 publish epoch at
+        # which the miss was proven plus the identity generation.
+        tree_cache = SimpleNamespace(
+            pop_storage_prefetch_terminal=lambda rid: "revoked_miss",
+            l3_publish_epoch=lambda: 7,
+            node_exists=lambda nid: False,
+        )
+        scheduler = self._scheduler(tree_cache)
+        req = self._req(generation=3)
+        req.hicache_restore_state = RestoreState.RESTORING
+
+        scheduler._feed_restore_terminal(req)
+
+        self.assertIs(req.hicache_restore_state, RestoreState.MISS_RECOMPUTE)
+        self.assertEqual(req.hicache_restore_miss_epoch, 7)
+        self.assertEqual(req.hicache_restore_miss_generation, 3)
+
+    def test_same_epoch_miss_not_rearmed(self):
+        # A MISS_RECOMPUTE request denied at admission with an unchanged L3
+        # publish epoch and matching generation must NOT re-enter
+        # WAIT[DEVICE_QUOTA] -- the request recomputes forward instead of
+        # re-probing the same missing prefix (the churn).
+        epoch = 7
+        tree_cache = SimpleNamespace(
+            pop_storage_prefetch_terminal=lambda rid: None,
+            l3_publish_epoch=lambda: epoch,
+            has_restore_potential=lambda *a, **k: True,
+        )
+        scheduler = self._scheduler(tree_cache)
+        req = self._req(generation=3)
+        req.hicache_restore_state = RestoreState.MISS_RECOMPUTE
+        req.hicache_restore_miss_epoch = 7
+        req.hicache_restore_miss_generation = 3
+
+        scheduler._apply_restore_event(
+            req, RestoreEvent.ADMISSION_DENY, rearm_allowed=False
+        )
+
+        self.assertIs(req.hicache_restore_state, RestoreState.MISS_RECOMPUTE)
+        self.assertIsNone(req.hicache_restore_wait_reason)
+        # The sticky evidence survives.
+        self.assertEqual(req.hicache_restore_miss_epoch, 7)
+
+    def test_epoch_advance_rearms_miss(self):
+        # The L3 publish epoch advanced past the miss probe: the cache
+        # coverage may really have changed, so the miss no longer binds and
+        # the request re-arms into WAIT[DEVICE_QUOTA].
+        tree_cache = SimpleNamespace(
+            pop_storage_prefetch_terminal=lambda rid: None,
+            l3_publish_epoch=lambda: 8,
+        )
+        scheduler = self._scheduler(tree_cache)
+        req = self._req(generation=3)
+        req.hicache_restore_state = RestoreState.MISS_RECOMPUTE
+        req.hicache_restore_miss_epoch = 7
+        req.hicache_restore_miss_generation = 3
+
+        scheduler._apply_restore_event(
+            req, RestoreEvent.ADMISSION_DENY, rearm_allowed=True
+        )
+
+        self.assertIs(req.hicache_restore_state, RestoreState.WAIT_CAPACITY)
+        self.assertIs(
+            req.hicache_restore_wait_reason, RestoreWaitReason.DEVICE_QUOTA
+        )
+        # Leaving the sticky state drops the negative evidence.
+        self.assertIsNone(req.hicache_restore_miss_epoch)
+        self.assertIsNone(req.hicache_restore_miss_generation)
+
+    def test_generation_change_rearms_miss(self):
+        # Same epoch but a new identity (generation): the old miss evidence
+        # does not apply to this prefix's new identity, so it re-arms.
+        tree_cache = SimpleNamespace(
+            pop_storage_prefetch_terminal=lambda rid: None,
+            l3_publish_epoch=lambda: 7,
+        )
+        scheduler = self._scheduler(tree_cache)
+        req = self._req(generation=4)
+        req.hicache_restore_state = RestoreState.MISS_RECOMPUTE
+        req.hicache_restore_miss_epoch = 7
+        req.hicache_restore_miss_generation = 3
+
+        scheduler._apply_restore_event(
+            req, RestoreEvent.ADMISSION_DENY, rearm_allowed=True
+        )
+
+        self.assertIs(req.hicache_restore_state, RestoreState.WAIT_CAPACITY)
+
+    def test_forward_ready_drops_sticky_evidence(self):
+        # A successful restore leaves MISS via the override: the re-arm
+        # gate clears the negative evidence on the way out.
+        tree_cache = SimpleNamespace(
+            pop_storage_prefetch_terminal=lambda rid: None,
+            l3_publish_epoch=lambda: 7,
+        )
+        scheduler = self._scheduler(tree_cache)
+        req = self._req(generation=3)
+        req.hicache_restore_state = RestoreState.MISS_RECOMPUTE
+        req.hicache_restore_miss_epoch = 7
+        req.hicache_restore_miss_generation = 3
+
+        scheduler._apply_restore_event(
+            req, RestoreEvent.ADMISSION_DENY, rearm_allowed=True
+        )
+        # Re-issue leg -> RESTORING -> READY.
+        scheduler._apply_restore_event(req, RestoreEvent.PREFETCH_ISSUED)
+        scheduler._apply_restore_event(req, RestoreEvent.FINALIZED)
+
+        self.assertIs(req.hicache_restore_state, RestoreState.READY)
+        self.assertIsNone(req.hicache_restore_miss_epoch)
+
+    def test_repeated_invocation_idempotent(self):
+        # Repeated re-arm-gate checks with unchanged epoch/generation stay
+        # refused every time -- the gate is idempotent and never flips on
+        # its own (recompute is the only correct forward exit).
+        tree_cache = SimpleNamespace(
+            pop_storage_prefetch_terminal=lambda rid: None,
+            l3_publish_epoch=lambda: 7,
+        )
+        scheduler = self._scheduler(tree_cache)
+        req = self._req(generation=3)
+        req.hicache_restore_state = RestoreState.MISS_RECOMPUTE
+        req.hicache_restore_miss_epoch = 7
+        req.hicache_restore_miss_generation = 3
+
+        for _ in range(3):
+            scheduler._apply_restore_event(
+                req, RestoreEvent.ADMISSION_DENY, rearm_allowed=False
+            )
+            self.assertIs(req.hicache_restore_state, RestoreState.MISS_RECOMPUTE)
+            self.assertIsNone(req.hicache_restore_wait_reason)
 
 
 if __name__ == "__main__":
