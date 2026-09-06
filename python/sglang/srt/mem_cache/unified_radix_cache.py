@@ -483,6 +483,16 @@ class UnifiedRadixCache(BasePrefixCache):
         # Deferred persists skipped because their node was deleted before
         # the flush consumed it (observability for the stale-ref family).
         self._storage_persist_skip_count = 0
+        # P0 (phase2-backupassert): storage-gap nodes that were not host-backed
+        # up but whose device value was already released (host-only unbacked
+        # ancestors). These legally skip the device->host backup and fall
+        # through to the storage-write path (host->L3). Observability counter.
+        self._storage_gap_skipped_d2h_count = 0
+        # P0 (phase2-backupassert): storage-gap nodes with neither a device
+        # value nor a host copy (forced-miss tombstone / hollow with no KV in
+        # any tier). They have nothing to persist and are skipped as the
+        # explicit invalid / un-backupable state. Observability counter.
+        self._storage_gap_skipped_nokv_count = 0
         # Re-entry guard for _drain_write_through_acks (see its entry check).
         self._drain_write_through_depth = 0
         self.ongoing_load_back: dict[int, _OngoingLoadBack] = {}
@@ -2141,6 +2151,20 @@ class UnifiedRadixCache(BasePrefixCache):
                 self._skip_stale_storage_persist(nid)
                 continue
             if not self.tree_core.is_backuped(nid):
+                # P0 (phase2-backupassert): a gap node may be unbacked AND
+                # host-only (device value already released by an eviction /
+                # hollow / forced-miss, or inserted host-only). `is_backuped`
+                # alone cannot distinguish "unbacked with a device value"
+                # (needs a D->H backup) from "unbacked host-only" (device
+                # value gone; host copy is the only KV). Do not run the D->H
+                # backup when there is no device value to copy -- the
+                # _build_backup_spec assert would fire. Skip and let the
+                # storage-write loop below persist the host copy to L3.
+                if self.tree_core.get_component_device_value(
+                    nid, BASE_COMPONENT_TYPE
+                ) is None:
+                    self._storage_gap_skipped_d2h_count += 1
+                    continue
                 self._execute_and_commit_kv_backup(BackupKV([nid]), write_back=False)
         # The D->H backups above evict_host when host space is tight; host
         # eviction deletes host-only leaves, which may be gap nodes. Re-filter
@@ -2155,6 +2179,15 @@ class UnifiedRadixCache(BasePrefixCache):
         for nid in gap:
             if not self.tree_core.node_exists(nid):
                 self._skip_stale_storage_persist(nid)
+                continue
+            if not self.tree_core.is_backuped(nid):
+                # P0 (phase2-backupassert): a gap node with neither a device
+                # value nor a host copy (a forced-miss tombstone / hollow with
+                # no KV in any tier) has nothing to persist. It must not be
+                # written to L3 as if it carried content (would fabricate a
+                # durable chain for a node that holds no KV) -- skip it as the
+                # explicit invalid / un-backupable state and record the reason.
+                self._storage_gap_skipped_nokv_count += 1
                 continue
             if not self.tree_core.is_storage_written(nid):
                 self._write_backup_storage_node(nid)
