@@ -3828,43 +3828,77 @@ class Scheduler(
         "storage_hit == 0 => recompute": each fact is checked on its own, and
         the presence of ANY in-flight producer or deferred descendant keeps
         the P3 reconcile + frontier wait path (never fast-forwards).
+
+        phase2-p0fix Q1: before judging, resolve the anchor to its deepest
+        durable ancestor (the most rootward L3-durable node on the anchor's
+        parent chain). A request's suffix is served from a page range under
+        the anchor; when the host prefix was split by an L3 write ack
+        (D->H commit), the shallow anchor can be non-durable while a deeper
+        ancestor's pages ARE durable. Judging on the shallow node's missing
+        storage facts would mis-forward a request that could restore from the
+        deeper durable pages. The storage facts (2-5) are evaluated on the
+        resolved judgment anchor; host material (fact 1) is unchanged. When no
+        durable ancestor exists (a pure device chain with no L3 content, root
+        storage_persisted defaults False), no-material holds and the request
+        forwards immediately -- the fast-forward main benefit is preserved.
         """
         tc = self.tree_cache
         # 1) Host material: host copy / host hit present for the candidate.
         host_material = bool(getattr(req, "host_hit_length", 0) > 0)
-        # 2) Storage material: the anchor is L3-durable or the root (a root
-        #    anchor is always prefetch-issuable -- never a no-material dead-end).
-        storage_material = False
+        # Q1: resolve the deepest durable ancestor before judging. Falls back
+        # to the original anchor when the proxy is absent (e.g. test stubs).
+        durable_ancestor = None
         if anchor is not None:
+            dda = getattr(tc, "deepest_durable_ancestor", None)
+            if callable(dda):
+                try:
+                    durable_ancestor = dda(anchor)
+                except Exception:
+                    durable_ancestor = None
+        judgment_anchor = (
+            durable_ancestor if durable_ancestor is not None else anchor
+        )
+        # 2) Storage material: the resolved anchor is durable (a durable
+        #    ancestor was found), or the original anchor is the root (a root
+        #    anchor is always prefetch-issuable -- never a no-material
+        #    dead-end). A pure device chain resolves to no durable ancestor
+        #    (None) -> no-material holds -> forward (main benefit preserved).
+        storage_material = durable_ancestor is not None
+        if judgment_anchor is not None:
             node_exists = getattr(tc, "node_exists", None)
-            if callable(node_exists) and node_exists(anchor):
-                storage_material = tc.is_l3_durable(anchor) or tc.is_root(anchor)
-        # 3) Pending durable ACK: an L3 write for this anchor's chain is in
-        #    flight (ongoing_backup), OR the node is already marked
+            if callable(node_exists) and node_exists(judgment_anchor):
+                is_l3 = getattr(tc, "is_l3_durable", None)
+                if callable(is_l3) and is_l3(judgment_anchor):
+                    storage_material = True
+                is_root = getattr(tc, "is_root", None)
+                if callable(is_root) and is_root(judgment_anchor):
+                    storage_material = True
+        # 3) Pending durable ACK: an L3 write for the resolved anchor's chain
+        #    is in flight (ongoing_backup), OR the node is already marked
         #    storage_written (a submitted write whose ack could promote it).
         pending_durable_ack = False
-        if anchor is not None:
+        if judgment_anchor is not None:
             node_exists = getattr(tc, "node_exists", None)
-            if callable(node_exists) and node_exists(anchor):
+            if callable(node_exists) and node_exists(judgment_anchor):
                 is_sw = getattr(tc, "is_storage_written", None)
                 if callable(is_sw):
-                    pending_durable_ack = bool(is_sw(anchor))
+                    pending_durable_ack = bool(is_sw(judgment_anchor))
         ongoing_backup = getattr(tc, "ongoing_backup", None)
         if ongoing_backup:
             for op_node, _lock in ongoing_backup.values():
-                if op_node == anchor:
+                if op_node == judgment_anchor:
                     pending_durable_ack = True
                     break
-        # 4) Deferred durable descendant: the anchor still anchors a
+        # 4) Deferred durable descendant: the resolved anchor still anchors a
         #    storage_acked && !storage_persisted node (a P3 reconcile
         #    promotion source that could make it durable).
         deferred_durable_desc = False
-        if anchor is not None:
+        if judgment_anchor is not None:
             node_exists = getattr(tc, "node_exists", None)
-            if callable(node_exists) and node_exists(anchor):
+            if callable(node_exists) and node_exists(judgment_anchor):
                 has_desc = getattr(tc, "has_acked_descendant", None)
                 if callable(has_desc):
-                    deferred_durable_desc = bool(has_desc(anchor))
+                    deferred_durable_desc = bool(has_desc(judgment_anchor))
         # 5) Restorable epoch change: a per-anchor durability event that could
         #    make a currently-unredeemable restore redeemable -- either an
         #    in-flight restore read-back (load_back) for this anchor node, or
@@ -3873,14 +3907,14 @@ class Scheduler(
         #    a re-restore may be redeemable). Both are conservative: they keep
         #    the frontier wait rather than fast-forward.
         restorable_epoch_change = False
-        if anchor is not None:
+        if judgment_anchor is not None:
             ongoing_load_back = getattr(tc, "ongoing_load_back", None)
-            if ongoing_load_back and anchor in ongoing_load_back:
+            if ongoing_load_back and judgment_anchor in ongoing_load_back:
                 restorable_epoch_change = True
             av = getattr(tc, "anchor_storage_version", None)
             if callable(av):
                 try:
-                    if int(av(anchor)) > 0:
+                    if int(av(judgment_anchor)) > 0:
                         restorable_epoch_change = True
                 except Exception:
                     restorable_epoch_change = False

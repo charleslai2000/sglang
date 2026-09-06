@@ -513,8 +513,9 @@ class NoMaterialFastForwardSchedulerTests(unittest.TestCase):
         anchor_version=0,
         ongoing_backup=(),
         ongoing_load_back=(),
+        deepest_durable_ancestor=None,
     ):
-        return SimpleNamespace(
+        tree = SimpleNamespace(
             node_exists=lambda nid: node_exists,
             is_l3_durable=lambda nid: is_l3_durable,
             is_root=lambda nid: is_root,
@@ -524,6 +525,9 @@ class NoMaterialFastForwardSchedulerTests(unittest.TestCase):
             ongoing_backup=dict(ongoing_backup),
             ongoing_load_back=set(ongoing_load_back),
         )
+        if deepest_durable_ancestor is not None:
+            tree.deepest_durable_ancestor = lambda nid: deepest_durable_ancestor
+        return tree
 
     def test_no_material_fast_forwards(self):
         # All five facts absent: recompute forward (no 60s idle).
@@ -576,6 +580,62 @@ class NoMaterialFastForwardSchedulerTests(unittest.TestCase):
         self.assertFalse(
             scheduler2._no_material_fast_forward_for(self._req(), 42)
         )
+
+    # -- phase2-p0fix Q1: durable-ancestor resolution before judging --------
+
+    def test_deeper_durable_ancestor_keeps_wait(self):
+        # The shallow anchor is non-durable (its own flags all missing), but
+        # a deeper ancestor's pages ARE durable -- the request's suffix can
+        # restore from those pages, so no-material must NOT forward. The
+        # storage fact is evaluated on the resolved durable ancestor.
+        scheduler = self._scheduler(
+            self._tree(
+                node_exists=True,
+                is_l3_durable=False,  # shallow anchor itself not durable
+                deepest_durable_ancestor=7,  # but an ancestor at node 7 is
+            )
+        )
+        self.assertFalse(scheduler._no_material_fast_forward_for(self._req(), 42))
+
+    def test_no_durable_ancestor_forwards(self):
+        # A pure device chain with no L3 content: walking the parent chain up
+        # to the root finds no durable ancestor (root storage_persisted
+        # defaults False) -> no-material holds -> forward (main benefit).
+        scheduler = self._scheduler(
+            self._tree(
+                node_exists=True,
+                is_l3_durable=False,
+                deepest_durable_ancestor=None,
+            )
+        )
+        self.assertTrue(scheduler._no_material_fast_forward_for(self._req(), 42))
+
+    def test_durable_ancestor_with_deferred_descendant_keeps_wait(self):
+        # Even with a durable ancestor resolved, the deferred-durable-descendant
+        # fact is evaluated on the resolved anchor: a P3 reconcile promotion
+        # source under it keeps the frontier wait (never fast-forward).
+        scheduler = self._scheduler(
+            self._tree(
+                node_exists=True,
+                is_l3_durable=False,
+                deepest_durable_ancestor=7,
+                has_deferred_desc=True,
+            )
+        )
+        self.assertFalse(scheduler._no_material_fast_forward_for(self._req(), 42))
+
+    def test_durable_ancestor_with_anchor_version_keeps_wait(self):
+        # The restorable-epoch-change fact is evaluated on the resolved
+        # durable ancestor: its per-anchor version > 0 keeps the wait.
+        scheduler = self._scheduler(
+            self._tree(
+                node_exists=True,
+                is_l3_durable=False,
+                deepest_durable_ancestor=7,
+                anchor_version=2,
+            )
+        )
+        self.assertFalse(scheduler._no_material_fast_forward_for(self._req(), 42))
 
 
 class TooShortWakeSchedulerFeedTests(unittest.TestCase):
