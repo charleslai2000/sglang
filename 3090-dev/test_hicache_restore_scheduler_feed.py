@@ -363,15 +363,9 @@ class P1StickyMissSchedulerFeedTests(unittest.TestCase):
 
     def _rearm_gate(self, scheduler, req):
         """Compute the per-anchor re-arm verdict exactly as the admission
-        loop does (scheduler.py T6) and feed it into the state machine."""
-        miss_rearm = scheduler_mod.miss_rearm_allowed(
-            req.hicache_restore_miss_epoch,
-            scheduler._anchor_version_or_zero(getattr(req, "last_host_node", None)),
-            req.hicache_restore_miss_generation,
-            getattr(req, "session_generation", None),
-            miss_anchor=req.hicache_restore_miss_anchor,
-            current_anchor=getattr(req, "last_host_node", None),
-        )
+        loop does (scheduler.py T6, now the explicit three-branch
+        `_miss_rearm_decision`) and feed it into the state machine."""
+        miss_rearm = scheduler._miss_rearm_decision(req)
         return scheduler._apply_restore_event(
             req, RestoreEvent.ADMISSION_DENY, rearm_allowed=miss_rearm
         )
@@ -805,6 +799,151 @@ class TooShortWakeSchedulerFeedTests(unittest.TestCase):
         # < 256 -> below threshold.
         req.prefix_indices = list(range(800))
         self.assertTrue(scheduler._current_prefetch_suffix_lt_threshold(req))
+
+
+class MissRearmDurableCoverageSchedulerFeedTests(unittest.TestCase):
+    """P4-round2 (点3): the T6 admission miss re-arm three-branch decision
+    (`_miss_rearm_decision`). A SAME-anchor storage-version advance re-arms
+    ONLY when the anchor chain now actually holds durable L3 material
+    (`_miss_rearm_durable_coverage` = Q1 `deepest_durable_ancestor(anchor)`
+    non-None). Clear / evict-rebuild bump the version WITHOUT leaving
+    material -> re-probing is a structural guaranteed miss, so the request
+    stays sticky (no re-arm). re-anchor / generation change still re-arm
+    unconditionally (whitelist preserved, judged BEFORE the coverage gate);
+    no-record / no-dda-proxy / no-anchor fall back to release (defensive)."""
+
+    def _scheduler(self, tree_cache):
+        scheduler = Scheduler.__new__(Scheduler)
+        scheduler.server_args = SimpleNamespace(hicache_restore_wait_timeout_s=60.0)
+        scheduler.tree_cache = tree_cache
+        scheduler.enable_hicache_storage = True
+        scheduler.enable_ready_horizon = False
+        return scheduler
+
+    def _req(
+        self,
+        anchor=42,
+        generation=3,
+        miss_epoch=5,
+        miss_anchor=42,
+        miss_gen=3,
+    ):
+        return SimpleNamespace(
+            rid="r1",
+            last_host_node=anchor,
+            session_generation=generation,
+            hicache_restore_miss_epoch=miss_epoch,
+            hicache_restore_miss_anchor=miss_anchor,
+            hicache_restore_miss_generation=miss_gen,
+        )
+
+    def _tree(self, *, anchor_version=6, deepest_durable_ancestor=7, has_dda=True):
+        if has_dda:
+            return SimpleNamespace(
+                anchor_storage_version=lambda nid: anchor_version,
+                deepest_durable_ancestor=lambda nid: deepest_durable_ancestor,
+            )
+        # Tree without the Q1 proxy (older engine / restricted stub).
+        return SimpleNamespace(
+            anchor_storage_version=lambda nid: anchor_version,
+        )
+
+    # -- (1) same-anchor version advance + durable ancestor -> re-arm --------
+
+    def test_same_anchor_version_advance_with_durable_material_rearms(self):
+        # A genuine write-ack promotion / restore read-back gave the anchor
+        # chain a durable ancestor: the re-probe may really restore now ->
+        # re-arm. Point-5 legitimate same-anchor re-restore must keep working.
+        scheduler = self._scheduler(
+            self._tree(anchor_version=6, deepest_durable_ancestor=7)
+        )
+        req = self._req()
+        self.assertTrue(scheduler._miss_rearm_decision(req))
+
+    # -- (2) same-anchor version advance + NO durable ancestor -> sticky -----
+
+    def test_same_anchor_version_advance_without_durable_material_stays_sticky(
+        self,
+    ):
+        # The version advanced via a clear / evict-rebuild that left a pure
+        # device chain (durable ancestor None): re-probing is guaranteed to
+        # miss again -> stay sticky (no re-arm, no structural-guaranteed-miss
+        # re-probe).
+        scheduler = self._scheduler(
+            self._tree(anchor_version=6, deepest_durable_ancestor=None)
+        )
+        req = self._req()
+        self.assertFalse(scheduler._miss_rearm_decision(req))
+
+    def test_same_anchor_version_unchanged_stays_sticky(self):
+        # P1 regression guard: version unchanged, same anchor, same
+        # generation -> sticky (the coverage gate is not even consulted).
+        scheduler = self._scheduler(
+            self._tree(anchor_version=5, deepest_durable_ancestor=7)
+        )
+        req = self._req()
+        self.assertFalse(scheduler._miss_rearm_decision(req))
+        # Coverage spring: the material gate must not fire when it must not.
+        scheduler2 = self._scheduler(
+            self._tree(anchor_version=5, deepest_durable_ancestor=None)
+        )
+        req2 = self._req()
+        self.assertFalse(scheduler2._miss_rearm_decision(req2))
+
+    # -- (3) re-anchor / generation change -> re-arm (whitelist preserved) ---
+
+    def test_reanchor_rearms_regardless_of_material(self):
+        # A different anchor node is a brand-new candidate: the old miss
+        # evidence is void even though the new chain has no durable ancestor
+        # yet -- the coverage gate must NOT block a fresh candidate.
+        scheduler = self._scheduler(
+            self._tree(anchor_version=6, deepest_durable_ancestor=None)
+        )
+        req = self._req(anchor=99, miss_anchor=42)
+        self.assertTrue(scheduler._miss_rearm_decision(req))
+
+    def test_generation_change_rearms_regardless_of_material(self):
+        scheduler = self._scheduler(
+            self._tree(anchor_version=6, deepest_durable_ancestor=None)
+        )
+        req = self._req(generation=9, miss_gen=3)
+        self.assertTrue(scheduler._miss_rearm_decision(req))
+
+    # -- (4) defensive fallbacks: no record / missing dda proxy / no anchor --
+
+    def test_no_miss_record_releases(self):
+        # Defensive branch: no recorded miss epoch (the state should not be
+        # MISS_RECOMPUTE then) -> release regardless of the tree state.
+        scheduler = self._scheduler(
+            self._tree(anchor_version=6, deepest_durable_ancestor=None)
+        )
+        req = self._req(miss_epoch=None)
+        self.assertTrue(scheduler._miss_rearm_decision(req))
+
+    def test_missing_dda_proxy_falls_back_to_release(self):
+        # The tree cache without the Q1 deepest_durable_ancestor proxy
+        # (stub / older engine): conservative release preserves prior
+        # behavior -- the material gate cannot over-block.
+        scheduler = self._scheduler(self._tree(has_dda=False))
+        req = self._req()
+        self.assertTrue(scheduler._miss_rearm_decision(req))
+
+    def test_coverage_helper_anchor_none_releases(self):
+        # The coverage helper returns True when there is no anchor to judge:
+        # nothing to gate here, let the identity/anchor criteria decide.
+        scheduler = self._scheduler(self._tree())
+        req = self._req(anchor=None)
+        self.assertTrue(scheduler._miss_rearm_durable_coverage(req))
+
+    def test_coverage_helper_direct(self):
+        # Direct helper coverage: non-None deepest_durable_ancestor -> True;
+        # pure device chain (None) -> False.
+        scheduler = self._scheduler(self._tree(deepest_durable_ancestor=None))
+        req = self._req()
+        self.assertFalse(scheduler._miss_rearm_durable_coverage(req))
+        scheduler2 = self._scheduler(self._tree(deepest_durable_ancestor=7))
+        req2 = self._req()
+        self.assertTrue(scheduler2._miss_rearm_durable_coverage(req2))
 
 
 if __name__ == "__main__":

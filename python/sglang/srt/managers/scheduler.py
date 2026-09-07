@@ -226,7 +226,6 @@ from sglang.srt.managers.scheduler_components.hicache_restore import (
     RestoreWaitReason,
     capacity_wake_applies,
     demand_restore_available,
-    miss_rearm_allowed,
     next_restore,
     no_material_fast_forward,
     promotion_budget_fits,
@@ -3989,6 +3988,81 @@ class Scheduler(
         except Exception:
             return 0
 
+    def _miss_rearm_decision(self, req) -> bool:
+        """T6 admission miss re-arm decision (explicit three-branch form of
+        the P1 `miss_rearm_allowed` gate, phase2-p4-round2 点3).
+
+        - no recorded miss epoch (defensive; the state should not be
+          MISS_RECOMPUTE then) -> re-arm (preserves historical behavior).
+        - re-anchored to a different node OR the identity (session
+          generation) changed -> re-arm: the old negative evidence no longer
+          applies to the new candidate / identity.
+        - the SAME anchor's per-anchor storage version advanced -> re-arm
+          ONLY when the anchor chain now actually holds durable L3 material
+          (`_miss_rearm_durable_coverage`). A same-anchor version advance is
+          the causal signal of a durability event, but clear (durable-belief
+          removed) and evict-rebuild (chain cleared + rebuilt) both bump the
+          version WITHOUT leaving recoverable L3 material -- re-probing
+          those is a structural guaranteed miss, so they stay sticky and
+          recompute forward instead of re-churning the revoked:miss loop.
+        - same-anchor, version unchanged, generation unchanged -> sticky
+          (not re-armed): re-probing the proven-missing prefix at the same
+          anchor version must miss again.
+
+        re-anchor/generation are judged BEFORE the material-coverage gate: a
+        brand-new candidate must never be blocked by the old anchor's
+        material state. No counters/TTL/thresholds (no-heuristic); the
+        coverage check is a structural existence query (deepest durable
+        ancestor non-None)."""
+        if req.hicache_restore_miss_epoch is None:
+            return True  # defensive: no record -> re-arm
+        cur_anchor = getattr(req, "last_host_node", None)
+        miss_anchor = req.hicache_restore_miss_anchor
+        cur_gen = getattr(req, "session_generation", None)
+        miss_gen = req.hicache_restore_miss_generation
+        re_anchored = (
+            miss_anchor is not None
+            and cur_anchor is not None
+            and cur_anchor != miss_anchor
+        )
+        generation_changed = cur_gen is not None and cur_gen != miss_gen
+        if re_anchored or generation_changed:
+            return True  # new candidate / identity changed: old evidence void
+        if self._anchor_version_or_zero(cur_anchor) > req.hicache_restore_miss_epoch:
+            # Same anchor, version advanced: re-arm only when the anchor
+            # chain now actually has durable L3 material covering it
+            # (P4-round2 点3: no-material same-anchor re-probe is a
+            # structural guaranteed miss).
+            return self._miss_rearm_durable_coverage(req)
+        return False  # same anchor, version unchanged -> sticky
+
+    def _miss_rearm_durable_coverage(self, req) -> bool:
+        """P4-round2 点3 material-coverage gate: whether the request's anchor
+        chain now actually holds durable L3 material (Q1
+        `deepest_durable_ancestor(anchor)` non-None).
+
+        A same-anchor version advance is the causal signal of a durability
+        event, but it does NOT guarantee the event left recoverable material
+        behind: clear (durable-belief removed) and evict-rebuild (chain
+        cleared and rebuilt) both bump the version while leaving a pure
+        device chain with no L3 content. Re-probing a no-material chain is a
+        structural guaranteed miss (the revoked:miss churn the P1 sticky
+        gate exists to prevent), so the re-arm stays sticky until material
+        genuinely arrives -- at which point the chain re-gains a durable
+        ancestor, dda becomes non-None, and the gate re-opens (point 5
+        legitimate re-restore preserved). O(depth) existence check, no
+        counters/TTL/thresholds. Defensive fallbacks: no anchor -> True
+        (nothing to judge here; let the identity/anchor criteria decide);
+        deepest_durable_ancestor proxy missing (stub / no per-anchor API) ->
+        True (conservative release, preserves prior behavior)."""
+        anchor = getattr(req, "last_host_node", None)
+        if anchor is None:
+            return True  # no anchor to judge -> release to identity/anchor
+        dda = getattr(self.tree_cache, "deepest_durable_ancestor", None)
+        if not callable(dda):
+            return True  # stub/fallback: conservative release
+        return dda(anchor) is not None
+
     def _cleanup_not_added_req(self, req, adder) -> None:
         """Revert matched mamba idx state when add_one_req rejected the
         request (avoid a memory leak). Only frees slots freshly allocated in
@@ -4760,16 +4834,19 @@ class Scheduler(
                         # really cover the prefix now). An unrelated chain's
                         # write ack advances only the global diagnostic
                         # counter and never re-arms.
-                        miss_rearm = miss_rearm_allowed(
-                            req.hicache_restore_miss_epoch,
-                            self._anchor_version_or_zero(
-                                getattr(req, "last_host_node", None)
-                            ),
-                            req.hicache_restore_miss_generation,
-                            getattr(req, "session_generation", None),
-                            miss_anchor=req.hicache_restore_miss_anchor,
-                            current_anchor=getattr(req, "last_host_node", None),
-                        )
+                        #
+                        # P4-round2 (点3): same-anchor version advance is the
+                        # causal signal of a durability event, but clear
+                        # (durable-belief removed) and evict-rebuild both bump
+                        # the version WITHOUT leaving recoverable L3 material
+                        # -- re-probing those is a structural guaranteed miss
+                        # (the revoked:miss churn). The same-anchor re-arm
+                        # therefore additionally requires the anchor chain to
+                        # now actually hold durable L3 material
+                        # (_miss_rearm_durable_coverage, O(depth) structural
+                        # existence check -- no counters/TTL). Re-anchor and
+                        # generation change keep re-arming unconditionally.
+                        miss_rearm = self._miss_rearm_decision(req)
                         self._apply_restore_event(
                             req,
                             RestoreEvent.ADMISSION_DENY,
