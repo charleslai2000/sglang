@@ -1,7 +1,13 @@
 import unittest
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from sglang.srt.mem_cache.hicache_storage import PoolName, SidecarPoolSpec
+from sglang.srt.mem_cache.hicache_storage import (
+    PoolHitPolicy,
+    PoolName,
+    PoolTransfer,
+    SidecarPoolSpec,
+)
 from sglang.srt.mem_cache.hybrid_cache import hybrid_pool_assembler
 from sglang.srt.mem_cache.hybrid_cache.hybrid_pool_assembler import (
     _STRATEGIES,
@@ -18,6 +24,7 @@ from sglang.srt.mem_cache.hybrid_cache.hybrid_pool_assembler import (
     register_stack_strategy,
 )
 from sglang.srt.mem_cache.unified_cache.components import ComponentType
+from sglang.srt.mem_cache.unified_radix_cache import _storage_hit_crop_is_safe
 from sglang.test.ci.ci_register import register_cpu_ci
 
 register_cpu_ci(est_time=2, suite="base-a-test-cpu")
@@ -228,6 +235,51 @@ class TestApplyStackResult(unittest.TestCase):
         kvcache.register_layer_transfer_counter.assert_called_once()
         params.req_to_token_pool.register_layer_transfer_counter.assert_not_called()
         cache.register_sidecar_pool.assert_not_called()
+
+
+class TestStorageHitFrontierGuard(unittest.TestCase):
+    def test_rejects_uncertified_hybrid_crop(self):
+        # The storage query validated the long KV frontier and its Mamba tail,
+        # but the host crop would make the shortened tail a different key.
+        hash_values = [f"hash-{page}" for page in range(54976)]
+        operation = SimpleNamespace(
+            storage_hit_count=54976,
+            hash_value=hash_values,
+            pool_transfers=[
+                PoolTransfer(
+                    name=PoolName.MAMBA,
+                    keys=[hash_values[-1]],
+                    hit_policy=PoolHitPolicy.TRAILING_PAGES,
+                )
+            ],
+        )
+        shortened_frontier = 21060
+        validated_sidecar_keys = {hash_values[-1]}
+
+        self.assertNotIn(hash_values[shortened_frontier - 1], validated_sidecar_keys)
+        self.assertFalse(_storage_hit_crop_is_safe(operation, shortened_frontier))
+        self.assertEqual(operation.hash_value, hash_values)
+
+    def test_preserves_kv_only_and_full_hybrid_paths(self):
+        self.assertTrue(
+            _storage_hit_crop_is_safe(
+                SimpleNamespace(storage_hit_count=54976, pool_transfers=None), 21060
+            )
+        )
+        self.assertTrue(
+            _storage_hit_crop_is_safe(
+                SimpleNamespace(
+                    storage_hit_count=54976,
+                    pool_transfers=[
+                        PoolTransfer(
+                            name=PoolName.MAMBA,
+                            hit_policy=PoolHitPolicy.TRAILING_PAGES,
+                        )
+                    ],
+                ),
+                54976,
+            )
+        )
 
 
 if __name__ == "__main__":
