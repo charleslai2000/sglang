@@ -82,6 +82,7 @@ def next_restore(
     capacity_fits: bool = False,
     genuine_miss: bool = False,
     rearm_allowed: bool = True,
+    short_tail_recompute: bool = False,
 ) -> Tuple[RestoreState, RestoreDecision]:
     """Pure transition-table lookup for the design §2.2 state machine.
 
@@ -91,11 +92,12 @@ def next_restore(
       T15 is the backup-completion wait (P2-IO): the lookup found the
       chain mid-backup, so the request waits for the ack drain instead of
       restoring the partial span and re-issuing the lookup per pass.
-    - T4 too-short declines only start a WAIT[REVALIDATE] from a fresh
-      NONE (the device-match-decay bet, re-issuable by the paced retry);
-      on a re-issue leg (T11/T12 wake) the too-short re-judgment is
-      definitive and clears the state with ADMIT_RECOMPUTE, exactly like a
-      genuine miss -- re-waiting would only idle out the old T13 clock.
+    - T4 too-short declines start a WAIT[REVALIDATE] from a fresh NONE only
+      when the caller has not proven that the current resident device prefix
+      can safely admit its small tail.  The explicit short_tail_recompute
+      judgment clears any restore state with ADMIT_RECOMPUTE; otherwise a
+      re-issue leg (T11/T12 wake) is definitive and clears the state, while a
+      fresh/retry decline keeps the device-match-decay bet.
     - T8 finalize lands RESTORING in READY.
     - T9 genuine miss parks the request in MISS_RECOMPUTE (P1 sticky miss:
       the negative evidence survives), with the ADMIT_RECOMPUTE decision
@@ -122,6 +124,8 @@ def next_restore(
     if event is RestoreEvent.DENIED_ALLOC:  # T3
         return RestoreState.WAIT_CAPACITY, RestoreDecision.WAIT
     if event is RestoreEvent.DENIED_SHORT:  # T4
+        if short_tail_recompute:
+            return RestoreState.NONE, RestoreDecision.ADMIT_RECOMPUTE
         if state is RestoreState.RESTORING:
             # A too-short decline on a re-issue leg (T11/T12 wake) is the
             # definitive judgment: the wake condition is resolved, so
@@ -377,6 +381,33 @@ def too_short_wait_armed(poll_interval: int) -> bool:
     return poll_interval > 0
 
 
+def short_tail_recompute_allowed(
+    *,
+    device_prefix_tokens: int,
+    host_hit_tokens: int,
+    suffix_tokens: int,
+    page_size: int,
+    prefetch_threshold: int,
+) -> bool:
+    """Whether a below-threshold suffix can be admitted immediately.
+
+    A non-empty device-resident prefix with no host restore material already
+    owns the historical match.  A short suffix is ordinary tail work; no L3
+    capacity event can make that current match longer, and waiting on
+    REVALIDATE would only retry the same below-threshold query.  The caller
+    preserves ``prefix_indices`` and therefore recomputes only this suffix.
+    """
+    if page_size <= 0 or prefetch_threshold <= 0:
+        return False
+    aligned_suffix = max(0, suffix_tokens) // page_size * page_size
+    return (
+        device_prefix_tokens > 0
+        and host_hit_tokens == 0
+        and aligned_suffix > 0
+        and aligned_suffix < prefetch_threshold
+    )
+
+
 def promotion_budget_fits(
     locked: int,
     reserved: int,
@@ -484,19 +515,18 @@ def capacity_wake_applies(reason: Optional[RestoreWaitReason]) -> bool:
     reason (design §2.3 predicates: device charge, host prefetch budget,
     frontier anchor fallback).
 
-    DEVICE_QUOTA / PREFETCH_BUDGET / FRONTIER / BACKUP_PENDING are
+    DEVICE_QUOTA / PREFETCH_BUDGET / HOST_ALLOC / FRONTIER / BACKUP_PENDING are
     testable: the predicate re-checks the exact denial cause (for
     BACKUP_PENDING: whether the chain's durable frontier has crossed the
     request end and a DEMAND_RESTORE ticket is grantable -- the ack drain
     flips the frontier, so the wake is ACK-driven, not a poll). REVALIDATE
-    (the suffix is still below the prefetch threshold) and HOST_ALLOC (the
-    host staging alloc is still failing) are not: waking them re-issues a
-    prefetch that is declined identically every pass. Those waits leave
-    only via the paced retry (poll interval > 0) or the T13 timeout.
+    (the suffix is still below the prefetch threshold) is not testable by a
+    capacity predicate and leaves only via the paced retry or T13 timeout.
     """
     return reason in (
         RestoreWaitReason.DEVICE_QUOTA,
         RestoreWaitReason.PREFETCH_BUDGET,
+        RestoreWaitReason.HOST_ALLOC,
         RestoreWaitReason.FRONTIER,
         RestoreWaitReason.BACKUP_PENDING,
     )

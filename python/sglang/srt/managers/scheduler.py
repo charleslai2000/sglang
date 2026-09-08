@@ -230,6 +230,7 @@ from sglang.srt.managers.scheduler_components.hicache_restore import (
     no_material_fast_forward,
     promotion_budget_fits,
     promotion_wait_blocked,
+    short_tail_recompute_allowed,
     too_short_wait_armed,
     wait_clock_next,
     wait_reason_for,
@@ -3041,6 +3042,8 @@ class Scheduler(
                     self._apply_restore_event(req, RestoreEvent.DENIED_RATE)
                 elif outcome == "forfeited_alloc_failed":
                     self._apply_restore_event(req, RestoreEvent.DENIED_ALLOC)
+                elif outcome == "revoked_alloc_failed":
+                    self._apply_restore_event(req, RestoreEvent.DENIED_ALLOC)
                 elif outcome == "declined_too_short":
                     # WAIT[REVALIDATE] is the device-match-decay bet, whose
                     # only re-issue source is the paced retry (step 2 below,
@@ -3049,7 +3052,28 @@ class Scheduler(
                     # out the full T13 clock (e13 K=1 t5 60s): the first
                     # decline is then terminal, and the request recomputes
                     # immediately (no restore intent is armed).
-                    if self._restore_potential_for(req) and too_short_wait_armed(
+                    short_tail = short_tail_recompute_allowed(
+                        device_prefix_tokens=len(req.prefix_indices),
+                        host_hit_tokens=req.host_hit_length,
+                        suffix_tokens=max(0, match_end - matched_len),
+                        page_size=self.page_size,
+                        prefetch_threshold=tree_cache.prefetch_threshold,
+                    )
+                    if short_tail:
+                        # The L1/L2 prefix is already resident; no storage
+                        # event can make the current match longer. Consume
+                        # the marker set by prefetch_from_storage so the
+                        # paced retry cannot re-enter REVALIDATE, then use
+                        # the state machine's immediate tail-admit path.
+                        tree_cache.pop_storage_prefetch_miss(req.rid)
+                        decision = self._apply_restore_event(
+                            req,
+                            RestoreEvent.DENIED_SHORT,
+                            short_tail_recompute=True,
+                        )
+                        if decision is RestoreDecision.ADMIT_RECOMPUTE:
+                            self._log_restore_recompute(req, "too_short_resident_tail")
+                    elif self._restore_potential_for(req) and too_short_wait_armed(
                         get_memory().hicache_storage_prefetch_retry_poll_interval
                     ):
                         self._apply_restore_event(req, RestoreEvent.DENIED_SHORT)
@@ -3178,10 +3202,9 @@ class Scheduler(
                     self._log_restore_recompute(req, "timeout")
                 continue
             if not capacity_wake_applies(req.hicache_restore_wait_reason):
-                # REVALIDATE / HOST_ALLOC denial causes are not testable by
-                # the capacity predicate: re-issuing would be declined
-                # identically every pass (the capacity loop). They leave
-                # only via the paced retry or the T13 timeout.
+                # REVALIDATE is not testable by the capacity predicate:
+                # re-issuing would be declined identically every pass. It
+                # leaves only via the paced retry or the T13 timeout.
                 continue
             if not self._restore_wait_capacity_fits(req):
                 continue
@@ -3338,6 +3361,7 @@ class Scheduler(
         capacity_fits: bool = False,
         genuine_miss: bool = False,
         rearm_allowed: bool = True,
+        short_tail_recompute: bool = False,
     ) -> RestoreDecision:
         """Feed a restore event into the request's state machine and apply
         the transition (Req fields only; the decision is returned for the
@@ -3351,6 +3375,7 @@ class Scheduler(
             capacity_fits=capacity_fits,
             genuine_miss=genuine_miss,
             rearm_allowed=rearm_allowed,
+            short_tail_recompute=short_tail_recompute,
         )
         if next_state is req.hicache_restore_state and decision is RestoreDecision.NONE:
             return decision
@@ -3743,6 +3768,25 @@ class Scheduler(
             # write that never crosses the frontier leaves the request to
             # the T13 timeout (bounded).
             return self._restore_backup_wake_ready(req)
+        if req.hicache_restore_wait_reason is RestoreWaitReason.HOST_ALLOC:
+            cc = self.tree_cache.cache_controller
+            if cc is None or req.full_untruncated_fill_ids is None:
+                return False
+            if cc.prefetch_rate_limited():
+                return False
+            matched_len = len(req.prefix_indices) + req.host_hit_length
+            match_end = req._compute_max_prefix_len(
+                len(req.full_untruncated_fill_ids)
+            )
+            requested = max(0, match_end - matched_len)
+            requested -= requested % self.page_size
+            if requested < self.tree_cache.prefetch_threshold:
+                return False
+            # The wake is driven by observable host availability. The
+            # complete requested span is a conservative bound for a positive
+            # L3 hit, so a wake cannot repeat the known allocation failure
+            # merely because a smaller arbitrary crop fits.
+            return cc.mem_pool_host.available_size() >= requested
         cc = self.tree_cache.cache_controller
         if cc is not None and cc.prefetch_rate_limited():
             return False

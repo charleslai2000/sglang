@@ -5706,7 +5706,15 @@ class UnifiedRadixCache(BasePrefixCache):
             return len(host_indices) if host_indices is not None else 0
         return len(prefetch_key)
 
-    def revoke_pending_prefetch(self, req_id: str) -> None:
+    def revoke_pending_prefetch(self, req_id: str, *, alloc_failed: bool = False) -> None:
+        """Release a pending prefetch and classify its terminal outcome.
+
+        ``alloc_failed`` is supplied only by the hit allocator after a
+        positive storage query could not stage the complete validated span.
+        Keeping this explicit preserves ordinary partial-hit/mid-backup
+        revoke semantics while preventing a positive hybrid hit from becoming
+        a genuine storage miss.
+        """
         # M5: released before the pop -- a revoke for a prefetch whose
         # entry is already gone must still consume its reservation.
         self.release_prefetch(req_id, "revoke")
@@ -5744,8 +5752,10 @@ class UnifiedRadixCache(BasePrefixCache):
             revoke_reason = "miss"
         elif operation.storage_hit_count < self.prefetch_threshold:
             revoke_reason = "insufficient"
-        else:
+        elif alloc_failed:
             revoke_reason = "alloc_failed"
+        else:
+            revoke_reason = "miss"
         logger.info(
             "[P2A] ts_ms=%d evt=prefetch_revoke rid=%s terminated=%s "
             "storage_hit=%d requested=%d miss_reason=%s storage_generation=%d",
@@ -5766,7 +5776,9 @@ class UnifiedRadixCache(BasePrefixCache):
             self.tree_core.clear_storage_durable(last_host_node_id)
         _log_restore_disposition(
             req_id,
-            "WAIT" if revoke_reason == "backup_pending" else "RECOMPUTE",
+            "WAIT"
+            if revoke_reason in ("backup_pending", "alloc_failed")
+            else "RECOMPUTE",
             operation.stats_requested_tokens or 0,
             operation.storage_hit_count,
             f"revoked:{revoke_reason}",
@@ -5780,6 +5792,8 @@ class UnifiedRadixCache(BasePrefixCache):
             if revoke_reason == "terminated"
             else "revoked_backup_pending"
             if revoke_reason == "backup_pending"
+            else "revoked_alloc_failed"
+            if revoke_reason == "alloc_failed"
             else "revoked_miss"
         )
         self.record_storage_prefetch_terminal(req_id, terminal)
@@ -5882,7 +5896,7 @@ class UnifiedRadixCache(BasePrefixCache):
             if host_indices is None:
                 if buffer_mode:
                     return False
-                self.revoke_pending_prefetch(req_id)
+                self.revoke_pending_prefetch(req_id, alloc_failed=True)
                 return True
 
             operation.storage_hit_count = alloc_len

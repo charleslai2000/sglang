@@ -19,6 +19,7 @@ import os
 import sys
 import types
 import unittest
+from contextlib import nullcontext
 from enum import Enum
 from queue import Queue
 from types import SimpleNamespace
@@ -102,6 +103,9 @@ def _install_stubenv():
     _fake_package("sglang.srt.mem_cache.common", RetractionBackup=object)
     _fake_package("sglang.srt.mem_cache.hicache_storage", **{
         "PoolName": Enum("PoolName", {"KV": "kv", "SWA": "swa", "MAMBA": "mamba"}),
+        "PoolHitPolicy": Enum(
+            "PoolHitPolicy", {"ALL_PAGES": "all_pages", "TRAILING_PAGES": "trailing_pages"}
+        ),
         "PoolTransfer": type("PoolTransfer", (), {"__init__": lambda self, **kw: None}),
         "SidecarPoolSpec": object,
     })
@@ -113,6 +117,21 @@ def _install_stubenv():
     _fake_package("sglang.srt.mem_cache.memory_pool", MHATokenToKVPool=object)
     _fake_package("sglang.srt.mem_cache.radix_cache", RadixKey=object)
     _fake_package("sglang.srt.mem_cache.swa_memory_pool", SWAKVPool=object)
+    _fake_package(
+        "sglang.srt.mem_cache.trace_context",
+        attach_trace_context=lambda *a, **k: None,
+        complete_trace_context=lambda *a, **k: True,
+        complete_slot_context=lambda *a, **k: None,
+        durable_trace_enabled=lambda: False,
+        is_inert_release_token=lambda *a, **k: False,
+        make_trace_context=lambda *a, **k: {},
+        ordered_key_set_digest=lambda *a, **k: "",
+        remember_slot_context=lambda *a, **k: None,
+        retire_slot_token=lambda *a, **k: None,
+        slot_context=lambda *a, **k: nullcontext(),
+        slot_context_for_token=lambda *a, **k: None,
+        slot_token=lambda *a, **k: None,
+    )
     _fake_package("sglang.srt.mem_cache.unified_cache")
 
     class _BackupKV:
@@ -998,6 +1017,44 @@ class BackupPendingRevokeTests(unittest.TestCase):
         # unchanged (no park; the backup is never coming).
         terminal = self._revoke([10, 20], {}, hit_count=64)
         self.assertEqual(terminal, "revoked_miss")
+
+    def test_positive_alloc_failure_is_retryable_and_releases_reservation(self):
+        # A positive full hit that cannot stage its validated span is a
+        # capacity wait, not L3-miss evidence. The revoke still releases the
+        # speculative reservation before removing the operation, so the
+        # host-capacity wake cannot be blocked by its own request.
+        cache = _make_cache(_FakeTreeCore([[10]]))
+        cache.ongoing_prefetch = {}
+        cache.cache_controller.inflight_speculative_tokens = 54976
+        cache_mod = sys.modules[UnifiedRadixCache.__module__]
+        cache._prefetch_reservations["r1"] = cache_mod.PrefetchReservation(
+            54976, cache_mod.PrefetchKind.SPECULATIVE
+        )
+        operation = SimpleNamespace(
+            request_id="r1",
+            is_terminated=lambda: False,
+            storage_hit_count=54976,
+            stats_requested_tokens=55000,
+            all_hash_values=None,
+            completed_tokens=0,
+        )
+        cache.ongoing_prefetch["r1"] = _OngoingPrefetch(
+            anchor_node_id=10,
+            prefetch_key=[0] * 54976,
+            host_indices=None,
+            operation=operation,
+            anchor_lock_params=None,
+            comp_xfers={},
+        )
+
+        cache.revoke_pending_prefetch("r1", alloc_failed=True)
+
+        self.assertEqual(
+            cache._storage_prefetch_terminal.get("r1"), "revoked_alloc_failed"
+        )
+        self.assertNotIn("r1", cache._storage_prefetch_missed_rids)
+        self.assertNotIn("r1", cache._prefetch_reservations)
+        self.assertEqual(cache.cache_controller.inflight_speculative_tokens, 0)
 
     def test_pipeline_stops_short_of_request_end_never_parks(self):
         # The counter-example at the revoke level: the in-flight write

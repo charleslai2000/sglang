@@ -49,6 +49,7 @@ miss_rearm_allowed = _MOD.miss_rearm_allowed
 next_restore = _MOD.next_restore
 no_material_fast_forward = _MOD.no_material_fast_forward
 too_short_wait_armed = _MOD.too_short_wait_armed
+short_tail_recompute_allowed = _MOD.short_tail_recompute_allowed
 wait_clock_next = _MOD.wait_clock_next
 wait_reason_for = _MOD.wait_reason_for
 
@@ -107,6 +108,48 @@ class RestoreStateMachineTests(unittest.TestCase):
         state, decision = next_restore(WAIT, RestoreEvent.DENIED_SHORT)
         self.assertIs(state, WAIT)
         self.assertIs(decision, RestoreDecision.WAIT)
+
+    def test_t4_resident_short_tail_admits_immediately(self):
+        # A known device-resident prefix plus a legal short suffix must not
+        # enter REVALIDATE: the normal adder keeps the prefix and computes
+        # only the tail.
+        for from_state in (NONE, WAIT, RESTORING):
+            state, decision = next_restore(
+                from_state,
+                RestoreEvent.DENIED_SHORT,
+                short_tail_recompute=True,
+            )
+            self.assertIs(state, NONE)
+            self.assertIs(decision, RestoreDecision.ADMIT_RECOMPUTE)
+
+    def test_resident_short_tail_predicate_is_page_aligned(self):
+        self.assertTrue(
+            short_tail_recompute_allowed(
+                device_prefix_tokens=54976,
+                host_hit_tokens=0,
+                suffix_tokens=24,
+                page_size=16,
+                prefetch_threshold=256,
+            )
+        )
+        self.assertFalse(
+            short_tail_recompute_allowed(
+                device_prefix_tokens=54976,
+                host_hit_tokens=0,
+                suffix_tokens=256,
+                page_size=16,
+                prefetch_threshold=256,
+            )
+        )
+        self.assertFalse(
+            short_tail_recompute_allowed(
+                device_prefix_tokens=54976,
+                host_hit_tokens=16,
+                suffix_tokens=24,
+                page_size=16,
+                prefetch_threshold=256,
+            )
+        )
 
     def test_t4_too_short_wait_requires_paced_retry(self):
         # The REVALIDATE wait is the device-match-decay bet, re-issuable
@@ -695,9 +738,8 @@ class RestoreWaitClockTests(unittest.TestCase):
 class CapacityWakeApplicabilityTests(unittest.TestCase):
     """capacity_wake_applies: the per-pass T11 wake only fires for reasons
     the capacity predicate can validate. REVALIDATE (suffix still below the
-    prefetch threshold) and HOST_ALLOC (staging alloc still failing) are
-    not capacity-testable: waking them re-issues a prefetch declined
-    identically every pass (the capacity loop, tester e10)."""
+    prefetch threshold) remains a paced retry, while HOST_ALLOC is woken by
+    the host-span availability predicate."""
 
     def test_capacity_testable_reasons_are_woken(self):
         for reason in (
@@ -708,9 +750,12 @@ class CapacityWakeApplicabilityTests(unittest.TestCase):
         ):
             self.assertTrue(capacity_wake_applies(reason), reason)
 
-    def test_non_capacity_reasons_are_not_woken(self):
-        for reason in (RestoreWaitReason.REVALIDATE, RestoreWaitReason.HOST_ALLOC):
+    def test_revalidate_is_not_woken(self):
+        for reason in (RestoreWaitReason.REVALIDATE,):
             self.assertFalse(capacity_wake_applies(reason), reason)
+
+    def test_host_alloc_wakes_on_host_availability(self):
+        self.assertTrue(capacity_wake_applies(RestoreWaitReason.HOST_ALLOC))
 
     def test_no_reason_is_not_woken(self):
         self.assertFalse(capacity_wake_applies(None))
