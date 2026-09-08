@@ -83,17 +83,24 @@ def _fused_qk_rmsnorm_rope_gate_kernel(
     local_head = tl.where(is_k, head - NUM_Q_HEADS, head)
     out_dtype = tl.float16 if FP16 else tl.bfloat16
 
-    if is_k:
-        in_base = k_ptr + token * stride_k_t + local_head * HEAD_DIM
-        w_ptr = k_weight_ptr
-        out_base = k_out_ptr + token * stride_ko_t + local_head * HEAD_DIM
+    if HAS_GATE:
+        q_in_base = q_gate_ptr + token * stride_qg_t + local_head * 2 * HEAD_DIM
     else:
-        if HAS_GATE:
-            in_base = q_gate_ptr + token * stride_qg_t + local_head * 2 * HEAD_DIM
-        else:
-            in_base = q_gate_ptr + token * stride_qg_t + local_head * HEAD_DIM
-        w_ptr = q_weight_ptr
-        out_base = q_out_ptr + token * stride_qo_t + local_head * HEAD_DIM
+        q_in_base = q_gate_ptr + token * stride_qg_t + local_head * HEAD_DIM
+
+    k_in_base = k_ptr + token * stride_k_t + local_head * HEAD_DIM
+    q_out_base = q_out_ptr + token * stride_qo_t + local_head * HEAD_DIM
+    k_out_base = k_out_ptr + token * stride_ko_t + local_head * HEAD_DIM
+    ptr_dtype = tl.pointer_type(out_dtype)
+    in_base = tl.where(
+        is_k, k_in_base.to(tl.int64), q_in_base.to(tl.int64)
+    ).to(ptr_dtype)
+    w_ptr = tl.where(
+        is_k, k_weight_ptr.to(tl.int64), q_weight_ptr.to(tl.int64)
+    ).to(ptr_dtype)
+    out_base = tl.where(
+        is_k, k_out_base.to(tl.int64), q_out_base.to(tl.int64)
+    ).to(ptr_dtype)
 
     # Full load -> RMSNorm variance
     head_offs = tl.arange(0, HEAD_BLOCK)
