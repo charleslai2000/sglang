@@ -58,61 +58,63 @@ def _load_architecture_specific_ops():
 
     # Determine which version to load based on GPU architecture
     if compute_capability == 86:
-        ops_subdir = "sm86"
-        variant_name = "SM86 (Ampere minimal common kernel)"
+        arch_candidates = [
+            ("sm86", "SM86 (Ampere minimal common kernel)"),
+            ("sm100", "SM86 fallback (precise math compatibility)"),
+        ]
     elif compute_capability == 90:
-        ops_subdir = "sm90"
-        variant_name = "SM90 (Hopper/H100 with fast math optimization)"
+        arch_candidates = [("sm90", "SM90 (Hopper/H100 with fast math optimization)")]
     elif compute_capability is not None:
-        ops_subdir = "sm100"
-        variant_name = f"SM{compute_capability} (precise math for compatibility)"
+        arch_candidates = [
+            ("sm100", f"SM{compute_capability} (precise math for compatibility)")
+        ]
     else:
-        ops_subdir = "sm100"
-        variant_name = "CPU/No GPU detected (using precise math)"
-
-    # Look for the compiled module with any valid extension
-
-    ops_pattern = str(sgl_kernel_dir / ops_subdir / "common_ops.*")
-    raw_matching_files = glob.glob(ops_pattern)
-    matching_files = _filter_compiled_extensions(raw_matching_files)
-
-    logger.debug(f"[sgl_kernel] Attempting to load {variant_name}")
-    logger.debug(f"[sgl_kernel] Looking for library matching pattern: {ops_pattern}")
-    logger.debug(f"[sgl_kernel] Found files: {raw_matching_files}")
-    logger.debug(f"[sgl_kernel] Prioritized files: {matching_files}")
+        arch_candidates = [("sm100", "CPU/No GPU detected (using precise math)")]
 
     previous_import_errors: List[Exception] = []
+    ops_pattern = ""
+    matching_files = []
 
     # Try to load from the architecture-specific directory
-    if matching_files:
-        ops_path = Path(matching_files[0])  # Use the first prioritized file
-        logger.debug(f"[sgl_kernel] Found architecture-specific library: {ops_path}")
-        try:
-            # Load the module from specific path using importlib
-            spec = importlib.util.spec_from_file_location("common_ops", str(ops_path))
-            if spec is None:
-                raise ImportError(f"Could not create module spec for {ops_path}")
+    for ops_subdir, variant_name in arch_candidates:
+        ops_pattern = str(sgl_kernel_dir / ops_subdir / "common_ops.*")
+        raw_matching_files = glob.glob(ops_pattern)
+        matching_files = _filter_compiled_extensions(raw_matching_files)
 
-            common_ops = importlib.util.module_from_spec(spec)
-            if spec.loader is None:
-                raise ImportError(f"Module spec has no loader for {ops_path}")
+        logger.debug(f"[sgl_kernel] Attempting to load {variant_name}")
+        logger.debug(f"[sgl_kernel] Looking for library matching pattern: {ops_pattern}")
+        logger.debug(f"[sgl_kernel] Found files: {raw_matching_files}")
+        logger.debug(f"[sgl_kernel] Prioritized files: {matching_files}")
 
-            logger.debug(f"[sgl_kernel] Loading module from {ops_path}...")
-            spec.loader.exec_module(common_ops)
-            logger.debug(f"[sgl_kernel] ✓ Successfully loaded {variant_name}")
-            logger.debug(f"[sgl_kernel] ✓ Module file: {common_ops.__file__}")
-            return common_ops
+        if matching_files:
+            ops_path = Path(matching_files[0])  # Use the first prioritized file
+            logger.debug(f"[sgl_kernel] Found architecture-specific library: {ops_path}")
+            try:
+                # Load the module from specific path using importlib
+                spec = importlib.util.spec_from_file_location("common_ops", str(ops_path))
+                if spec is None:
+                    raise ImportError(f"Could not create module spec for {ops_path}")
 
-        except Exception as e:
-            previous_import_errors.append(e)
+                common_ops = importlib.util.module_from_spec(spec)
+                if spec.loader is None:
+                    raise ImportError(f"Module spec has no loader for {ops_path}")
+
+                logger.debug(f"[sgl_kernel] Loading module from {ops_path}...")
+                spec.loader.exec_module(common_ops)
+                logger.debug(f"[sgl_kernel] ✓ Successfully loaded {variant_name}")
+                logger.debug(f"[sgl_kernel] ✓ Module file: {common_ops.__file__}")
+                return common_ops
+
+            except Exception as e:
+                previous_import_errors.append(e)
+                logger.debug(
+                    f"[sgl_kernel] ✗ Failed to load from {ops_path}: {type(e).__name__}: {e}"
+                )
+                # Continue to the next architecture-specific candidate
+        else:
             logger.debug(
-                f"[sgl_kernel] ✗ Failed to load from {ops_path}: {type(e).__name__}: {e}"
+                f"[sgl_kernel] ✗ Architecture-specific library not found matching pattern: {ops_pattern}"
             )
-            # Continue to fallback
-    else:
-        logger.debug(
-            f"[sgl_kernel] ✗ Architecture-specific library not found matching pattern: {ops_pattern}"
-        )
 
     # Try alternative directory (in case installation structure differs)
     alt_pattern = str(sgl_kernel_dir / "common_ops.*")
