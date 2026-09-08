@@ -24,6 +24,33 @@ GDC_KERNELS = (
     REPO_ROOT / "python/sglang/kernels/ops/mamba/triton_ops/mamba_ssm.py",
 )
 
+QK_KERNEL = (
+    REPO_ROOT
+    / "python/sglang/kernels/ops/attention/fused_qk_rmsnorm_rope_gate.py"
+)
+
+
+def test_fused_qk_runtime_pointers_are_selected_without_dynamic_dominance():
+    source = QK_KERNEL.read_text()
+    tree = ast.parse(source)
+    kernel = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "_fused_qk_rmsnorm_rope_gate_kernel"
+    )
+
+    dynamic_is_k_branches = [
+        node
+        for node in ast.walk(kernel)
+        if isinstance(node, ast.If)
+        and isinstance(node.test, ast.Name)
+        and node.test.id == "is_k"
+    ]
+    assert not dynamic_is_k_branches
+    assert source.count("tl.where(") >= 3
+    assert source.count(".to(ptr_dtype)") == 3
+
 
 def _load_guard(source_path: Path, arch_supported: bool, cuda_extra):
     tree = ast.parse(source_path.read_text())
