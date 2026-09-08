@@ -3746,6 +3746,13 @@ class Scheduler(
         cc = self.tree_cache.cache_controller
         if cc is not None and cc.prefetch_rate_limited():
             return False
+        if req.hicache_restore_wait_reason is RestoreWaitReason.PREFETCH_BUDGET:
+            # A budget wake only re-issues the L3->host prefetch, whose
+            # capacity gate is the host prefetch limiter above. Device
+            # admission remains authoritative after the restore reaches
+            # READY; requiring its charge here strands this waiter while an
+            # unrelated running request still occupies the device.
+            return True
         # too_short churn (independent P, defense-in-depth): a DEVICE_QUOTA
         # waiter whose current restore suffix is already sub-threshold AND
         # can never grow back above it (the can-never-qualify prompt -- the
