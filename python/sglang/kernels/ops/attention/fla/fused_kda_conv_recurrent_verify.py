@@ -31,6 +31,18 @@ import triton.language as tl
 
 from sglang.kernels.jit.utils import is_arch_support_pdl
 
+
+def _is_gdc_supported() -> bool:
+    """Return whether this Triton installation can emit CUDA GDC intrinsics."""
+    if not is_arch_support_pdl():
+        return False
+    cuda_extra = getattr(getattr(tl, "extra", None), "cuda", None)
+    return cuda_extra is not None and all(
+        hasattr(cuda_extra, name)
+        for name in ("gdc_wait", "gdc_launch_dependents")
+    )
+
+
 # V-tile width of the fused verify kernel. Tuned on B200 at T=5 with
 # benchmark/kernels/bench_kda_verify_sweep.py; any power of two is
 # numerics-safe at num_warps=4 (bit-exact vs the BV=32 original).
@@ -423,7 +435,9 @@ def fused_kda_conv_gating_verify(
     grid = (NV, B * HV)
     # PDL (sm90+): chain behind the producer qkv-projection GEMM and signal the
     # downstream o_norm / o_proj. Scheduling only — bit-exactness unaffected.
-    pdl_kwargs = {"USE_GDC": True, "launch_pdl": True} if is_arch_support_pdl() else {}
+    pdl_kwargs = (
+        {"USE_GDC": True, "launch_pdl": True} if _is_gdc_supported() else {}
+    )
     fused_kda_conv_gating_verify_kernel[grid](
         x=mixed_qkv,
         w=conv_weight,

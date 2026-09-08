@@ -13,6 +13,10 @@ GDC_KERNELS = (
     / "python/sglang/kernels/ops/attention/fla/fused_norm_gate.py",
     REPO_ROOT
     / "python/sglang/kernels/ops/attention/fla/fused_sigmoid_gating_recurrent.py",
+    REPO_ROOT
+    / "python/sglang/kernels/ops/attention/fla/layernorm_gated.py",
+    REPO_ROOT
+    / "python/sglang/kernels/ops/attention/fla/fused_kda_conv_recurrent_verify.py",
     REPO_ROOT / "python/sglang/kernels/ops/mamba/causal_conv1d_triton.py",
 )
 
