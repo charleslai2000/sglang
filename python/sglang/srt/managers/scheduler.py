@@ -3250,6 +3250,8 @@ class Scheduler(
             event, genuine_miss = RestoreEvent.REVOKED_TERMINATED, False
         elif outcome == "revoked_backup_pending":
             event, genuine_miss = RestoreEvent.BACKUP_PENDING, False
+        elif outcome == "revoked_alloc_failed":
+            event, genuine_miss = RestoreEvent.DENIED_ALLOC, False
         else:  # "revoked_miss"
             event, genuine_miss = RestoreEvent.REVOKED_MISS, True
         if event is RestoreEvent.REVOKED_MISS and genuine_miss:

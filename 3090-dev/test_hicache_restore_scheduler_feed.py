@@ -210,6 +210,7 @@ class CapacitySemanticsSchedulerFeedTests(unittest.TestCase):
             hicache_restore_wait_reason=None,
             hicache_restore_state_ts=0.0,
             hicache_restore_miss_epoch=None,
+            hicache_restore_miss_anchor=None,
             hicache_restore_miss_generation=None,
         )
 
@@ -224,6 +225,9 @@ class CapacitySemanticsSchedulerFeedTests(unittest.TestCase):
 
         self.assertIs(req.hicache_restore_state, RestoreState.WAIT_CAPACITY)
         self.assertIs(req.hicache_restore_wait_reason, RestoreWaitReason.HOST_ALLOC)
+        self.assertIsNone(req.hicache_restore_miss_epoch)
+        self.assertIsNone(req.hicache_restore_miss_anchor)
+        self.assertIsNone(req.hicache_restore_miss_generation)
 
     def test_host_alloc_wait_wakes_only_for_complete_requested_span(self):
         available = [54976]
