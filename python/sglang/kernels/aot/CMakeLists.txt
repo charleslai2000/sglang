@@ -378,6 +378,11 @@ set_target_properties(common_ops_sm100_build PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/sm100"
 )
 
+if (SGL_KERNEL_MINIMAL_SM86)
+    target_compile_definitions(common_ops_sm90_build PRIVATE SGL_KERNEL_MINIMAL_SM86=1)
+    target_compile_definitions(common_ops_sm100_build PRIVATE SGL_KERNEL_MINIMAL_SM86=1)
+endif()
+
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 execute_process(
     COMMAND ${Python3_EXECUTABLE} -c "import torch; print(int(torch._C._GLIBCXX_USE_CXX11_ABI))"
