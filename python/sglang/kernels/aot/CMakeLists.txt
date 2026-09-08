@@ -178,6 +178,7 @@ option(SGL_KERNEL_ENABLE_FA3              "Enable FA3"              ${DEFAULT_SG
 option(SGL_KERNEL_ENABLE_FA3_SPARSE_MASK  "Enable FA3 sparse mask kernels" OFF)
 option(SGL_KERNEL_ENABLE_SM90A            "Enable SM90A"            OFF)
 option(SGL_KERNEL_ENABLE_SM100A           "Enable SM100A"           OFF)
+option(SGL_KERNEL_MINIMAL_SM86            "Build the reduced SM86 common kernel source set" OFF)
 
 if (SGL_KERNEL_ENABLE_BF16)
     list(APPEND SGL_KERNEL_CUDA_FLAGS
@@ -313,6 +314,31 @@ set(SOURCES
     "${repo-flash-attention_SOURCE_DIR}/csrc/flash_attn/src/flash_fwd_sparse_hdim128_fp16_sm80.cu"
     "${repo-flash-attention_SOURCE_DIR}/csrc/flash_attn/flash_sparse_api.cpp"
 )
+
+if (SGL_KERNEL_MINIMAL_SM86)
+    # Qwen3.5-4B on SM86 does not require MLA, expert-specialization, or MoE
+    # kernels. Keep the complete default source list above unchanged so this
+    # opt-in filter cannot alter the 3090 build when disabled.
+    list(REMOVE_ITEM SOURCES
+        "csrc/attention/cutlass_mla_kernel.cu"
+        "csrc/attention/vertical_slash_index.cu"
+        "csrc/elementwise/concat_mla.cu"
+        "csrc/expert_specialization/es_fp8_blockwise.cu"
+        "csrc/expert_specialization/es_sm100_mxfp8_blockscaled.cu"
+        "csrc/expert_specialization/es_sm100_mxfp8_blockscaled_group_quant.cu"
+        "csrc/moe/cutlass_moe/w4a8/scaled_mm_entry.cu"
+        "csrc/moe/cutlass_moe/w4a8/w4a8_grouped_mm_c3x.cu"
+        "csrc/moe/cutlass_moe/w4a8/w4a8_moe_data.cu"
+        "csrc/moe/fp8_blockwise_moe_kernel.cu"
+        "csrc/moe/fused_qknorm_rope_kernel.cu"
+        "csrc/moe/moe_align_kernel.cu"
+        "csrc/moe/moe_sum.cu"
+        "csrc/moe/moe_sum_reduce.cu"
+        "csrc/moe/moe_topk_sigmoid_kernels.cu"
+        "csrc/moe/moe_topk_softmax_kernels.cu"
+        "csrc/moe/prepare_moe_input.cu"
+    )
+endif()
 
 set(INCLUDES
     ${repo-cutlass_SOURCE_DIR}/include
