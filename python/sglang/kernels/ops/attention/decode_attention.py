@@ -26,6 +26,7 @@ from typing import NamedTuple, Optional, Tuple
 import triton
 import triton.language as tl
 
+from sglang.kernels.jit.utils import is_arch_support_pdl
 from sglang.kernels.ops.attention.score_mod import unpack_aux_tensors
 from sglang.srt.environ import envs
 from sglang.srt.utils import get_device_core_count, is_gfx95_supported, is_hip
@@ -33,6 +34,34 @@ from sglang.srt.utils import get_device_core_count, is_gfx95_supported, is_hip
 _is_hip = is_hip()
 
 logger = logging.getLogger(__name__)
+
+
+def _install_gdc_shims() -> bool:
+    """Make Triton 3.2's AST resolver see safe GDC fallbacks."""
+    cuda_extra = getattr(getattr(tl, "extra", None), "cuda", None)
+    if cuda_extra is None:
+        return False
+    if all(hasattr(cuda_extra, name) for name in ("gdc_wait", "gdc_launch_dependents")):
+        return not getattr(cuda_extra, "__sglang_gdc_shimmed__", False)
+    if not getattr(cuda_extra, "__sglang_gdc_shimmed__", False):
+
+        @triton.jit
+        def _gdc_noop():
+            return
+
+        for name in ("gdc_wait", "gdc_launch_dependents"):
+            if not hasattr(cuda_extra, name):
+                setattr(cuda_extra, name, _gdc_noop)
+        setattr(cuda_extra, "__sglang_gdc_shimmed__", True)
+    return False
+
+
+_GDC_INTRINSICS_AVAILABLE = _install_gdc_shims()
+
+
+def _is_gdc_supported() -> bool:
+    """Return whether this Triton installation can emit CUDA GDC intrinsics."""
+    return is_arch_support_pdl() and _GDC_INTRINSICS_AVAILABLE
 
 
 _MIN_BLOCK_KV = 32
@@ -1186,6 +1215,7 @@ def decode_attention_fwd(
     assert max_kv_splits == attn_logits.shape[2]
     assert q.shape[0] <= kv_indptr.shape[0] - 1
     assert q.shape[0] <= attn_logits.shape[0]
+    use_pdl = use_pdl and _is_gdc_supported()
 
     # head_num lives at dim 1 (3-D) or dim 2 (4-D shared view).
     kv_head_num = v_buffer.shape[-2]
