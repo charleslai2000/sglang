@@ -7,6 +7,17 @@ import triton.language as tl
 from sglang.kernels.jit.utils import is_arch_support_pdl
 
 
+def _is_gdc_supported() -> bool:
+    """Return whether this Triton installation can emit CUDA GDC intrinsics."""
+    if not is_arch_support_pdl():
+        return False
+    cuda_extra = getattr(getattr(tl, "extra", None), "cuda", None)
+    return cuda_extra is not None and all(
+        hasattr(cuda_extra, name)
+        for name in ("gdc_wait", "gdc_launch_dependents")
+    )
+
+
 @triton.jit(do_not_specialize=["T"])
 def fused_sigmoid_gating_delta_rule_update_kernel(
     A_log,
@@ -455,7 +466,9 @@ def fused_sigmoid_gating_delta_rule_update(
     # PDL (sm90+): chain this kernel behind its producer conv1d_update, which
     # already launches dependents. Bit-exact (scheduling only) — benefits both
     # KDA and GDN recurrent paths.
-    pdl_kwargs = {"USE_GDC": True, "launch_pdl": True} if is_arch_support_pdl() else {}
+    pdl_kwargs = (
+        {"USE_GDC": True, "launch_pdl": True} if _is_gdc_supported() else {}
+    )
 
     fused_sigmoid_gating_delta_rule_update_kernel[grid](
         A_log=A_log,
