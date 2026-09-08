@@ -189,6 +189,95 @@ class BackupPendingSchedulerFeedTests(unittest.TestCase):
         )
 
 
+class CapacitySemanticsSchedulerFeedTests(unittest.TestCase):
+    """P4 post-guard capacity semantics: positive hit allocation failure is
+    a HOST_ALLOC wait, while a resident short suffix is admitted directly."""
+
+    def _scheduler(self, tree_cache):
+        scheduler = Scheduler.__new__(Scheduler)
+        scheduler.server_args = SimpleNamespace(hicache_restore_wait_timeout_s=60.0)
+        scheduler.tree_cache = tree_cache
+        scheduler.enable_hicache_storage = True
+        scheduler.enable_ready_horizon = False
+        scheduler.page_size = 16
+        return scheduler
+
+    def _req(self):
+        return SimpleNamespace(
+            rid="r1",
+            last_host_node=42,
+            hicache_restore_state=RestoreState.RESTORING,
+            hicache_restore_wait_reason=None,
+            hicache_restore_state_ts=0.0,
+            hicache_restore_miss_epoch=None,
+            hicache_restore_miss_generation=None,
+        )
+
+    def test_positive_alloc_failure_maps_to_host_capacity_wait(self):
+        tree_cache = SimpleNamespace(
+            pop_storage_prefetch_terminal=lambda rid: "revoked_alloc_failed",
+        )
+        scheduler = self._scheduler(tree_cache)
+        req = self._req()
+
+        scheduler._feed_restore_terminal(req)
+
+        self.assertIs(req.hicache_restore_state, RestoreState.WAIT_CAPACITY)
+        self.assertIs(req.hicache_restore_wait_reason, RestoreWaitReason.HOST_ALLOC)
+
+    def test_host_alloc_wait_wakes_only_for_complete_requested_span(self):
+        available = [54976]
+        tree_cache = SimpleNamespace(
+            cache_controller=SimpleNamespace(
+                prefetch_rate_limited=lambda: False,
+                mem_pool_host=SimpleNamespace(available_size=lambda: available[0]),
+            ),
+            prefetch_threshold=256,
+        )
+        scheduler = self._scheduler(tree_cache)
+        req = self._req()
+        req.hicache_restore_state = RestoreState.WAIT_CAPACITY
+        req.hicache_restore_wait_reason = RestoreWaitReason.HOST_ALLOC
+        req.prefix_indices = []
+        req.host_hit_length = 0
+        req.full_untruncated_fill_ids = list(range(55000))
+        req._compute_max_prefix_len = lambda input_len: 55000
+
+        self.assertFalse(scheduler._restore_wait_capacity_fits(req))
+        available[0] = 54992
+        self.assertTrue(scheduler._restore_wait_capacity_fits(req))
+
+    def test_resident_short_tail_does_not_enter_revalidate(self):
+        marker = ["r1"]
+        tree_cache = SimpleNamespace(
+            hicache_storage_pass_prefix_keys=False,
+            prefetch_threshold=256,
+            is_root=lambda node: node == 0,
+            prefetch_gate_ok=lambda node, buffer_mode: True,
+            get_last_hash_value=lambda node: "tail",
+            prefetch_from_storage=lambda *args, **kwargs: "declined_too_short",
+            pop_storage_prefetch_miss=lambda rid: marker.remove(rid) is None,
+            node_exists=lambda node: False,
+            is_l3_durable=lambda node: False,
+        )
+        scheduler = self._scheduler(tree_cache)
+        scheduler.server_args.hicache_host_memory_mode = "cache"
+        req = self._req()
+        req.hicache_restore_state = RestoreState.NONE
+        req.prefix_indices = list(range(54976))
+        req.host_hit_length = 0
+        req.full_untruncated_fill_ids = list(range(55000))
+        req.init_next_round_input = lambda *args, **kwargs: None
+        req._compute_max_prefix_len = lambda input_len: 55000
+
+        scheduler._prefetch_kvcache(req)
+
+        self.assertIs(req.hicache_restore_state, RestoreState.NONE)
+        self.assertIsNone(req.hicache_restore_wait_reason)
+        self.assertEqual(len(req.prefix_indices), 54976)
+        self.assertEqual(marker, [])
+
+
 class P1StickyMissSchedulerFeedTests(unittest.TestCase):
     """P1 restore re-arm churn: the T9 miss records the L3 publish epoch +
     generation evidence, and the T6 admission re-arm gate refuses to re-arm
