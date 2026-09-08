@@ -9,6 +9,9 @@ import pytest
 
 REPO_ROOT = Path(__file__).parents[3]
 GDC_KERNELS = (
+    REPO_ROOT / "python/sglang/kernels/ops/attention/decode_attention.py",
+    REPO_ROOT
+    / "python/sglang/kernels/ops/attention/fused_qk_rmsnorm_rope_gate.py",
     REPO_ROOT
     / "python/sglang/kernels/ops/attention/fla/fused_norm_gate.py",
     REPO_ROOT
