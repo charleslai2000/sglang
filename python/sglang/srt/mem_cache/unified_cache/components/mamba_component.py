@@ -1,6 +1,11 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import hashlib
+import json
+import os
+import threading
+import time
 from typing import TYPE_CHECKING, Callable, Optional, Sequence
 
 import torch
@@ -19,6 +24,11 @@ from sglang.srt.mem_cache.hicache_storage import (
     PoolName,
     PoolTransfer,
     PoolTransferResult,
+)
+from sglang.srt.mem_cache.trace_context import (
+    attach_trace_context,
+    durable_trace_enabled,
+    slot_context,
 )
 from sglang.srt.mem_cache.unified_cache.cache_action import (
     FreeComponentDeviceSlot,
@@ -53,6 +63,97 @@ if TYPE_CHECKING:
         UnifiedRadixCache,
         UnifiedTreeNode,
     )
+
+
+_T38C_DURABLE_SEQ = {}
+_T38C_DURABLE_SEQ_LOCK = threading.Lock()
+
+
+def _t38c_durable_enabled() -> bool:
+    return os.path.exists("/tmp/t38c-durable-trace")
+
+
+def _t38c_slot_digest(pool, values) -> str | None:
+    if not _t38c_durable_enabled():
+        return None
+    digest = hashlib.sha256()
+    pool_name = getattr(pool, "value", pool)
+    for value in values:
+        try:
+            tensor = value.detach()
+            shape = tuple(int(dim) for dim in tensor.shape)
+            indices = tensor.reshape(-1).to(device="cpu", dtype=torch.int64)
+            raw = indices.contiguous().numpy().tobytes()
+            dtype = str(tensor.dtype)
+        except AttributeError:
+            shape = (len(value),)
+            dtype = type(value).__name__
+            raw = bytes(str(tuple(value)), "utf-8")
+        digest.update(str(pool_name).encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(dtype.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(repr(shape).encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(raw)
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _t38c_durable_log(rec):
+    if not _t38c_durable_enabled():
+        return
+    try:
+        thread_id = threading.get_ident()
+        with _T38C_DURABLE_SEQ_LOCK:
+            local_seq = _T38C_DURABLE_SEQ.get(thread_id, 0) + 1
+            _T38C_DURABLE_SEQ[thread_id] = local_seq
+        run_id = os.environ.get("T38C_RUN_ID") or f"pid-{os.getpid()}"
+        record = attach_trace_context(dict(rec))
+        record.setdefault("schema_version", "p0_durable.v2")
+        record.setdefault("run_id", run_id)
+        record.setdefault(
+            "event_id",
+            f"{run_id}:{os.getpid()}:{thread_id}:mamba:{local_seq}",
+        )
+        record.setdefault("process_id", os.getpid())
+        record.setdefault("rank", os.environ.get("RANK"))
+        record.setdefault("thread_id", thread_id)
+        record.setdefault("local_seq", local_seq)
+        record.setdefault("operation", record.get("operation_id"))
+        record.setdefault("attempt", record.get("attempt_id"))
+        for field in (
+            "operation_id",
+            "attempt_id",
+            "node_id",
+            "anchor_id",
+            "pool",
+            "tier",
+            "final_kv_hash",
+            "storage_key",
+            "mamba_key",
+            "extent_id",
+            "extent_generation",
+            "old_generation",
+            "new_generation",
+            "slot_digest",
+            "requested_pages",
+            "succeeded_pages",
+            "reason",
+            "predecessor_event_id",
+            "evidence_ref",
+        ):
+            record.setdefault(field, None)
+        record.setdefault("result", None)
+        record["ts_wall_ns"] = time.time_ns()
+        record["ts_mono_ns"] = time.monotonic_ns()
+        record["trace"] = "p0_durable"
+        record["ts_ms"] = int(time.time() * 1000)
+        with open("/tmp/t38c-probe.log", "a") as trace_file:
+            trace_file.write(json.dumps(record, default=str) + "\n")
+        return record["event_id"]
+    except Exception:
+        pass
 
 
 class MambaComponent(TreeComponent):
@@ -331,17 +432,67 @@ class MambaComponent(TreeComponent):
 
         # Device layer
         if EvictLayer.DEVICE in target and cd.value is not None:
-            device_frees[self.component_type].append(cd.value)
-            freed = len(cd.value)
+            device_value = cd.value
+            device_frees[self.component_type].append(device_value)
+            freed = len(device_value)
             self.tree_core.component_evictable_size_[self.component_type] -= freed
             cd.value = None
+            if _t38c_durable_enabled():
+                digest = _t38c_slot_digest(PoolName.MAMBA, [device_value])
+                _t38c_durable_log(
+                    {
+                        "evt": "residency_detach",
+                        "trace_context": self.cache._t38c_trace_context_for_node(
+                            node.id
+                        ),
+                        "node_id": str(node.id),
+                        "final_kv_hash": node.get_last_hash_value() or "",
+                        "mamba_key": node.get_last_hash_value() or "",
+                        "pool": PoolName.MAMBA.value,
+                        "tier": "device",
+                        "slot_count": int(device_value.numel()),
+                        "slot_digest": digest,
+                        "session_ids": sorted(cd.session_ids or ()),
+                        "reason": str(target),
+                        "result": "detached",
+                    }
+                )
+                if hasattr(self.cache, "_t38c_note_residency_detach"):
+                    self.cache._t38c_note_residency_detach(
+                        node.id, PoolName.MAMBA.value, "device", digest
+                    )
 
         # Host layer
         host_lru = self.tree_core.host_lru_lists[self.component_type]
         if EvictLayer.HOST in target and cd.host_value is not None:
-            host_freed = len(cd.host_value)
-            host_frees[self.component_type].append(cd.host_value)
+            host_value = cd.host_value
+            host_freed = len(host_value)
+            host_frees[self.component_type].append(host_value)
             cd.host_value = None
+            if _t38c_durable_enabled():
+                digest = _t38c_slot_digest(PoolName.MAMBA, [host_value])
+                _t38c_durable_log(
+                    {
+                        "evt": "residency_detach",
+                        "trace_context": self.cache._t38c_trace_context_for_node(
+                            node.id
+                        ),
+                        "node_id": str(node.id),
+                        "final_kv_hash": node.get_last_hash_value() or "",
+                        "mamba_key": node.get_last_hash_value() or "",
+                        "pool": PoolName.MAMBA.value,
+                        "tier": "host",
+                        "slot_count": int(host_value.numel()),
+                        "slot_digest": digest,
+                        "session_ids": sorted(cd.session_ids or ()),
+                        "reason": str(target),
+                        "result": "detached",
+                    }
+                )
+                if hasattr(self.cache, "_t38c_note_residency_detach"):
+                    self.cache._t38c_note_residency_detach(
+                        node.id, PoolName.MAMBA.value, "host", digest
+                    )
             if host_lru.in_list(node):
                 host_lru.remove_node(node)
 
@@ -938,6 +1089,26 @@ class MambaComponent(TreeComponent):
             return
         for host_value in host_values:
             self.cache.host_pool_group.free(host_value, pool=PoolName.MAMBA)
+            if _t38c_durable_enabled():
+                digest = _t38c_slot_digest(PoolName.MAMBA, [host_value])
+                _t38c_durable_log(
+                    {
+                        "evt": "residency_free_complete",
+                        "trace_context": slot_context(
+                            PoolName.MAMBA.value, "host", digest
+                        ),
+                        "pool": PoolName.MAMBA.value,
+                        "tier": "host",
+                        "slot_count": int(host_value.numel()),
+                        "slot_digest": digest,
+                        "result": True,
+                        "reason": "mamba_host_free_returned",
+                    }
+                )
+                if hasattr(self.cache, "_t38c_note_residency_completion"):
+                    self.cache._t38c_note_residency_completion(
+                        PoolName.MAMBA.value, "host", digest
+                    )
 
     def apply_component_action(self, action: ComponentAction) -> None:
         if isinstance(action, MambaEvictExcessPathStates):
@@ -964,6 +1135,24 @@ class MambaComponent(TreeComponent):
                             PoolTransfer(name=PoolName.MAMBA, host_indices=host_indices)
                         ]
                     )
+                    if _t38c_durable_enabled():
+                        digest = _t38c_slot_digest(
+                            PoolName.MAMBA, [host_indices]
+                        )
+                        _t38c_durable_log(
+                            {
+                                "evt": "residency_release_enqueued",
+                                "trace_context": slot_context(
+                                    PoolName.MAMBA.value, "host", digest
+                                ),
+                                "pool": PoolName.MAMBA.value,
+                                "tier": "host",
+                                "slot_count": int(host_indices.numel()),
+                                "slot_digest": digest,
+                                "result": "enqueued",
+                                "reason": "free_component_host_slot",
+                            }
+                        )
             return
         raise AssertionError(
             f"MambaComponent: unhandled ComponentAction {type(action).__name__}"

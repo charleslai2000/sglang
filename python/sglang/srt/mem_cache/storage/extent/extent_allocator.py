@@ -25,13 +25,75 @@ read-side re-verification (generation mismatch = miss).
 from __future__ import annotations
 
 import logging
+import json
+import os
+import threading
 import time
 from collections import OrderedDict
 from typing import Callable, List, Optional, Sequence, Tuple
 
 import msgspec
 
+from sglang.srt.mem_cache.trace_context import attach_trace_context
+
 logger = logging.getLogger(__name__)
+
+_T38C_DURABLE_SEQ = {}
+_T38C_DURABLE_SEQ_LOCK = threading.Lock()
+
+
+def _t38c_durable_log(rec):
+    if not os.path.exists("/tmp/t38c-durable-trace"):
+        return
+    try:
+        thread_id = threading.get_ident()
+        with _T38C_DURABLE_SEQ_LOCK:
+            local_seq = _T38C_DURABLE_SEQ.get(thread_id, 0) + 1
+            _T38C_DURABLE_SEQ[thread_id] = local_seq
+        run_id = os.environ.get("T38C_RUN_ID") or f"pid-{os.getpid()}"
+        record = attach_trace_context(dict(rec))
+        record.setdefault("schema_version", "p0_durable.v2")
+        record.setdefault("run_id", run_id)
+        record.setdefault(
+            "event_id",
+            f"{run_id}:{os.getpid()}:{thread_id}:allocator:{local_seq}",
+        )
+        record.setdefault("process_id", os.getpid())
+        record.setdefault("rank", os.environ.get("RANK"))
+        record.setdefault("thread_id", thread_id)
+        record.setdefault("local_seq", local_seq)
+        record.setdefault("operation", record.get("operation_id"))
+        record.setdefault("attempt", record.get("attempt_id"))
+        for field in (
+            "operation_id",
+            "attempt_id",
+            "node_id",
+            "anchor_id",
+            "pool",
+            "tier",
+            "final_kv_hash",
+            "storage_key",
+            "mamba_key",
+            "slot_digest",
+            "old_generation",
+            "new_generation",
+            "requested_pages",
+            "succeeded_pages",
+            "reason",
+            "predecessor_event_id",
+            "evidence_ref",
+        ):
+            record.setdefault(field, None)
+        record.setdefault("result", None)
+        record["ts_wall_ns"] = time.time_ns()
+        record["ts_mono_ns"] = time.monotonic_ns()
+        record["trace"] = "p0_durable"
+        record["ts_ms"] = int(time.time() * 1000)
+        with open("/tmp/t38c-probe.log", "a") as trace_file:
+            trace_file.write(json.dumps(record, default=str) + "\n")
+        return record["event_id"]
+    except Exception:
+        pass
 
 
 class ExtentRef(msgspec.Struct, frozen=True):
@@ -150,10 +212,18 @@ class ExtentAllocator:
             cursor += length
         return refs, passed
 
-    def commit(self, keys: Sequence[str], refs: Sequence[ExtentRef], passed: List[int]) -> None:
+    def commit(
+        self,
+        keys: Sequence[str],
+        refs: Sequence[ExtentRef],
+        passed: List[int],
+        trace_context: Optional[dict] = None,
+    ) -> None:
         """Apply a plan after its pwrite succeeded (the backend's ACK point)."""
         for slot in passed:
-            self._drop_slot(slot)
+            self._drop_slot(
+                slot, reason="commit_reuse", trace_context=trace_context
+            )
         for key, ref in zip(keys, refs):
             if ref is None:
                 continue
@@ -171,7 +241,7 @@ class ExtentAllocator:
 
     # ---- GC ----
 
-    def evict_slot_lru(self) -> int:
+    def evict_slot_lru(self, trace_context: Optional[dict] = None) -> int:
         """Drop the slot holding the least-recently-used key; returns the
         number of live bytes freed (0 when there is nothing to evict)."""
         if not self._recency:
@@ -181,9 +251,30 @@ class ExtentAllocator:
         if oldest is None:
             self._recency.pop(oldest_key, None)
             return 0
-        return self._drop_slot(oldest.extent_id)
+        return self._drop_slot(
+            oldest.extent_id, reason="lru_gc", trace_context=trace_context
+        )
 
-    def clear(self) -> None:
+    def clear(self, trace_context: Optional[dict] = None) -> None:
+        for slot, keys in enumerate(self._slot_keys):
+            old_generation = self._generations[slot]
+            for key in sorted(keys):
+                _t38c_durable_log(
+                    {
+                        "evt": "storage_invalidate",
+                        "trace_context": trace_context,
+                        "operation": "allocator_clear",
+                        "pool": "storage",
+                        "storage_key": key,
+                        "extent_id": slot,
+                        "extent_generation": old_generation,
+                        "old_generation": old_generation,
+                        "new_generation": old_generation,
+                        "index_removed": True,
+                        "reason": "backend_clear",
+                        "result": True,
+                    }
+                )
         self._index.clear()
         self._recency.clear()
         for slot in range(self.num_slots):
@@ -194,15 +285,39 @@ class ExtentAllocator:
 
     # ---- internals ----
 
-    def _drop_slot(self, slot: int) -> int:
+    def _drop_slot(
+        self,
+        slot: int,
+        reason: str = "unknown",
+        trace_context: Optional[dict] = None,
+    ) -> int:
+        old_generation = self._generations[slot]
         freed = self._slot_bytes[slot]
-        for key in self._slot_keys[slot]:
+        removed_keys = sorted(self._slot_keys[slot])
+        for key in removed_keys:
             self._index.pop(key, None)
             self._recency.pop(key, None)
         self._slot_keys[slot].clear()
         self._slot_bytes[slot] = 0
         self._cursors[slot] = 0
         self._generations[slot] += 1
+        for key in removed_keys:
+            _t38c_durable_log(
+                {
+                    "evt": "storage_invalidate",
+                    "trace_context": trace_context,
+                    "operation": "allocator_drop_slot",
+                    "pool": "storage",
+                    "storage_key": key,
+                    "extent_id": slot,
+                    "extent_generation": self._generations[slot],
+                    "old_generation": old_generation,
+                    "new_generation": self._generations[slot],
+                    "index_removed": True,
+                    "reason": reason,
+                    "result": True,
+                }
+            )
         if freed > 0:
             # [P3] extent_recycle: a slot's generation bumped (the index
             # entries captured before the reuse now fail the read-side

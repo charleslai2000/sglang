@@ -33,6 +33,7 @@ aligned, so only whole-extent aligned IO could use O_DIRECT safely.
 from __future__ import annotations
 
 import ctypes
+import json
 import logging
 import os
 import threading
@@ -51,6 +52,7 @@ from sglang.srt.mem_cache.hicache_storage import (
 )
 from sglang.srt.mem_cache.storage.extent.extent_allocator import ExtentAllocator
 from sglang.srt.mem_cache.storage.file.lru_file_evictor import _parse_size_to_bytes
+from sglang.srt.mem_cache.trace_context import attach_trace_context
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +71,104 @@ _MERGE_GAP_THRESHOLD = 4096
 # The v1 batch packs 2 blocks per page, so a 1024-page batch is 2048 iovecs
 # and the IO helpers shard at this boundary.
 _IOV_MAX = 1024
+
+_T38C_DURABLE_SEQ = {}
+_T38C_DURABLE_SEQ_LOCK = threading.Lock()
+
+
+# T38C paired Mamba trace.  Diagnostic-only and completely disabled unless
+# the explicit marker exists; no token text or state bytes are recorded.
+def _t38c_log(rec):
+    try:
+        import json as _json
+
+        if not os.path.exists("/tmp/t38c-on"):
+            return
+        rec["ts"] = round(time.time(), 3)
+        with open("/tmp/t38c-probe.log", "a") as _f:
+            _f.write(_json.dumps(rec, default=str) + "\n")
+    except Exception:
+        pass
+
+
+def _t38c_durable_log(rec):
+    """Marker-gated p0_durable.v2 trace; identities/counters only."""
+    try:
+        if not os.path.exists("/tmp/t38c-durable-trace"):
+            return
+        thread_id = threading.get_ident()
+        with _T38C_DURABLE_SEQ_LOCK:
+            local_seq = _T38C_DURABLE_SEQ.get(thread_id, 0) + 1
+            _T38C_DURABLE_SEQ[thread_id] = local_seq
+        run_id = os.environ.get("T38C_RUN_ID") or f"pid-{os.getpid()}"
+        record = attach_trace_context(dict(rec))
+        record.setdefault("schema_version", "p0_durable.v2")
+        record.setdefault("run_id", run_id)
+        record.setdefault(
+            "event_id",
+            f"{run_id}:{os.getpid()}:{thread_id}:extent:{local_seq}",
+        )
+        record.setdefault("process_id", os.getpid())
+        record.setdefault("rank", os.environ.get("RANK"))
+        record.setdefault("thread_id", thread_id)
+        record.setdefault("local_seq", local_seq)
+        record.setdefault("operation", record.get("operation_id"))
+        record.setdefault("attempt", record.get("attempt_id"))
+        for field in (
+            "operation_id",
+            "attempt_id",
+            "node_id",
+            "anchor_id",
+            "pool",
+            "tier",
+            "final_kv_hash",
+            "storage_key",
+            "mamba_key",
+            "extent_id",
+            "extent_generation",
+            "old_generation",
+            "new_generation",
+            "slot_digest",
+            "requested_pages",
+            "succeeded_pages",
+            "reason",
+            "predecessor_event_id",
+            "evidence_ref",
+        ):
+            record.setdefault(field, None)
+        record.setdefault("result", None)
+        record["ts_wall_ns"] = time.time_ns()
+        record["ts_mono_ns"] = time.monotonic_ns()
+        record["trace"] = "p0_durable"
+        record["ts_ms"] = int(time.time() * 1000)
+        with open("/tmp/t38c-probe.log", "a") as _f:
+            _f.write(json.dumps(record, default=str) + "\n")
+        return record["event_id"]
+    except Exception:
+        pass
+
+
+def _t38c_extent_commits(keys, refs, groups, context):
+    for extent_id, indexes in groups.items():
+        generations = sorted(
+            {
+                generation
+                for index in indexes
+                if (generation := getattr(refs[index], "generation", None))
+                is not None
+            }
+        )
+        _t38c_durable_log(
+            {
+                "evt": "extent_commit",
+                **(context or {}),
+                "extent_id": extent_id,
+                "extent_generation": generations[0]
+                if len(generations) == 1
+                else generations,
+                "pages": len(indexes),
+            }
+        )
 
 
 def _merge_requested_ranges(items):
@@ -523,7 +623,7 @@ class ExtentFileBackend(HiCacheStorage):
         ]
         blocks = self._v1_host_blocks(ptr_list, size_list, blocks_per_page)
         with self._lock:
-            self._gc_evict()
+            self._gc_evict(getattr(self, "_t38c_durable_context", None))
             refs, passed = self._allocator.plan(list(zip(storage_keys, page_lens)))
             if any(r is None for r in refs):
                 logger.warning(
@@ -544,7 +644,23 @@ class ExtentFileBackend(HiCacheStorage):
                     iovecs.extend(blocks[i])
                 if not self._pwritev(extent_id * self._extent_size + first, iovecs):
                     return [False] * len(keys)
-            self._allocator.commit(storage_keys, refs, passed)
+            trace_context = getattr(self, "_t38c_durable_context", None) or {
+                "pool": "kv",
+                "final_kv_hash": keys[-1] if keys else "",
+            }
+            self._allocator.commit(
+                storage_keys, refs, passed, trace_context=trace_context
+            )
+            _t38c_extent_commits(
+                storage_keys,
+                refs,
+                groups,
+                getattr(self, "_t38c_durable_context", None)
+                or {
+                    "pool": "kv",
+                    "final_kv_hash": keys[-1] if keys else "",
+                },
+            )
             self._log_extent_write(
                 "kv", getattr(extra_info, "node_id", None), storage_keys, page_lens
             )
@@ -634,6 +750,30 @@ class ExtentFileBackend(HiCacheStorage):
     ) -> PoolTransferResult:
         with self._lock:
 
+            query_context = getattr(extra_info, "extra_info", None) or {}
+
+            def log_mamba_query(logical_key: str, present_result: bool) -> None:
+                if not os.path.exists("/tmp/t38c-durable-trace"):
+                    return
+                storage_key = self._component_key(PoolName.MAMBA, logical_key)
+                ref = self._allocator.lookup(storage_key)
+                _t38c_durable_log(
+                    {
+                        "evt": "storage_query",
+                        "operation": "batch_exists_v2",
+                        **query_context,
+                        "pool": PoolName.MAMBA.value,
+                        "mamba_key": logical_key,
+                        "storage_key": storage_key,
+                        "extent_id": ref.extent_id if ref is not None else None,
+                        "extent_generation": (
+                            ref.generation if ref is not None else None
+                        ),
+                        "result": bool(present_result),
+                        "reason": "query_present" if present_result else "query_miss",
+                    }
+                )
+
             def present(key: str) -> bool:
                 return self._allocator.lookup(key) is not None
 
@@ -645,8 +785,31 @@ class ExtentFileBackend(HiCacheStorage):
             final_pages = kv_pages
             for transfer in pool_transfers or []:
                 if final_pages == 0:
+                    if transfer.name == PoolName.MAMBA:
+                        _t38c_log(
+                            {
+                                "evt": "pc_mamba_query",
+                                "raw_kv_frontier": int(kv_pages),
+                                "trailing_key": (
+                                    transfer.keys[-1]
+                                    if transfer.keys
+                                    else ""
+                                ),
+                                "trailing_key_present": False,
+                                "tested_key": "",
+                                "tested_present": False,
+                                "boundary": 0,
+                                "final_pages": 0,
+                                "removal_recycle_hook": "allocator_storage_invalidate",
+                            }
+                        )
                     break
                 name = transfer.name
+                # Each sidecar is queried against the frontier that remains
+                # usable after the preceding pools, not the original KV
+                # prefix.  In particular, appended request tokens must not
+                # participate in a trailing sidecar check.
+                frontier = final_pages
                 # A PREFETCH transfer's keys are placeholders at build time
                 # (mamba_component / swa_component write node-last checkpoints;
                 # the real trailing hashes are filled only after the hit query
@@ -663,25 +826,85 @@ class ExtentFileBackend(HiCacheStorage):
                     boundary = next(
                         (
                             i
-                            for i in range(kv_pages)
+                            for i in range(frontier)
                             if not present(self._component_key(name, keys[i]))
                         ),
-                        kv_pages,
+                        frontier,
                     )
                 else:  # trailing_pages
-                    trailing = max(1, len(transfer.keys) if transfer.keys else 1)
+                    trailing = self._trailing_transfer_pages(transfer)
+                    trailing = min(trailing, frontier)
                     boundary = 0
-                    for prefix_len in range(kv_pages, 0, -1):
-                        if all(
+                    mamba_tested_key = ""
+                    mamba_tested_present = False
+                    mamba_match_key = ""
+                    mamba_match_present = False
+                    for prefix_len in range(frontier, 0, -1):
+                        candidate_start = max(0, prefix_len - trailing)
+                        candidate_present = all(
                             present(self._component_key(name, keys[i]))
-                            for i in range(max(0, prefix_len - trailing), prefix_len)
-                        ):
+                            for i in range(candidate_start, prefix_len)
+                        )
+                        if name == PoolName.MAMBA:
+                            candidate_key = keys[prefix_len - 1]
+                            if not mamba_tested_key:
+                                mamba_tested_key = candidate_key
+                                mamba_tested_present = candidate_present
+                                log_mamba_query(
+                                    candidate_key, candidate_present
+                                )
+                            if candidate_present:
+                                mamba_match_key = candidate_key
+                                mamba_match_present = True
+                        if candidate_present:
                             boundary = prefix_len
                             break
+                    if name == PoolName.MAMBA:
+                        _t38c_log(
+                            {
+                                "evt": "pc_mamba_query",
+                                "raw_kv_frontier": int(kv_pages),
+                                "trailing_key": (
+                                    transfer.keys[-1]
+                                    if transfer.keys
+                                    else ""
+                                ),
+                                "trailing_key_present": (
+                                    present(
+                                        self._component_key(
+                                            name, transfer.keys[-1]
+                                        )
+                                    )
+                                    if transfer.keys
+                                    else False
+                                ),
+                                "tested_key": mamba_tested_key,
+                                "tested_present": bool(mamba_tested_present),
+                                "matched_key": mamba_match_key,
+                                "matched_present": bool(mamba_match_present),
+                                "boundary": int(boundary),
+                                "final_pages": int(min(final_pages, boundary)),
+                                "removal_recycle_hook": "allocator_storage_invalidate",
+                            }
+                        )
                 if boundary:
                     hit_count[name] = boundary
                 final_pages = min(final_pages, boundary)
         return PoolTransferResult(final_pages, hit_count)
+
+    def _trailing_transfer_pages(self, transfer: PoolTransfer) -> int:
+        """Return the number of sidecar pages represented by a transfer."""
+        host_indices = transfer.host_indices
+        if host_indices is not None:
+            try:
+                slots = int(host_indices.numel())
+            except AttributeError:
+                slots = len(host_indices)
+            host_pool = getattr(self, "registered_pools", {}).get(transfer.name)
+            page_size = getattr(host_pool, "page_size", 1) or 1
+            if slots > 0 and slots % page_size == 0:
+                return max(1, slots // page_size)
+        return max(1, len(transfer.keys) if transfer.keys else 1)
 
     def batch_get_v2(
         self,
@@ -703,6 +926,19 @@ class ExtentFileBackend(HiCacheStorage):
                     len(host_indices) if host_indices is not None else 0,
                 )
                 results[transfer.name] = [False] * len(keys)
+                if transfer.name == PoolName.MAMBA:
+                    _t38c_log(
+                        {
+                            "evt": "pc_mamba_write",
+                            "node_id": getattr(transfer, "_t38c_node_id", ""),
+                            "final_kv_hash": getattr(
+                                transfer, "_t38c_final_kv_hash", ""
+                            ),
+                            "mamba_transfer_exists": True,
+                            "mamba_key": keys[-1] if keys else "",
+                            "batch_set_v2": False,
+                        }
+                    )
                 continue
             storage_keys = [self._component_key(transfer.name, k) for k in keys]
             pages = self._read_pages(storage_keys)
@@ -744,14 +980,65 @@ class ExtentFileBackend(HiCacheStorage):
                     len(host_indices) if host_indices is not None else 0,
                 )
                 results[transfer.name] = [False] * len(keys)
+                _t38c_durable_log(
+                    {
+                        "evt": "batch_set_result",
+                        "trace_context": getattr(
+                            transfer, "_t38c_trace_context", None
+                        ),
+                        "operation_id": getattr(transfer, "_t38c_operation_id", None),
+                        "attempt_id": getattr(transfer, "_t38c_attempt_id", None),
+                        "node_id": getattr(transfer, "_t38c_node_id", ""),
+                        "final_kv_hash": getattr(
+                            transfer, "_t38c_final_kv_hash", ""
+                        ),
+                        "pool": getattr(transfer.name, "value", transfer.name),
+                        "requested_pages": len(keys),
+                        "succeeded_pages": 0,
+                        "result": False,
+                        "reason": "host_index_geometry",
+                    }
+                )
                 continue
             storage_keys = [self._component_key(transfer.name, k) for k in keys]
             values = [
                 host_pool.get_data_page(int(host_indices[i * page_size]), flat=True)
                 for i in range(len(keys))
             ]
-            ok = self._write_pages(storage_keys, values)
+            trace_context = {
+                **(
+                    getattr(transfer, "_t38c_trace_context", None) or {}
+                ),
+                "operation_id": getattr(transfer, "_t38c_operation_id", None),
+                "attempt_id": getattr(transfer, "_t38c_attempt_id", None),
+                "node_id": getattr(transfer, "_t38c_node_id", ""),
+                "final_kv_hash": getattr(transfer, "_t38c_final_kv_hash", ""),
+                "pool": getattr(transfer.name, "value", transfer.name),
+            }
+            ok = self._write_pages(storage_keys, values, trace_context)
             results[transfer.name] = [ok] * len(keys)
+            _t38c_durable_log(
+                {
+                    "evt": "batch_set_result",
+                    **trace_context,
+                    "requested_pages": len(keys),
+                    "succeeded_pages": len(keys) if ok else 0,
+                    "result": bool(ok),
+                }
+            )
+            if transfer.name == PoolName.MAMBA:
+                _t38c_log(
+                    {
+                        "evt": "pc_mamba_write",
+                        "node_id": getattr(transfer, "_t38c_node_id", ""),
+                        "final_kv_hash": getattr(
+                            transfer, "_t38c_final_kv_hash", ""
+                        ),
+                        "mamba_transfer_exists": True,
+                        "mamba_key": keys[-1] if keys else "",
+                        "batch_set_v2": bool(ok),
+                    }
+                )
             if ok:
                 self._log_extent_write(
                     transfer.name,
@@ -834,7 +1121,9 @@ class ExtentFileBackend(HiCacheStorage):
         self._stats["last_batch_preads"] = preads
         return out
 
-    def _write_pages(self, keys: List[str], values: List[Any]) -> bool:
+    def _write_pages(
+        self, keys: List[str], values: List[Any], trace_context=None
+    ) -> bool:
         """Pack pages into extents and pwrite, all-or-nothing.
 
         Watermark GC runs first (under the lock); the whole plan->pwrite->
@@ -845,7 +1134,7 @@ class ExtentFileBackend(HiCacheStorage):
         if len(keys) != len(values) or any(v is None for v in values):
             return False
         with self._lock:
-            self._gc_evict()
+            self._gc_evict(trace_context)
             views = [_page_byte_view(v) for v in values]
             refs, passed = self._allocator.plan(
                 list(zip(keys, [len(v) for v in views]))
@@ -866,12 +1155,13 @@ class ExtentFileBackend(HiCacheStorage):
                 bufs = [views[i] for i in idxs]
                 if not self._pwritev(extent_id * self._extent_size + first, bufs):
                     return False
-            self._allocator.commit(keys, refs, passed)
+            self._allocator.commit(keys, refs, passed, trace_context=trace_context)
+            _t38c_extent_commits(keys, refs, groups, trace_context)
             return True
 
     # ---- GC / lifecycle ----
 
-    def _gc_evict(self) -> None:
+    def _gc_evict(self, trace_context=None) -> None:
         """Lazy watermark GC: evict LRU slots until under both watermarks.
 
         Pressure = live bytes above max_size x eviction_ratio, or free disk
@@ -892,12 +1182,15 @@ class ExtentFileBackend(HiCacheStorage):
                     pressure = True
             if not pressure:
                 return
-            if self._allocator.evict_slot_lru() == 0:
+            evicted = self._allocator.evict_slot_lru(trace_context=trace_context)
+            if evicted == 0:
                 return
 
     def clear(self) -> bool:
         with self._lock:
-            self._allocator.clear()
+            self._allocator.clear(
+                trace_context=getattr(self, "_t38c_durable_context", None)
+            )
         logger.info("Cleared all entries in ExtentFileBackend storage.")
         return True
 

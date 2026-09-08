@@ -5,6 +5,7 @@ import logging
 import os
 import threading
 import time
+from collections import deque
 from dataclasses import replace
 from queue import Empty, Queue
 from typing import TYPE_CHECKING, Any, Callable, List, Optional
@@ -35,11 +36,21 @@ from sglang.srt.mem_cache.hicache_storage import (
 from sglang.srt.mem_cache.l2_transfer import L2Transfer
 from sglang.srt.mem_cache.pool_host import HostPoolGroup, PoolEntry
 from sglang.srt.mem_cache.pool_host.mha import MHATokenToKVPoolHost
+from sglang.srt.mem_cache.trace_context import (
+    attach_trace_context,
+    durable_trace_enabled,
+    INERT_RELEASE_TOKEN,
+    ordered_key_set_digest,
+    remember_slot_context,
+)
 
 if TYPE_CHECKING:
     from sglang.srt.mem_cache.allocator import BaseTokenToKVPoolAllocator
 
 logger = logging.getLogger(__name__)
+
+_T38C_DURABLE_SEQ = {}
+_T38C_DURABLE_SEQ_LOCK = threading.Lock()
 
 # T38C-PROBE (L3 read-chain observation; log-only. Appends JSON lines to
 # /tmp/t38c-probe.log only when /tmp/t38c-on exists; zero numeric-path change;
@@ -58,6 +69,92 @@ def _t38c_log(rec):
         pass
 
 
+def _t38c_durable_log(rec):
+    """Marker-gated p0_durable.v2 trace; identities/counters only."""
+    try:
+        if not os.path.exists("/tmp/t38c-durable-trace"):
+            return
+        thread_id = threading.get_ident()
+        with _T38C_DURABLE_SEQ_LOCK:
+            local_seq = _T38C_DURABLE_SEQ.get(thread_id, 0) + 1
+            _T38C_DURABLE_SEQ[thread_id] = local_seq
+        run_id = os.environ.get("T38C_RUN_ID") or f"pid-{os.getpid()}"
+        record = attach_trace_context(dict(rec))
+        record.setdefault("schema_version", "p0_durable.v2")
+        record.setdefault("run_id", run_id)
+        record.setdefault(
+            "event_id",
+            f"{run_id}:{os.getpid()}:{thread_id}:controller:{local_seq}",
+        )
+        record.setdefault("process_id", os.getpid())
+        record.setdefault("rank", os.environ.get("RANK"))
+        record.setdefault("thread_id", thread_id)
+        record.setdefault("local_seq", local_seq)
+        record.setdefault("operation", record.get("operation_id"))
+        record.setdefault("attempt", record.get("attempt_id"))
+        for field in (
+            "operation_id",
+            "attempt_id",
+            "node_id",
+            "anchor_id",
+            "pool",
+            "tier",
+            "final_kv_hash",
+            "storage_key",
+            "mamba_key",
+            "extent_id",
+            "extent_generation",
+            "old_generation",
+            "new_generation",
+            "slot_digest",
+            "requested_pages",
+            "succeeded_pages",
+            "reason",
+            "predecessor_event_id",
+            "evidence_ref",
+        ):
+            record.setdefault(field, None)
+        record.setdefault("result", None)
+        record["ts_wall_ns"] = time.time_ns()
+        record["ts_mono_ns"] = time.monotonic_ns()
+        record["trace"] = "p0_durable"
+        record["ts_ms"] = int(time.time() * 1000)
+        with open("/tmp/t38c-probe.log", "a") as _f:
+            _f.write(json.dumps(record, default=str) + "\n")
+        return record["event_id"]
+    except Exception:
+        pass
+
+
+def _t38c_slot_digest(pool, values) -> str | None:
+    if not os.path.exists("/tmp/t38c-durable-trace"):
+        return None
+    import hashlib
+
+    digest = hashlib.sha256()
+    pool_name = getattr(pool, "value", pool)
+    for value in values:
+        try:
+            tensor = value.detach()
+            shape = tuple(int(dim) for dim in tensor.shape)
+            indices = tensor.reshape(-1).to(device="cpu", dtype=torch.int64)
+            raw = indices.contiguous().numpy().tobytes()
+            dtype = str(tensor.dtype)
+        except AttributeError:
+            shape = (len(value),)
+            dtype = type(value).__name__
+            raw = bytes(str(tuple(value)), "utf-8")
+        digest.update(str(pool_name).encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(dtype.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(repr(shape).encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(raw)
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
 
 
 class StorageOperation(BaseStorageOperation):
@@ -69,10 +166,12 @@ class StorageOperation(BaseStorageOperation):
         hash_value: Optional[List[str]] = None,
         prefix_keys: Optional[List[str]] = None,
         pool_transfers: Optional[list[PoolTransfer]] = None,
+        trace_context: Optional[dict] = None,
     ):
         super().__init__(host_indices, token_ids, last_hash, hash_value, prefix_keys)
         self.pool_transfers = pool_transfers
         self.pool_storage_result = PoolTransferResult.empty()
+        self.trace_context = dict(trace_context) if trace_context else None
 
 
 class PrefetchOperation(StorageOperation):
@@ -83,6 +182,7 @@ class PrefetchOperation(StorageOperation):
         last_hash: Optional[str] = None,
         prefix_keys: Optional[List[str]] = None,
         pool_transfers: Optional[list[PoolTransfer]] = None,
+        trace_context: Optional[dict] = None,
     ):
         self.request_id = request_id
         self._lock = threading.Lock()
@@ -95,6 +195,7 @@ class PrefetchOperation(StorageOperation):
             last_hash,
             prefix_keys=prefix_keys,
             pool_transfers=pool_transfers,
+            trace_context=trace_context,
         )
         self.pool_transfers_done = not bool(pool_transfers)
 
@@ -130,6 +231,9 @@ class HybridCacheController(BaseHiCacheController):
     ):
         startup_storage_backend = storage_backend
         self.extra_host_mem_release_queues: dict[PoolName, Queue[torch.Tensor]] = {}
+        self._t38c_host_mem_release_tokens: Queue = Queue()
+        self._t38c_extra_host_mem_release_tokens: dict[PoolName, Queue] = {}
+        self._t38c_release_handoff_lock = threading.Lock()
         super().__init__(
             token_to_kv_pool_allocator=token_to_kv_pool_allocator,
             mem_pool_host=mem_pool_host,
@@ -148,6 +252,7 @@ class HybridCacheController(BaseHiCacheController):
             enable_storage_metrics=enable_storage_metrics,
             host_memory_mode=host_memory_mode,
         )
+        self._t38c_expected_rank_set = self._t38c_rank_topology()
         # Override layer_num: hybrid models transfer all layers (For example, Linear Model (KV + Mamba)),
         # not just the full attention layers reported by full_kv_pool.
         if transfer_layer_num is not None and transfer_layer_num != self.layer_num:
@@ -192,6 +297,7 @@ class HybridCacheController(BaseHiCacheController):
         self.mem_pool_host.add_entry(entry)
         if not entry.is_primary_index_anchor:
             self.extra_host_mem_release_queues.setdefault(entry.name, Queue())
+            self._t38c_extra_host_mem_release_tokens.setdefault(entry.name, Queue())
         if self.enable_storage and self.storage_backend is not None:
             self.storage_backend.register_mem_host_pool_v2(entry.host_pool, entry.name)
 
@@ -273,31 +379,81 @@ class HybridCacheController(BaseHiCacheController):
 
     def _init_extra_host_mem_release_queues(self) -> None:
         self.extra_host_mem_release_queues = {}
+        self._t38c_extra_host_mem_release_tokens = {}
         entries = getattr(self.mem_pool_host, "entries", None) or []
         anchor_entry = getattr(self.mem_pool_host, "anchor_entry", None)
         for entry in entries:
             if entry is anchor_entry or entry.is_primary_index_anchor:
                 continue
             self.extra_host_mem_release_queues[entry.name] = Queue()
+            self._t38c_extra_host_mem_release_tokens[entry.name] = Queue()
 
     def _append_host_mem_release_pages(
-        self, release_queue: Queue, host_indices: torch.Tensor, page_size: int
+        self,
+        release_queue: Queue,
+        host_indices: torch.Tensor,
+        page_size: int,
+        pool: PoolName = PoolName.KV,
+        trace_context: Optional[dict] = None,
     ) -> None:
         if host_indices.numel() == 0:
             return
+        pool_label = getattr(pool, "value", pool)
+        token_queue = (
+            self._t38c_host_mem_release_tokens
+            if pool_label == PoolName.KV.value
+            else self._t38c_extra_host_mem_release_tokens.setdefault(pool, Queue())
+        )
         for page in host_indices.split(page_size):
-            release_queue.put(page)
+            with self._t38c_release_handoff_lock:
+                release_queue.put(page)
+                token = INERT_RELEASE_TOKEN
+                if durable_trace_enabled():
+                    digest = _t38c_slot_digest(pool, [page])
+                    registered_token = remember_slot_context(
+                        getattr(pool, "value", pool), "host", digest, trace_context
+                    )
+                    if registered_token is not None:
+                        token = registered_token
+                    # The real page and its exact trace token are published
+                    # while the controller-owned handoff lock is held.
+                token_queue.put(token)
+            _t38c_durable_log(
+                {
+                    "evt": "residency_release_enqueued",
+                    "trace_context": trace_context,
+                    "pool": getattr(pool, "value", pool),
+                    "tier": "host",
+                    "slot_count": int(page.numel()),
+                    "slot_digest": _t38c_slot_digest(pool, [page]),
+                    "result": "enqueued",
+                    "reason": "queued_host_release",
+                }
+            )
 
     def append_host_mem_release(
         self,
         host_indices: Optional[torch.Tensor] = None,
         extra_pools: Optional[list[PoolTransfer]] = None,
+        trace_context: Optional[dict] = None,
     ):
+        if trace_context is None:
+            trace_context = next(
+                (
+                    getattr(transfer, "_t38c_trace_context", None)
+                    for transfer in extra_pools or []
+                    if getattr(transfer, "_t38c_trace_context", None) is not None
+                ),
+                None,
+            )
+        trace_context = dict(trace_context) if trace_context else None
         if host_indices is not None:
             self._append_host_mem_release_pages(
                 self.host_mem_release_queue,
                 host_indices,
                 self.mem_pool_host.page_size,
+                PoolName.KV,
+                trace_context,
             )
         for transfer in extra_pools or []:
             if transfer.host_indices is None or transfer.host_indices.numel() == 0:
@@ -313,11 +469,82 @@ class HybridCacheController(BaseHiCacheController):
             if release_queue is None:
                 continue
             self._append_host_mem_release_pages(
-                release_queue, transfer.host_indices, entry.host_pool.page_size
+                release_queue,
+                transfer.host_indices,
+                entry.host_pool.page_size,
+                transfer.name,
+                getattr(transfer, "_t38c_trace_context", trace_context),
             )
+
+    def _t38c_pop_host_mem_release_token(self, pool) -> Optional[tuple]:
+        token_queue = self._t38c_token_queue(pool)
+        if token_queue is None:
+            return None
+        with self._t38c_release_handoff_lock:
+            if token_queue.empty():
+                return None
+            return token_queue.get()
+
+    def _t38c_token_queue(self, pool) -> Optional[Queue]:
+        if pool == PoolName.KV or getattr(pool, "value", pool) == PoolName.KV.value:
+            return self._t38c_host_mem_release_tokens
+        return self._t38c_extra_host_mem_release_tokens.get(pool) or (
+            self._t38c_extra_host_mem_release_tokens.get(getattr(pool, "value", pool))
+        )
+
+    def _t38c_pop_host_mem_release_pair(self, release_queue: Queue, pool):
+        """Pop a release page and its exact token as one trace-only handoff."""
+        token_queue = self._t38c_token_queue(pool)
+        if token_queue is None:
+            return None
+        with self._t38c_release_handoff_lock:
+            # A page without metadata is never completed by digest. Leave it
+            # queued until its producer has published the paired metadata.
+            if release_queue.empty() or token_queue.empty():
+                return None
+            return release_queue.get(), token_queue.get()
+
+    def _t38c_rank_topology(self) -> list[str]:
+        """Capture the authoritative TP rank set from initialized state."""
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            world_size = torch.distributed.get_world_size(group=self.tp_group)
+            if hasattr(torch.distributed, "get_process_group_ranks"):
+                ranks = torch.distributed.get_process_group_ranks(self.tp_group)
+            else:
+                ranks = list(range(world_size))
+            if world_size == 1:
+                ranks = [torch.distributed.get_rank(group=self.tp_group)]
+            return sorted(str(rank) for rank in ranks)
+        return [str(os.environ.get("RANK", "0"))]
+
+    def _t38c_retire_host_mem_release_tokens(self, session_id) -> None:
+        """Retire queued tokens without changing the real release FIFO."""
+        session_id = str(session_id)
+        with self._t38c_release_handoff_lock:
+            queues = [self._t38c_host_mem_release_tokens]
+            queues.extend(self._t38c_extra_host_mem_release_tokens.values())
+            for token_queue in queues:
+                with token_queue.mutex:
+                    token_queue.queue = deque(
+                        INERT_RELEASE_TOKEN
+                        if token is not None
+                        and len(token) > 1
+                        and token[1] == session_id
+                        else token
+                        for token in token_queue.queue
+                    )
+
+    def _t38c_reset_release_handoff(self) -> None:
+        with self._t38c_release_handoff_lock:
+            queues = [self._t38c_host_mem_release_tokens]
+            queues.extend(self._t38c_extra_host_mem_release_tokens.values())
+            for token_queue in queues:
+                with token_queue.mutex:
+                    token_queue.queue.clear()
 
     def reset(self):
         super().reset()
+        self._t38c_reset_release_handoff()
         if self.enable_storage:
             self.host_mem_release_queue.queue.clear()
             for release_queue in self.extra_host_mem_release_queues.values():
@@ -567,6 +794,7 @@ class HybridCacheController(BaseHiCacheController):
         last_hash: Optional[str] = None,
         prefix_keys: Optional[List[str]] = None,
         extra_pools: Optional[list[PoolTransfer]] = None,
+        trace_context: Optional[dict] = None,
     ) -> PrefetchOperation:
         operation = PrefetchOperation(
             request_id,
@@ -574,7 +802,10 @@ class HybridCacheController(BaseHiCacheController):
             last_hash,
             prefix_keys=prefix_keys,
             pool_transfers=extra_pools,
+            trace_context=trace_context,
         )
+        for transfer in extra_pools or []:
+            transfer._t38c_trace_context = operation.trace_context
         self.prefetch_queue.put(operation)
         return operation
 
@@ -586,6 +817,7 @@ class HybridCacheController(BaseHiCacheController):
         prefix_keys: Optional[List[str]] = None,
         extra_pools: Optional[list[PoolTransfer]] = None,
         node_id: Optional[Any] = None,
+        trace_context: Optional[dict] = None,
     ) -> int:
         operation = StorageOperation(
             host_indices,
@@ -593,8 +825,23 @@ class HybridCacheController(BaseHiCacheController):
             hash_value=hash_value,
             prefix_keys=prefix_keys,
             pool_transfers=extra_pools,
+            trace_context=trace_context,
         )
         operation.node_id = node_id
+        operation.trace_id = f"storage-{operation.id}"
+        operation._t38c_expected_rank_set = list(self._t38c_expected_rank_set)
+        for transfer in extra_pools or []:
+            transfer._t38c_operation_id = operation.id
+            transfer._t38c_attempt_id = operation.trace_id
+            transfer._t38c_node_id = str(node_id) if node_id is not None else ""
+            transfer._t38c_final_kv_hash = (
+                hash_value[-1] if hash_value else ""
+            )
+            if transfer.name == PoolName.MAMBA:
+                transfer._t38c_expected_rank_set = list(
+                    self._t38c_expected_rank_set
+                )
+            transfer._t38c_trace_context = operation.trace_context
         self.backup_queue.put(operation)
         return operation.id
 
@@ -605,11 +852,43 @@ class HybridCacheController(BaseHiCacheController):
         operation.all_hash_values = hash_value
 
         extra_info = HiCacheStorageExtraInfo(
-            prefix_keys=operation.prefix_keys.copy() if operation.prefix_keys else None
+            prefix_keys=operation.prefix_keys.copy() if operation.prefix_keys else None,
+            extra_info={
+                "operation_id": operation.id,
+                "attempt_id": getattr(operation, "trace_id", f"prefetch-{operation.id}"),
+                "node_id": getattr(operation, "node_id", None),
+                "final_kv_hash": hash_value[-1] if hash_value else "",
+                "trace_context": getattr(operation, "trace_context", None),
+            },
         )
         if operation.pool_transfers:
+            # Establish the KV frontier before asking a trailing sidecar for
+            # its boundary.  The query can contain newly appended turn
+            # tokens that are not in storage; those tokens must not become
+            # the sidecar's trailing window and reject an otherwise complete
+            # historical KV prefix.
+            kv_hit_pages = self.storage_backend.batch_exists(hash_value, extra_info)
+            kv_hit_pages = max(0, min(kv_hit_pages, len(hash_value)))
+            query_hashes = hash_value[:kv_hit_pages]
+            query_transfers = self._align_storage_query_transfers(
+                operation.pool_transfers, hash_value, kv_hit_pages
+            )
+            for transfer in query_transfers:
+                transfer._t38c_operation_id = operation.id
+                transfer._t38c_attempt_id = getattr(
+                    operation, "trace_id", f"prefetch-{operation.id}"
+                )
+                transfer._t38c_node_id = str(
+                    getattr(operation, "node_id", "") or ""
+                )
+                transfer._t38c_final_kv_hash = (
+                    hash_value[-1] if hash_value else ""
+                )
+                transfer._t38c_trace_context = getattr(
+                    operation, "trace_context", None
+                )
             hit_result = self.storage_backend.batch_exists_v2(
-                hash_value, operation.pool_transfers, extra_info
+                query_hashes, query_transfers, extra_info
             )
         else:
             kv_hit_count = self.storage_backend.batch_exists(hash_value, extra_info)
@@ -635,6 +914,48 @@ class HybridCacheController(BaseHiCacheController):
             hash_value[:kv_hit_pages],
             kv_hit_pages * self.page_size,
         )
+
+    def _trailing_transfer_pages(self, transfer: PoolTransfer) -> int:
+        """Return the sidecar window size, independent of query length.
+
+        A prefetch transfer's host buffer describes the sidecar pages that
+        will actually be restored.  Prefer that size over ``transfer.keys``:
+        the latter may still describe the full request, including tokens past
+        the KV hit frontier.  Keep the key-count fallback for storage query
+        callers that do not carry host staging indices.
+        """
+        host_indices = transfer.host_indices
+        if host_indices is not None:
+            try:
+                slots = int(host_indices.numel())
+            except AttributeError:
+                slots = len(host_indices)
+            entry = getattr(self.mem_pool_host, "entry_map", {}).get(transfer.name)
+            page_size = (
+                getattr(entry.host_pool, "page_size", self.page_size)
+                if entry is not None
+                else self.page_size
+            ) or 1
+            if slots > 0 and slots % page_size == 0:
+                return max(1, slots // page_size)
+        return max(1, len(transfer.keys) if transfer.keys else 1)
+
+    def _align_storage_query_transfers(
+        self,
+        transfers: list[PoolTransfer],
+        all_hashes: list[str],
+        kv_hit_pages: int,
+    ) -> list[PoolTransfer]:
+        """Align trailing sidecar keys to the actual KV hit frontier."""
+        aligned = []
+        for transfer in transfers:
+            if transfer.hit_policy != PoolHitPolicy.TRAILING_PAGES:
+                aligned.append(transfer)
+                continue
+            trailing = self._trailing_transfer_pages(transfer)
+            keys = all_hashes[max(0, kv_hit_pages - trailing) : kv_hit_pages]
+            aligned.append(replace(transfer, keys=keys))
+        return aligned
 
     def move_hybrid_indices(
         self, operation: CacheOperation
@@ -736,9 +1057,73 @@ class HybridCacheController(BaseHiCacheController):
             results = self.storage_backend.batch_set_v2(backup_transfers)
             pool_hits = count_pool_hits(results)
             operation.pool_storage_result.update_extra_pool_hit_pages(pool_hits)
+            for transfer in backup_transfers:
+                result = results.get(transfer.name)
+                if result is None:
+                    result = results.get(transfer.name.value)
+                _t38c_durable_log(
+                    {
+                        "evt": "batch_set_result",
+                        "trace_context": getattr(
+                            operation, "trace_context", None
+                        ),
+                        "operation_id": operation.id,
+                        "attempt_id": getattr(
+                            operation, "trace_id", f"storage-{operation.id}"
+                        ),
+                        "node_id": str(getattr(operation, "node_id", "") or ""),
+                        "final_kv_hash": (
+                            operation.hash_value[-1]
+                            if operation.hash_value
+                            else ""
+                        ),
+                        "pool": getattr(transfer.name, "value", transfer.name),
+                        "requested_pages": len(transfer.keys or []),
+                        "succeeded_pages": sum(bool(ok) for ok in (result or [])),
+                        "result": bool(result) and all(bool(ok) for ok in result),
+                    }
+                )
 
+        kv_before = operation.completed_tokens
+        trace_context = {
+            **(operation.trace_context or {}),
+            "operation_id": operation.id,
+            "attempt_id": getattr(operation, "trace_id", f"storage-{operation.id}"),
+            "node_id": str(getattr(operation, "node_id", "") or ""),
+            "final_kv_hash": operation.hash_value[-1] if operation.hash_value else "",
+            "pool": "kv",
+        }
         if not self.backup_skip:
-            super()._page_backup(operation)
+            previous_context = getattr(
+                self.storage_backend, "_t38c_durable_context", None
+            )
+            try:
+                self.storage_backend._t38c_durable_context = trace_context
+            except Exception:
+                previous_context = None
+            try:
+                super()._page_backup(operation)
+            finally:
+                try:
+                    if previous_context is None:
+                        del self.storage_backend._t38c_durable_context
+                    else:
+                        self.storage_backend._t38c_durable_context = previous_context
+                except Exception:
+                    pass
+            _t38c_durable_log(
+                {
+                    **trace_context,
+                    "evt": "batch_set_result",
+                    "requested_pages": len(operation.hash_value),
+                    "succeeded_pages": max(
+                        0,
+                        (operation.completed_tokens - kv_before) // self.page_size,
+                    ),
+                    "result": operation.completed_tokens
+                    >= len(operation.hash_value) * self.page_size,
+                }
+            )
         else:
             sidecar_ok = bool(backup_transfers)
             if sidecar_ok:
@@ -795,6 +1180,97 @@ class HybridCacheController(BaseHiCacheController):
                 if operation is None:
                     continue
                 self._page_backup(operation)
+                transfers = operation.pool_transfers or []
+                mamba_transfers = [
+                    transfer
+                    for transfer in transfers
+                    if transfer.name == PoolName.MAMBA
+                ]
+                mamba_keys = [
+                    key
+                    for transfer in mamba_transfers
+                    for key in (transfer.keys or [])
+                ]
+                mamba_key_set_digest, mamba_key_count = ordered_key_set_digest(
+                    mamba_keys
+                )
+                mamba_expected_pages = mamba_key_count
+                mamba_succeeded_pages = operation.pool_storage_result.extra_pool_hit_pages.get(
+                    PoolName.MAMBA,
+                    operation.pool_storage_result.extra_pool_hit_pages.get(
+                        PoolName.MAMBA.value, 0
+                    ),
+                )
+                expected_rank_set = getattr(
+                    operation, "_t38c_expected_rank_set",
+                    self._t38c_expected_rank_set,
+                )
+                if expected_rank_set is None:
+                    expected_rank_set = next(
+                        (
+                            getattr(transfer, "_t38c_expected_rank_set", None)
+                            for transfer in mamba_transfers
+                            if getattr(transfer, "_t38c_expected_rank_set", None)
+                            is not None
+                        ),
+                        None,
+                    )
+                expected_rank_set = (
+                    sorted(str(rank) for rank in expected_rank_set)
+                    if expected_rank_set
+                    else list(self._t38c_expected_rank_set)
+                )
+                observed_ack_rank_set = [
+                    str(
+                        torch.distributed.get_rank(group=self.tp_group)
+                        if torch.distributed.is_available()
+                        and torch.distributed.is_initialized()
+                        else os.environ.get("RANK", "0")
+                    )
+                ]
+                _t38c_durable_log(
+                    {
+                        "evt": "backup_ack_enqueue",
+                        "trace_context": getattr(
+                            operation, "trace_context", None
+                        ),
+                        "operation_id": operation.id,
+                        "attempt_id": getattr(
+                            operation, "trace_id", f"storage-{operation.id}"
+                        ),
+                        "node_id": str(getattr(operation, "node_id", "") or ""),
+                        "final_kv_hash": (
+                            operation.hash_value[-1]
+                            if operation.hash_value
+                            else ""
+                        ),
+                        "kv_transfer": bool(operation.hash_value),
+                        "mamba_transfer": any(
+                            transfer.name == PoolName.MAMBA for transfer in transfers
+                        ),
+                        "kv_durable": operation.completed_tokens
+                        >= len(operation.hash_value) * self.page_size,
+                        "mamba_durable": mamba_key_count > 0
+                        and mamba_succeeded_pages == mamba_expected_pages,
+                        "mamba_expected_pages": mamba_expected_pages,
+                        "mamba_succeeded_pages": mamba_succeeded_pages,
+                        "mamba_key_count": mamba_key_count,
+                        "mamba_key_set_digest": mamba_key_set_digest,
+                        "expected_rank_set": expected_rank_set,
+                        "observed_ack_rank_set": observed_ack_rank_set,
+                        "observed_ack_rank_count": len(observed_ack_rank_set),
+                        "rank_set_unavailable": not expected_rank_set,
+                        "operation": operation.id,
+                        "attempt": getattr(
+                            operation, "trace_id", f"storage-{operation.id}"
+                        ),
+                        "completed_tokens": int(operation.completed_tokens),
+                        "result": "complete"
+                        if operation.completed_tokens
+                        >= len(operation.hash_value) * self.page_size
+                        else "partial",
+                    }
+                )
                 self.ack_backup_queue.put(operation)
             except Empty:
                 continue
