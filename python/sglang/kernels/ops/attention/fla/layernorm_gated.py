@@ -34,6 +34,18 @@ from sglang.srt.utils import (
 _is_npu = is_npu()
 _use_cpu = is_cpu() and cpu_has_amx_support()
 
+
+def _is_gdc_supported() -> bool:
+    """Return whether this Triton installation can emit CUDA GDC intrinsics."""
+    if not is_arch_support_pdl():
+        return False
+    cuda_extra = getattr(getattr(tl, "extra", None), "cuda", None)
+    return cuda_extra is not None and all(
+        hasattr(cuda_extra, name)
+        for name in ("gdc_wait", "gdc_launch_dependents")
+    )
+
+
 # Maximum rows per Triton block for layernorm gated kernel
 MAX_ROWS_PER_BLOCK = 4
 
@@ -254,7 +266,9 @@ def _layer_norm_fwd(
     rows_per_block = calc_rows_per_block(M, x.device)
     # Update grid to use rows_per_block
     grid = (cdiv(M, rows_per_block), ngroups)
-    pdl_kwargs = {"USE_GDC": True, "launch_pdl": True} if is_arch_support_pdl() else {}
+    pdl_kwargs = (
+        {"USE_GDC": True, "launch_pdl": True} if _is_gdc_supported() else {}
+    )
     # Workaround for PyTorch <= 2.12: torch.xpu.device is not Dynamo-compatible
     # in that release — it creates a DynamoConfigPatchProxy that
     # SourcelessBuilder cannot wrap, causing a hard error under
