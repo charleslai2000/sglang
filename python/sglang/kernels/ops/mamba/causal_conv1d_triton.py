@@ -15,6 +15,17 @@ from sglang.kernels.jit.utils import is_arch_support_pdl
 PAD_SLOT_ID = -1
 
 
+def _is_gdc_supported() -> bool:
+    """Return whether this Triton installation can emit CUDA GDC intrinsics."""
+    if not is_arch_support_pdl():
+        return False
+    cuda_extra = getattr(getattr(tl, "extra", None), "cuda", None)
+    return cuda_extra is not None and all(
+        hasattr(cuda_extra, name)
+        for name in ("gdc_wait", "gdc_launch_dependents")
+    )
+
+
 @triton.jit()
 def _causal_conv1d_fwd_kernel(  # continuous batching
     # Pointers to matrices
@@ -1137,7 +1148,9 @@ def causal_conv1d_update(
     else:
         stride_retrieve_parent_token_seq = stride_retrieve_parent_token_token = 0
 
-    pdl_kwargs = {"USE_GDC": True, "launch_pdl": True} if is_arch_support_pdl() else {}
+    pdl_kwargs = (
+        {"USE_GDC": True, "launch_pdl": True} if _is_gdc_supported() else {}
+    )
 
     _causal_conv1d_update_kernel[grid](
         # Pointers to matrices

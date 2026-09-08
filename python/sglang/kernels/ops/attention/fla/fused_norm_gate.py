@@ -19,6 +19,18 @@ from sglang.srt.utils import (
 _is_npu = is_npu()
 _use_cpu = is_cpu() and cpu_has_amx_support()
 
+
+def _is_gdc_supported() -> bool:
+    """Return whether this Triton installation can emit CUDA GDC intrinsics."""
+    if not is_arch_support_pdl():
+        return False
+    cuda_extra = getattr(getattr(tl, "extra", None), "cuda", None)
+    return cuda_extra is not None and all(
+        hasattr(cuda_extra, name)
+        for name in ("gdc_wait", "gdc_launch_dependents")
+    )
+
+
 # Maximum rows per Triton block for layernorm gated kernel
 MAX_ROWS_PER_BLOCK = 4
 
@@ -225,7 +237,9 @@ def layer_norm_gated_fwd(
     if D <= 512:
         BT = 32
         pdl_kwargs = (
-            {"USE_GDC": True, "launch_pdl": True} if is_arch_support_pdl() else {}
+            {"USE_GDC": True, "launch_pdl": True}
+            if _is_gdc_supported()
+            else {}
         )
         layer_norm_gated_fwd_kernel[(cdiv(T, BT),)](
             x=x,
