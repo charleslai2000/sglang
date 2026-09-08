@@ -42,6 +42,7 @@ from sglang.srt.mem_cache.buffer_mode.storage_existence_cache import (
 )
 from sglang.srt.mem_cache.common import RetractionBackup
 from sglang.srt.mem_cache.hicache_storage import (
+    PoolHitPolicy,
     PoolName,
     PoolTransfer,
     SidecarPoolSpec,
@@ -141,6 +142,16 @@ logger = logging.getLogger(__name__)
 
 _T38C_DURABLE_SEQ = {}
 _T38C_DURABLE_SEQ_LOCK = threading.Lock()
+
+
+def _storage_hit_crop_is_safe(operation, alloc_len: int) -> bool:
+    """Whether a host-capacity crop preserves the validated storage frontier."""
+    if alloc_len >= operation.storage_hit_count:
+        return True
+    return not any(
+        transfer.hit_policy == PoolHitPolicy.TRAILING_PAGES
+        for transfer in operation.pool_transfers or []
+    )
 
 
 def _t38c_residency_identity(context, node_id, final_kv_hash):
@@ -5863,7 +5874,10 @@ class UnifiedRadixCache(BasePrefixCache):
                     operation.storage_hit_count,
                     available_size - (available_size % self.page_size),
                 )
-                if alloc_len >= self.prefetch_threshold:
+                if (
+                    alloc_len >= self.prefetch_threshold
+                    and _storage_hit_crop_is_safe(operation, alloc_len)
+                ):
                     host_indices = cc.mem_pool_host.alloc(alloc_len)
             if host_indices is None:
                 if buffer_mode:
