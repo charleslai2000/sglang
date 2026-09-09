@@ -10,6 +10,7 @@ from typing import Optional
 
 ROOT = Path(__file__).parents[1]
 SCHEDULER = ROOT / "python/sglang/srt/managers/scheduler.py"
+UNIFIED_CACHE = ROOT / "python/sglang/srt/mem_cache/unified_radix_cache.py"
 
 
 def _load_methods(*names):
@@ -27,6 +28,27 @@ def _load_methods(*names):
         "logger": logging.getLogger(__name__),
     }
     exec(compile(ast.Module(selected, []), str(SCHEDULER), "exec"), namespace)
+    return namespace
+
+
+def _load_unified_cache_methods(*names):
+    module = ast.parse(UNIFIED_CACHE.read_text())
+    cls = next(
+        node
+        for node in ast.walk(module)
+        if isinstance(node, ast.ClassDef) and node.name == "UnifiedRadixCache"
+    )
+    selected = [
+        node
+        for node in cls.body
+        if isinstance(node, ast.FunctionDef) and node.name in names
+    ]
+    namespace = {
+        "Optional": Optional,
+        "PoolName": SimpleNamespace(KV="kv"),
+        "PrefetchOperation": object,
+    }
+    exec(compile(ast.Module(selected, []), str(UNIFIED_CACHE), "exec"), namespace)
     return namespace
 
 
@@ -80,6 +102,39 @@ class RHContractDependencyFreeTests(unittest.TestCase):
             self.assertIn(schema, source)
             for field in fields:
                 self.assertIn(field, source)
+
+    def test_ready_host_aux_fields_come_from_finalizer_completion(self):
+        methods = _load_unified_cache_methods(
+            "_host_alloc_hybrid_sidecar_counts", "_host_alloc_hybrid_completion"
+        )
+        cache = SimpleNamespace()
+        cache._host_alloc_hybrid_sidecar_counts = MethodType(
+            methods["_host_alloc_hybrid_sidecar_counts"], cache
+        )
+        cache._host_alloc_hybrid_completion = MethodType(
+            methods["_host_alloc_hybrid_completion"], cache
+        )
+        operation = SimpleNamespace(
+            pool_transfers=[
+                SimpleNamespace(
+                    indices_from_pool="device",
+                    name="mamba",
+                    keys=["m0", "m1", "m2"],
+                )
+            ],
+            pool_storage_result=SimpleNamespace(
+                extra_pool_hit_pages={"mamba": 3}
+            ),
+        )
+
+        completion = cache._host_alloc_hybrid_completion(
+            operation, completed_tokens=8, finalize_result="accepted"
+        )
+
+        self.assertEqual(completion["completed_kv_tokens"], 8)
+        self.assertEqual(completion["required_aux_pools"], ["mamba"])
+        self.assertEqual(completion["completed_aux_units"], {"mamba": 3})
+        self.assertEqual(completion["finalize_result"], "accepted")
 
 
 if __name__ == "__main__":

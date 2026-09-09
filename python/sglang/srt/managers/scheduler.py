@@ -3835,6 +3835,11 @@ class Scheduler(
             staged_tokens = getattr(
                 self.tree_cache, "peek_prefetch_loaded_tokens", lambda _rid: None
             )(req.rid)
+            completion = getattr(
+                self.tree_cache,
+                "pop_storage_prefetch_completion",
+                lambda _rid: None,
+            )(req.rid) or {}
             logger.info(
                 "[P3] ts_ns=%d evt=ready_host schema=rh_ready_host.v1 rid=%s "
                 "attempt_id=%s issue_origin=%s completed_kv_tokens=%s "
@@ -3848,14 +3853,14 @@ class Scheduler(
                 (attempt_origin or last_origin).name
                 if (attempt_origin or last_origin) is not None
                 else "null",
-                staged_tokens,
-                None,
-                None,
+                completion.get("completed_kv_tokens", staged_tokens),
+                completion.get("required_aux_pools"),
+                completion.get("completed_aux_units"),
                 restore_state_before,
                 req.hicache_restore_state.name
                 if req.hicache_restore_state is not None
                 else "null",
-                "accepted",
+                completion.get("finalize_result", "null"),
                 time.monotonic_ns(),
             )
         if (
