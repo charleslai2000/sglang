@@ -460,6 +460,39 @@ class RHContractDependencyFreeTests(unittest.TestCase):
         self.assertIn("match_duration_us=null", record)
         self.assertIn("retraction_count=0", record)
 
+    def test_match_preparation_emits_for_bool_hostile_prefix_indices(self):
+        scheduler, req, _, _, _, logger = self._issue_scheduler()
+
+        class BoolHostileTensorLike:
+            def __bool__(self):
+                raise RuntimeError("multi-element tensor truth test")
+
+            def __len__(self):
+                return 2
+
+        req.prefix_indices = BoolHostileTensorLike()
+        scheduler._emit_rh_match_prepare(
+            req,
+            pass_seq=2,
+            result="prepared",
+            reason="current_match",
+        )
+
+        records = self._log_text(logger)
+        prepare_records = [
+            record
+            for record in records
+            if "schema=rh_match_prepare.v1" in record
+        ]
+        failure_records = [
+            record
+            for record in records
+            if "schema=rh_match_prepare_emit_failed.v1" in record
+        ]
+        self.assertEqual(len(prepare_records), 1)
+        self.assertIn("device_hit_tokens=2", prepare_records[0])
+        self.assertEqual(failure_records, [])
+
     def test_match_preparation_emits_safe_failure_marker_for_field_error(self):
         scheduler, req, _, _, _, logger = self._issue_scheduler()
 
