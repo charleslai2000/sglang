@@ -4189,7 +4189,9 @@ class Scheduler(
             cc, "prefetch_speculative_capacity_limit", None
         )
         speculative_used = getattr(cc, "inflight_speculative_tokens", None)
-        for rank, view in enumerate(frontier_reqs, start=1):
+        frontier_views = {view.rid: view for view in views}
+        for rank, req in enumerate(frontier_reqs, start=1):
+            view = frontier_views[req.rid]
             entry = self._ready_horizon_negatives.get(view.rid)
             if view.rid in issue_rids:
                 # The authoritative issue decision is emitted after the
