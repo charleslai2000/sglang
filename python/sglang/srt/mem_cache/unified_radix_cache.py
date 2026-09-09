@@ -146,6 +146,17 @@ logger = logging.getLogger(__name__)
 _T38C_DURABLE_SEQ = {}
 _T38C_DURABLE_SEQ_LOCK = threading.Lock()
 
+# Cache-side mutation records are sampled independently of scheduler wake
+# records.  The mutation sequence remains complete and monotonic for joins;
+# only emitted log records are bounded.  Each request/cause/trace key emits
+# its first 16 mutations, then every 128th mutation, up to 64 records.  A
+# cache instance emits at most 256 mutation records in total.
+_HOST_ALLOC_MUTATION_TELEMETRY_HEAD = 16
+_HOST_ALLOC_MUTATION_TELEMETRY_STRIDE = 128
+_HOST_ALLOC_MUTATION_TELEMETRY_MAX_PER_KEY = 64
+_HOST_ALLOC_MUTATION_TELEMETRY_MAX_TOTAL = 256
+_HOST_ALLOC_MUTATION_TELEMETRY_MAX_KEYS = 4096
+
 
 def _log_host_alloc_telemetry(
     event: str,
@@ -175,8 +186,10 @@ def _storage_hit_crop_is_safe(operation, alloc_len: int) -> bool:
     """Whether a host-capacity crop preserves the validated storage frontier."""
     if alloc_len >= operation.storage_hit_count:
         return True
+    trailing_pages = getattr(PoolHitPolicy, "TRAILING_PAGES", None)
     return not any(
-        transfer.hit_policy == PoolHitPolicy.TRAILING_PAGES
+        trailing_pages is not None
+        and getattr(transfer, "hit_policy", None) == trailing_pages
         for transfer in getattr(operation, "pool_transfers", None) or []
     )
 
@@ -1688,6 +1701,10 @@ class UnifiedRadixCache(BasePrefixCache):
         self._host_allocability_instance_id = 0
         self._host_allocability_generations: dict[str, int] = {}
         self._host_allocability_telemetry_seq = 0
+        self._host_allocability_telemetry_mutations = {}
+        self._host_allocability_telemetry_emitted = {}
+        self._host_allocability_telemetry_last_emitted = {}
+        self._host_allocability_telemetry_total_emitted = 0
 
         self.reset()
         logger.info(
@@ -2566,6 +2583,10 @@ class UnifiedRadixCache(BasePrefixCache):
         self._host_allocability_instance_id += 1
         self._host_allocability_generations = {PoolName.KV.value: 0}
         self._host_allocability_telemetry_seq = 0
+        self._host_allocability_telemetry_mutations = {}
+        self._host_allocability_telemetry_emitted = {}
+        self._host_allocability_telemetry_last_emitted = {}
+        self._host_allocability_telemetry_total_emitted = 0
         self.tree_core.reset()
         self.session_refs.reset()
 
@@ -3641,22 +3662,78 @@ class UnifiedRadixCache(BasePrefixCache):
         *,
         evictable_before: Optional[int] = None,
         evictable_after: Optional[int] = None,
+        causal_rid: Optional[str] = None,
+        trace_context=None,
     ) -> None:
-        """Advance one pool generation after a completed causal mutation."""
+        """Advance one pool generation after a completed causal mutation.
+
+        The generation and telemetry sequence advance for every mutation.
+        Mutation records are observational samples keyed by pool, cause,
+        request, and trace context: the first 16 per key are emitted, then
+        every 128th mutation, with a 64-record per-key and 256-record
+        per-cache-instance hard cap.  This preserves request/cause joins and
+        sequence gaps while bounding log volume; it never changes wake or
+        allocation behavior.
+        """
+        import json as _json
+
         returned_units = int(returned_units or 0)
         if returned_units <= 0 and cause != "lock_release_evictable":
             return
         pool = getattr(pool, "value", pool)
-        before = self._host_allocability_generations.get(pool, 0)
-        self._host_allocability_generations[pool] = before + 1
+        generations = getattr(self, "_host_allocability_generations", None)
+        if generations is None:
+            generations = {}
+            self._host_allocability_generations = generations
+        before = generations.get(pool, 0)
+        generations[pool] = before + 1
         if evictable_after is None:
             evictable_after = self._host_evictable_signature(pool)[0]
         if evictable_before is None:
             evictable_before = evictable_after
         self._host_allocability_telemetry_seq += 1
+
+        trace_key = _json.dumps(trace_context, sort_keys=True, default=str)
+        telemetry_key = (str(pool), str(cause), causal_rid, trace_key)
+        mutations = getattr(self, "_host_allocability_telemetry_mutations", None)
+        emitted = getattr(self, "_host_allocability_telemetry_emitted", None)
+        last_emitted = getattr(
+            self, "_host_allocability_telemetry_last_emitted", None
+        )
+        if mutations is None or emitted is None or last_emitted is None:
+            mutations = {}
+            emitted = {}
+            last_emitted = {}
+            self._host_allocability_telemetry_mutations = mutations
+            self._host_allocability_telemetry_emitted = emitted
+            self._host_allocability_telemetry_last_emitted = last_emitted
+        if telemetry_key not in mutations and len(mutations) >= _HOST_ALLOC_MUTATION_TELEMETRY_MAX_KEYS:
+            mutations.clear()
+            emitted.clear()
+            last_emitted.clear()
+        mutation_count = mutations.get(telemetry_key, 0) + 1
+        mutations[telemetry_key] = mutation_count
+        key_emitted = emitted.get(telemetry_key, 0)
+        total_emitted = getattr(
+            self, "_host_allocability_telemetry_total_emitted", 0
+        )
+        should_emit = key_emitted < _HOST_ALLOC_MUTATION_TELEMETRY_HEAD or (
+            mutation_count % _HOST_ALLOC_MUTATION_TELEMETRY_STRIDE == 0
+            and key_emitted < _HOST_ALLOC_MUTATION_TELEMETRY_MAX_PER_KEY
+        )
+        if (
+            not should_emit
+            or key_emitted >= _HOST_ALLOC_MUTATION_TELEMETRY_MAX_PER_KEY
+            or total_emitted >= _HOST_ALLOC_MUTATION_TELEMETRY_MAX_TOTAL
+        ):
+            return
+        emitted[telemetry_key] = key_emitted + 1
+        self._host_allocability_telemetry_total_emitted = total_emitted + 1
+        previous_emitted_mutation = last_emitted.get(telemetry_key, 0)
+        last_emitted[telemetry_key] = mutation_count
         _log_host_alloc_telemetry(
             "host_allocability_change",
-            cache_instance_id=self._host_allocability_instance_id,
+            cache_instance_id=getattr(self, "_host_allocability_instance_id", 0),
             pool=pool,
             generation_before=before,
             generation_after=before + 1,
@@ -3664,9 +3741,14 @@ class UnifiedRadixCache(BasePrefixCache):
             returned_units=int(returned_units),
             evictable_before=int(evictable_before),
             evictable_after=int(evictable_after),
-            causal_rid=None,
-            trace_context=None,
+            causal_rid=causal_rid,
+            trace_context=trace_context,
             telemetry_seq=self._host_allocability_telemetry_seq,
+            telemetry_mutation_count=mutation_count,
+            telemetry_sample_index=key_emitted + 1,
+            telemetry_coalesced_mutations=max(
+                0, mutation_count - previous_emitted_mutation - 1
+            ),
         )
 
     def _bump_changed_host_allocability(
@@ -3731,7 +3813,11 @@ class UnifiedRadixCache(BasePrefixCache):
         )
 
     def _release_aux_transfers_before_host_alloc_snapshot(
-        self, comp_xfers: dict[ComponentType, list[PoolTransfer]]
+        self,
+        comp_xfers: dict[ComponentType, list[PoolTransfer]],
+        *,
+        causal_rid: Optional[str] = None,
+        trace_context=None,
     ) -> None:
         """Complete failed-prefetch auxiliary cleanup before taking its cursor."""
         transfers = [transfer for xfers in comp_xfers.values() for transfer in xfers]
@@ -3748,6 +3834,8 @@ class UnifiedRadixCache(BasePrefixCache):
                             getattr(transfer.name, "value", transfer.name),
                             "direct_free",
                             len(transfer.host_indices),
+                            causal_rid=causal_rid,
+                            trace_context=trace_context,
                         )
                     transfer.host_indices = None
             else:
@@ -3767,6 +3855,8 @@ class UnifiedRadixCache(BasePrefixCache):
                 getattr(transfer.name, "value", transfer.name),
                 "direct_free",
                 int(released or len(transfer.host_indices)),
+                causal_rid=causal_rid,
+                trace_context=trace_context,
             )
             transfer.host_indices = None
 
@@ -5284,7 +5374,9 @@ class UnifiedRadixCache(BasePrefixCache):
                 if transfer.host_indices is not None
             }
             required_aux_units.setdefault(failed_pool, len(prefetch_key))
-            self._release_aux_transfers_before_host_alloc_snapshot(comp_xfers)
+            self._release_aux_transfers_before_host_alloc_snapshot(
+                comp_xfers, causal_rid=req_id
+            )
             if anchor_lock_params is not None:
                 self.dec_host_lock_ref(last_host_node_id, anchor_lock_params)
             snapshot = self.host_allocability_snapshot(
@@ -5521,7 +5613,10 @@ class UnifiedRadixCache(BasePrefixCache):
                 per_sidecar=self._host_alloc_hybrid_sidecar_counts(operation),
                 all_or_nothing=self._host_alloc_hybrid_is_all_or_nothing(operation),
                 result="discarded",
-                restore_state_after="RECOMPUTE",
+                # The terminal handoff below is "finalized", which the
+                # scheduler consumes as RESTORING -> READY even though this
+                # all-or-nothing result contains zero usable material.
+                restore_state_after="READY",
             )
             # Hybrid all-or-nothing check failed; result already discarded.
             _log_restore_disposition(
@@ -5617,6 +5712,8 @@ class UnifiedRadixCache(BasePrefixCache):
                 PoolName.KV.value,
                 "direct_free",
                 int(released or insert_result.prefix_len),
+                causal_rid=req_id,
+                trace_context=getattr(operation, "trace_context", None),
             )
             loaded_from_storage = completed_tokens - insert_result.prefix_len
 
@@ -5644,8 +5741,10 @@ class UnifiedRadixCache(BasePrefixCache):
     @staticmethod
     def _host_alloc_hybrid_is_all_or_nothing(operation: PrefetchOperation) -> bool:
         transfers = getattr(operation, "pool_transfers", None) or []
+        trailing_pages = getattr(PoolHitPolicy, "TRAILING_PAGES", None)
         return any(
-            transfer.hit_policy == PoolHitPolicy.TRAILING_PAGES
+            trailing_pages is not None
+            and getattr(transfer, "hit_policy", None) == trailing_pages
             for transfer in transfers
         )
 
@@ -5657,14 +5756,26 @@ class UnifiedRadixCache(BasePrefixCache):
         ) or {}
         sidecars = {}
         for transfer in getattr(operation, "pool_transfers", None) or []:
-            if transfer.indices_from_pool == PoolName.KV:
+            if getattr(transfer, "indices_from_pool", None) == PoolName.KV:
                 continue
-            pool = getattr(transfer.name, "value", transfer.name)
-            expected = len(transfer.keys or ())
-            fetched = hit_pages.get(transfer.name, hit_pages.get(pool, 0))
+            name = getattr(transfer, "name", None)
+            pool = getattr(name, "value", name) or "unknown"
+            keys = getattr(transfer, "keys", None)
+            try:
+                expected = len(keys or ())
+            except TypeError:
+                expected = 0
+            try:
+                fetched = hit_pages.get(name, hit_pages.get(pool, 0))
+            except (AttributeError, TypeError):
+                fetched = 0
+            try:
+                fetched = int(fetched or 0)
+            except (TypeError, ValueError):
+                fetched = 0
             sidecars[str(pool)] = {
                 "expected": int(expected),
-                "fetched": int(fetched),
+                "fetched": fetched,
             }
         return sidecars
 
@@ -5702,19 +5813,32 @@ class UnifiedRadixCache(BasePrefixCache):
         pool_transfers = [
             transfer
             for transfer in getattr(operation, "pool_transfers", None) or []
-            if transfer.indices_from_pool != PoolName.KV
+            if getattr(transfer, "indices_from_pool", None) != PoolName.KV
         ]
         hit_pages = (
-            operation.pool_storage_result.extra_pool_hit_pages if pool_transfers else {}
+            getattr(
+                getattr(operation, "pool_storage_result", None),
+                "extra_pool_hit_pages",
+                {},
+            )
+            if pool_transfers
+            else {}
         )
-        pool_hit_pages = [hit_pages.get(t.name, 0) for t in pool_transfers]
+        try:
+            pool_hit_pages = [
+                hit_pages.get(getattr(t, "name", None), 0)
+                for t in pool_transfers
+            ]
+        except (AttributeError, TypeError):
+            pool_hit_pages = [0 for _ in pool_transfers]
         completed_tokens = operation.completed_tokens
         # Hybrid cache state is all-or-nothing: every extra pool (SWA / Mamba / ...)
         # must cover the same fetched prefix. If any pool falls short the whole
         # prefetch result is unusable, so discard it and release everything.
         expected_tokens = len(hash_value) * self.page_size
         all_succeeded = completed_tokens == expected_tokens and all(
-            transfer.keys is not None and count == len(transfer.keys)
+            getattr(transfer, "keys", None) is not None
+            and count == len(getattr(transfer, "keys"))
             for transfer, count in zip(pool_transfers, pool_hit_pages)
         )
         if pool_transfers and not all_succeeded:
@@ -5723,12 +5847,13 @@ class UnifiedRadixCache(BasePrefixCache):
             # restoring the missing aux pages.
             keep_pages = completed_tokens // self.page_size
             for transfer, count in zip(pool_transfers, pool_hit_pages):
-                if transfer.keys is None:
+                keys = getattr(transfer, "keys", None)
+                if keys is None:
                     keep_pages = 0
-                elif count < len(transfer.keys):
+                elif count < len(keys):
                     # Aux transfers key the chain's trailing pages.
                     keep_pages = min(
-                        keep_pages, max(0, len(hash_value) - len(transfer.keys))
+                        keep_pages, max(0, len(hash_value) - len(keys))
                     )
             self.storage_existence_cache.invalidate_beyond(
                 PoolName.KV, hash_value, keep_pages=keep_pages
@@ -6201,7 +6326,11 @@ class UnifiedRadixCache(BasePrefixCache):
                     else len(transfer.keys or ())
                 )
         if revoke_reason == "alloc_failed":
-            self._release_aux_transfers_before_host_alloc_snapshot(comp_xfers)
+            self._release_aux_transfers_before_host_alloc_snapshot(
+                comp_xfers,
+                causal_rid=req_id,
+                trace_context=getattr(operation, "trace_context", None),
+            )
         else:
             cc.append_host_mem_release(
                 extra_pools=[x for xfers in comp_xfers.values() for x in xfers]
