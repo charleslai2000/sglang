@@ -6093,8 +6093,10 @@ class UnifiedRadixCache(BasePrefixCache):
             return True
         if not self.tree_core.node_exists(anchor_node_id):
             return False
-        return self.tree_core.is_backuped(anchor_node_id) or self.tree_core.is_root(
-            anchor_node_id
+        return (
+            self.tree_core.is_backuped(anchor_node_id)
+            or self.tree_core.is_root(anchor_node_id)
+            or self.tree_core.is_l3_durable(anchor_node_id)
         )
 
     # ---- P2-1 M1b: terminal prefetch outcomes (drain -> scheduler) ----

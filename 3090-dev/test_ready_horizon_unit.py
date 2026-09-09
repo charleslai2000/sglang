@@ -81,16 +81,31 @@ PREFIX_LEN = 100  # default identity fingerprint in the test views
 
 
 def _req(rid, state=None, reason=None, host_hit=0, generation=None, anchor=1):
-    return SimpleNamespace(
+    req = SimpleNamespace(
         rid=rid,
+        last_node=anchor,
         last_host_node=anchor,
         full_untruncated_fill_ids=[1] * PREFIX_LEN,
+        output_ids=[],
+        extra_key=None,
+        cache_salt=None,
         hicache_restore_state=state,
         hicache_restore_wait_reason=reason,
         hicache_restore_state_ts=0.0,
         host_hit_length=host_hit,
         session_generation=generation,
+        retraction_count=0,
+        hicache_prefetch_active_attempt_id=None,
+        to_finish=None,
     )
+
+    def init_next_round_input(tree_cache, cow_mamba=None):
+        req.match_calls = getattr(req, "match_calls", 0) + 1
+        req.last_node = req.last_host_node = anchor
+        req.last_match_cow_mamba = cow_mamba
+
+    req.init_next_round_input = init_next_round_input
+    return req
 
 
 def _view(
@@ -889,7 +904,7 @@ def _pass_scheduler(
         lambda *a, **k: scheduler.evicted.append(a) or 0
     )
 
-    def _issue(req, *, origin, demand_restore=False):
+    def _issue(req, *, origin, demand_restore=False, prepared_match=None):
         # Mirror the real T1 wiring: a successful issue transitions the
         # request to RESTORING, so it leaves the candidate set.
         attempt_id = f"{req.rid}:prefetch:1"
@@ -1215,7 +1230,7 @@ class ReadyHorizonPassTests(unittest.TestCase):
     def test_failed_issue_is_hold_and_never_false_issue(self):
         scheduler = _pass_scheduler(queue=[_req("r1", NONE)])
 
-        def decline(req, *, origin, demand_restore=False):
+        def decline(req, *, origin, demand_restore=False, prepared_match=None):
             return PrefetchIssueResult(
                 status=PrefetchIssueResult.DECLINED,
                 attempt_id="r1:prefetch:1",
@@ -1280,7 +1295,7 @@ class DeterministicMissParkTests(unittest.TestCase):
             anchor_versions=anchor_versions,
         )
 
-        def charge(req, *, demand_restore=False):
+        def charge(req, *, demand_restore=False, prepared_match=None):
             cc.inflight_speculative_tokens += CHAIN_TOKENS
             req.hicache_restore_state = RESTORING
             scheduler.issued.append(req.rid)
