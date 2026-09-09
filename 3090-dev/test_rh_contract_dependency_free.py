@@ -426,6 +426,40 @@ class RHContractDependencyFreeTests(unittest.TestCase):
         self.assertNotIn("r1:rh:1", prepare)
         self.assertIn("session_generation=null", prepare)
 
+    def test_match_preparation_emits_with_nullable_fields(self):
+        scheduler, req, _, _, _, _ = self._issue_scheduler()
+        req.hicache_request_enqueue_seq = None
+        req.session_generation = None
+        req.hicache_prefetch_active_attempt_id = None
+        req.retraction_count = None
+
+        class EagerFormattingLogger:
+            def __init__(self):
+                self.records = []
+
+            def info(self, *args, **kwargs):
+                self.records.append(args[0] % args[1:])
+
+        logger = EagerFormattingLogger()
+        scheduler._emit_rh_match_prepare.__func__.__globals__["logger"] = logger
+        scheduler._emit_rh_match_prepare(
+            req,
+            pass_seq=2,
+            result="skipped",
+            reason="active_attempt",
+            match_duration_us=None,
+            match_count_for_pass=0,
+        )
+
+        self.assertEqual(len(logger.records), 1)
+        record = logger.records[0]
+        self.assertIn("schema=rh_match_prepare.v1", record)
+        self.assertIn("enqueue_seq=null", record)
+        self.assertIn("session_generation=null", record)
+        self.assertIn("attempt_id=null", record)
+        self.assertIn("match_duration_us=null", record)
+        self.assertIn("retraction_count=0", record)
+
     def test_real_impl_invalid_ticket_rematches_exactly_once(self):
         scheduler, req, _, storage, events, logger = self._issue_scheduler()
         prepared = scheduler._prepare_ready_horizon_match(req, pass_seq=3)
