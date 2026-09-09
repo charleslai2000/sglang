@@ -4441,6 +4441,8 @@ class Scheduler(
         decision_id = f"{safe_rid}:rh:{pass_seq}" if pass_seq > 0 else None
         attempt_id = getattr(req, "hicache_prefetch_active_attempt_id", None)
         try:
+            prefix_indices = getattr(req, "prefix_indices", None)
+            device_hit_tokens = 0 if prefix_indices is None else len(prefix_indices)
             logger.info(
                 f"[P3] ts_ns={time.monotonic_ns()} "
                 "evt=rh_match_prepare schema=rh_match_prepare.v1 "
@@ -4453,7 +4455,7 @@ class Scheduler(
                 f"retraction_count={getattr(req, 'retraction_count', 0) or 0} "
                 f"restore_state_before={restore_state_before} result={result} "
                 f"reason={reason} fill_len={fill_len} "
-                f"device_hit_tokens={len(getattr(req, 'prefix_indices', ()) or ())} "
+                f"device_hit_tokens={device_hit_tokens} "
                 f"host_hit_tokens={getattr(req, 'host_hit_length', 0)} "
                 f"anchor_kind={anchor_kind} "
                 f"anchor_id={field(str(anchor) if anchor is not None else None)} "
