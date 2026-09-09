@@ -16,6 +16,8 @@ from sglang.srt.distributed.communication_tags import P2PTag
 from sglang.srt.environ import envs
 from sglang.srt.managers.cache_controller import CacheOperation
 from sglang.srt.managers.scheduler_components.hicache_restore import (
+    HostAllocFailure,
+    HostAllocabilitySnapshot,
     backup_wait_applies,
     backup_wake_applies,
     promotion_budget_fits,
@@ -1654,6 +1656,14 @@ class UnifiedRadixCache(BasePrefixCache):
         self._t38c_residency_reconcile_ready = set()
         self._t38c_residency_queue_blocked = set()
 
+        # Cache-owned, process-local invalidation state for HOST_ALLOC wakes.
+        # The scheduler may observe this state but never synthesizes or mutates
+        # it.  A reset creates a new instance identity so old cursors cannot
+        # compare equal to the new cache state.
+        self._host_allocability_instance_id = 0
+        self._host_allocability_generations: dict[str, int] = {}
+        self._host_allocability_telemetry_seq = 0
+
         self.reset()
         logger.info(
             f"Init Unified Radix Cache. Components: {self.tree_components}. "
@@ -2528,6 +2538,9 @@ class UnifiedRadixCache(BasePrefixCache):
 
     def _reset_full(self) -> None:
         """Full reset: destroy entire tree and all state."""
+        self._host_allocability_instance_id += 1
+        self._host_allocability_generations = {PoolName.KV.value: 0}
+        self._host_allocability_telemetry_seq = 0
         self.tree_core.reset()
         self.session_refs.reset()
 
@@ -2630,6 +2643,7 @@ class UnifiedRadixCache(BasePrefixCache):
         # consumed by the scheduler's restore-state reconciliation on the
         # same (scheduler) thread.
         self._storage_prefetch_terminal: dict[str, str] = {}
+        self._storage_prefetch_failures: dict[str, HostAllocFailure] = {}
         self.ongoing_backup: dict[int, tuple[NodeId, DecLockRefParams]] = {}
         # One-shot marker for the storage-failure degradation (see
         # _handle_storage_failure); cleared together with the controller's
@@ -3199,10 +3213,12 @@ class UnifiedRadixCache(BasePrefixCache):
     ) -> None:
         if self.disable:
             return
+        before = self._host_allocability_signatures()
         result = self.tree_core.dec_swa_lock_only(
             node_id, swa_uuid_for_lock, skip_lock_node_ids
         )
         self._free_values(result.device_frees, result.host_frees)
+        self._bump_changed_host_allocability(before, "lock_release_evictable")
 
     def inc_host_lock_ref(self, node_id: NodeId) -> IncLockRefResult:
         if self.disable:
@@ -3214,7 +3230,10 @@ class UnifiedRadixCache(BasePrefixCache):
     ) -> DecLockRefResult:
         if self.disable:
             return DecLockRefResult()
-        return self.tree_core.dec_host_lock_ref(node_id, params)
+        before = self._host_allocability_signatures()
+        result = self.tree_core.dec_host_lock_ref(node_id, params)
+        self._bump_changed_host_allocability(before, "lock_release_evictable")
+        return result
 
     def cache_finished_req(
         self, req: Req, is_insert: bool = True, *, kv_len_to_handle: int, **kwargs
@@ -3539,6 +3558,152 @@ class UnifiedRadixCache(BasePrefixCache):
                     }
                 )
 
+    @staticmethod
+    def _host_allocability_pool_for_component(component_type: ComponentType) -> str:
+        return _COMPONENT_POOL_LABEL.get(component_type, str(component_type))
+
+    def _host_evictable_signature(self, pool: str) -> tuple[int, frozenset[int]]:
+        """Return the tree-owned evictable summary for one host pool."""
+        component_type = {
+            PoolName.KV.value: BASE_COMPONENT_TYPE,
+            PoolName.SWA.value: ComponentType.SWA,
+            PoolName.MAMBA.value: ComponentType.MAMBA,
+        }.get(pool)
+        if component_type is None or component_type not in self.components:
+            return 0, frozenset()
+        if pool == PoolName.KV.value:
+            leaves = getattr(self.tree_core, "evictable_host_leaves", ())
+            return (
+                sum(
+                    len(node.component_data[component_type].host_value)
+                    for node in leaves
+                    if node.component_data[component_type].host_value is not None
+                ),
+                frozenset(node.id for node in leaves),
+            )
+        host_lru = self.tree_core.host_lru_lists.get(component_type)
+        if host_lru is None:
+            return 0, frozenset()
+        eligible = frozenset(
+            node.id
+            for node in host_lru.cache.values()
+            if node.component_data[component_type].host_lock_ref == 0
+            and node.component_data[component_type].host_value is not None
+        )
+        return (
+            sum(
+                len(host_lru.cache[node_id].component_data[component_type].host_value)
+                for node_id in eligible
+            ),
+            eligible,
+        )
+
+    def _host_allocability_signatures(self) -> dict[str, tuple[int, frozenset[int]]]:
+        pools = [PoolName.KV.value]
+        pools.extend(
+            self._host_allocability_pool_for_component(ct)
+            for ct in self.components
+            if ct != BASE_COMPONENT_TYPE
+        )
+        return {pool: self._host_evictable_signature(pool) for pool in pools}
+
+    def _bump_host_allocability(
+        self,
+        pool: str,
+        cause: str,
+        returned_units: Optional[int] = None,
+        *,
+        evictable_before: Optional[int] = None,
+        evictable_after: Optional[int] = None,
+    ) -> None:
+        """Advance one pool generation after a completed causal mutation."""
+        if returned_units is not None and returned_units <= 0:
+            return
+        pool = getattr(pool, "value", pool)
+        before = self._host_allocability_generations.get(pool, 0)
+        self._host_allocability_generations[pool] = before + 1
+        if evictable_after is None:
+            evictable_after = self._host_evictable_signature(pool)[0]
+        if evictable_before is None:
+            evictable_before = evictable_after
+        self._host_allocability_telemetry_seq += 1
+        logger.info(
+            "[HAE] evt=host_allocability_change seq=%d cache_instance=%d "
+            "pool=%s generation_before=%d generation_after=%d cause=%s "
+            "returned_units=%d evictable_before=%d evictable_after=%d",
+            self._host_allocability_telemetry_seq,
+            self._host_allocability_instance_id,
+            pool,
+            before,
+            before + 1,
+            cause,
+            returned_units,
+            evictable_before,
+            evictable_after,
+        )
+
+    def _bump_changed_host_allocability(
+        self,
+        before: dict[str, tuple[int, frozenset[int]]],
+        cause: str,
+    ) -> None:
+        for pool, previous in before.items():
+            current = self._host_evictable_signature(pool)
+            if current != previous:
+                self._bump_host_allocability(
+                    pool,
+                    cause,
+                    evictable_before=previous[0],
+                    evictable_after=current[0],
+                )
+
+    def host_allocability_snapshot(
+        self, required_pools: Optional[Sequence[PoolName | str]] = None
+    ) -> HostAllocabilitySnapshot:
+        """Return a cache-owned per-pool allocability snapshot."""
+        if required_pools is None:
+            pools = [PoolName.KV.value]
+            group = self.host_pool_group
+            if group is not None:
+                pools.extend(
+                    getattr(entry.name, "value", entry.name)
+                    for entry in group.entries
+                )
+        else:
+            pools = [getattr(pool, "value", pool) for pool in required_pools]
+            if PoolName.KV.value not in pools:
+                pools.insert(0, PoolName.KV.value)
+        pools = list(dict.fromkeys(str(pool) for pool in pools))
+
+        generations = {
+            pool: self._host_allocability_generations.get(pool, 0) for pool in pools
+        }
+        free_units = {}
+        evictable_units = {}
+        for pool in pools:
+            evictable_units[pool] = self._host_evictable_signature(pool)[0]
+            controller = self.cache_controller
+            host_group = getattr(controller, "mem_pool_host", None)
+            try:
+                free_units[pool] = int(
+                    host_group.available_size(pool=PoolName(pool))
+                )
+            except (AttributeError, KeyError, TypeError, ValueError):
+                try:
+                    free_units[pool] = (
+                        int(host_group.available_size())
+                        if pool == PoolName.KV.value
+                        else 0
+                    )
+                except (AttributeError, TypeError, ValueError):
+                    free_units[pool] = 0
+        return HostAllocabilitySnapshot(
+            cache_instance_id=self._host_allocability_instance_id,
+            generation_by_pool=generations,
+            free_units_by_pool=free_units,
+            evictable_units_by_pool=evictable_units,
+        )
+
     def _drain_host_frees(
         self, host_frees: dict[ComponentType, list[torch.Tensor]]
     ) -> None:
@@ -3549,6 +3714,11 @@ class UnifiedRadixCache(BasePrefixCache):
             pool = _t38c_pool_name(ct) if tracing else None
             digest = _t38c_slot_digest(pool, values) if tracing else None
             self.components[ct].free_host_values(values)
+            self._bump_host_allocability(
+                self._host_allocability_pool_for_component(ct),
+                "direct_free",
+                _t38c_free_slots({ct: values}),
+            )
             if tracing:
                 trace_context = slot_context(pool, "host", digest)
                 _t38c_note_completion(
@@ -3713,7 +3883,10 @@ class UnifiedRadixCache(BasePrefixCache):
             writeback=True,
         )
         if resolved is None and extra_transfers:
-            self.host_pool_group.free(host_indices)
+            released = self.host_pool_group.free(host_indices)
+            self._bump_host_allocability(
+                PoolName.KV.value, "direct_free", int(released or len(host_indices))
+            )
             return None
 
         backup = RetractionBackup(
@@ -3790,8 +3963,19 @@ class UnifiedRadixCache(BasePrefixCache):
         self.retraction_discard(backup)
 
     def retraction_discard(self, backup: RetractionBackup) -> None:
-        self.host_pool_group.free(backup.host_indices)
+        released = self.host_pool_group.free(backup.host_indices)
+        self._bump_host_allocability(
+            PoolName.KV.value, "direct_free", int(released or len(backup.host_indices))
+        )
+        released_by_pool = {}
+        for transfer in backup.pool_transfers or []:
+            if transfer.indices_from_pool is None and transfer.host_indices is not None:
+                released_by_pool[transfer.name] = released_by_pool.get(transfer.name, 0) + len(
+                    transfer.host_indices
+                )
         self.host_pool_group.release_transfers(backup.pool_transfers)
+        for pool, units in released_by_pool.items():
+            self._bump_host_allocability(pool.value, "direct_free", units)
 
     # ---- HiCache: Backup / LoadBack ----
 
@@ -5038,9 +5222,31 @@ class UnifiedRadixCache(BasePrefixCache):
             )
             if anchor_lock_params is not None:
                 self.dec_host_lock_ref(last_host_node_id, anchor_lock_params)
+            failed_pool = self._host_allocability_pool_for_component(ct)
+            required_aux_units = {
+                getattr(transfer.name, "value", transfer.name): len(transfer.host_indices)
+                for transfers in comp_xfers.values()
+                for transfer in transfers
+                if transfer.host_indices is not None
+            }
+            required_aux_units.setdefault(failed_pool, len(prefetch_key))
+            snapshot = self.host_allocability_snapshot(
+                [PoolName.KV.value, *required_aux_units]
+            )
+            self.record_host_alloc_failure(
+                req_id,
+                HostAllocFailure(
+                    requested_primary_tokens=len(prefetch_key),
+                    required_aux_units=required_aux_units,
+                    failed_domains=frozenset({failed_pool}),
+                    positive_hit_tokens=0,
+                    sidecar_hit_pages={},
+                    allocability_snapshot=snapshot,
+                ),
+            )
             # Forfeited over transient staging pressure; retryable (T3
             # parks the rid in WAIT[HOST_ALLOC], woken by T11).
-            self._storage_prefetch_missed_rids.add(req_id)
+            self._storage_prefetch_missed_rids.discard(req_id)
             _log_restore_disposition(req_id, "WAIT", prefetch_length, 0, "aux_alloc_failed")
             try:
                 _t38c_log({"evt": "pc_outcome", "phase": "issue", "rid": req_id,
@@ -5275,8 +5481,13 @@ class UnifiedRadixCache(BasePrefixCache):
                     insert_result.inserted_host_node
                 )
 
-            self.cache_controller.mem_pool_host.free(
+            released = self.cache_controller.mem_pool_host.free(
                 host_indices[: insert_result.prefix_len]
+            )
+            self._bump_host_allocability(
+                PoolName.KV.value,
+                "direct_free",
+                int(released or insert_result.prefix_len),
             )
             loaded_from_storage = completed_tokens - insert_result.prefix_len
 
@@ -5410,6 +5621,7 @@ class UnifiedRadixCache(BasePrefixCache):
         # pending terminal outcome, and any frontier wait are moot now.
         self._storage_prefetch_missed_rids.discard(req_id)
         self._storage_prefetch_terminal.pop(req_id, None)
+        self._storage_prefetch_failures.pop(req_id, None)
         self.discard_frontier_waiter(req_id)
         return self.prefetch_loaded_tokens_by_reqid.pop(req_id, 0)
 
@@ -5550,6 +5762,14 @@ class UnifiedRadixCache(BasePrefixCache):
 
     # ---- P2-1 M1b: terminal prefetch outcomes (drain -> scheduler) ----
 
+    def record_host_alloc_failure(
+        self, req_id: str, failure: HostAllocFailure
+    ) -> None:
+        self._storage_prefetch_failures[req_id] = failure
+
+    def pop_host_alloc_failure(self, req_id: str) -> Optional[HostAllocFailure]:
+        return self._storage_prefetch_failures.pop(req_id, None)
+
     def record_storage_prefetch_terminal(self, req_id: str, outcome: str) -> None:
         """Record a terminal prefetch outcome for the scheduler's
         restore-state reconciliation (same thread: the drain runs inside the
@@ -5579,6 +5799,7 @@ class UnifiedRadixCache(BasePrefixCache):
         self.prefetch_loaded_tokens_by_reqid.pop(rid, None)
         self._storage_prefetch_missed_rids.discard(rid)
         self._storage_prefetch_terminal.pop(rid, None)
+        self._storage_prefetch_failures.pop(rid, None)
         self.discard_frontier_waiter(rid)
         if (
             self.buffer_pipeline is not None
@@ -5807,6 +6028,42 @@ class UnifiedRadixCache(BasePrefixCache):
         )
         if anchor_lock_params is not None:
             self.dec_host_lock_ref(last_host_node_id, anchor_lock_params)
+        if revoke_reason == "alloc_failed":
+            required_aux_units = {}
+            blocked_domains = {PoolName.KV.value}
+            sidecar_hit_pages = {PoolName.KV.value: operation.storage_hit_count}
+            for transfer in operation.pool_transfers or []:
+                pool = getattr(transfer.name, "value", transfer.name)
+                if pool == PoolName.KV.value or transfer.indices_from_pool is not None:
+                    continue
+                required_aux_units[pool] = (
+                    len(transfer.host_indices)
+                    if transfer.host_indices is not None
+                    else len(transfer.keys or ())
+                )
+                hit_pages = operation.pool_storage_result.extra_pool_hit_pages.get(
+                    transfer.name,
+                    operation.pool_storage_result.extra_pool_hit_pages.get(pool, 0),
+                )
+                sidecar_hit_pages[pool] = int(hit_pages)
+                if transfer.keys is None or hit_pages < len(transfer.keys):
+                    blocked_domains.add(pool)
+            snapshot = self.host_allocability_snapshot(
+                [PoolName.KV.value, *required_aux_units]
+            )
+            self.record_host_alloc_failure(
+                req_id,
+                HostAllocFailure(
+                    requested_primary_tokens=operation.storage_hit_count,
+                    required_aux_units=required_aux_units,
+                    failed_domains=frozenset(blocked_domains),
+                    positive_hit_tokens=operation.storage_hit_count,
+                    sidecar_hit_pages=sidecar_hit_pages,
+                    allocability_snapshot=snapshot,
+                ),
+            )
+            # Allocation pressure must not arm the legacy paced-miss retry.
+            self._storage_prefetch_missed_rids.discard(req_id)
         # Every revoke path runs before the bounce alloc, so buffer mode
         # holds no occupancy here; post-alloc aborts go through
         # release_aborted_request instead.
@@ -6445,6 +6702,11 @@ class UnifiedRadixCache(BasePrefixCache):
                 released_tokens += len(host_indices)
             if host_indices_list:
                 cc.mem_pool_host.free(torch.cat(host_indices_list, dim=0))
+                self._bump_host_allocability(
+                    PoolName.KV.value,
+                    "queued_release_drain",
+                    released_tokens,
+                )
                 for host_indices, token in release_pairs:
                     digest = _t38c_slot_digest(PoolName.KV, [host_indices])
                     trace_context = slot_context_for_token(token)
@@ -6488,6 +6750,11 @@ class UnifiedRadixCache(BasePrefixCache):
                 if host_indices_list:
                     cc.mem_pool_host.free(
                         torch.cat(host_indices_list, dim=0), pool=pool_name
+                    )
+                    self._bump_host_allocability(
+                        pool_name.value,
+                        "queued_release_drain",
+                        released_tokens,
                     )
                     pool_label = getattr(pool_name, "value", pool_name)
                     for host_indices, token in release_pairs:

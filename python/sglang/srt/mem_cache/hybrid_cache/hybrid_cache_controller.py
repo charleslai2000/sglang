@@ -571,6 +571,9 @@ class HybridCacheController(BaseHiCacheController):
         )
         if pool_transfers is None and extra_pools:
             self.mem_pool_host.free(host_indices)
+            callback = getattr(self, "host_allocability_change_fn", None)
+            if callback is not None:
+                callback(PoolName.KV.value, "direct_free", len(host_indices))
             return None
 
         self.write_queue.append(

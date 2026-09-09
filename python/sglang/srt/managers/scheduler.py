@@ -220,6 +220,9 @@ from sglang.srt.managers.scheduler_components.batch_result_processor import (
 )
 from sglang.srt.managers.scheduler_components.hicache_restore import (
     FrontierAnchorInfo,
+    HostAllocFailure,
+    HostAllocWaitCursor,
+    HostAllocWakeArbiter,
     RestoreDecision,
     RestoreEvent,
     RestoreState,
@@ -1264,6 +1267,8 @@ class Scheduler(
         # Set by the ShutdownReq handler to break the event loop for graceful shutdown.
         self.gracefully_exit = False
         self.waiting_queue: List[Req] = []
+        self._host_alloc_wake_arbiter = HostAllocWakeArbiter()
+        self._host_alloc_attempt_seq = 0
         # The running decoding batch for continuous batching
         self.running_batch: ScheduleBatch = ScheduleBatch(reqs=[], batch_is_full=False)
         # The current forward batch
@@ -3042,6 +3047,7 @@ class Scheduler(
                     self._apply_restore_event(req, RestoreEvent.DENIED_RATE)
                 elif outcome == "forfeited_alloc_failed":
                     self._apply_restore_event(req, RestoreEvent.DENIED_ALLOC)
+                    self._capture_host_alloc_wait(req)
                 elif outcome == "revoked_alloc_failed":
                     self._apply_restore_event(req, RestoreEvent.DENIED_ALLOC)
                 elif outcome == "declined_too_short":
@@ -3112,6 +3118,175 @@ class Scheduler(
                         req.rid,
                         last_host_node,
                     )
+
+    def _host_alloc_snapshot_for_req(self, req):
+        cursor = getattr(req, "hicache_host_alloc_wait_cursor", None)
+        pools = {"kv"}
+        if cursor is not None:
+            pools.update(str(pool) for pool in cursor.blocked_domains)
+            pools.update(str(pool) for pool in cursor.required_aux_units)
+        snapshot_fn = getattr(self.tree_cache, "host_allocability_snapshot", None)
+        if snapshot_fn is None:
+            return cursor.snapshot if cursor is not None else None
+        return snapshot_fn(sorted(pools))
+
+    def _host_alloc_wait_eligible(self, req) -> bool:
+        cursor = getattr(req, "hicache_host_alloc_wait_cursor", None)
+        if cursor is None:
+            return False
+        current = self._host_alloc_snapshot_for_req(req)
+        if current is None or current.cache_instance_id != cursor.snapshot.cache_instance_id:
+            return False
+        return all(
+            current.generation_by_pool.get(pool, 0)
+            > cursor.snapshot.generation_by_pool.get(pool, 0)
+            for pool in cursor.blocked_domains
+        )
+
+    def _host_alloc_generation_vector_for_req(self, req):
+        cursor = req.hicache_host_alloc_wait_cursor
+        current = self._host_alloc_snapshot_for_req(req)
+        return (
+            current.cache_instance_id,
+            tuple(
+                sorted(
+                    (str(pool), current.generation_by_pool.get(pool, 0))
+                    for pool in cursor.blocked_domains
+                )
+            ),
+        )
+
+    def _host_alloc_global_generation_vector(self):
+        snapshot_fn = getattr(self.tree_cache, "host_allocability_snapshot", None)
+        if snapshot_fn is None:
+            return None
+        return snapshot_fn().generation_vector()
+
+    def _host_alloc_global_snapshot(self):
+        snapshot_fn = getattr(self.tree_cache, "host_allocability_snapshot", None)
+        return snapshot_fn() if snapshot_fn is not None else None
+
+    def _capture_host_alloc_wait(
+        self, req, failure: Optional[HostAllocFailure] = None
+    ) -> None:
+        if failure is None:
+            pop_failure = getattr(self.tree_cache, "pop_host_alloc_failure", None)
+            failure = pop_failure(req.rid) if pop_failure is not None else None
+        if failure is None:
+            snapshot = self._host_alloc_snapshot_for_req(req)
+            if snapshot is None:
+                return
+            failure = HostAllocFailure(
+                requested_primary_tokens=0,
+                required_aux_units={},
+                failed_domains=frozenset({"kv"}),
+                positive_hit_tokens=0,
+                sidecar_hit_pages={},
+                allocability_snapshot=snapshot,
+            )
+        if not hasattr(self, "_host_alloc_wake_arbiter"):
+            self._host_alloc_wake_arbiter = HostAllocWakeArbiter()
+        arbiter = self._host_alloc_wake_arbiter
+        if getattr(req, "hicache_host_alloc_attempt_id", None) is not None:
+            req.hicache_host_alloc_last_attempt_id = req.hicache_host_alloc_attempt_id
+            attempt_snapshot = self._host_alloc_global_snapshot()
+            sequence = arbiter.record_attempt_result(
+                req.rid,
+                attempt_snapshot or failure.allocability_snapshot,
+            )
+            req.hicache_host_alloc_attempt_id = None
+        else:
+            sequence = arbiter.enqueue(req.rid)
+        req.hicache_host_alloc_wait_cursor = HostAllocWaitCursor(
+            snapshot=failure.allocability_snapshot,
+            blocked_domains=failure.failed_domains or frozenset({"kv"}),
+            requested_primary_tokens=failure.requested_primary_tokens,
+            required_aux_units=failure.required_aux_units,
+            fifo_sequence=sequence,
+        )
+        logger.info(
+            "[HAE] evt=restore_host_alloc_retry_result rid=%s attempt=%s "
+            "full_frontier_tokens=%d crop_attempted=false lower_checkpoint_queried=false "
+            "failed_domains=%s required_aux_units=%s free_before=%s "
+            "evictable_before=%s free_after=%s evictable_after=%s "
+            "genuine_miss=false captured_generations_after=%s reservation_released=true",
+            req.rid,
+            getattr(req, "hicache_host_alloc_last_attempt_id", None),
+            failure.requested_primary_tokens,
+            sorted(map(str, failure.failed_domains)),
+            dict(failure.required_aux_units),
+            dict(
+                getattr(
+                    getattr(req, "hicache_host_alloc_attempt_snapshot", None),
+                    "free_units_by_pool",
+                    {},
+                )
+            ),
+            dict(
+                getattr(
+                    getattr(req, "hicache_host_alloc_attempt_snapshot", None),
+                    "evictable_units_by_pool",
+                    {},
+                )
+            ),
+            dict(failure.allocability_snapshot.free_units_by_pool),
+            dict(failure.allocability_snapshot.evictable_units_by_pool),
+            dict(failure.allocability_snapshot.generation_by_pool),
+        )
+        logger.info(
+            "[HAE] evt=restore_host_alloc_wait rid=%s attempt=%s "
+            "fifo_sequence=%d positive_hit_tokens=%d requested_primary_tokens=%d "
+            "blocked_domains=%s captured_generations=%s free_units=%s "
+            "evictable_units=%s prefetch_reservation_held=false",
+            req.rid,
+            getattr(req, "hicache_host_alloc_last_attempt_id", None),
+            sequence,
+            failure.positive_hit_tokens,
+            failure.requested_primary_tokens,
+            sorted(map(str, failure.failed_domains)),
+            dict(failure.allocability_snapshot.generation_by_pool),
+            dict(failure.allocability_snapshot.free_units_by_pool),
+            dict(failure.allocability_snapshot.evictable_units_by_pool),
+        )
+
+    def _select_host_alloc_waiter(self) -> Optional[str]:
+        if not hasattr(self, "_host_alloc_wake_arbiter"):
+            self._host_alloc_wake_arbiter = HostAllocWakeArbiter()
+        arbiter = self._host_alloc_wake_arbiter
+        requests = {req.rid: req for req in self.waiting_queue}
+        for rid in arbiter.ordered_rids():
+            req = requests.get(rid)
+            if req is None or req.hicache_restore_state is not RestoreState.WAIT_CAPACITY:
+                arbiter.remove(rid)
+        if not requests:
+            return None
+        controller = getattr(self.tree_cache, "cache_controller", None)
+        if controller is None or controller.prefetch_rate_limited():
+            return None
+        timeout_s = self.server_args.hicache_restore_wait_timeout_s
+        now = time.perf_counter()
+        return arbiter.choose(
+            lambda rid: (
+                requests[rid].hicache_restore_wait_reason is RestoreWaitReason.HOST_ALLOC
+                and self._host_alloc_wait_eligible(requests[rid])
+                and (
+                    timeout_s <= 0
+                    or now
+                    - getattr(requests[rid], "hicache_restore_state_ts", now)
+                    <= timeout_s
+                )
+            ),
+            lambda rid: self._host_alloc_global_generation_vector()
+            or self._host_alloc_generation_vector_for_req(requests[rid]),
+        )
+
+    def _host_alloc_skip_decision(self, req) -> str:
+        controller = getattr(self.tree_cache, "cache_controller", None)
+        if controller is None or controller.prefetch_rate_limited():
+            return "hold_budget"
+        if not self._host_alloc_wait_eligible(req):
+            return "hold_no_generation"
+        return "hold_global_grant_used"
 
     def _reconcile_restore_states(self):
         """Per-pass restore-state reconciliation (P2-1 M1b/M2; evolved from
@@ -3192,6 +3367,9 @@ class Scheduler(
         # 4) M1: WAIT timeout (T13) and per-pass capacity wakes (T11).
         timeout_s = self.server_args.hicache_restore_wait_timeout_s
         now = time.perf_counter()
+        if not hasattr(self, "_host_alloc_attempt_seq"):
+            self._host_alloc_attempt_seq = 0
+        host_alloc_grant = self._select_host_alloc_waiter()
         for req in self.waiting_queue:
             if req.hicache_restore_state is not RestoreState.WAIT_CAPACITY:
                 continue
@@ -3206,6 +3384,19 @@ class Scheduler(
                 # re-issuing would be declined identically every pass. It
                 # leaves only via the paced retry or the T13 timeout.
                 continue
+            if req.hicache_restore_wait_reason is RestoreWaitReason.HOST_ALLOC:
+                if req.rid != host_alloc_grant:
+                    logger.info(
+                        "[HAE] evt=restore_host_alloc_wake_decision rid=%s "
+                        "decision=%s",
+                        req.rid,
+                        self._host_alloc_skip_decision(req),
+                    )
+                    continue
+                logger.info(
+                    "[HAE] evt=restore_host_alloc_wake_decision rid=%s decision=grant",
+                    req.rid,
+                )
             if not self._restore_wait_capacity_fits(req):
                 continue
             # Captured before _apply_restore_event clears the reason: a
@@ -3223,10 +3414,18 @@ class Scheduler(
                 req, RestoreEvent.CAPACITY_FITS, capacity_fits=True
             )
             if decision is RestoreDecision.RETRY_PREFETCH:
+                self._host_alloc_attempt_seq += 1
+                req.hicache_host_alloc_attempt_id = (
+                    f"{req.rid}:{self._host_alloc_attempt_seq}"
+                )
+                req.hicache_host_alloc_attempt_snapshot = (
+                    self._host_alloc_snapshot_for_req(req)
+                )
                 logger.info(
-                    "[P2A] ts_ms=%d evt=restore_retry rid=%s cause=capacity",
+                    "[P2A] ts_ms=%d evt=restore_retry rid=%s cause=capacity attempt_id=%s",
                     int(time.time() * 1000),
                     req.rid,
+                    req.hicache_host_alloc_attempt_id,
                 )
                 self._prefetch_kvcache(
                     req,
@@ -3274,7 +3473,14 @@ class Scheduler(
             req.hicache_restore_miss_generation = getattr(
                 req, "session_generation", None
             )
+        failure = (
+            self.tree_cache.pop_host_alloc_failure(req.rid)
+            if event is RestoreEvent.DENIED_ALLOC
+            else None
+        )
         self._apply_restore_event(req, event, genuine_miss=genuine_miss)
+        if event is RestoreEvent.DENIED_ALLOC:
+            self._capture_host_alloc_wait(req, failure)
         if (
             event is RestoreEvent.REVOKED_MISS
             and genuine_miss
@@ -3381,6 +3587,18 @@ class Scheduler(
         )
         if next_state is req.hicache_restore_state and decision is RestoreDecision.NONE:
             return decision
+        if (
+            prev_state is RestoreState.WAIT_CAPACITY
+            and req.hicache_restore_wait_reason is RestoreWaitReason.HOST_ALLOC
+        ):
+            if not (
+                next_state is RestoreState.WAIT_CAPACITY
+                and wait_reason_for(event, genuine_miss=genuine_miss)
+                is RestoreWaitReason.HOST_ALLOC
+            ):
+                if hasattr(self, "_host_alloc_wake_arbiter"):
+                    self._host_alloc_wake_arbiter.remove(req.rid)
+                req.hicache_host_alloc_wait_cursor = None
         req.hicache_restore_state = next_state
         if next_state is RestoreState.WAIT_CAPACITY:
             req.hicache_restore_wait_reason = wait_reason_for(
@@ -3776,19 +3994,10 @@ class Scheduler(
                 return False
             if cc.prefetch_rate_limited():
                 return False
-            matched_len = len(req.prefix_indices) + req.host_hit_length
-            match_end = req._compute_max_prefix_len(
-                len(req.full_untruncated_fill_ids)
-            )
-            requested = max(0, match_end - matched_len)
-            requested -= requested % self.page_size
-            if requested < self.tree_cache.prefetch_threshold:
-                return False
-            # The wake is driven by observable host availability. The
-            # complete requested span is a conservative bound for a positive
-            # L3 hit, so a wake cannot repeat the known allocation failure
-            # merely because a smaller arbitrary crop fits.
-            return cc.mem_pool_host.available_size() >= requested
+            # Generation admission is handled by the FIFO arbiter.  Do not
+            # require the complete span to be already free: the authoritative
+            # retry must be allowed to run alloc -> evict_host -> alloc.
+            return True
         cc = self.tree_cache.cache_controller
         if cc is not None and cc.prefetch_rate_limited():
             return False

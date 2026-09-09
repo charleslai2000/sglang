@@ -17,9 +17,132 @@ admission re-arm refuses to re-enter WAIT until that epoch advances or the
 identity (generation) changes.
 """
 
+from collections import deque
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Optional, Tuple
+from typing import Deque, Hashable, Mapping, Optional, Tuple
+
+
+@dataclass(frozen=True)
+class HostAllocabilitySnapshot:
+    """Read-only, cache-owned host allocability state.
+
+    Generation values are invalidation signals only.  Allocation and eviction
+    remain authoritative in the cache allocator path.
+    """
+
+    cache_instance_id: int
+    generation_by_pool: Mapping[Hashable, int]
+    free_units_by_pool: Mapping[Hashable, int]
+    evictable_units_by_pool: Mapping[Hashable, int]
+
+    def generation_vector(self) -> tuple[int, tuple[tuple[str, int], ...]]:
+        return (
+            self.cache_instance_id,
+            tuple(
+                sorted(
+                    (str(pool), int(generation))
+                    for pool, generation in self.generation_by_pool.items()
+                )
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class HostAllocFailure:
+    """Typed allocation-pressure facts transferred to restore reconciliation."""
+
+    requested_primary_tokens: int
+    required_aux_units: Mapping[Hashable, int]
+    failed_domains: frozenset[Hashable]
+    positive_hit_tokens: int
+    sidecar_hit_pages: Mapping[Hashable, int]
+    allocability_snapshot: HostAllocabilitySnapshot
+    full_span_only: bool = True
+
+
+@dataclass(frozen=True)
+class HostAllocWaitCursor:
+    snapshot: HostAllocabilitySnapshot
+    blocked_domains: frozenset[Hashable]
+    requested_primary_tokens: int
+    required_aux_units: Mapping[Hashable, int]
+    fifo_sequence: int
+
+
+class HostAllocWakeArbiter:
+    """Scheduler-owned FIFO admission for bounded HOST_ALLOC retries."""
+
+    def __init__(self) -> None:
+        self._queue: Deque[str] = deque()
+        self._sequence_by_rid: dict[str, int] = {}
+        self._next_sequence = 0
+        self._last_granted_vector = None
+
+    def enqueue(self, rid: str) -> int:
+        sequence = self._sequence_by_rid.get(rid)
+        if sequence is not None:
+            return sequence
+        sequence = self._next_sequence
+        self._next_sequence += 1
+        self._sequence_by_rid[rid] = sequence
+        self._queue.append(rid)
+        return sequence
+
+    def remove(self, rid: str) -> None:
+        self._sequence_by_rid.pop(rid, None)
+        self._queue = deque(item for item in self._queue if item != rid)
+
+    def rotate(self, rid: str) -> int:
+        self.remove(rid)
+        return self.enqueue(rid)
+
+    def sequence(self, rid: str) -> Optional[int]:
+        return self._sequence_by_rid.get(rid)
+
+    def ordered_rids(self) -> tuple[str, ...]:
+        return tuple(
+            rid for rid in self._queue if rid in self._sequence_by_rid
+        )
+
+    def choose(self, eligible, vector_for) -> Optional[str]:
+        """Choose the first eligible waiter for a new generation vector."""
+        for rid in tuple(self._queue):
+            if rid not in self._sequence_by_rid:
+                continue
+            if not eligible(rid):
+                continue
+            vector = vector_for(rid)
+            if vector == self._last_granted_vector:
+                continue
+            self._last_granted_vector = vector
+            return rid
+        return None
+
+    def record_attempt_result(
+        self,
+        rid: str,
+        snapshot: HostAllocabilitySnapshot,
+        blocked_domains=None,
+    ) -> int:
+        """Suppress the retry's post-cleanup vector, then rotate its waiter."""
+        if blocked_domains is None:
+            self._last_granted_vector = snapshot.generation_vector()
+        else:
+            self._last_granted_vector = (
+                snapshot.cache_instance_id,
+                tuple(
+                    sorted(
+                        (str(pool), snapshot.generation_by_pool.get(pool, 0))
+                        for pool in blocked_domains
+                    )
+                ),
+            )
+        return self.rotate(rid)
+
+    @property
+    def last_granted_vector(self):
+        return self._last_granted_vector
 
 
 class RestoreState(Enum):
