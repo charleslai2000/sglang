@@ -169,13 +169,34 @@ class HiCachePrefetchOrigin(Enum):
     EAGER_DISAGG_PREFILL = auto()
 
 
-class PrefetchIssueResult(Enum):
-    """Result of claiming and submitting one prefetch attempt."""
+class HiCachePrefetchIssueStatus(Enum):
+    """Status of one scheduler-owned prefetch issue attempt."""
 
     ISSUED = auto()
-    DECLINED = auto()
-    ACTIVE = auto()
-    SKIPPED = auto()
+    HELD = auto()
+    SKIPPED_ACTIVE = auto()
+    SKIPPED_STATE = auto()
+    FAILED_BEFORE_ISSUE = auto()
+
+
+@dataclass(frozen=True)
+class PrefetchIssueResult:
+    """Typed result crossing the scheduler/restore issue boundary."""
+
+    status: HiCachePrefetchIssueStatus
+    attempt_id: Optional[str]
+    origin: HiCachePrefetchOrigin
+    reason: str
+    state_before: str
+    state_after: str
+
+
+# Compatibility names for the existing scheduler fixtures. New code should
+# inspect ``result.status`` and use HiCachePrefetchIssueStatus directly.
+PrefetchIssueResult.ISSUED = HiCachePrefetchIssueStatus.ISSUED
+PrefetchIssueResult.DECLINED = HiCachePrefetchIssueStatus.HELD
+PrefetchIssueResult.ACTIVE = HiCachePrefetchIssueStatus.SKIPPED_ACTIVE
+PrefetchIssueResult.SKIPPED = HiCachePrefetchIssueStatus.SKIPPED_STATE
 
 
 class RestoreWaitReason(Enum):

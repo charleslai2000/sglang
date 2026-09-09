@@ -969,7 +969,9 @@ class ReadyHorizonPassTests(unittest.TestCase):
             impl_calls, [(HiCachePrefetchOrigin.READY_HORIZON, False)]
         )
 
-        scheduler._release_prefetch_claim(req)
+        scheduler._release_prefetch_claim(
+            req, req.hicache_prefetch_active_attempt_id, "test_retry"
+        )
         retry = scheduler._prefetch_kvcache(
             req,
             origin=HiCachePrefetchOrigin.DEMAND_RETRY,
