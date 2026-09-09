@@ -25,6 +25,7 @@ from sglang.srt.managers.scheduler_components.hicache_restore import (
     RestoreEvent,
     RestoreState,
     RestoreWaitReason,
+    HiCachePrefetchOrigin,
 )
 
 
@@ -274,7 +275,7 @@ class CapacitySemanticsSchedulerFeedTests(unittest.TestCase):
         req.init_next_round_input = lambda *args, **kwargs: None
         req._compute_max_prefix_len = lambda input_len: 55000
 
-        scheduler._prefetch_kvcache(req)
+        scheduler._prefetch_kvcache(req, origin=HiCachePrefetchOrigin.DEMAND_RETRY)
 
         self.assertIs(req.hicache_restore_state, RestoreState.NONE)
         self.assertIsNone(req.hicache_restore_wait_reason)

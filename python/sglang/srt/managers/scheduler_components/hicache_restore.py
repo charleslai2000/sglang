@@ -160,6 +160,24 @@ class RestoreState(Enum):
     # (generation) changes -- the request recomputes forward meanwhile
 
 
+class HiCachePrefetchOrigin(Enum):
+    """Owner of a HiCache prefetch issue."""
+
+    EAGER_RH_OFF = auto()
+    READY_HORIZON = auto()
+    DEMAND_RETRY = auto()
+    EAGER_DISAGG_PREFILL = auto()
+
+
+class PrefetchIssueResult(Enum):
+    """Result of claiming and submitting one prefetch attempt."""
+
+    ISSUED = auto()
+    DECLINED = auto()
+    ACTIVE = auto()
+    SKIPPED = auto()
+
+
 class RestoreWaitReason(Enum):
     """Why a request sits in WAIT_CAPACITY (design §2.2 wait_reason set)."""
 
