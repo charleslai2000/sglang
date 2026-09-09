@@ -225,6 +225,7 @@ from sglang.srt.managers.scheduler_components.hicache_restore import (
     HostAllocWakeArbiter,
     HOST_ALLOC_TELEMETRY_SCHEMA_VERSION,
     HiCachePrefetchOrigin,
+    HiCachePrefetchIssueStatus,
     PrefetchIssueResult,
     RestoreDecision,
     RestoreEvent,
@@ -1487,6 +1488,8 @@ class Scheduler(
         # are not transient -- the revoke frees the budget and would
         # re-arm the next pass without the park.
         self._ready_horizon_negatives: dict = {}
+        self._rh_request_enqueue_seq = 0
+        self._rh_pass_seq = 0
 
     def init_schedule_policy(self):
         # Init schedule policy and new token estimation
@@ -3034,16 +3037,56 @@ class Scheduler(
         req.hicache_prefetch_active_origin = origin
         return attempt_id
 
-    def _release_prefetch_claim(self, req: Req) -> None:
-        attempt_id = getattr(req, "hicache_prefetch_active_attempt_id", None)
-        if attempt_id is None:
-            return
-        req.hicache_prefetch_last_attempt_id = attempt_id
+    def _release_prefetch_claim(
+        self, req: Req, attempt_id: Optional[str], terminal_reason: str
+    ) -> bool:
+        active_attempt_id = getattr(req, "hicache_prefetch_active_attempt_id", None)
+        if active_attempt_id != attempt_id:
+            logger.info(
+                "[P3] evt=prefetch_claim_release_stale rid=%s expected=%s active=%s reason=%s",
+                req.rid,
+                attempt_id,
+                active_attempt_id,
+                terminal_reason,
+            )
+            return False
+        if active_attempt_id is None:
+            return False
+        req.hicache_prefetch_last_attempt_id = active_attempt_id
         req.hicache_prefetch_last_origin = getattr(
             req, "hicache_prefetch_active_origin", None
         )
         req.hicache_prefetch_active_attempt_id = None
         req.hicache_prefetch_active_origin = None
+        return True
+
+    @staticmethod
+    def _prefetch_state_name(state) -> str:
+        return state.name if state is not None else "null"
+
+    def _prefetch_result(
+        self,
+        req: Req,
+        status: HiCachePrefetchIssueStatus,
+        origin: HiCachePrefetchOrigin,
+        reason: str,
+        state_before: str,
+        attempt_id: Optional[str] = None,
+    ) -> PrefetchIssueResult:
+        return PrefetchIssueResult(
+            status=status,
+            attempt_id=(
+                attempt_id
+                if attempt_id is not None
+                else getattr(req, "hicache_prefetch_active_attempt_id", None)
+            ),
+            origin=origin,
+            reason=reason,
+            state_before=state_before,
+            state_after=self._prefetch_state_name(
+                getattr(req, "hicache_restore_state", None)
+            ),
+        )
 
     def _prefetch_kvcache(
         self,
@@ -3054,17 +3097,39 @@ class Scheduler(
     ) -> PrefetchIssueResult:
         attempt_id = self._claim_prefetch(req, origin)
         if attempt_id is None:
-            return PrefetchIssueResult.ACTIVE
+            active_origin = getattr(
+                req, "hicache_prefetch_active_origin", None
+            ) or origin
+            state = self._prefetch_state_name(
+                getattr(req, "hicache_restore_state", None)
+            )
+            return PrefetchIssueResult(
+                HiCachePrefetchIssueStatus.SKIPPED_ACTIVE,
+                getattr(req, "hicache_prefetch_active_attempt_id", None),
+                active_origin,
+                "active_attempt",
+                state,
+                state,
+            )
         try:
             result = self._prefetch_kvcache_impl(
                 req, origin=origin, demand_restore=demand_restore
             )
         except Exception:
-            self._release_prefetch_claim(req)
+            self._release_prefetch_claim(req, attempt_id, "exception")
             raise
-        if result is PrefetchIssueResult.ISSUED:
+        result_status = (
+            result.status
+            if isinstance(result, PrefetchIssueResult)
+            else result
+        )
+        if result_status is HiCachePrefetchIssueStatus.ISSUED:
             return result
-        self._release_prefetch_claim(req)
+        self._release_prefetch_claim(
+            req,
+            attempt_id,
+            result.reason if isinstance(result, PrefetchIssueResult) else "declined",
+        )
         return result
 
     def _prefetch_kvcache_impl(
@@ -3074,6 +3139,28 @@ class Scheduler(
         origin: HiCachePrefetchOrigin,
         demand_restore: bool = False,
     ) -> PrefetchIssueResult:
+        state_before_value = getattr(req, "hicache_restore_state", None)
+        state_before = (
+            state_before_value.name if state_before_value is not None else "null"
+        )
+
+        def result(status, reason):
+            state_after_value = getattr(req, "hicache_restore_state", None)
+            return PrefetchIssueResult(
+                status=status,
+                attempt_id=getattr(
+                    req, "hicache_prefetch_active_attempt_id", None
+                ),
+                origin=origin,
+                reason=reason,
+                state_before=state_before,
+                state_after=(
+                    state_after_value.name
+                    if state_after_value is not None
+                    else "null"
+                ),
+            )
+
         try:
             _t38c_log({"evt": "pc_prefetch_enter", "phase": "entry",
                        "rid": req.rid,
@@ -3147,6 +3234,9 @@ class Scheduler(
                     host_alloc_attempt_id=getattr(
                         req, "hicache_host_alloc_attempt_id", None
                     ),
+                    prefetch_attempt_id=getattr(
+                        req, "hicache_prefetch_active_attempt_id", None
+                    ),
                 )
                 # P2-1 M1b: feed the issue outcome into the restore state
                 # machine (T1 issued / T2-T4 declines). declined_too_short
@@ -3156,6 +3246,7 @@ class Scheduler(
                 # per pass is the capacity loop.
                 if outcome == "issued":
                     self._apply_restore_event(req, RestoreEvent.PREFETCH_ISSUED)
+                    return result(HiCachePrefetchIssueStatus.ISSUED, "issued")
                 elif outcome == "declined_rate_limited":
                     self._apply_restore_event(req, RestoreEvent.DENIED_RATE)
                 elif outcome == "forfeited_alloc_failed":
@@ -3222,7 +3313,10 @@ class Scheduler(
                     # normal P3 reconcile + frontier wait path.
                     if self._no_material_fast_forward_for(req, last_host_node):
                         self._log_restore_recompute(req, "no_material")
-                        return PrefetchIssueResult.DECLINED
+                        return result(
+                            HiCachePrefetchIssueStatus.SKIPPED_STATE,
+                            "no_material",
+                        )
                     self._apply_restore_event(req, RestoreEvent.GATE_SKIP_FRONTIER)
                     tree_cache.register_frontier_waiter(req.rid, last_host_node)
                     logger.info(
@@ -3231,9 +3325,9 @@ class Scheduler(
                         req.rid,
                         last_host_node,
                     )
-                return PrefetchIssueResult.DECLINED
-            return PrefetchIssueResult.DECLINED
-        return PrefetchIssueResult.SKIPPED
+                return result(HiCachePrefetchIssueStatus.HELD, "frontier")
+            return result(HiCachePrefetchIssueStatus.HELD, outcome)
+        return result(HiCachePrefetchIssueStatus.SKIPPED_STATE, "storage_disabled")
 
     def _host_alloc_snapshot_for_req(self, req):
         cursor = getattr(req, "hicache_host_alloc_wait_cursor", None)
@@ -3671,8 +3765,23 @@ class Scheduler(
     def _feed_restore_terminal(self, req) -> None:
         """Consume a terminal prefetch outcome (finalize T8 / revoke T9/T10)
         recorded by the drain into the request's restore state machine."""
-        outcome = self.tree_cache.pop_storage_prefetch_terminal(req.rid)
-        if outcome is None:
+        terminal = self.tree_cache.pop_storage_prefetch_terminal(req.rid)
+        if terminal is None:
+            return
+        if isinstance(terminal, tuple):
+            terminal_attempt_id, outcome = terminal
+        else:
+            # Legacy test doubles may still provide an uncorrelated outcome.
+            # Real cache terminals always carry the attempt ID.
+            terminal_attempt_id, outcome = None, terminal
+        active_attempt_id = getattr(req, "hicache_prefetch_active_attempt_id", None)
+        if terminal_attempt_id is not None and terminal_attempt_id != active_attempt_id:
+            logger.warning(
+                "[P3] evt=prefetch_terminal_stale rid=%s terminal_attempt_id=%s active_attempt_id=%s",
+                req.rid,
+                terminal_attempt_id,
+                active_attempt_id,
+            )
             return
         if outcome == "finalized":
             event, genuine_miss = RestoreEvent.FINALIZED, False
@@ -3709,23 +3818,45 @@ class Scheduler(
             if event is RestoreEvent.DENIED_ALLOC
             else None
         )
+        restore_state_before = self._prefetch_state_name(
+            getattr(req, "hicache_restore_state", None)
+        )
         attempt_id = getattr(req, "hicache_prefetch_active_attempt_id", None)
         attempt_origin = getattr(req, "hicache_prefetch_active_origin", None)
         self._apply_restore_event(req, event, genuine_miss=genuine_miss)
         if event is RestoreEvent.DENIED_ALLOC:
             self._capture_host_alloc_wait(req, failure)
-        self._release_prefetch_claim(req)
+        if terminal_attempt_id is not None:
+            self._release_prefetch_claim(
+                req, terminal_attempt_id, outcome
+            )
         if event is RestoreEvent.FINALIZED:
             last_origin = getattr(req, "hicache_prefetch_last_origin", None)
+            staged_tokens = getattr(
+                self.tree_cache, "peek_prefetch_loaded_tokens", lambda _rid: None
+            )(req.rid)
             logger.info(
-                "[P3] ts_ms=%d evt=ready_host rid=%s attempt_id=%s origin=%s ready=1",
-                int(time.time() * 1000),
+                "[P3] ts_ns=%d evt=ready_host schema=rh_ready_host.v1 rid=%s "
+                "attempt_id=%s issue_origin=%s completed_kv_tokens=%s "
+                "required_aux_pools=%s completed_aux_units=%s "
+                "restore_state_before=%s restore_state_after=%s "
+                "finalize_result=%s ready_monotonic_ns=%d",
+                time.monotonic_ns(),
                 req.rid,
                 attempt_id
                 or getattr(req, "hicache_prefetch_last_attempt_id", None),
                 (attempt_origin or last_origin).name
                 if (attempt_origin or last_origin) is not None
-                else "none",
+                else "null",
+                staged_tokens,
+                None,
+                None,
+                restore_state_before,
+                req.hicache_restore_state.name
+                if req.hicache_restore_state is not None
+                else "null",
+                "accepted",
+                time.monotonic_ns(),
             )
         if (
             event is RestoreEvent.REVOKED_MISS
@@ -3875,6 +4006,100 @@ class Scheduler(
         )
         return decision
 
+    def _emit_rh_decision(
+        self,
+        view,
+        *,
+        rank,
+        frontier_n,
+        decision,
+        reason,
+        epochs,
+        headroom,
+        reserve_floor,
+        physical_limit,
+        physical_used,
+        speculative_limit,
+        speculative_used,
+        negative_entry,
+        issue_origin,
+        attempt_id,
+        force=False,
+    ) -> None:
+        req = view.req
+        field = lambda value: "null" if value is None else value
+        state_before = self._prefetch_state_name(view.state)
+        wait_reason = view.wait_reason.name if view.wait_reason is not None else None
+        fingerprint = (
+            rank,
+            frontier_n,
+            state_before,
+            wait_reason,
+            bool(view.staging_eligible),
+            negative_entry.reason.name if negative_entry is not None else None,
+            negative_entry.epoch_cursor if negative_entry is not None else None,
+            (
+                epochs.l3_publish,
+                epochs.host_headroom,
+                epochs.host_release,
+                epochs.spec_budget,
+                epochs.waiting_frontier,
+            ),
+            headroom,
+            reserve_floor,
+            physical_limit,
+            physical_used,
+            speculative_limit,
+            speculative_used,
+            decision,
+            reason,
+        )
+        previous = getattr(req, "hicache_last_rh_decision_fingerprint", None)
+        if not force and previous == fingerprint:
+            return
+        pass_seq = getattr(self, "_rh_pass_seq", 0)
+        decision_id = f"{req.rid}:rh:{pass_seq}"
+        req.hicache_last_rh_decision_id = decision_id
+        req.hicache_last_rh_decision_fingerprint = fingerprint
+        logger.info(
+            "[P3] ts_ns=%d evt=rh_preadmission_decision schema=rh_preadmission.v1 "
+            "rid=%s request_enqueue_seq=%s rh_pass_seq=%d decision_id=%s "
+            "fingerprint=%s frontier_rank=%d frontier_n=%d "
+            "restore_state_before=%s wait_reason_before=%s "
+            "active_prefetch_attempt_id=%s staging_eligible=%s "
+            "restore_potential=%s negative_cache_blocked=%s negative_cursor=%s "
+            "causal_epoch=%s headroom_tokens=%s reserve_floor_tokens=%s "
+            "physical_budget_limit_tokens=%s physical_budget_used_tokens=%s "
+            "speculative_budget_limit_tokens=%s speculative_budget_used_tokens=%s "
+            "decision=%s reason=%s issue_origin=%s attempt_id=%s",
+            time.monotonic_ns(),
+            req.rid,
+            field(getattr(req, "hicache_request_enqueue_seq", None)),
+            pass_seq,
+            decision_id,
+            repr(fingerprint)[:160],
+            rank,
+            frontier_n,
+            state_before,
+            wait_reason or "null",
+            field(getattr(req, "hicache_prefetch_active_attempt_id", None)),
+            bool(view.staging_eligible),
+            bool(view.staging_eligible),
+            negative_entry is not None,
+            field(negative_entry.epoch_cursor if negative_entry is not None else None),
+            repr(epochs),
+            headroom,
+            reserve_floor,
+            field(physical_limit),
+            field(physical_used),
+            field(speculative_limit),
+            field(speculative_used),
+            decision,
+            reason,
+            issue_origin.name if issue_origin is not None else "null",
+            field(attempt_id),
+        )
+
     def _ready_horizon_pass(self) -> None:
         """P3 Ready Horizon v0 (3.2): maintain the READY_HOST pool.
 
@@ -3892,6 +4117,7 @@ class Scheduler(
         evicts (M2): headroom or budget exhaustion declines silently."""
         if not self.enable_ready_horizon:
             return
+        self._rh_pass_seq = getattr(self, "_rh_pass_seq", 0) + 1
         cc = self.tree_cache.cache_controller
         if cc is None:
             return
@@ -3930,6 +4156,66 @@ class Scheduler(
             now=now,
             reserve_floor=self._ready_reserve_floor_tokens(cc),
         )
+        decline_reasons = dict(plan.declines)
+        issue_rids = {view.rid for view in plan.to_issue}
+        candidate_rids = {view.rid for view in plan.candidates}
+        reserve_floor = self._ready_reserve_floor_tokens(cc)
+        physical_limit = getattr(cc, "prefetch_capacity_limit", None)
+        physical_used = getattr(cc, "prefetch_tokens_occupied", None)
+        speculative_limit = getattr(
+            cc, "prefetch_speculative_capacity_limit", None
+        )
+        speculative_used = getattr(cc, "inflight_speculative_tokens", None)
+        for rank, view in enumerate(frontier_reqs, start=1):
+            entry = self._ready_horizon_negatives.get(view.rid)
+            if view.rid in issue_rids:
+                decision, reason = "issue", "issued"
+            elif view.rid in decline_reasons:
+                decision, reason = "hold", "reserve_floor"
+            elif entry is not None:
+                decision, reason = "exclude", "negative_cache"
+            elif not view.staging_eligible:
+                decision, reason = "exclude", "no_restore_potential"
+            elif view.state not in (
+                RestoreState.NONE,
+                RestoreState.MISS_RECOMPUTE,
+                RestoreState.WAIT_CAPACITY,
+            ):
+                decision, reason = "exclude", "state_funnel"
+            elif cc.prefetch_rate_limited():
+                decision, reason = "hold", "physical_budget"
+            elif cc.prefetch_speculative_rate_limited():
+                decision, reason = "hold", "speculative_budget"
+            elif view.rid not in candidate_rids:
+                decision, reason = "hold", "outside_watermark"
+            else:
+                decision, reason = "hold", "state_funnel"
+            self._emit_rh_decision(
+                view,
+                rank=rank,
+                frontier_n=len(frontier_reqs),
+                decision=decision,
+                reason=reason,
+                epochs=epochs,
+                headroom=headroom,
+                reserve_floor=reserve_floor,
+                physical_limit=physical_limit,
+                physical_used=physical_used,
+                speculative_limit=speculative_limit,
+                speculative_used=speculative_used,
+                negative_entry=entry,
+                issue_origin=(
+                    HiCachePrefetchOrigin.READY_HORIZON
+                    if decision == "issue"
+                    else None
+                ),
+                attempt_id=(
+                    getattr(view.req, "hicache_prefetch_active_attempt_id", None)
+                    if decision == "issue"
+                    else None
+                ),
+                force=decision == "issue",
+            )
         # Record the headroom-gate declines (NO_HEADROOM): none of these
         # can stage until host pages free.
         for rid, reason in plan.declines:
@@ -3942,24 +4228,46 @@ class Scheduler(
                 req, origin=HiCachePrefetchOrigin.READY_HORIZON
             )
             state = req.hicache_restore_state
-            issued = state is RestoreState.RESTORING
-            result_name = (
-                result.name.lower()
+            result_status = (
+                result.status
                 if isinstance(result, PrefetchIssueResult)
+                else result
+            )
+            issued = result_status is HiCachePrefetchIssueStatus.ISSUED
+            result_name = (
+                result_status.name.lower()
+                if isinstance(result_status, HiCachePrefetchIssueStatus)
                 else "issued" if issued else "declined"
             )
             logger.info(
-                "[P3] ts_ms=%d evt=ready_stage.v2 rid=%s attempt_id=%s "
-                "origin=%s result=%s state=%s ready=%d headroom=%d",
-                int(time.time() * 1000),
+                "[P3] ts_ns=%d evt=ready_stage schema=rh_stage.v2 rid=%s "
+                "decision_id=%s attempt_id=%s issue_origin=%s demand_restore=%s "
+                "restore_state_before=%s restore_state_after=%s result=%s "
+                "reason=%s frontier_rank=%d headroom_tokens=%s "
+                "reserve_floor_tokens=%s physical_budget_used_tokens=%s "
+                "speculative_budget_used_tokens=%s",
+                time.monotonic_ns(),
                 req.rid,
-                getattr(req, "hicache_prefetch_last_attempt_id", None)
-                or getattr(req, "hicache_prefetch_active_attempt_id", None),
+                getattr(req, "hicache_last_rh_decision_id", None),
+                (
+                    result.attempt_id
+                    if isinstance(result, PrefetchIssueResult)
+                    else getattr(req, "hicache_prefetch_active_attempt_id", None)
+                    or getattr(req, "hicache_prefetch_last_attempt_id", None)
+                ),
                 HiCachePrefetchOrigin.READY_HORIZON.name,
+                False,
+                result.state_before if isinstance(result, PrefetchIssueResult) else "null",
+                result.state_after if isinstance(result, PrefetchIssueResult) else (
+                    state.name if state is not None else "null"
+                ),
                 result_name,
-                state.name if state is not None else "none",
-                plan.ready_count,
+                result.reason if isinstance(result, PrefetchIssueResult) else "issued" if issued else "declined",
+                next((i for i, candidate in enumerate(frontier_reqs, 1) if candidate.rid == req.rid), 0),
                 headroom,
+                reserve_floor,
+                physical_used,
+                speculative_used,
             )
             if not issued:
                 # A synchronous decline: the horizon cannot stage this rid
@@ -4603,21 +4911,16 @@ class Scheduler(
         if self.disaggregation_mode == DisaggregationMode.NULL:
             if self._abort_on_queued_limit(req):
                 return
+            self._rh_request_enqueue_seq = getattr(
+                self, "_rh_request_enqueue_seq", 0
+            ) + 1
+            req.hicache_request_enqueue_seq = self._rh_request_enqueue_seq
             if not self.enable_ready_horizon:
                 self._prefetch_kvcache(
                     req, origin=HiCachePrefetchOrigin.EAGER_RH_OFF
                 )
             self.waiting_queue.append(req)
             req.time_stats.set_wait_queue_entry_time()
-            if self.enable_ready_horizon:
-                logger.info(
-                    "[P3] ts_ms=%d evt=rh_preadmission rid=%s origin=%s "
-                    "attempt_id=none stage_generation=%d",
-                    int(time.time() * 1000),
-                    req.rid,
-                    HiCachePrefetchOrigin.READY_HORIZON.name,
-                    getattr(req, "hicache_prefetch_attempt_seq", 0) + 1,
-                )
         elif self.disaggregation_mode == DisaggregationMode.PREFILL:
             self._prefetch_kvcache(
                 req, origin=HiCachePrefetchOrigin.EAGER_DISAGG_PREFILL
@@ -4689,7 +4992,11 @@ class Scheduler(
                 if self.enable_hicache_storage:
                     # Release prefetch events associated with the request
                     self.tree_cache.release_aborted_request(candidate_req.rid)
-                    self._release_prefetch_claim(candidate_req)
+                    self._release_prefetch_claim(
+                        candidate_req,
+                        getattr(candidate_req, "hicache_prefetch_active_attempt_id", None),
+                        "queued_priority_abort",
+                    )
                 self._remove_host_alloc_waiter(candidate_req.rid)
                 self.waiting_queue.pop(idx)
                 self.beam_coordinator.retire_group(candidate_req)
@@ -4722,7 +5029,11 @@ class Scheduler(
                 if self.enable_hicache_storage:
                     # Release prefetch events associated with the request
                     self.tree_cache.release_aborted_request(req.rid)
-                    self._release_prefetch_claim(req)
+                    self._release_prefetch_claim(
+                        req,
+                        getattr(req, "hicache_prefetch_active_attempt_id", None),
+                        "queued_abort",
+                    )
                 self._remove_host_alloc_waiter(req.rid)
                 self.ipc_channels.send_to_tokenizer.send_output(
                     _make_abort_req(
@@ -4861,7 +5172,11 @@ class Scheduler(
             req.pending_bootstrap = False
         if self.enable_hicache_storage:
             self.tree_cache.release_aborted_request(req.rid)
-            self._release_prefetch_claim(req)
+            self._release_prefetch_claim(
+                req,
+                getattr(req, "hicache_prefetch_active_attempt_id", None),
+                "chunked_abort",
+            )
         release_kv_cache(req, self.tree_cache, is_insert=False)
 
         self.chunked_req = None
@@ -5343,11 +5658,22 @@ class Scheduler(
             if res == AddReqResult.CONTINUE:
                 origin = getattr(req, "hicache_prefetch_last_origin", None)
                 logger.info(
-                    "[P3] ts_ms=%d evt=admission.v2 rid=%s attempt_id=%s origin=%s",
-                    int(time.time() * 1000),
+                    "[P3] ts_ns=%d evt=admission.v2 schema=rh_admission.v2 "
+                    "rid=%s rh_decision_id=%s hicache_prefetch_attempt_id=%s "
+                    "hicache_prefetch_origin=%s ready_host_observed=%s "
+                    "admission_monotonic_ns=%d can_run=%s",
+                    time.monotonic_ns(),
                     req.rid,
+                    getattr(req, "hicache_last_rh_decision_id", None),
                     getattr(req, "hicache_prefetch_last_attempt_id", None),
-                    origin.name if origin is not None else "none",
+                    origin.name if origin is not None else "null",
+                    (
+                        "true"
+                        if req.hicache_restore_state is RestoreState.READY
+                        else "null"
+                    ),
+                    time.monotonic_ns(),
+                    "true",
                 )
 
             if self.enable_lora:
@@ -6665,7 +6991,11 @@ class Scheduler(
             if self.enable_hicache_storage:
                 # to release prefetch events associated with the request
                 self.tree_cache.release_aborted_request(req.rid)
-                self._release_prefetch_claim(req)
+                self._release_prefetch_claim(
+                    req,
+                    getattr(req, "hicache_prefetch_active_attempt_id", None),
+                    "abort",
+                )
             self.ipc_channels.send_to_tokenizer.send_output(_make_abort_req(req), req)
             # For disaggregation decode mode, the request in the waiting queue has KV cache allocated.
             if self.disaggregation_mode == DisaggregationMode.DECODE:
@@ -6698,7 +7028,11 @@ class Scheduler(
             ):
                 if self.enable_hicache_storage:
                     self.tree_cache.release_aborted_request(req.rid)
-                    self._release_prefetch_claim(req)
+                    self._release_prefetch_claim(
+                        req,
+                        getattr(req, "hicache_prefetch_active_attempt_id", None),
+                        "abort",
+                    )
                 self.ipc_channels.send_to_tokenizer.send_output(
                     _make_abort_req(req), req
                 )
@@ -6723,7 +7057,11 @@ class Scheduler(
                     logger.debug(f"Abort bootstrap queue request. {req.rid=}")
                     if self.enable_hicache_storage:
                         self.tree_cache.release_aborted_request(req.rid)
-                        self._release_prefetch_claim(req)
+                        self._release_prefetch_claim(
+                            req,
+                            getattr(req, "hicache_prefetch_active_attempt_id", None),
+                            "abort",
+                        )
 
                     if hasattr(req.disagg_kv_sender, "abort"):
                         req.disagg_kv_sender.abort()

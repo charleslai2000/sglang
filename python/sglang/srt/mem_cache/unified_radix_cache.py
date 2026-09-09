@@ -2688,7 +2688,7 @@ class UnifiedRadixCache(BasePrefixCache):
         # "revoked_miss" / "revoked_terminated"), recorded by the drain and
         # consumed by the scheduler's restore-state reconciliation on the
         # same (scheduler) thread.
-        self._storage_prefetch_terminal: dict[str, str] = {}
+        self._storage_prefetch_terminal: dict[str, object] = {}
         self._storage_prefetch_failures: dict[str, HostAllocFailure] = {}
         self.ongoing_backup: dict[int, tuple[NodeId, DecLockRefParams]] = {}
         # One-shot marker for the storage-failure degradation (see
@@ -5229,6 +5229,7 @@ class UnifiedRadixCache(BasePrefixCache):
         matched_prefix_tokens: Optional[list[int]] = None,
         demand_restore: bool = False,
         host_alloc_attempt_id: Optional[str] = None,
+        prefetch_attempt_id: Optional[str] = None,
     ) -> Optional[str]:
         """Returns an outcome code for the P2-1 M1b state machine:
         "issued" / "declined_rate_limited" / "declined_too_short" /
@@ -5462,6 +5463,7 @@ class UnifiedRadixCache(BasePrefixCache):
             trace_context=trace_context,
         )
         operation.host_alloc_attempt_id = host_alloc_attempt_id
+        operation.prefetch_attempt_id = prefetch_attempt_id
         stats["issued"] += 1
         logger.info("[P2A] ts_ms=%d evt=prefetch_issued rid=%s prefetch_length=%d", int(time.time() * 1000), req_id, prefetch_length)
         try:
@@ -5657,7 +5659,9 @@ class UnifiedRadixCache(BasePrefixCache):
         if self.buffer_pipeline is not None:
             # No graft: release the rank-local tail beyond the synced usable
             # length, then park the bounce for admission-time consumption.
-            self.record_storage_prefetch_terminal(req_id, "finalized")
+            self.record_storage_prefetch_terminal(
+                req_id, "finalized", getattr(operation, "prefetch_attempt_id", None)
+            )
             return self.buffer_pipeline.stage_completed_prefetch(
                 req_id, completed_tokens, hash_value
             )
@@ -5722,7 +5726,9 @@ class UnifiedRadixCache(BasePrefixCache):
         del self.ongoing_prefetch[req_id]
         self._demand_restore_rids.discard(req_id)
         self.cache_controller.prefetch_tokens_occupied -= len(prefetch_key)
-        self.record_storage_prefetch_terminal(req_id, "finalized")
+        self.record_storage_prefetch_terminal(
+            req_id, "finalized", getattr(operation, "prefetch_attempt_id", None)
+        )
 
         self.prefetch_loaded_tokens_by_reqid[req_id] = loaded_from_storage
         logger.info(
@@ -5880,7 +5886,9 @@ class UnifiedRadixCache(BasePrefixCache):
                 self._prefetch_occupied_span(prefetch_key, host_indices)
             )
             self.prefetch_loaded_tokens_by_reqid[req_id] = 0
-            self.record_storage_prefetch_terminal(req_id, "finalized")
+            self.record_storage_prefetch_terminal(
+                req_id, "finalized", getattr(operation, "prefetch_attempt_id", None)
+            )
             logger.warning(
                 "HiCache hybrid prefetch discarded req=%s completed=%d requested=%d "
                 "kv_beliefs_kept_pages=%d",
@@ -6057,11 +6065,18 @@ class UnifiedRadixCache(BasePrefixCache):
     def pop_host_alloc_failure(self, req_id: str) -> Optional[HostAllocFailure]:
         return getattr(self, "_storage_prefetch_failures", {}).pop(req_id, None)
 
-    def record_storage_prefetch_terminal(self, req_id: str, outcome: str) -> None:
+    def record_storage_prefetch_terminal(
+        self,
+        req_id: str,
+        outcome: str,
+        attempt_id: Optional[str] = None,
+    ) -> None:
         """Record a terminal prefetch outcome for the scheduler's
         restore-state reconciliation (same thread: the drain runs inside the
         scheduler's event pass)."""
-        self._storage_prefetch_terminal[req_id] = outcome
+        self._storage_prefetch_terminal[req_id] = (
+            (attempt_id, outcome) if attempt_id is not None else outcome
+        )
 
     def pop_storage_prefetch_terminal(self, req_id: str) -> Optional[str]:
         """Consume the recorded terminal outcome once (None when absent)."""
@@ -6308,7 +6323,9 @@ class UnifiedRadixCache(BasePrefixCache):
             if revoke_reason == "alloc_failed"
             else "revoked_miss"
         )
-        self.record_storage_prefetch_terminal(req_id, terminal)
+        self.record_storage_prefetch_terminal(
+            req_id, terminal, getattr(operation, "prefetch_attempt_id", None)
+        )
         self._invalidate_absent_from_hit_query(operation)
         if self.buffer_pipeline is not None:
             self.buffer_pipeline.pop_prefix_ctx(req_id)

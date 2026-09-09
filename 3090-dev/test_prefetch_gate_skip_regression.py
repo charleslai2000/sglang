@@ -5,13 +5,27 @@ import enum
 import logging
 import time
 import unittest
+from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 
 
-class PrefetchIssueResult(enum.Enum):
+class HiCachePrefetchIssueStatus(enum.Enum):
     ISSUED = enum.auto()
-    DECLINED = enum.auto()
+    HELD = enum.auto()
+    SKIPPED_ACTIVE = enum.auto()
+    SKIPPED_STATE = enum.auto()
+    FAILED_BEFORE_ISSUE = enum.auto()
+
+
+@dataclass(frozen=True)
+class PrefetchIssueResult:
+    status: HiCachePrefetchIssueStatus
+    attempt_id: str | None
+    origin: object
+    reason: str
+    state_before: str
+    state_after: str
 
 
 class RestoreEvent:
@@ -37,6 +51,7 @@ def _load_prefetch_impl():
     )
     namespace = {
         "PrefetchIssueResult": PrefetchIssueResult,
+        "HiCachePrefetchIssueStatus": HiCachePrefetchIssueStatus,
         "RestoreEvent": RestoreEvent,
         "HiCachePrefetchOrigin": HiCachePrefetchOrigin,
         "Req": object,
@@ -101,6 +116,8 @@ class PrefetchGateSkipRegressionTests(unittest.TestCase):
         )
         scheduler.req = SimpleNamespace(
             rid="r1",
+            hicache_prefetch_active_attempt_id="r1:prefetch:1",
+            hicache_prefetch_active_origin=object(),
             last_host_node=42,
             prefix_indices=[],
             host_hit_length=0,
@@ -119,7 +136,7 @@ class PrefetchGateSkipRegressionTests(unittest.TestCase):
 
         result = impl(scheduler, scheduler.req, origin=object())
 
-        self.assertIs(result, PrefetchIssueResult.DECLINED)
+        self.assertIs(result.status, HiCachePrefetchIssueStatus.HELD)
         self.assertEqual(scheduler.frontier_waits, [("r1", 42)])
         self.assertEqual(
             scheduler.restore_events, [RestoreEvent.GATE_SKIP_FRONTIER]
@@ -132,7 +149,8 @@ class PrefetchGateSkipRegressionTests(unittest.TestCase):
 
         result = impl(scheduler, scheduler.req, origin=object())
 
-        self.assertIs(result, PrefetchIssueResult.DECLINED)
+        self.assertIs(result.status, HiCachePrefetchIssueStatus.ISSUED)
+        self.assertIsNotNone(result.attempt_id)
         self.assertEqual(scheduler.frontier_waits, [])
         self.assertEqual(len(scheduler.storage_calls), 1)
 

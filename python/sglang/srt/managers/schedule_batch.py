@@ -1051,6 +1051,9 @@ class Req(ReqDllmMixin):
         self.hicache_prefetch_active_origin = None
         self.hicache_prefetch_last_attempt_id: Optional[str] = None
         self.hicache_prefetch_last_origin = None
+        self.hicache_last_rh_decision_id: Optional[str] = None
+        self.hicache_last_rh_decision_fingerprint = None
+        self.hicache_request_enqueue_seq: Optional[int] = None
         # Cache-provided HOST_ALLOC cursor; the scheduler owns FIFO admission
         # and consumes at most one retry per observed generation vector.
         self.hicache_host_alloc_wait_cursor = None
