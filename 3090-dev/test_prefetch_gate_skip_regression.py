@@ -8,6 +8,7 @@ import unittest
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Optional
 
 
 class HiCachePrefetchIssueStatus(enum.Enum):
@@ -34,6 +35,7 @@ class RestoreEvent:
 
 
 class HiCachePrefetchOrigin:
+    READY_HORIZON = object()
     pass
 
 
@@ -51,6 +53,8 @@ def _load_prefetch_impl():
     )
     namespace = {
         "PrefetchIssueResult": PrefetchIssueResult,
+        "Optional": Optional,
+        "_ReadyHorizonPreparedMatch": object,
         "HiCachePrefetchIssueStatus": HiCachePrefetchIssueStatus,
         "RestoreEvent": RestoreEvent,
         "HiCachePrefetchOrigin": HiCachePrefetchOrigin,

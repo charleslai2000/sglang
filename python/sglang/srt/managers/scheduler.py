@@ -451,6 +451,32 @@ _HOST_ALLOC_WAKE_TELEMETRY_LAST = {}
 _HOST_ALLOC_WAKE_TELEMETRY_HOLDS = {}
 
 
+@dataclasses.dataclass(frozen=True)
+class _ReadyHorizonPreparedMatch:
+    """One-pass proof that RH observed the request's current prefix match."""
+
+    req: Req
+    rid: str
+    pass_seq: int
+    enqueue_seq: Optional[int]
+    session_generation: Optional[int]
+    retraction_count: int
+    fill_object_id: int
+    fill_len: int
+    output_len: int
+    extra_key: object
+    cache_salt: object
+    last_device_node: object
+    last_host_node: object
+    restore_state_before: str
+    match_duration_us: int
+    mamba_pool_idx_changed: bool
+    mamba_cow_src_changed: bool
+    mamba_needs_clear_changed: bool
+    mamba_alloc_calls_delta: int
+    mamba_evict_calls_delta: int
+
+
 # B1.5-PROBE (T31 rebase of T23; read-only instrumentation, appends JSON lines to
 # /tmp/b15-probe.log only, zero numeric-path change; removed after experiment)
 def _b15_log(rec):
@@ -3094,6 +3120,7 @@ class Scheduler(
         *,
         origin: HiCachePrefetchOrigin,
         demand_restore: bool = False,
+        prepared_match: Optional[_ReadyHorizonPreparedMatch] = None,
     ) -> PrefetchIssueResult:
         attempt_id = self._claim_prefetch(req, origin)
         if attempt_id is None:
@@ -3112,9 +3139,13 @@ class Scheduler(
                 state,
             )
         try:
-            result = self._prefetch_kvcache_impl(
-                req, origin=origin, demand_restore=demand_restore
-            )
+            impl_kwargs = {
+                "origin": origin,
+                "demand_restore": demand_restore,
+            }
+            if prepared_match is not None:
+                impl_kwargs["prepared_match"] = prepared_match
+            result = self._prefetch_kvcache_impl(req, **impl_kwargs)
         except Exception:
             self._release_prefetch_claim(req, attempt_id, "exception")
             raise
@@ -3138,6 +3169,7 @@ class Scheduler(
         *,
         origin: HiCachePrefetchOrigin,
         demand_restore: bool = False,
+        prepared_match: Optional[_ReadyHorizonPreparedMatch] = None,
     ) -> PrefetchIssueResult:
         state_before_value = getattr(req, "hicache_restore_state", None)
         state_before = (
@@ -3170,7 +3202,84 @@ class Scheduler(
         except Exception:
             pass
         if self.enable_hicache_storage:
-            req.init_next_round_input(self.tree_cache, cow_mamba=False)
+            if origin is HiCachePrefetchOrigin.READY_HORIZON:
+                pass_seq = getattr(self, "_rh_pass_seq", 0)
+                prepared_valid = (
+                    prepared_match is not None
+                    and self._rh_prepared_match_valid(
+                        req, prepared_match, pass_seq
+                    )
+                )
+                if not prepared_valid:
+                    self._emit_rh_match_prepare(
+                        req,
+                        pass_seq=pass_seq,
+                        result="invalidated",
+                        reason=(
+                            "ticket_missing"
+                            if prepared_match is None
+                            else "ticket_stale"
+                        ),
+                        prepared=prepared_match,
+                        fallback_rematch=True,
+                        match_count_for_pass=1,
+                    )
+                    mamba_before = self._rh_mamba_snapshot(req)
+                    match_started_ns = time.monotonic_ns()
+                    try:
+                        req.init_next_round_input(
+                            self.tree_cache, cow_mamba=False
+                        )
+                    except Exception:
+                        match_duration_us, mamba_delta = (
+                            self._rh_match_observation(
+                                req, mamba_before, match_started_ns
+                            )
+                        )
+                        self._emit_rh_match_prepare(
+                            req,
+                            pass_seq=pass_seq,
+                            result="failed",
+                            reason="fallback_rematch_failed",
+                            match_duration_us=match_duration_us,
+                            mamba_delta=mamba_delta,
+                            fallback_rematch=True,
+                            match_count_for_pass=2,
+                        )
+                        return result(
+                            HiCachePrefetchIssueStatus.FAILED_BEFORE_ISSUE,
+                            "match_prepare_failed",
+                        )
+                    match_duration_us, mamba_delta = self._rh_match_observation(
+                        req, mamba_before, match_started_ns
+                    )
+                    if not self._rh_current_match_anchors_valid(req):
+                        self._emit_rh_match_prepare(
+                            req,
+                            pass_seq=pass_seq,
+                            result="failed",
+                            reason="fallback_anchor_unknown",
+                            match_duration_us=match_duration_us,
+                            mamba_delta=mamba_delta,
+                            fallback_rematch=True,
+                            match_count_for_pass=2,
+                        )
+                        return result(
+                            HiCachePrefetchIssueStatus.FAILED_BEFORE_ISSUE,
+                            "match_prepare_failed",
+                        )
+                    self._emit_rh_match_prepare(
+                        req,
+                        pass_seq=pass_seq,
+                        result="prepared",
+                        reason="fallback_rematch",
+                        match_duration_us=match_duration_us,
+                        mamba_delta=mamba_delta,
+                        fallback_rematch=True,
+                        match_count_for_pass=2,
+                    )
+            else:
+                req.init_next_round_input(self.tree_cache, cow_mamba=False)
             tree_cache = self.tree_cache
             buffer_mode = self.server_args.hicache_host_memory_mode == "buffer_only"
             last_host_node = req.last_host_node
@@ -4123,6 +4232,412 @@ class Scheduler(
             field(attempt_id),
         )
 
+    def _rh_match_candidate(
+        self, req: Req, *, allow_active_attempt: bool = False
+    ) -> bool:
+        """Whether RH may refresh this request's match in this pass."""
+        return self._rh_match_candidate_reason(
+            req, allow_active_attempt=allow_active_attempt
+        ) is None
+
+    def _rh_match_candidate_reason(
+        self, req: Req, *, allow_active_attempt: bool = False
+    ) -> Optional[str]:
+        """Return a stable bounded reason when RH cannot refresh a request."""
+        if getattr(self, "chunked_req", None) is req:
+            return "active_chunk"
+        if (
+            not allow_active_attempt
+            and getattr(req, "hicache_prefetch_active_attempt_id", None) is not None
+        ):
+            return "active_attempt"
+        if getattr(req, "rid", None) in getattr(
+            self.tree_cache, "ongoing_prefetch", ()
+        ):
+            return "ongoing_prefetch"
+        finished = getattr(req, "finished", None)
+        if callable(finished) and finished():
+            return "finished"
+        if getattr(req, "to_finish", None) is not None:
+            return "to_finish"
+
+        state = getattr(req, "hicache_restore_state", None)
+        # Fresh queued requests have no restore episode yet; RH treats that
+        # value as the initial NONE state without persisting a new marker.
+        if state is None or state in (RestoreState.NONE, RestoreState.MISS_RECOMPUTE):
+            return None
+        if state is not RestoreState.WAIT_CAPACITY:
+            return "state_funnel"
+        reason = getattr(req, "hicache_restore_wait_reason", None)
+        if reason is RestoreWaitReason.PREFETCH_BUDGET or (
+            reason is RestoreWaitReason.DEVICE_QUOTA
+            and getattr(req, "host_hit_length", 0) == 0
+        ):
+            return None
+        return "wait_reason"
+
+    def _rh_state_name(self, req: Req) -> str:
+        state = getattr(req, "hicache_restore_state", None)
+        return state.name if state is not None else "NONE"
+
+    def _rh_value_fingerprint(self, value):
+        if value is None or isinstance(value, (bool, int, float, str, bytes)):
+            return value
+        try:
+            return value.detach().cpu().tolist()
+        except Exception:
+            return repr(value)
+
+    def _rh_counter_value(self, owner, names) -> int:
+        for name in names:
+            value = getattr(owner, name, None)
+            if isinstance(value, int):
+                return value
+        return 0
+
+    def _rh_mamba_snapshot(self, req):
+        pool = getattr(self, "req_to_token_pool", None)
+        if pool is None:
+            pool = getattr(self.tree_cache, "req_to_token_pool", None)
+        allocator = getattr(pool, "mamba_allocator", None)
+        alloc_owners = (allocator, self.tree_cache, self)
+        alloc_calls = next(
+            (
+                self._rh_counter_value(
+                    owner, ("mamba_alloc_calls", "alloc_calls", "_alloc_calls")
+                )
+                for owner in alloc_owners
+                if owner is not None
+                and any(
+                    isinstance(getattr(owner, name, None), int)
+                    for name in ("mamba_alloc_calls", "alloc_calls", "_alloc_calls")
+                )
+            ),
+            0,
+        )
+        evict_calls = next(
+            (
+                self._rh_counter_value(
+                    owner, ("mamba_evict_calls", "evict_calls", "_evict_calls")
+                )
+                for owner in (self.tree_cache, self)
+                if owner is not None
+                and any(
+                    isinstance(getattr(owner, name, None), int)
+                    for name in ("mamba_evict_calls", "evict_calls", "_evict_calls")
+                )
+            ),
+            0,
+        )
+        return (
+            self._rh_value_fingerprint(getattr(req, "mamba_pool_idx", None)),
+            self._rh_value_fingerprint(getattr(req, "mamba_cow_src_index", None)),
+            bool(getattr(req, "mamba_needs_clear", False)),
+            alloc_calls,
+            evict_calls,
+        )
+
+    def _rh_match_observation(self, req, before, started_ns):
+        try:
+            after = self._rh_mamba_snapshot(req)
+        except Exception:
+            after = before
+        return (
+            max(0, (time.monotonic_ns() - started_ns) // 1000),
+            (
+                before[0] != after[0],
+                before[1] != after[1],
+                before[2] != after[2],
+                after[3] - before[3],
+                after[4] - before[4],
+            ),
+        )
+
+    def _emit_rh_match_prepare(
+        self,
+        req: Req,
+        *,
+        pass_seq: int,
+        result: str,
+        reason: str,
+        prepared: Optional[_ReadyHorizonPreparedMatch] = None,
+        fallback_rematch: bool = False,
+        match_duration_us: Optional[int] = None,
+        mamba_delta=(False, False, False, 0, 0),
+        match_count_for_pass: Optional[int] = None,
+    ) -> None:
+        """Emit bounded, observational preparation data; never drives policy."""
+        host_anchor = prepared.last_host_node if prepared is not None else getattr(
+            req, "last_host_node", None
+        )
+        device_anchor = (
+            prepared.last_device_node
+            if prepared is not None
+            else getattr(req, "last_node", None)
+        )
+        server_args = getattr(self, "server_args", None)
+        buffer_mode = getattr(server_args, "hicache_host_memory_mode", "cache") == "buffer_only"
+        anchor = host_anchor
+        node_exists_fn = getattr(self.tree_cache, "node_exists", None)
+        is_root = getattr(self.tree_cache, "is_root", None)
+        anchor_kind = "unknown"
+        if buffer_mode and callable(is_root):
+            try:
+                if (
+                    host_anchor is not None
+                    and device_anchor is not None
+                    and is_root(host_anchor)
+                    and not is_root(device_anchor)
+                ):
+                    anchor = device_anchor
+                    anchor_kind = "buffer_device_fallback"
+            except Exception:
+                pass
+        anchor_exists = False
+        if anchor is not None and callable(node_exists_fn):
+            try:
+                anchor_exists = bool(node_exists_fn(anchor))
+            except Exception:
+                anchor_exists = False
+        gate_ok = False
+        gate_fn = getattr(self.tree_cache, "prefetch_gate_ok", None)
+        if anchor_exists and callable(gate_fn):
+            try:
+                gate_ok = bool(
+                    gate_fn(
+                        anchor,
+                        buffer_mode,
+                    )
+                )
+            except Exception:
+                gate_ok = False
+        if anchor_kind == "unknown" and anchor_exists and callable(is_root):
+            try:
+                anchor_kind = "root" if is_root(anchor) else "node"
+            except Exception:
+                anchor_kind = "unknown"
+        field = lambda value: "null" if value is None else value
+        if match_count_for_pass is None:
+            match_count_for_pass = 2 if fallback_rematch else 1
+        if prepared is not None:
+            restore_state_before = prepared.restore_state_before
+            fill_len = prepared.fill_len
+            match_duration_us = (
+                prepared.match_duration_us
+                if match_duration_us is None
+                else match_duration_us
+            )
+            mamba_delta = (
+                prepared.mamba_pool_idx_changed,
+                prepared.mamba_cow_src_changed,
+                prepared.mamba_needs_clear_changed,
+                prepared.mamba_alloc_calls_delta,
+                prepared.mamba_evict_calls_delta,
+            )
+        else:
+            restore_state_before = self._rh_state_name(req)
+            fill_len = len(getattr(req, "full_untruncated_fill_ids", ()) or ())
+        decision_id = getattr(req, "hicache_last_rh_decision_id", None)
+        if decision_id is None and pass_seq > 0:
+            decision_id = f"{req.rid}:rh:{pass_seq}"
+        attempt_id = getattr(req, "hicache_prefetch_active_attempt_id", None)
+        try:
+            logger.info(
+                "[P3] ts_ns=%d evt=rh_match_prepare schema=rh_match_prepare.v1 "
+                "rid=%s enqueue_seq=%s pass_seq=%d decision_id=%s attempt_id=%s "
+                "session_generation=%s retraction_count=%d restore_state_before=%s "
+                "result=%s reason=%s fill_len=%s device_hit_tokens=%s "
+                "host_hit_tokens=%s anchor_kind=%s anchor_id=%s anchor_exists=%s "
+                "anchor_gate_ok=%s cow_mamba=false match_duration_us=%s "
+                "match_count_for_pass=%d fallback_rematch=%s "
+                "mamba_pool_idx_changed=%s mamba_cow_src_changed=%s "
+                "mamba_needs_clear_changed=%s mamba_alloc_calls_delta=%d "
+                "mamba_evict_calls_delta=%d",
+                time.monotonic_ns(),
+                req.rid,
+                field(getattr(req, "hicache_request_enqueue_seq", None)),
+                pass_seq,
+                field(decision_id),
+                field(attempt_id),
+                getattr(req, "session_generation", None),
+                getattr(req, "retraction_count", 0),
+                restore_state_before,
+                result,
+                reason,
+                fill_len,
+                len(getattr(req, "prefix_indices", ()) or ()),
+                getattr(req, "host_hit_length", 0),
+                anchor_kind,
+                field(str(anchor) if anchor is not None else None),
+                anchor_exists,
+                gate_ok,
+                field(match_duration_us),
+                match_count_for_pass,
+                fallback_rematch,
+                mamba_delta[0],
+                mamba_delta[1],
+                mamba_delta[2],
+                mamba_delta[3],
+                mamba_delta[4],
+            )
+        except Exception:
+            pass
+
+    def _rh_current_match_anchors_valid(self, req: Req) -> bool:
+        fill_ids = getattr(req, "full_untruncated_fill_ids", None)
+        last_host_node = getattr(req, "last_host_node", None)
+        node_exists = getattr(self.tree_cache, "node_exists", None)
+        if (
+            fill_ids is None
+            or last_host_node is None
+            or not callable(node_exists)
+        ):
+            return False
+        try:
+            if not node_exists(last_host_node):
+                return False
+            last_device_node = getattr(req, "last_node", None)
+            return last_device_node is None or bool(node_exists(last_device_node))
+        except Exception:
+            return False
+
+    def _prepare_ready_horizon_match(
+        self, req: Req, pass_seq: int
+    ) -> Optional[_ReadyHorizonPreparedMatch]:
+        """Refresh one candidate exactly once, without Mamba COW/allocation."""
+        candidate_reason = self._rh_match_candidate_reason(req)
+        if candidate_reason is not None:
+            self._emit_rh_match_prepare(
+                req,
+                pass_seq=pass_seq,
+                result=(
+                    "skipped"
+                    if candidate_reason in ("active_attempt", "ongoing_prefetch")
+                    else "ineligible"
+                ),
+                reason=candidate_reason,
+                match_count_for_pass=0,
+            )
+            return None
+        restore_state_before = self._rh_state_name(req)
+        mamba_before = self._rh_mamba_snapshot(req)
+        match_started_ns = time.monotonic_ns()
+        try:
+            req.init_next_round_input(self.tree_cache, cow_mamba=False)
+        except Exception:
+            match_duration_us, mamba_delta = self._rh_match_observation(
+                req, mamba_before, match_started_ns
+            )
+            self._emit_rh_match_prepare(
+                req,
+                pass_seq=pass_seq,
+                result="failed",
+                reason="match_prepare_failed",
+                match_duration_us=match_duration_us,
+                mamba_delta=mamba_delta,
+            )
+            return None
+        match_duration_us, mamba_delta = self._rh_match_observation(
+            req, mamba_before, match_started_ns
+        )
+
+        fill_ids = getattr(req, "full_untruncated_fill_ids", None)
+        last_host_node = getattr(req, "last_host_node", None)
+        anchors_exist = self._rh_current_match_anchors_valid(req)
+        last_device_node = getattr(req, "last_node", None)
+        if not anchors_exist:
+            self._emit_rh_match_prepare(
+                req,
+                pass_seq=pass_seq,
+                result="failed",
+                reason="anchor_unknown",
+                match_duration_us=match_duration_us,
+                mamba_delta=mamba_delta,
+            )
+            return None
+
+        prepared = _ReadyHorizonPreparedMatch(
+            req=req,
+            rid=req.rid,
+            pass_seq=pass_seq,
+            enqueue_seq=getattr(req, "hicache_request_enqueue_seq", None),
+            session_generation=getattr(req, "session_generation", None),
+            retraction_count=getattr(req, "retraction_count", 0),
+            fill_object_id=id(fill_ids),
+            fill_len=len(fill_ids),
+            output_len=len(getattr(req, "output_ids", ()) or ()),
+            extra_key=getattr(req, "extra_key", None),
+            cache_salt=getattr(req, "cache_salt", None),
+            last_device_node=last_device_node,
+            last_host_node=last_host_node,
+            restore_state_before=restore_state_before,
+            match_duration_us=match_duration_us,
+            mamba_pool_idx_changed=mamba_delta[0],
+            mamba_cow_src_changed=mamba_delta[1],
+            mamba_needs_clear_changed=mamba_delta[2],
+            mamba_alloc_calls_delta=mamba_delta[3],
+            mamba_evict_calls_delta=mamba_delta[4],
+        )
+        self._emit_rh_match_prepare(
+            req,
+            pass_seq=pass_seq,
+            result="prepared",
+            reason="current_match",
+            prepared=prepared,
+            match_duration_us=match_duration_us,
+            mamba_delta=mamba_delta,
+        )
+        return prepared
+
+    def _rh_prepared_match_valid(
+        self,
+        req: Req,
+        prepared: _ReadyHorizonPreparedMatch,
+        pass_seq: int,
+    ) -> bool:
+        """Validate the ephemeral RH match proof immediately before issue."""
+        if prepared.req is not req or prepared.rid != req.rid:
+            return False
+        if prepared.pass_seq != pass_seq:
+            return False
+        if getattr(req, "hicache_request_enqueue_seq", None) != prepared.enqueue_seq:
+            return False
+        if getattr(req, "session_generation", None) != prepared.session_generation:
+            return False
+        if getattr(req, "retraction_count", 0) != prepared.retraction_count:
+            return False
+        fill_ids = getattr(req, "full_untruncated_fill_ids", None)
+        if (
+            fill_ids is None
+            or id(fill_ids) != prepared.fill_object_id
+            or len(fill_ids) != prepared.fill_len
+        ):
+            return False
+        if len(getattr(req, "output_ids", ()) or ()) != prepared.output_len:
+            return False
+        if getattr(req, "extra_key", None) != prepared.extra_key:
+            return False
+        if getattr(req, "cache_salt", None) != prepared.cache_salt:
+            return False
+        if getattr(req, "last_node", None) != prepared.last_device_node:
+            return False
+        if getattr(req, "last_host_node", None) != prepared.last_host_node:
+            return False
+        finished = getattr(req, "finished", None)
+        if (callable(finished) and finished()) or getattr(req, "to_finish", None) is not None:
+            return False
+        state = getattr(req, "hicache_restore_state", None)
+        if state in (RestoreState.RESTORING, RestoreState.READY):
+            return False
+        if not self._rh_match_candidate_without_active_attempt(req):
+            return False
+        if not self._rh_current_match_anchors_valid(req):
+            return False
+        return True
+
+    def _rh_match_candidate_without_active_attempt(self, req: Req) -> bool:
+        return self._rh_match_candidate(req, allow_active_attempt=True)
+
     def _ready_horizon_pass(self) -> None:
         """P3 Ready Horizon v0 (3.2): maintain the READY_HOST pool.
 
@@ -4146,9 +4661,8 @@ class Scheduler(
             return
         policy = self.ready_horizon
         frontier_reqs = policy.frontier(self.waiting_queue)
-        views = self._ready_horizon_views(frontier_reqs)
         now = time.perf_counter()
-        epochs = self._ready_horizon_epochs(frontier_reqs, views, cc)
+        epochs = self._ready_horizon_epochs(frontier_reqs, [], cc)
         event = policy.epoch_event(self._ready_horizon_epoch_prev, epochs)
         # The snapshot tracks the previous pass, not the last check: a
         # release that merely returns a counter to its pre-issue value
@@ -4161,6 +4675,13 @@ class Scheduler(
         ):
             return
         self._ready_horizon_last_refill_ts = now
+
+        prepared_matches = {}
+        for req in frontier_reqs:
+            prepared = self._prepare_ready_horizon_match(req, self._rh_pass_seq)
+            if prepared is not None:
+                prepared_matches[req.rid] = prepared
+        views = self._ready_horizon_views(frontier_reqs, prepared_matches)
 
         frontier_rids = {r.rid for r in frontier_reqs}
         self._ready_horizon_negatives = {
@@ -4252,8 +4773,11 @@ class Scheduler(
                 self._park_ready_decline(rid, view, reason, epochs, now)
         for view in plan.to_issue:
             req = view.req
+            prepared_match = prepared_matches.pop(req.rid, None)
             result = self._prefetch_kvcache(
-                req, origin=HiCachePrefetchOrigin.READY_HORIZON
+                req,
+                origin=HiCachePrefetchOrigin.READY_HORIZON,
+                prepared_match=prepared_match,
             )
             state = req.hicache_restore_state
             result_status = (
@@ -4408,7 +4932,7 @@ class Scheduler(
                 return view
         return None
 
-    def _ready_horizon_views(self, frontier_reqs) -> list:
+    def _ready_horizon_views(self, frontier_reqs, prepared_matches=None) -> list:
         """Frozen per-request frontier views for the ready-pool policy
         (M6: the staged marker is the finalize-written, admission-consumed
         residency count; the full-prefix gate is resident-material-present
@@ -4416,6 +4940,12 @@ class Scheduler(
         buffer_mode = self.server_args.hicache_host_memory_mode == "buffer_only"
         views = []
         for req in frontier_reqs:
+            state = getattr(req, "hicache_restore_state", None)
+            if state is None:
+                state = RestoreState.NONE
+            match_current = (
+                prepared_matches is None or req.rid in prepared_matches
+            )
             staged = (
                 self.tree_cache.staged_prefetch_tokens(req.rid)
                 if buffer_mode
@@ -4426,13 +4956,15 @@ class Scheduler(
                 ReadyHorizonView(
                     req=req,
                     rid=req.rid,
-                    state=req.hicache_restore_state,
+                    state=state,
                     wait_reason=req.hicache_restore_wait_reason,
                     staged_tokens=staged,
                     # the finalize writes the marker (> 0) on a full restore
                     full_prefix=staged > 0,
                     host_hit_length=req.host_hit_length,
-                    staging_eligible=self._restore_potential_for(req),
+                    staging_eligible=(
+                        match_current and self._restore_potential_for(req)
+                    ),
                     prefix_len=len(req.full_untruncated_fill_ids) if req.full_untruncated_fill_ids is not None else 0,
                     generation=generation,
                 )
