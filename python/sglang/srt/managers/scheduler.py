@@ -4796,6 +4796,13 @@ class Scheduler(
             issued = status_issued and result_attempt_id is not None
             if status_issued and result_attempt_id is None:
                 result_reason = "missing_attempt_id"
+            post_issue_epochs = CausalEpochs(
+                l3_publish=epochs.l3_publish,
+                host_headroom=epochs.host_headroom,
+                host_release=epochs.host_release,
+                spec_budget=cc.inflight_speculative_tokens,
+                waiting_frontier=epochs.waiting_frontier,
+            )
             if issued:
                 decision, reason = "issue", "issued"
             elif result_status is HiCachePrefetchIssueStatus.SKIPPED_ACTIVE:
@@ -4869,11 +4876,15 @@ class Scheduler(
                 # A synchronous decline: the horizon cannot stage this rid
                 # until the causal epoch that resolves the decline
                 # advances. The budget rate-limit is the testable one.
-                if cc.prefetch_rate_limited() or cc.prefetch_speculative_rate_limited():
+                if cc.prefetch_speculative_rate_limited():
                     self._park_ready_decline(
-                        req.rid, view, DeclineReason.SPEC_BUDGET, epochs, now
+                        req.rid,
+                        view,
+                        DeclineReason.SPEC_BUDGET,
+                        post_issue_epochs,
+                        now,
                     )
-            elif cc.prefetch_rate_limited() or cc.prefetch_speculative_rate_limited():
+            elif cc.prefetch_speculative_rate_limited():
                 # The issue just exhausted an inflight budget: every
                 # remaining candidate would decline identically (the e7
                 # attempt-only spinner class), so park the un-tried tail
@@ -4882,8 +4893,17 @@ class Scheduler(
                     if rest.rid in plan.to_issue or rest.rid == req.rid:
                         continue
                     self._park_ready_decline(
-                        rest.rid, rest, DeclineReason.SPEC_BUDGET, epochs, now
+                        rest.rid,
+                        rest,
+                        DeclineReason.SPEC_BUDGET,
+                        post_issue_epochs,
+                        now,
                     )
+                break
+            elif cc.prefetch_rate_limited():
+                # A physical-only limiter has no subscribed speculative
+                # epoch; stop this pass without assigning a speculative
+                # negative-cache cursor.
                 break
 
         if (plan.ready_count, plan.ready_tokens) != self._ready_horizon_last_log:

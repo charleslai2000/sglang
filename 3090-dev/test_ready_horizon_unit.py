@@ -1032,6 +1032,70 @@ class ReadyHorizonPassTests(unittest.TestCase):
         self.assertEqual(scheduler.issued, [])
         self.assertEqual(scheduler.evicted, [])
 
+    def test_spec_budget_park_uses_post_issue_cursor_and_wakes_on_release(self):
+        # The first issue fills the speculative budget. The un-tried tail
+        # must park at the observed post-issue counter, not the pass's
+        # pre-issue snapshot (which is zero in this shape).
+        patch, clock = self._clock_patch()
+        with patch:
+            cc = _Cc(spec_limit=CHAIN_TOKENS)
+            scheduler = _pass_scheduler(
+                queue=[_req("r1", NONE), _req("r2", NONE)], cc=cc
+            )
+
+            def issue(req, *, origin, demand_restore=False, prepared_match=None):
+                cc.inflight_speculative_tokens += CHAIN_TOKENS
+                req.hicache_restore_state = RESTORING
+                scheduler.issued.append(req.rid)
+                return PrefetchIssueResult(
+                    status=PrefetchIssueResult.ISSUED,
+                    attempt_id=f"{req.rid}:prefetch:1",
+                    origin=origin,
+                    reason="issued",
+                    state_before=NONE.name,
+                    state_after=RESTORING.name,
+                )
+
+            scheduler._prefetch_kvcache = issue
+            scheduler._ready_horizon_pass()
+            self.assertEqual(scheduler.issued, ["r1"])
+            entry = scheduler._ready_horizon_negatives["r2"]
+            self.assertEqual(entry.reason, SPEC_BUDGET)
+            self.assertEqual(entry.epoch_cursor, CHAIN_TOKENS)
+
+            # A budget release below the parked cursor is causal and wakes
+            # the candidate once the safety fuse has elapsed.
+            cc.inflight_speculative_tokens = 0
+            clock.advance(10.0)
+            scheduler._ready_horizon_pass()
+            self.assertEqual(scheduler.issued, ["r1", "r2"])
+
+    def test_physical_only_limiter_does_not_create_spec_budget_park(self):
+        # A physical-only exhaustion is not a speculative-budget event and
+        # must not record a speculative cursor for the un-tried tail.
+        cc = _Cc(physical_limit=CHAIN_TOKENS)
+        scheduler = _pass_scheduler(
+            queue=[_req("r1", NONE), _req("r2", NONE)], cc=cc
+        )
+
+        def issue(req, *, origin, demand_restore=False, prepared_match=None):
+            cc.prefetch_tokens_occupied += CHAIN_TOKENS
+            req.hicache_restore_state = RESTORING
+            scheduler.issued.append(req.rid)
+            return PrefetchIssueResult(
+                status=PrefetchIssueResult.ISSUED,
+                attempt_id=f"{req.rid}:prefetch:1",
+                origin=origin,
+                reason="issued",
+                state_before=NONE.name,
+                state_after=RESTORING.name,
+            )
+
+        scheduler._prefetch_kvcache = issue
+        scheduler._ready_horizon_pass()
+        self.assertEqual(scheduler.issued, ["r1"])
+        self.assertNotIn("r2", scheduler._ready_horizon_negatives)
+
     def test_no_headroom_park_wakes_on_release_epoch_not_level(self):
         # Fix A end-to-end (the B-run permanent-freeze regression):
         # 1) host headroom insufficient -> NO_HEADROOM park recorded at the
