@@ -4441,42 +4441,30 @@ class Scheduler(
         attempt_id = getattr(req, "hicache_prefetch_active_attempt_id", None)
         try:
             logger.info(
-                "[P3] ts_ns=%d evt=rh_match_prepare schema=rh_match_prepare.v1 "
-                "rid=%s enqueue_seq=%s pass_seq=%d decision_id=%s attempt_id=%s "
-                "session_generation=%s retraction_count=%d restore_state_before=%s "
-                "result=%s reason=%s fill_len=%s device_hit_tokens=%s "
-                "host_hit_tokens=%s anchor_kind=%s anchor_id=%s anchor_exists=%s "
-                "anchor_gate_ok=%s cow_mamba=false match_duration_us=%s "
-                "match_count_for_pass=%d fallback_rematch=%s "
-                "mamba_pool_idx_changed=%s mamba_cow_src_changed=%s "
-                "mamba_needs_clear_changed=%s mamba_alloc_calls_delta=%d "
-                "mamba_evict_calls_delta=%d",
-                time.monotonic_ns(),
-                req.rid,
-                field(getattr(req, "hicache_request_enqueue_seq", None)),
-                pass_seq,
-                field(decision_id),
-                field(attempt_id),
-                field(getattr(req, "session_generation", None)),
-                getattr(req, "retraction_count", 0),
-                restore_state_before,
-                result,
-                reason,
-                fill_len,
-                len(getattr(req, "prefix_indices", ()) or ()),
-                getattr(req, "host_hit_length", 0),
-                anchor_kind,
-                field(str(anchor) if anchor is not None else None),
-                anchor_exists,
-                gate_ok,
-                field(match_duration_us),
-                match_count_for_pass,
-                fallback_rematch,
-                mamba_delta[0],
-                mamba_delta[1],
-                mamba_delta[2],
-                mamba_delta[3],
-                mamba_delta[4],
+                f"[P3] ts_ns={time.monotonic_ns()} "
+                "evt=rh_match_prepare schema=rh_match_prepare.v1 "
+                f"rid={req.rid} "
+                "enqueue_seq="
+                f"{field(getattr(req, 'hicache_request_enqueue_seq', None))} "
+                f"pass_seq={pass_seq} decision_id={field(decision_id)} "
+                f"attempt_id={field(attempt_id)} "
+                f"session_generation={field(getattr(req, 'session_generation', None))} "
+                f"retraction_count={getattr(req, 'retraction_count', 0) or 0} "
+                f"restore_state_before={restore_state_before} result={result} "
+                f"reason={reason} fill_len={fill_len} "
+                f"device_hit_tokens={len(getattr(req, 'prefix_indices', ()) or ())} "
+                f"host_hit_tokens={getattr(req, 'host_hit_length', 0)} "
+                f"anchor_kind={anchor_kind} "
+                f"anchor_id={field(str(anchor) if anchor is not None else None)} "
+                f"anchor_exists={anchor_exists} anchor_gate_ok={gate_ok} "
+                f"cow_mamba=false match_duration_us={field(match_duration_us)} "
+                f"match_count_for_pass={match_count_for_pass} "
+                f"fallback_rematch={fallback_rematch} "
+                f"mamba_pool_idx_changed={mamba_delta[0]} "
+                f"mamba_cow_src_changed={mamba_delta[1]} "
+                f"mamba_needs_clear_changed={mamba_delta[2]} "
+                f"mamba_alloc_calls_delta={mamba_delta[3]} "
+                f"mamba_evict_calls_delta={mamba_delta[4]}"
             )
         except Exception:
             pass
