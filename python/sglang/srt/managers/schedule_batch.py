@@ -1043,6 +1043,12 @@ class Req(ReqDllmMixin):
         self.hicache_restore_state: Optional[RestoreState] = None
         self.hicache_restore_wait_reason: Optional[RestoreWaitReason] = None
         self.hicache_restore_state_ts: float = 0.0
+        # Cache-provided HOST_ALLOC cursor; the scheduler owns FIFO admission
+        # and consumes at most one retry per observed generation vector.
+        self.hicache_host_alloc_wait_cursor = None
+        self.hicache_host_alloc_attempt_id: Optional[str] = None
+        self.hicache_host_alloc_last_attempt_id: Optional[str] = None
+        self.hicache_host_alloc_attempt_snapshot = None
         # P1 sticky-miss negative evidence (RestoreState.MISS_RECOMPUTE),
         # phase2-peranchor: the ANCHOR's per-anchor storage_version at which
         # the request's prefix was proven L3-missing, the anchor node it was
