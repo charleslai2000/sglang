@@ -460,6 +460,42 @@ class RHContractDependencyFreeTests(unittest.TestCase):
         self.assertIn("match_duration_us=null", record)
         self.assertIn("retraction_count=0", record)
 
+    def test_match_preparation_emits_safe_failure_marker_for_field_error(self):
+        scheduler, req, _, _, _, logger = self._issue_scheduler()
+
+        class FailingLength:
+            def __len__(self):
+                raise RuntimeError("injected telemetry accessor failure")
+
+        req.prefix_indices = FailingLength()
+        scheduler._emit_rh_match_prepare(
+            req,
+            pass_seq=2,
+            result="prepared",
+            reason="current_match",
+        )
+
+        records = self._log_text(logger)
+        failure_records = [
+            record
+            for record in records
+            if "schema=rh_match_prepare_emit_failed.v1" in record
+        ]
+        self.assertEqual(len(failure_records), 1)
+        self.assertIn("rid=r1", failure_records[0])
+        self.assertIn("exception_class=RuntimeError", failure_records[0])
+        self.assertNotIn("schema=rh_match_prepare.v1", failure_records[0])
+        self.assertEqual(
+            set(failure_records[0].split()),
+            {
+                "[P3]",
+                "evt=rh_match_prepare_emit_failed",
+                "schema=rh_match_prepare_emit_failed.v1",
+                "rid=r1",
+                "exception_class=RuntimeError",
+            },
+        )
+
     def test_real_impl_invalid_ticket_rematches_exactly_once(self):
         scheduler, req, _, storage, events, logger = self._issue_scheduler()
         prepared = scheduler._prepare_ready_horizon_match(req, pass_seq=3)

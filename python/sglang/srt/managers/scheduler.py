@@ -4419,6 +4419,7 @@ class Scheduler(
         field = lambda value: "null" if value is None else value
         if match_count_for_pass is None:
             match_count_for_pass = 2 if fallback_rematch else 1
+        safe_rid = req.rid
         if prepared is not None:
             restore_state_before = prepared.restore_state_before
             fill_len = prepared.fill_len
@@ -4437,13 +4438,13 @@ class Scheduler(
         else:
             restore_state_before = self._rh_state_name(req)
             fill_len = len(getattr(req, "full_untruncated_fill_ids", ()) or ())
-        decision_id = f"{req.rid}:rh:{pass_seq}" if pass_seq > 0 else None
+        decision_id = f"{safe_rid}:rh:{pass_seq}" if pass_seq > 0 else None
         attempt_id = getattr(req, "hicache_prefetch_active_attempt_id", None)
         try:
             logger.info(
                 f"[P3] ts_ns={time.monotonic_ns()} "
                 "evt=rh_match_prepare schema=rh_match_prepare.v1 "
-                f"rid={req.rid} "
+                f"rid={safe_rid} "
                 "enqueue_seq="
                 f"{field(getattr(req, 'hicache_request_enqueue_seq', None))} "
                 f"pass_seq={pass_seq} decision_id={field(decision_id)} "
@@ -4466,8 +4467,15 @@ class Scheduler(
                 f"mamba_alloc_calls_delta={mamba_delta[3]} "
                 f"mamba_evict_calls_delta={mamba_delta[4]}"
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            try:
+                logger.info(
+                    "[P3] evt=rh_match_prepare_emit_failed "
+                    "schema=rh_match_prepare_emit_failed.v1 "
+                    f"rid={safe_rid} exception_class={type(exc).__name__}"
+                )
+            except Exception:
+                pass
 
     def _rh_current_match_anchors_valid(self, req: Req) -> bool:
         fill_ids = getattr(req, "full_untruncated_fill_ids", None)
