@@ -3231,11 +3231,7 @@ class Scheduler(
                         req.rid,
                         last_host_node,
                     )
-                return (
-                    PrefetchIssueResult.ISSUED
-                    if outcome == "issued"
-                    else PrefetchIssueResult.DECLINED
-                )
+                return PrefetchIssueResult.DECLINED
             return PrefetchIssueResult.DECLINED
         return PrefetchIssueResult.SKIPPED
 
