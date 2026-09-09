@@ -2,6 +2,7 @@
 
 import ast
 import logging
+import re
 import time
 import unittest
 from pathlib import Path
@@ -122,6 +123,76 @@ class RHContractDependencyFreeTests(unittest.TestCase):
             self.assertIn(schema, source)
             for field in fields:
                 self.assertIn(field, source)
+
+    def test_issue_join_uses_returned_attempt_and_event_order(self):
+        source = SCHEDULER.read_text()
+        ready_pass = next(
+            node
+            for node in ast.walk(ast.parse(source))
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "_ready_horizon_pass"
+        )
+        prefetch_line = next(
+            node.lineno
+            for node in ast.walk(ready_pass)
+            if isinstance(node, ast.Assign)
+            and isinstance(node.value, ast.Call)
+            and isinstance(node.value.func, ast.Attribute)
+            and node.value.func.attr == "_prefetch_kvcache"
+        )
+        issue_emit_lines = [
+            node.lineno
+            for node in ast.walk(ready_pass)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "_emit_rh_decision"
+        ]
+        post_issue_emit = [line for line in issue_emit_lines if line > prefetch_line]
+        self.assertTrue(post_issue_emit)
+        post_issue_calls = [
+            node
+            for node in ast.walk(ready_pass)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "_emit_rh_decision"
+            and node.lineno > prefetch_line
+        ]
+        self.assertTrue(
+            any(
+                keyword.arg == "attempt_id"
+                and isinstance(keyword.value, ast.Name)
+                and keyword.value.id == "result_attempt_id"
+                for call in post_issue_calls
+                for keyword in call.keywords
+            )
+        )
+
+        records = [
+            "evt=rh_preadmission_decision schema=rh_preadmission.v1 rid=r1 decision=issue attempt_id=N",
+            "evt=ready_stage schema=rh_stage.v2 rid=r1 attempt_id=N result=issued",
+            "evt=ready_host schema=rh_ready_host.v1 rid=r1 attempt_id=N finalize_result=accepted",
+            "evt=admission.v2 schema=rh_admission.v2 rid=r1 hicache_prefetch_attempt_id=N can_run=true",
+        ]
+        fields = {
+            "rid": lambda record: re.search(r"\brid=(\S+)", record).group(1),
+            "attempt": lambda record: re.search(
+                r"\b(?:attempt_id|hicache_prefetch_attempt_id)=(\S+)", record
+            ).group(1),
+        }
+        parsed = [
+            (fields["rid"](record), fields["attempt"](record))
+            for record in records
+        ]
+        self.assertEqual(parsed, [("r1", "N")] * 4)
+        self.assertEqual(
+            [
+                "rh_preadmission.v1",
+                "rh_stage.v2",
+                "rh_ready_host.v1",
+                "rh_admission.v2",
+            ],
+            [re.search(r"\bschema=(\S+)", record).group(1) for record in records],
+        )
 
     def test_ready_host_aux_fields_come_from_finalizer_completion(self):
         methods = _load_unified_cache_methods(

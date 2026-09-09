@@ -892,10 +892,19 @@ def _pass_scheduler(
     def _issue(req, *, origin, demand_restore=False):
         # Mirror the real T1 wiring: a successful issue transitions the
         # request to RESTORING, so it leaves the candidate set.
+        attempt_id = f"{req.rid}:prefetch:1"
+        req.hicache_prefetch_active_attempt_id = attempt_id
         req.hicache_restore_state = RESTORING
         scheduler.issued.append(req.rid)
         scheduler.issue_origins.append(origin)
-        return PrefetchIssueResult.ISSUED
+        return PrefetchIssueResult(
+            status=PrefetchIssueResult.ISSUED,
+            attempt_id=attempt_id,
+            origin=origin,
+            reason="issued",
+            state_before=NONE.name,
+            state_after=RESTORING.name,
+        )
 
     scheduler._prefetch_kvcache = _issue
     scheduler.issue_origins = []
@@ -1189,6 +1198,45 @@ class ReadyHorizonPassTests(unittest.TestCase):
             any("evt=ready_stage.v2 rid=r1" in m and "result=issued" in m for m in logs.output),
             logs.output,
         )
+
+    def test_issue_decision_precedes_stage_with_claimed_attempt_id(self):
+        scheduler = _pass_scheduler(queue=[_req("r1", NONE)])
+        with self.assertLogs("sglang.srt.managers.scheduler", level="INFO") as logs:
+            scheduler._ready_horizon_pass()
+        decision = next(
+            m for m in logs.output if "schema=rh_preadmission.v1" in m
+        )
+        stage = next(m for m in logs.output if "schema=rh_stage.v2" in m)
+        self.assertIn("decision=issue", decision)
+        self.assertIn("attempt_id=r1:prefetch:1", decision)
+        self.assertIn("attempt_id=r1:prefetch:1", stage)
+        self.assertLess(logs.output.index(decision), logs.output.index(stage))
+
+    def test_failed_issue_is_hold_and_never_false_issue(self):
+        scheduler = _pass_scheduler(queue=[_req("r1", NONE)])
+
+        def decline(req, *, origin, demand_restore=False):
+            return PrefetchIssueResult(
+                status=PrefetchIssueResult.DECLINED,
+                attempt_id="r1:prefetch:1",
+                origin=origin,
+                reason="declined_rate_limited",
+                state_before=NONE.name,
+                state_after=NONE.name,
+            )
+
+        scheduler._prefetch_kvcache = decline
+        with self.assertLogs("sglang.srt.managers.scheduler", level="INFO") as logs:
+            scheduler._ready_horizon_pass()
+        decision = next(
+            m for m in logs.output if "schema=rh_preadmission.v1" in m
+        )
+        stage = next(m for m in logs.output if "schema=rh_stage.v2" in m)
+        self.assertIn("decision=hold", decision)
+        self.assertIn("reason=physical_budget", decision)
+        self.assertNotIn("decision=issue", decision)
+        self.assertIn("result=held", stage)
+        self.assertIn("reason=declined_rate_limited", stage)
 
 
 class _FakeClock:
