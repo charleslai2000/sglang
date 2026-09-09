@@ -194,6 +194,82 @@ class RHContractDependencyFreeTests(unittest.TestCase):
             [re.search(r"\bschema=(\S+)", record).group(1) for record in records],
         )
 
+    def test_ready_pass_joins_raw_frontier_req_to_policy_view(self):
+        methods = _load_methods("_ready_horizon_pass")
+        scheduler = SimpleNamespace(
+            enable_ready_horizon=True,
+            _rh_pass_seq=0,
+            tree_cache=SimpleNamespace(cache_controller=SimpleNamespace()),
+            ready_horizon=SimpleNamespace(
+                frontier=lambda queue: queue,
+                epoch_event=lambda previous, current: object(),
+                should_refill=lambda **kwargs: True,
+                refill_plan=lambda *args, **kwargs: SimpleNamespace(
+                    declines=[],
+                    to_issue=[],
+                    candidates=[],
+                    ready_count=0,
+                    ready_tokens=0,
+                ),
+                describe_watermarks=lambda: "0/0",
+            ),
+            waiting_queue=[],
+            _ready_horizon_epoch_prev=None,
+            _ready_horizon_last_refill_ts=0.0,
+            _ready_horizon_negatives={},
+            _ready_horizon_last_log=None,
+        )
+        req = SimpleNamespace(rid="raw-r1")
+        view = SimpleNamespace(
+            req=req,
+            rid=req.rid,
+            staging_eligible=False,
+            state=SimpleNamespace(name="NONE"),
+        )
+        decisions = []
+        scheduler.waiting_queue = [req]
+        scheduler._ready_horizon_views = lambda frontier: [view]
+        scheduler._ready_horizon_epochs = lambda frontier, views, cc: SimpleNamespace(
+            l3_publish=0,
+            host_headroom=0,
+            host_release=0,
+            spec_budget=0,
+            waiting_frontier=(req.rid,),
+        )
+        scheduler._ready_host_headroom = lambda cc, views: 0
+        scheduler._ready_reserve_floor_tokens = lambda cc: 0
+        scheduler._emit_rh_decision = lambda policy_view, **kwargs: decisions.append(
+            (policy_view, kwargs)
+        )
+
+        method = methods["_ready_horizon_pass"]
+        method.__globals__["logger"] = SimpleNamespace(
+            info=lambda *args, **kwargs: None
+        )
+        method.__globals__["time"] = SimpleNamespace(
+            perf_counter=lambda: 1.0, time=lambda: 1.0
+        )
+        method.__globals__["RestoreState"] = SimpleNamespace(
+            NONE=view.state,
+            MISS_RECOMPUTE=object(),
+            WAIT_CAPACITY=object(),
+        )
+        method.__globals__["HiCachePrefetchIssueStatus"] = SimpleNamespace()
+        method.__globals__["PrefetchIssueResult"] = object
+        method.__globals__["HiCachePrefetchOrigin"] = SimpleNamespace(
+            READY_HORIZON=object()
+        )
+
+        method(scheduler)
+
+        self.assertEqual(len(decisions), 1)
+        decision_view, fields = decisions[0]
+        self.assertIs(decision_view, view)
+        self.assertEqual(fields["decision"], "exclude")
+        self.assertEqual(fields["reason"], "no_restore_potential")
+        self.assertEqual(fields["rank"], 1)
+        self.assertEqual(fields["frontier_n"], 1)
+
     def test_ready_host_aux_fields_come_from_finalizer_completion(self):
         methods = _load_unified_cache_methods(
             "_host_alloc_hybrid_sidecar_counts", "_host_alloc_hybrid_completion"
