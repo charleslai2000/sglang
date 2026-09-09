@@ -1043,6 +1043,14 @@ class Req(ReqDllmMixin):
         self.hicache_restore_state: Optional[RestoreState] = None
         self.hicache_restore_wait_reason: Optional[RestoreWaitReason] = None
         self.hicache_restore_state_ts: float = 0.0
+        # Scheduler-local prefetch ownership.  The active claim spans an
+        # issued restore until its terminal outcome; retries get a fresh
+        # attempt and origin, so RH cannot duplicate an in-flight issue.
+        self.hicache_prefetch_attempt_seq: int = 0
+        self.hicache_prefetch_active_attempt_id: Optional[str] = None
+        self.hicache_prefetch_active_origin = None
+        self.hicache_prefetch_last_attempt_id: Optional[str] = None
+        self.hicache_prefetch_last_origin = None
         # Cache-provided HOST_ALLOC cursor; the scheduler owns FIFO admission
         # and consumes at most one retry per observed generation vector.
         self.hicache_host_alloc_wait_cursor = None

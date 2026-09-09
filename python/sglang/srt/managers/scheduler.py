@@ -224,6 +224,8 @@ from sglang.srt.managers.scheduler_components.hicache_restore import (
     HostAllocWaitCursor,
     HostAllocWakeArbiter,
     HOST_ALLOC_TELEMETRY_SCHEMA_VERSION,
+    HiCachePrefetchOrigin,
+    PrefetchIssueResult,
     RestoreDecision,
     RestoreEvent,
     RestoreState,
@@ -3021,10 +3023,62 @@ class Scheduler(
         for tokenized_req in recv_req:
             self.handle_generate_request(tokenized_req)
 
-    def _prefetch_kvcache(self, req: Req, *, demand_restore: bool = False):
+    def _claim_prefetch(self, req: Req, origin: HiCachePrefetchOrigin):
+        active_attempt_id = getattr(req, "hicache_prefetch_active_attempt_id", None)
+        if active_attempt_id is not None:
+            return None
+        sequence = getattr(req, "hicache_prefetch_attempt_seq", 0) + 1
+        attempt_id = f"{req.rid}:prefetch:{sequence}"
+        req.hicache_prefetch_attempt_seq = sequence
+        req.hicache_prefetch_active_attempt_id = attempt_id
+        req.hicache_prefetch_active_origin = origin
+        return attempt_id
+
+    def _release_prefetch_claim(self, req: Req) -> None:
+        attempt_id = getattr(req, "hicache_prefetch_active_attempt_id", None)
+        if attempt_id is None:
+            return
+        req.hicache_prefetch_last_attempt_id = attempt_id
+        req.hicache_prefetch_last_origin = getattr(
+            req, "hicache_prefetch_active_origin", None
+        )
+        req.hicache_prefetch_active_attempt_id = None
+        req.hicache_prefetch_active_origin = None
+
+    def _prefetch_kvcache(
+        self,
+        req: Req,
+        *,
+        origin: HiCachePrefetchOrigin,
+        demand_restore: bool = False,
+    ) -> PrefetchIssueResult:
+        attempt_id = self._claim_prefetch(req, origin)
+        if attempt_id is None:
+            return PrefetchIssueResult.ACTIVE
+        try:
+            result = self._prefetch_kvcache_impl(
+                req, origin=origin, demand_restore=demand_restore
+            )
+        except Exception:
+            self._release_prefetch_claim(req)
+            raise
+        if result is PrefetchIssueResult.ISSUED:
+            return result
+        self._release_prefetch_claim(req)
+        return result
+
+    def _prefetch_kvcache_impl(
+        self,
+        req: Req,
+        *,
+        origin: HiCachePrefetchOrigin,
+        demand_restore: bool = False,
+    ) -> PrefetchIssueResult:
         try:
             _t38c_log({"evt": "pc_prefetch_enter", "phase": "entry",
                        "rid": req.rid,
+                       "attempt_id": req.hicache_prefetch_active_attempt_id,
+                       "origin": origin.name,
                        "l3_enabled": bool(self.enable_hicache_storage)})
         except Exception:
             pass
@@ -3168,7 +3222,7 @@ class Scheduler(
                     # normal P3 reconcile + frontier wait path.
                     if self._no_material_fast_forward_for(req, last_host_node):
                         self._log_restore_recompute(req, "no_material")
-                        return
+                        return PrefetchIssueResult.DECLINED
                     self._apply_restore_event(req, RestoreEvent.GATE_SKIP_FRONTIER)
                     tree_cache.register_frontier_waiter(req.rid, last_host_node)
                     logger.info(
@@ -3177,6 +3231,13 @@ class Scheduler(
                         req.rid,
                         last_host_node,
                     )
+                return (
+                    PrefetchIssueResult.ISSUED
+                    if outcome == "issued"
+                    else PrefetchIssueResult.DECLINED
+                )
+            return PrefetchIssueResult.DECLINED
+        return PrefetchIssueResult.SKIPPED
 
     def _host_alloc_snapshot_for_req(self, req):
         cursor = getattr(req, "hicache_host_alloc_wait_cursor", None)
@@ -3412,7 +3473,7 @@ class Scheduler(
                     req.rid,
                     req.storage_prefetch_retry_attempts,
                 )
-                self._prefetch_kvcache(req)
+                self._prefetch_kvcache(req, origin=HiCachePrefetchOrigin.DEMAND_RETRY)
 
         # 3) M2: frontier-ACK wakes (T12). The ack drain moved the waiter
         # into the ready set earlier in this same event pass.
@@ -3443,6 +3504,7 @@ class Scheduler(
                 )
                 self._prefetch_kvcache(
                     req,
+                    origin=HiCachePrefetchOrigin.DEMAND_RETRY,
                     demand_restore=self.enable_ready_horizon or was_backup_pending,
                 )
                 if req.hicache_restore_state is RestoreState.NONE:
@@ -3601,6 +3663,7 @@ class Scheduler(
                 )
                 self._prefetch_kvcache(
                     req,
+                    origin=HiCachePrefetchOrigin.DEMAND_RETRY,
                     demand_restore=self.enable_ready_horizon or was_backup_pending,
                 )
                 if req.hicache_restore_state is RestoreState.NONE:
@@ -3650,9 +3713,24 @@ class Scheduler(
             if event is RestoreEvent.DENIED_ALLOC
             else None
         )
+        attempt_id = getattr(req, "hicache_prefetch_active_attempt_id", None)
+        attempt_origin = getattr(req, "hicache_prefetch_active_origin", None)
         self._apply_restore_event(req, event, genuine_miss=genuine_miss)
         if event is RestoreEvent.DENIED_ALLOC:
             self._capture_host_alloc_wait(req, failure)
+        self._release_prefetch_claim(req)
+        if event is RestoreEvent.FINALIZED:
+            last_origin = getattr(req, "hicache_prefetch_last_origin", None)
+            logger.info(
+                "[P3] ts_ms=%d evt=ready_host rid=%s attempt_id=%s origin=%s ready=1",
+                int(time.time() * 1000),
+                req.rid,
+                attempt_id
+                or getattr(req, "hicache_prefetch_last_attempt_id", None),
+                (attempt_origin or last_origin).name
+                if (attempt_origin or last_origin) is not None
+                else "none",
+            )
         if (
             event is RestoreEvent.REVOKED_MISS
             and genuine_miss
@@ -3864,15 +3942,25 @@ class Scheduler(
                 self._park_ready_decline(rid, view, reason, epochs, now)
         for view in plan.to_issue:
             req = view.req
-            self._prefetch_kvcache(req)
+            result = self._prefetch_kvcache(
+                req, origin=HiCachePrefetchOrigin.READY_HORIZON
+            )
             state = req.hicache_restore_state
             issued = state is RestoreState.RESTORING
+            result_name = (
+                result.name.lower()
+                if isinstance(result, PrefetchIssueResult)
+                else "issued" if issued else "declined"
+            )
             logger.info(
-                "[P3] ts_ms=%d evt=ready_stage rid=%s result=%s state=%s "
-                "ready=%d headroom=%d",
+                "[P3] ts_ms=%d evt=ready_stage.v2 rid=%s attempt_id=%s "
+                "origin=%s result=%s state=%s ready=%d headroom=%d",
                 int(time.time() * 1000),
                 req.rid,
-                "issued" if issued else "declined",
+                getattr(req, "hicache_prefetch_last_attempt_id", None)
+                or getattr(req, "hicache_prefetch_active_attempt_id", None),
+                HiCachePrefetchOrigin.READY_HORIZON.name,
+                result_name,
                 state.name if state is not None else "none",
                 plan.ready_count,
                 headroom,
@@ -4519,11 +4607,25 @@ class Scheduler(
         if self.disaggregation_mode == DisaggregationMode.NULL:
             if self._abort_on_queued_limit(req):
                 return
-            self._prefetch_kvcache(req)
+            if not self.enable_ready_horizon:
+                self._prefetch_kvcache(
+                    req, origin=HiCachePrefetchOrigin.EAGER_RH_OFF
+                )
             self.waiting_queue.append(req)
             req.time_stats.set_wait_queue_entry_time()
+            if self.enable_ready_horizon:
+                logger.info(
+                    "[P3] ts_ms=%d evt=rh_preadmission rid=%s origin=%s "
+                    "attempt_id=none stage_generation=%d",
+                    int(time.time() * 1000),
+                    req.rid,
+                    HiCachePrefetchOrigin.READY_HORIZON.name,
+                    getattr(req, "hicache_prefetch_attempt_seq", 0) + 1,
+                )
         elif self.disaggregation_mode == DisaggregationMode.PREFILL:
-            self._prefetch_kvcache(req)
+            self._prefetch_kvcache(
+                req, origin=HiCachePrefetchOrigin.EAGER_DISAGG_PREFILL
+            )
             self.disagg_prefill_bootstrap_queue.add(
                 req, self.model_config.num_key_value_heads
             )
@@ -4591,6 +4693,7 @@ class Scheduler(
                 if self.enable_hicache_storage:
                     # Release prefetch events associated with the request
                     self.tree_cache.release_aborted_request(candidate_req.rid)
+                    self._release_prefetch_claim(candidate_req)
                 self._remove_host_alloc_waiter(candidate_req.rid)
                 self.waiting_queue.pop(idx)
                 self.beam_coordinator.retire_group(candidate_req)
@@ -4623,6 +4726,7 @@ class Scheduler(
                 if self.enable_hicache_storage:
                     # Release prefetch events associated with the request
                     self.tree_cache.release_aborted_request(req.rid)
+                    self._release_prefetch_claim(req)
                 self._remove_host_alloc_waiter(req.rid)
                 self.ipc_channels.send_to_tokenizer.send_output(
                     _make_abort_req(
@@ -4761,6 +4865,7 @@ class Scheduler(
             req.pending_bootstrap = False
         if self.enable_hicache_storage:
             self.tree_cache.release_aborted_request(req.rid)
+            self._release_prefetch_claim(req)
         release_kv_cache(req, self.tree_cache, is_insert=False)
 
         self.chunked_req = None
@@ -5239,6 +5344,15 @@ class Scheduler(
                 has_chunked_req=(self.chunked_req is not None),
                 truncation_align_size=self.truncation_align_size,
             )
+            if res == AddReqResult.CONTINUE:
+                origin = getattr(req, "hicache_prefetch_last_origin", None)
+                logger.info(
+                    "[P3] ts_ms=%d evt=admission.v2 rid=%s attempt_id=%s origin=%s",
+                    int(time.time() * 1000),
+                    req.rid,
+                    getattr(req, "hicache_prefetch_last_attempt_id", None),
+                    origin.name if origin is not None else "none",
+                )
 
             if self.enable_lora:
                 running_loras.add(req.lora_id)
@@ -6555,6 +6669,7 @@ class Scheduler(
             if self.enable_hicache_storage:
                 # to release prefetch events associated with the request
                 self.tree_cache.release_aborted_request(req.rid)
+                self._release_prefetch_claim(req)
             self.ipc_channels.send_to_tokenizer.send_output(_make_abort_req(req), req)
             # For disaggregation decode mode, the request in the waiting queue has KV cache allocated.
             if self.disaggregation_mode == DisaggregationMode.DECODE:
@@ -6587,6 +6702,7 @@ class Scheduler(
             ):
                 if self.enable_hicache_storage:
                     self.tree_cache.release_aborted_request(req.rid)
+                    self._release_prefetch_claim(req)
                 self.ipc_channels.send_to_tokenizer.send_output(
                     _make_abort_req(req), req
                 )
@@ -6611,6 +6727,7 @@ class Scheduler(
                     logger.debug(f"Abort bootstrap queue request. {req.rid=}")
                     if self.enable_hicache_storage:
                         self.tree_cache.release_aborted_request(req.rid)
+                        self._release_prefetch_claim(req)
 
                     if hasattr(req.disagg_kv_sender, "abort"):
                         req.disagg_kv_sender.abort()

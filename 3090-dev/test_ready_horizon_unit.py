@@ -46,8 +46,11 @@ from types import SimpleNamespace
 from unittest import mock
 
 import sglang.srt.managers.scheduler as scheduler_mod
+from sglang.srt.disaggregation.utils import DisaggregationMode
 from sglang.srt.managers.scheduler import Scheduler
 from sglang.srt.managers.scheduler_components.hicache_restore import (
+    HiCachePrefetchOrigin,
+    PrefetchIssueResult,
     RestoreState,
     RestoreWaitReason,
 )
@@ -886,13 +889,16 @@ def _pass_scheduler(
         lambda *a, **k: scheduler.evicted.append(a) or 0
     )
 
-    def _issue(req, *, demand_restore=False):
+    def _issue(req, *, origin, demand_restore=False):
         # Mirror the real T1 wiring: a successful issue transitions the
         # request to RESTORING, so it leaves the candidate set.
         req.hicache_restore_state = RESTORING
         scheduler.issued.append(req.rid)
+        scheduler.issue_origins.append(origin)
+        return PrefetchIssueResult.ISSUED
 
     scheduler._prefetch_kvcache = _issue
+    scheduler.issue_origins = []
     return scheduler
 
 
@@ -932,6 +938,51 @@ class ReadyHorizonPassTests(unittest.TestCase):
         self._run(scheduler)
         self.assertEqual(scheduler.issued, ["r1"])
 
+    def test_active_prefetch_claim_blocks_duplicate_and_classifies_retry(self):
+        scheduler = Scheduler.__new__(Scheduler)
+        req = SimpleNamespace(
+            rid="r1",
+            hicache_prefetch_attempt_seq=0,
+            hicache_prefetch_active_attempt_id=None,
+            hicache_prefetch_active_origin=None,
+            hicache_prefetch_last_attempt_id=None,
+            hicache_prefetch_last_origin=None,
+        )
+        impl_calls = []
+
+        def impl(req, *, origin, demand_restore=False):
+            impl_calls.append((origin, demand_restore))
+            return PrefetchIssueResult.ISSUED
+
+        scheduler._prefetch_kvcache_impl = impl
+
+        first = scheduler._prefetch_kvcache(
+            req, origin=HiCachePrefetchOrigin.READY_HORIZON
+        )
+        second = scheduler._prefetch_kvcache(
+            req, origin=HiCachePrefetchOrigin.READY_HORIZON
+        )
+
+        self.assertIs(first, PrefetchIssueResult.ISSUED)
+        self.assertIs(second, PrefetchIssueResult.ACTIVE)
+        self.assertEqual(
+            impl_calls, [(HiCachePrefetchOrigin.READY_HORIZON, False)]
+        )
+
+        scheduler._release_prefetch_claim(req)
+        retry = scheduler._prefetch_kvcache(
+            req,
+            origin=HiCachePrefetchOrigin.DEMAND_RETRY,
+            demand_restore=True,
+        )
+        self.assertIs(retry, PrefetchIssueResult.ISSUED)
+        self.assertEqual(
+            impl_calls,
+            [
+                (HiCachePrefetchOrigin.READY_HORIZON, False),
+                (HiCachePrefetchOrigin.DEMAND_RETRY, True),
+            ],
+        )
     def test_causal_epoch_change_triggers_new_refill(self):
         # The frontier changed (a new request entered): a causal event.
         # The next pass re-checks and issues the new candidate.
@@ -1059,6 +1110,53 @@ class ReadyHorizonPassTests(unittest.TestCase):
         self._run(scheduler)
         self.assertEqual(scheduler.issued, [])
 
+    def test_rh_on_enqueue_is_queue_first_and_rh_owned(self):
+        scheduler = Scheduler.__new__(Scheduler)
+        scheduler.enable_priority_scheduling = False
+        scheduler.abort_on_priority_when_disabled = False
+        scheduler.disaggregation_mode = DisaggregationMode.NULL
+        scheduler.max_queued_requests = None
+        scheduler.waiting_queue = []
+        scheduler.enable_ready_horizon = True
+        scheduler.issued = []
+        scheduler._prefetch_kvcache = mock.Mock()
+        req = SimpleNamespace(
+            rid="rh-on",
+            priority=None,
+            time_stats=SimpleNamespace(set_wait_queue_entry_time=mock.Mock()),
+        )
+
+        scheduler._add_request_to_queue(req)
+
+        self.assertEqual(scheduler.waiting_queue, [req])
+        scheduler._prefetch_kvcache.assert_not_called()
+
+    def test_rh_off_enqueue_preserves_eager_order_and_origin(self):
+        scheduler = Scheduler.__new__(Scheduler)
+        scheduler.enable_priority_scheduling = False
+        scheduler.abort_on_priority_when_disabled = False
+        scheduler.disaggregation_mode = DisaggregationMode.NULL
+        scheduler.max_queued_requests = None
+        scheduler.waiting_queue = []
+        scheduler.enable_ready_horizon = False
+        calls = []
+
+        def issue(req, *, origin, demand_restore=False):
+            calls.append((origin, len(scheduler.waiting_queue)))
+            return PrefetchIssueResult.DECLINED
+
+        scheduler._prefetch_kvcache = issue
+        req = SimpleNamespace(
+            rid="rh-off",
+            priority=None,
+            time_stats=SimpleNamespace(set_wait_queue_entry_time=mock.Mock()),
+        )
+
+        scheduler._add_request_to_queue(req)
+
+        self.assertEqual(calls, [(HiCachePrefetchOrigin.EAGER_RH_OFF, 0)])
+        self.assertEqual(scheduler.waiting_queue, [req])
+
     def test_ready_pool_log_on_change(self):
         scheduler = _pass_scheduler(
             queue=[_req("r1", READY, None), _req("r2", READY, None)],
@@ -1086,7 +1184,7 @@ class ReadyHorizonPassTests(unittest.TestCase):
         with self.assertLogs("sglang.srt.managers.scheduler", level="INFO") as logs:
             scheduler._ready_horizon_pass()
         self.assertTrue(
-            any("evt=ready_stage rid=r1 result=issued state=RESTORING" in m for m in logs.output),
+            any("evt=ready_stage.v2 rid=r1" in m and "result=issued" in m for m in logs.output),
             logs.output,
         )
 
