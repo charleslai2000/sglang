@@ -554,6 +554,7 @@ def _make_cache(tree_core, *, backup_park=True):
     cache._storage_frontier_waiters = {}
     cache._storage_frontier_ready = set()
     cache._storage_prefetch_terminal = {}
+    cache._storage_prefetch_failures = {}
     cache._storage_prefetch_missed_rids = set()
     cache._prefetch_outcome_stats = {
         "attempts": 0,

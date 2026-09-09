@@ -47,7 +47,19 @@ class HostPoolGroup:
         self.device = self.anchor_entry.host_pool.device
         self.size = self.anchor_entry.host_pool.size
         self.logical_size = self.anchor_entry.host_pool.logical_size
+        # Optional cache-owned observer.  The group remains the owner of
+        # per-pool free completion; callers may use this to advance a
+        # cache-owned allocability generation without teaching the scheduler
+        # about pool mutations.
+        self.host_allocability_change_fn: Callable[[PoolName, str, int], Any] | None = None
         self._refresh_transfer_capabilities()
+
+    def _notify_host_free(self, pool: PoolName, indices: torch.Tensor) -> None:
+        callback = self.host_allocability_change_fn
+        if callback is None or len(indices) == 0:
+            return
+        released = int(self.free(indices, pool=pool) or len(indices))
+        callback(pool, "direct_free", released)
 
     def _refresh_transfer_capabilities(self) -> None:
         child_write_back_jit = [
@@ -160,7 +172,7 @@ class HostPoolGroup:
 
         def rollback() -> None:
             for transfer, indices in allocated:
-                self.free(indices, pool=transfer.name)
+                self._notify_host_free(transfer.name, indices)
                 transfer.host_indices = None
 
         for transfer in transfers:
@@ -187,12 +199,11 @@ class HostPoolGroup:
         if not transfers:
             return None
 
-        allocated: list[tuple[PoolTransfer, torch.Tensor]] = []
         derived_transfers: list[PoolTransfer] = []
 
         def rollback() -> None:
             for transfer, indices in allocated:
-                self.free(indices, pool=transfer.name)
+                self._notify_host_free(transfer.name, indices)
                 transfer.host_indices = None
 
         for transfer in transfers:
@@ -247,7 +258,14 @@ class HostPoolGroup:
         for transfer in transfers or []:
             if transfer.indices_from_pool is not None or transfer.host_indices is None:
                 continue
-            released += self.free(transfer.host_indices, pool=transfer.name)
+            indices = transfer.host_indices
+            released_count = int(
+                self.free(indices, pool=transfer.name) or len(indices)
+            )
+            released += released_count
+            callback = self.host_allocability_change_fn
+            if callback is not None and len(indices) > 0:
+                callback(transfer.name, "direct_free", released_count)
         return released
 
     @property

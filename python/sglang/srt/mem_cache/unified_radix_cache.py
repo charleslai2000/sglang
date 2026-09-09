@@ -18,6 +18,7 @@ from sglang.srt.managers.cache_controller import CacheOperation
 from sglang.srt.managers.scheduler_components.hicache_restore import (
     HostAllocFailure,
     HostAllocabilitySnapshot,
+    HOST_ALLOC_TELEMETRY_SCHEMA_VERSION,
     backup_wait_applies,
     backup_wake_applies,
     promotion_budget_fits,
@@ -146,13 +147,37 @@ _T38C_DURABLE_SEQ = {}
 _T38C_DURABLE_SEQ_LOCK = threading.Lock()
 
 
+def _log_host_alloc_telemetry(
+    event: str,
+    *,
+    rid: Optional[str] = None,
+    attempt_id: Optional[str] = None,
+    **fields,
+) -> None:
+    """Emit bounded, observational HOST_ALLOC records with a stable schema."""
+    import json as _json
+
+    record = {
+        "schema": HOST_ALLOC_TELEMETRY_SCHEMA_VERSION,
+        "evt": event,
+        "ts_mono_ns": time.monotonic_ns(),
+        "ts_wall_ms": int(time.time() * 1000),
+        "worker": os.environ.get("SGLANG_WORKER_ID") or f"pid-{os.getpid()}",
+        "rank": os.environ.get("RANK"),
+        "rid": rid,
+        "attempt_id": attempt_id,
+    }
+    record.update(fields)
+    logger.info("[HAE] %s", _json.dumps(record, sort_keys=True, default=str))
+
+
 def _storage_hit_crop_is_safe(operation, alloc_len: int) -> bool:
     """Whether a host-capacity crop preserves the validated storage frontier."""
     if alloc_len >= operation.storage_hit_count:
         return True
     return not any(
         transfer.hit_policy == PoolHitPolicy.TRAILING_PAGES
-        for transfer in operation.pool_transfers or []
+        for transfer in getattr(operation, "pool_transfers", None) or []
     )
 
 
@@ -3569,7 +3594,8 @@ class UnifiedRadixCache(BasePrefixCache):
             PoolName.SWA.value: ComponentType.SWA,
             PoolName.MAMBA.value: ComponentType.MAMBA,
         }.get(pool)
-        if component_type is None or component_type not in self.components:
+        components = getattr(self, "components", {})
+        if component_type is None or component_type not in components:
             return 0, frozenset()
         if pool == PoolName.KV.value:
             leaves = getattr(self.tree_core, "evictable_host_leaves", ())
@@ -3611,7 +3637,7 @@ class UnifiedRadixCache(BasePrefixCache):
         self,
         pool: str,
         cause: str,
-        returned_units: Optional[int] = None,
+        returned_units: int = 0,
         *,
         evictable_before: Optional[int] = None,
         evictable_after: Optional[int] = None,
@@ -3627,19 +3653,18 @@ class UnifiedRadixCache(BasePrefixCache):
         if evictable_before is None:
             evictable_before = evictable_after
         self._host_allocability_telemetry_seq += 1
-        logger.info(
-            "[HAE] evt=host_allocability_change seq=%d cache_instance=%d "
-            "pool=%s generation_before=%d generation_after=%d cause=%s "
-            "returned_units=%d evictable_before=%d evictable_after=%d",
-            self._host_allocability_telemetry_seq,
-            self._host_allocability_instance_id,
-            pool,
-            before,
-            before + 1,
-            cause,
-            returned_units,
-            evictable_before,
-            evictable_after,
+        _log_host_alloc_telemetry(
+            "host_allocability_change",
+            cache_instance_id=self._host_allocability_instance_id,
+            pool=pool,
+            generation_before=before,
+            generation_after=before + 1,
+            cause=cause,
+            returned_units=int(returned_units),
+            evictable_before=int(evictable_before),
+            evictable_after=int(evictable_after),
+            causal_rid=None,
+            trace_context=None,
         )
 
     def _bump_changed_host_allocability(
@@ -3675,9 +3700,8 @@ class UnifiedRadixCache(BasePrefixCache):
                 pools.insert(0, PoolName.KV.value)
         pools = list(dict.fromkeys(str(pool) for pool in pools))
 
-        generations = {
-            pool: self._host_allocability_generations.get(pool, 0) for pool in pools
-        }
+        generation_state = getattr(self, "_host_allocability_generations", {})
+        generations = {pool: generation_state.get(pool, 0) for pool in pools}
         free_units = {}
         evictable_units = {}
         for pool in pools:
@@ -3698,7 +3722,7 @@ class UnifiedRadixCache(BasePrefixCache):
                 except (AttributeError, TypeError, ValueError):
                     free_units[pool] = 0
         return HostAllocabilitySnapshot(
-            cache_instance_id=self._host_allocability_instance_id,
+            cache_instance_id=getattr(self, "_host_allocability_instance_id", 0),
             generation_by_pool=generations,
             free_units_by_pool=free_units,
             evictable_units_by_pool=evictable_units,
@@ -3967,15 +3991,7 @@ class UnifiedRadixCache(BasePrefixCache):
         self._bump_host_allocability(
             PoolName.KV.value, "direct_free", int(released or len(backup.host_indices))
         )
-        released_by_pool = {}
-        for transfer in backup.pool_transfers or []:
-            if transfer.indices_from_pool is None and transfer.host_indices is not None:
-                released_by_pool[transfer.name] = released_by_pool.get(transfer.name, 0) + len(
-                    transfer.host_indices
-                )
         self.host_pool_group.release_transfers(backup.pool_transfers)
-        for pool, units in released_by_pool.items():
-            self._bump_host_allocability(pool.value, "direct_free", units)
 
     # ---- HiCache: Backup / LoadBack ----
 
@@ -5080,6 +5096,7 @@ class UnifiedRadixCache(BasePrefixCache):
         prefix_keys: Optional[list[str]] = None,
         matched_prefix_tokens: Optional[list[int]] = None,
         demand_restore: bool = False,
+        host_alloc_attempt_id: Optional[str] = None,
     ) -> Optional[str]:
         """Returns an outcome code for the P2-1 M1b state machine:
         "issued" / "declined_rate_limited" / "declined_too_short" /
@@ -5233,6 +5250,35 @@ class UnifiedRadixCache(BasePrefixCache):
             snapshot = self.host_allocability_snapshot(
                 [PoolName.KV.value, *required_aux_units]
             )
+            _log_host_alloc_telemetry(
+                "restore_host_alloc_retry_result",
+                rid=req_id,
+                attempt_id=None,
+                generation_vector_id=snapshot.generation_vector(),
+                full_frontier_tokens=int(len(prefetch_key)),
+                crop_attempted=False,
+                lower_checkpoint_queried=False,
+                per_pool={
+                    pool: {
+                        "required": int(required),
+                        "free_before": None,
+                        "evictable_before": None,
+                        "alloc1": None,
+                        "reclaimed": 0,
+                        "alloc2": None,
+                        "free_after": int(snapshot.free_units_by_pool.get(pool, 0)),
+                        "evictable_after": int(
+                            snapshot.evictable_units_by_pool.get(pool, 0)
+                        ),
+                    }
+                    for pool, required in required_aux_units.items()
+                },
+                failed_domains=[str(failed_pool)],
+                terminal="forfeited_alloc_failed",
+                genuine_miss=False,
+                captured_generations_after=dict(snapshot.generation_by_pool),
+                reservation_released=True,
+            )
             self.record_host_alloc_failure(
                 req_id,
                 HostAllocFailure(
@@ -5270,6 +5316,7 @@ class UnifiedRadixCache(BasePrefixCache):
             extra_pools=aux_xfers or None,
             trace_context=trace_context,
         )
+        operation.host_alloc_attempt_id = host_alloc_attempt_id
         stats["issued"] += 1
         logger.info("[P2A] ts_ms=%d evt=prefetch_issued rid=%s prefetch_length=%d", int(time.time() * 1000), req_id, prefetch_length)
         try:
@@ -5545,7 +5592,7 @@ class UnifiedRadixCache(BasePrefixCache):
         # Their hit lengths are stored in completed_tokens.
         pool_transfers = [
             transfer
-            for transfer in operation.pool_transfers or []
+            for transfer in getattr(operation, "pool_transfers", None) or []
             if transfer.indices_from_pool != PoolName.KV
         ]
         hit_pages = (
@@ -5581,7 +5628,11 @@ class UnifiedRadixCache(BasePrefixCache):
             # tail (host_indices[completed_tokens:])
             self.cache_controller.append_host_mem_release(
                 host_indices=host_indices[:completed_tokens],
-                extra_pools=pool_transfers if operation.pool_transfers_done else None,
+                extra_pools=(
+                    pool_transfers
+                    if getattr(operation, "pool_transfers_done", False)
+                    else None
+                ),
             )
             if anchor_lock_params is not None:
                 self.dec_host_lock_ref(last_host_node_id, anchor_lock_params)
@@ -5621,7 +5672,7 @@ class UnifiedRadixCache(BasePrefixCache):
         # pending terminal outcome, and any frontier wait are moot now.
         self._storage_prefetch_missed_rids.discard(req_id)
         self._storage_prefetch_terminal.pop(req_id, None)
-        self._storage_prefetch_failures.pop(req_id, None)
+        getattr(self, "_storage_prefetch_failures", {}).pop(req_id, None)
         self.discard_frontier_waiter(req_id)
         return self.prefetch_loaded_tokens_by_reqid.pop(req_id, 0)
 
@@ -5765,10 +5816,12 @@ class UnifiedRadixCache(BasePrefixCache):
     def record_host_alloc_failure(
         self, req_id: str, failure: HostAllocFailure
     ) -> None:
+        if not hasattr(self, "_storage_prefetch_failures"):
+            self._storage_prefetch_failures = {}
         self._storage_prefetch_failures[req_id] = failure
 
     def pop_host_alloc_failure(self, req_id: str) -> Optional[HostAllocFailure]:
-        return self._storage_prefetch_failures.pop(req_id, None)
+        return getattr(self, "_storage_prefetch_failures", {}).pop(req_id, None)
 
     def record_storage_prefetch_terminal(self, req_id: str, outcome: str) -> None:
         """Record a terminal prefetch outcome for the scheduler's
@@ -5799,7 +5852,7 @@ class UnifiedRadixCache(BasePrefixCache):
         self.prefetch_loaded_tokens_by_reqid.pop(rid, None)
         self._storage_prefetch_missed_rids.discard(rid)
         self._storage_prefetch_terminal.pop(rid, None)
-        self._storage_prefetch_failures.pop(rid, None)
+        getattr(self, "_storage_prefetch_failures", {}).pop(rid, None)
         self.discard_frontier_waiter(rid)
         if (
             self.buffer_pipeline is not None
@@ -5837,7 +5890,11 @@ class UnifiedRadixCache(BasePrefixCache):
         pool_transfers = [x for xfers in comp_xfers.values() for x in xfers]
         self.cache_controller.append_host_mem_release(
             host_indices=host_indices[:completed_tokens],
-            extra_pools=pool_transfers if operation.pool_transfers_done else None,
+            extra_pools=(
+                pool_transfers
+                if getattr(operation, "pool_transfers_done", False)
+                else None
+            ),
         )
         # Buffer mode granted occupancy at hit-alloc, sized to the bounce;
         # cache mode reserved the requested span at enqueue.
@@ -6032,7 +6089,11 @@ class UnifiedRadixCache(BasePrefixCache):
             required_aux_units = {}
             blocked_domains = {PoolName.KV.value}
             sidecar_hit_pages = {PoolName.KV.value: operation.storage_hit_count}
-            for transfer in operation.pool_transfers or []:
+            pool_storage_result = getattr(operation, "pool_storage_result", None)
+            hit_pages_by_pool = getattr(
+                pool_storage_result, "extra_pool_hit_pages", {}
+            )
+            for transfer in getattr(operation, "pool_transfers", None) or []:
                 pool = getattr(transfer.name, "value", transfer.name)
                 if pool == PoolName.KV.value or transfer.indices_from_pool is not None:
                     continue
@@ -6041,15 +6102,82 @@ class UnifiedRadixCache(BasePrefixCache):
                     if transfer.host_indices is not None
                     else len(transfer.keys or ())
                 )
-                hit_pages = operation.pool_storage_result.extra_pool_hit_pages.get(
+                hit_pages = hit_pages_by_pool.get(
                     transfer.name,
-                    operation.pool_storage_result.extra_pool_hit_pages.get(pool, 0),
+                    hit_pages_by_pool.get(pool, 0),
                 )
                 sidecar_hit_pages[pool] = int(hit_pages)
                 if transfer.keys is None or hit_pages < len(transfer.keys):
                     blocked_domains.add(pool)
             snapshot = self.host_allocability_snapshot(
                 [PoolName.KV.value, *required_aux_units]
+            )
+            attempt_details = getattr(operation, "_host_alloc_retry_details", {})
+            before_snapshot = attempt_details.get("snapshot")
+            kv_details = {
+                "required": int(
+                    attempt_details.get("required", operation.storage_hit_count)
+                ),
+                "free_before": int(
+                    (before_snapshot.free_units_by_pool if before_snapshot else {}).get(
+                        PoolName.KV.value, 0
+                    )
+                ),
+                "evictable_before": int(
+                    (
+                        before_snapshot.evictable_units_by_pool
+                        if before_snapshot
+                        else {}
+                    ).get(PoolName.KV.value, 0)
+                ),
+                "alloc1": bool(attempt_details.get("alloc1", False)),
+                "reclaimed": int(attempt_details.get("reclaimed", 0)),
+                "alloc2": bool(attempt_details.get("alloc2", False)),
+                "free_after": int(
+                    snapshot.free_units_by_pool.get(PoolName.KV.value, 0)
+                ),
+                "evictable_after": int(
+                    snapshot.evictable_units_by_pool.get(PoolName.KV.value, 0)
+                ),
+            }
+            per_pool = {PoolName.KV.value: kv_details}
+            for pool, required in required_aux_units.items():
+                per_pool[pool] = {
+                    "required": int(required),
+                    "free_before": int(
+                        (before_snapshot.free_units_by_pool if before_snapshot else {}).get(
+                            pool, 0
+                        )
+                    ),
+                    "evictable_before": int(
+                        (
+                            before_snapshot.evictable_units_by_pool
+                            if before_snapshot
+                            else {}
+                        ).get(pool, 0)
+                    ),
+                    "alloc1": None,
+                    "reclaimed": 0,
+                    "alloc2": None,
+                    "free_after": int(snapshot.free_units_by_pool.get(pool, 0)),
+                    "evictable_after": int(
+                        snapshot.evictable_units_by_pool.get(pool, 0)
+                    ),
+                }
+            _log_host_alloc_telemetry(
+                "restore_host_alloc_retry_result",
+                rid=req_id,
+                attempt_id=getattr(operation, "host_alloc_attempt_id", None),
+                generation_vector_id=snapshot.generation_vector(),
+                full_frontier_tokens=int(operation.storage_hit_count),
+                crop_attempted=False,
+                lower_checkpoint_queried=False,
+                per_pool=per_pool,
+                failed_domains=sorted(map(str, blocked_domains)),
+                terminal="revoked_alloc_failed",
+                genuine_miss=False,
+                captured_generations_after=dict(snapshot.generation_by_pool),
+                reservation_released=True,
             )
             self.record_host_alloc_failure(
                 req_id,
@@ -6126,7 +6254,20 @@ class UnifiedRadixCache(BasePrefixCache):
                 # ongoing_prefetch, so wait_complete keeps gating admission.
                 return False
             alloc_len = operation.storage_hit_count
+            telemetry_snapshot = None
+            snapshot_fn = getattr(self, "host_allocability_snapshot", None)
+            if snapshot_fn is not None:
+                pool_names = [PoolName.KV.value]
+                pool_names.extend(
+                    getattr(transfer.name, "value", transfer.name)
+                    for transfer in getattr(operation, "pool_transfers", None) or []
+                    if transfer.indices_from_pool is None
+                )
+                telemetry_snapshot = snapshot_fn(pool_names)
             host_indices = cc.mem_pool_host.alloc(alloc_len)
+            alloc1_succeeded = host_indices is not None
+            reclaimed_units = 0
+            alloc2_succeeded = False
             if host_indices is None:
                 # P3 M2: speculative staging eats free/soft-reserved host
                 # headroom only -- an alloc failure declines it silently,
@@ -6135,21 +6276,16 @@ class UnifiedRadixCache(BasePrefixCache):
                 # Ready-Horizon-off baseline (no reservation), still evict.
                 reservation = self._prefetch_reservations.get(req_id)
                 if reservation is None or reservation.kind is PrefetchKind.DEMAND:
-                    self.evict_host(alloc_len)
+                    reclaimed_units = int(self.evict_host(alloc_len) or 0)
                     host_indices = cc.mem_pool_host.alloc(alloc_len)
-            if host_indices is None and not buffer_mode:
-                # Memory-pressure fallback: a shorter page-aligned prefix.
-                # (Cache mode only — buffer mode parks for the full hit.)
-                available_size = cc.mem_pool_host.available_size()
-                alloc_len = min(
-                    operation.storage_hit_count,
-                    available_size - (available_size % self.page_size),
-                )
-                if (
-                    alloc_len >= self.prefetch_threshold
-                    and _storage_hit_crop_is_safe(operation, alloc_len)
-                ):
-                    host_indices = cc.mem_pool_host.alloc(alloc_len)
+                    alloc2_succeeded = host_indices is not None
+            operation._host_alloc_retry_details = {
+                "snapshot": telemetry_snapshot,
+                "required": alloc_len,
+                "alloc1": alloc1_succeeded,
+                "reclaimed": reclaimed_units,
+                "alloc2": alloc2_succeeded,
+            }
             if host_indices is None:
                 if buffer_mode:
                     return False
@@ -6260,8 +6396,8 @@ class UnifiedRadixCache(BasePrefixCache):
                     cc.append_host_mem_release(
                         operation.host_indices[operation.completed_tokens :],
                         (
-                            operation.pool_transfers
-                            if not operation.pool_transfers_done
+                            getattr(operation, "pool_transfers", None)
+                            if not getattr(operation, "pool_transfers_done", False)
                             else None
                         ),
                         trace_context=getattr(operation, "trace_context", None),
@@ -6272,7 +6408,7 @@ class UnifiedRadixCache(BasePrefixCache):
             for operation in _drain_queue(cc.ack_backup_queue, n_backup):
                 drained += 1
                 _ack_node_id = getattr(operation, "node_id", None)
-                _ack_transfers = operation.pool_transfers or []
+                _ack_transfers = getattr(operation, "pool_transfers", None) or []
                 _ack_mamba_transfers = [
                     transfer
                     for transfer in _ack_transfers

@@ -1685,6 +1685,9 @@ def _apply_stack_result(
     result.cache_controller.host_allocability_change_fn = (
         cache._bump_host_allocability
     )
+    result.host_pool_group.host_allocability_change_fn = (
+        cache._bump_host_allocability
+    )
 
     for ct, host_pool in result.component_host_pools.items():
         cache_attr, component_attr = _COMPONENT_HOST_ATTR[ct]
