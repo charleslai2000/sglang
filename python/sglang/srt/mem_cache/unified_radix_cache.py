@@ -2587,6 +2587,8 @@ class UnifiedRadixCache(BasePrefixCache):
         self._host_allocability_telemetry_emitted = {}
         self._host_allocability_telemetry_last_emitted = {}
         self._host_allocability_telemetry_total_emitted = 0
+        getattr(self, "_storage_prefetch_terminal", {}).clear()
+        getattr(self, "_storage_prefetch_completion", {}).clear()
         self.tree_core.reset()
         self.session_refs.reset()
 
@@ -2689,6 +2691,10 @@ class UnifiedRadixCache(BasePrefixCache):
         # consumed by the scheduler's restore-state reconciliation on the
         # same (scheduler) thread.
         self._storage_prefetch_terminal: dict[str, object] = {}
+        # One-shot finalizer-owned material proof for the scheduler's
+        # ready_host join. This is observational and does not participate in
+        # restore or allocation decisions.
+        self._storage_prefetch_completion: dict[str, object] = {}
         self._storage_prefetch_failures: dict[str, HostAllocFailure] = {}
         self.ongoing_backup: dict[int, tuple[NodeId, DecLockRefParams]] = {}
         # One-shot marker for the storage-failure degradation (see
@@ -5581,6 +5587,7 @@ class UnifiedRadixCache(BasePrefixCache):
         req_id = operation.request_id
         completed_tokens = operation.completed_tokens
         hash_value = operation.hash_value
+        sidecar_counts = self._host_alloc_hybrid_sidecar_counts(operation)
 
         (
             last_host_node_id,
@@ -5611,14 +5618,21 @@ class UnifiedRadixCache(BasePrefixCache):
                 trace_context=getattr(operation, "trace_context", None),
                 kv_expected=int(len(hash_value) * self.page_size),
                 kv_fetched=int(completed_tokens),
-                sidecars=self._host_alloc_hybrid_sidecar_counts(operation),
-                per_sidecar=self._host_alloc_hybrid_sidecar_counts(operation),
+                sidecars=sidecar_counts,
+                per_sidecar=sidecar_counts,
                 all_or_nothing=self._host_alloc_hybrid_is_all_or_nothing(operation),
                 result="discarded",
                 # The terminal handoff below is "finalized", which the
                 # scheduler consumes as RESTORING -> READY even though this
                 # all-or-nothing result contains zero usable material.
                 restore_state_after="READY",
+            )
+            self.record_storage_prefetch_completion(
+                req_id,
+                self._host_alloc_hybrid_completion(
+                    operation, completed_tokens, "discarded", sidecar_counts
+                ),
+                getattr(operation, "prefetch_attempt_id", None),
             )
             # Hybrid all-or-nothing check failed; result already discarded.
             _log_restore_disposition(
@@ -5638,11 +5652,18 @@ class UnifiedRadixCache(BasePrefixCache):
             trace_context=getattr(operation, "trace_context", None),
             kv_expected=int(len(hash_value) * self.page_size),
             kv_fetched=int(completed_tokens),
-            sidecars=self._host_alloc_hybrid_sidecar_counts(operation),
-            per_sidecar=self._host_alloc_hybrid_sidecar_counts(operation),
+            sidecars=sidecar_counts,
+            per_sidecar=sidecar_counts,
             all_or_nothing=self._host_alloc_hybrid_is_all_or_nothing(operation),
             result="accepted",
             restore_state_after="READY",
+        )
+        self.record_storage_prefetch_completion(
+            req_id,
+            self._host_alloc_hybrid_completion(
+                operation, completed_tokens, "accepted", sidecar_counts
+            ),
+            getattr(operation, "prefetch_attempt_id", None),
         )
 
         requested = operation.stats_requested_tokens or 0
@@ -5784,6 +5805,29 @@ class UnifiedRadixCache(BasePrefixCache):
                 "fetched": fetched,
             }
         return sidecars
+
+    def _host_alloc_hybrid_completion(
+        self,
+        operation: PrefetchOperation,
+        completed_tokens: int,
+        finalize_result: str,
+        sidecar_counts: Optional[dict] = None,
+    ) -> dict:
+        """Return finalizer-owned material fields for the ready_host join."""
+        sidecar_counts = (
+            sidecar_counts
+            if sidecar_counts is not None
+            else self._host_alloc_hybrid_sidecar_counts(operation)
+        )
+        return {
+            "completed_kv_tokens": int(completed_tokens),
+            "required_aux_pools": sorted(sidecar_counts),
+            "completed_aux_units": {
+                pool: int(details["fetched"])
+                for pool, details in sidecar_counts.items()
+            },
+            "finalize_result": finalize_result,
+        }
 
     def _check_hybrid_prefetch_result(
         self,
@@ -6078,6 +6122,26 @@ class UnifiedRadixCache(BasePrefixCache):
             (attempt_id, outcome) if attempt_id is not None else outcome
         )
 
+    def record_storage_prefetch_completion(
+        self,
+        req_id: str,
+        completion: dict,
+        attempt_id: Optional[str] = None,
+    ) -> None:
+        if not hasattr(self, "_storage_prefetch_completion"):
+            self._storage_prefetch_completion = {}
+        self._storage_prefetch_completion[req_id] = (
+            (attempt_id, completion) if attempt_id is not None else completion
+        )
+
+    def pop_storage_prefetch_completion(self, req_id: str) -> Optional[dict]:
+        completion = getattr(self, "_storage_prefetch_completion", {}).pop(
+            req_id, None
+        )
+        if isinstance(completion, tuple):
+            return completion[1]
+        return completion
+
     def pop_storage_prefetch_terminal(self, req_id: str) -> Optional[str]:
         """Consume the recorded terminal outcome once (None when absent)."""
         return self._storage_prefetch_terminal.pop(req_id, None)
@@ -6101,6 +6165,7 @@ class UnifiedRadixCache(BasePrefixCache):
         self.prefetch_loaded_tokens_by_reqid.pop(rid, None)
         self._storage_prefetch_missed_rids.discard(rid)
         self._storage_prefetch_terminal.pop(rid, None)
+        getattr(self, "_storage_prefetch_completion", {}).pop(rid, None)
         getattr(self, "_storage_prefetch_failures", {}).pop(rid, None)
         self.discard_frontier_waiter(rid)
         if (
