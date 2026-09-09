@@ -4437,9 +4437,7 @@ class Scheduler(
         else:
             restore_state_before = self._rh_state_name(req)
             fill_len = len(getattr(req, "full_untruncated_fill_ids", ()) or ())
-        decision_id = getattr(req, "hicache_last_rh_decision_id", None)
-        if decision_id is None and pass_seq > 0:
-            decision_id = f"{req.rid}:rh:{pass_seq}"
+        decision_id = f"{req.rid}:rh:{pass_seq}" if pass_seq > 0 else None
         attempt_id = getattr(req, "hicache_prefetch_active_attempt_id", None)
         try:
             logger.info(
@@ -4459,7 +4457,7 @@ class Scheduler(
                 pass_seq,
                 field(decision_id),
                 field(attempt_id),
-                getattr(req, "session_generation", None),
+                field(getattr(req, "session_generation", None)),
                 getattr(req, "retraction_count", 0),
                 restore_state_before,
                 result,

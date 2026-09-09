@@ -205,6 +205,7 @@ class RHContractDependencyFreeTests(unittest.TestCase):
             "_rh_mamba_snapshot",
             "_rh_match_observation",
             "_prefetch_state_name",
+            "_emit_rh_decision",
             "_prefetch_kvcache_impl",
             "_emit_rh_match_prepare",
             "_prepare_ready_horizon_match",
@@ -365,6 +366,65 @@ class RHContractDependencyFreeTests(unittest.TestCase):
             self.assertIn(field, prepare_records[0])
         self.assertIn("mamba_pool_idx_changed=False", prepare_records[0])
         self.assertIn("mamba_alloc_calls_delta=0", prepare_records[0])
+
+    def test_later_pass_preparation_joins_current_decision_and_null_session(self):
+        scheduler, req, _, _, _, logger = self._issue_scheduler()
+        scheduler._prefetch_state_name = scheduler._prefetch_state_name.__func__
+        req.hicache_last_rh_decision_id = "r1:rh:1"
+        req.session_generation = None
+        scheduler._rh_pass_seq = 2
+
+        scheduler._emit_rh_match_prepare(
+            req,
+            pass_seq=2,
+            result="prepared",
+            reason="current_match",
+            match_count_for_pass=1,
+        )
+        scheduler._emit_rh_decision(
+            SimpleNamespace(
+                req=req,
+                state=_RestoreStates.NONE,
+                wait_reason=None,
+                staging_eligible=True,
+            ),
+            rank=1,
+            frontier_n=1,
+            decision="hold",
+            reason="reserve_floor",
+            epochs=SimpleNamespace(
+                l3_publish=0,
+                host_headroom=0,
+                host_release=0,
+                spec_budget=0,
+                waiting_frontier=(req.rid,),
+            ),
+            headroom=0,
+            reserve_floor=0,
+            physical_limit=None,
+            physical_used=None,
+            speculative_limit=None,
+            speculative_used=None,
+            negative_entry=None,
+            issue_origin=None,
+            attempt_id=None,
+        )
+
+        records = self._log_text(logger)
+        prepare = next(
+            record for record in records if "schema=rh_match_prepare.v1" in record
+        )
+        decision = next(
+            record
+            for record in records
+            if "schema=rh_preadmission.v1" in record
+        )
+        prepare_id = re.search(r"decision_id=(\S+)", prepare).group(1)
+        decision_id = re.search(r"decision_id=(\S+)", decision).group(1)
+        self.assertEqual(prepare_id, "r1:rh:2")
+        self.assertEqual(prepare_id, decision_id)
+        self.assertNotIn("r1:rh:1", prepare)
+        self.assertIn("session_generation=null", prepare)
 
     def test_real_impl_invalid_ticket_rematches_exactly_once(self):
         scheduler, req, _, storage, events, logger = self._issue_scheduler()
