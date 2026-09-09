@@ -5622,10 +5622,10 @@ class UnifiedRadixCache(BasePrefixCache):
                 per_sidecar=sidecar_counts,
                 all_or_nothing=self._host_alloc_hybrid_is_all_or_nothing(operation),
                 result="discarded",
-                # The terminal handoff below is "finalized", which the
-                # scheduler consumes as RESTORING -> READY even though this
-                # all-or-nothing result contains zero usable material.
-                restore_state_after="READY",
+                # The terminal handoff remains "finalized" so the scheduler
+                # can consume the authoritative discarded completion and
+                # release the request to recompute without entering READY.
+                restore_state_after="NONE",
             )
             self.record_storage_prefetch_completion(
                 req_id,

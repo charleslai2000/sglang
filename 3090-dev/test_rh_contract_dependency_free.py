@@ -2,6 +2,7 @@
 
 import ast
 import logging
+import time
 import unittest
 from pathlib import Path
 from types import MethodType, SimpleNamespace
@@ -11,6 +12,22 @@ from typing import Optional
 ROOT = Path(__file__).parents[1]
 SCHEDULER = ROOT / "python/sglang/srt/managers/scheduler.py"
 UNIFIED_CACHE = ROOT / "python/sglang/srt/mem_cache/unified_radix_cache.py"
+
+
+class _RestoreEvents:
+    FINALIZED = object()
+    DENIED_SHORT = object()
+    REVOKED_TERMINATED = object()
+    BACKUP_PENDING = object()
+    DENIED_ALLOC = object()
+    REVOKED_MISS = object()
+
+
+class _RestoreStates:
+    RESTORING = SimpleNamespace(name="RESTORING")
+    READY = SimpleNamespace(name="READY")
+    NONE = SimpleNamespace(name="NONE")
+    WAIT_CAPACITY = SimpleNamespace(name="WAIT_CAPACITY")
 
 
 def _load_methods(*names):
@@ -25,7 +42,10 @@ def _load_methods(*names):
         "Req": object,
         "Optional": Optional,
         "HiCachePrefetchOrigin": object,
+        "RestoreEvent": _RestoreEvents,
+        "RestoreState": _RestoreStates,
         "logger": logging.getLogger(__name__),
+        "time": time,
     }
     exec(compile(ast.Module(selected, []), str(SCHEDULER), "exec"), namespace)
     return namespace
@@ -135,6 +155,81 @@ class RHContractDependencyFreeTests(unittest.TestCase):
         self.assertEqual(completion["required_aux_pools"], ["mamba"])
         self.assertEqual(completion["completed_aux_units"], {"mamba": 3})
         self.assertEqual(completion["finalize_result"], "accepted")
+
+    def test_discarded_finalization_cannot_be_ready_host(self):
+        methods = _load_methods("_feed_restore_terminal")
+
+        class CapturingLogger:
+            def __init__(self):
+                self.info_records = []
+
+            def info(self, *args, **kwargs):
+                self.info_records.append(args)
+
+            def warning(self, *args, **kwargs):
+                pass
+
+        def run(finalize_result):
+            logger = CapturingLogger()
+            events = []
+            completion = {"finalize_result": finalize_result}
+            tree_cache = SimpleNamespace(
+                pop_storage_prefetch_terminal=lambda rid: ("a1", "finalized"),
+                pop_storage_prefetch_completion=lambda rid: completion,
+                peek_prefetch_loaded_tokens=lambda rid: 0,
+            )
+            scheduler = SimpleNamespace(tree_cache=tree_cache)
+            scheduler._prefetch_state_name = lambda state: state.name
+            scheduler._release_prefetch_claim = lambda *args: None
+
+            def apply_restore_event(req, event, **kwargs):
+                events.append((event, kwargs))
+                if event is _RestoreEvents.FINALIZED:
+                    req.hicache_restore_state = _RestoreStates.READY
+                else:
+                    req.hicache_restore_state = _RestoreStates.NONE
+
+            scheduler._apply_restore_event = apply_restore_event
+            scheduler._feed_restore_terminal = MethodType(
+                methods["_feed_restore_terminal"], scheduler
+            )
+            req = SimpleNamespace(
+                rid="r1",
+                hicache_prefetch_active_attempt_id="a1",
+                hicache_prefetch_active_origin=None,
+                hicache_prefetch_last_origin=None,
+                hicache_restore_state=_RestoreStates.RESTORING,
+                last_host_node=None,
+            )
+
+            feed_globals = methods["_feed_restore_terminal"].__globals__
+            original_logger = feed_globals["logger"]
+            feed_globals["logger"] = logger
+            try:
+                scheduler._feed_restore_terminal(req)
+            finally:
+                feed_globals["logger"] = original_logger
+            return req, events, logger.info_records
+
+        for finalize_result in ("discarded", "rejected"):
+            discarded_req, discarded_events, discarded_logs = run(finalize_result)
+            self.assertIs(discarded_req.hicache_restore_state, _RestoreStates.NONE)
+            self.assertIs(discarded_events[0][0], _RestoreEvents.DENIED_SHORT)
+            self.assertTrue(discarded_events[0][1]["short_tail_recompute"])
+            self.assertFalse(
+                any(
+                    "schema=rh_ready_host.v1" in record[0]
+                    for record in discarded_logs
+                )
+            )
+
+        accepted_req, accepted_events, accepted_logs = run("accepted")
+        self.assertIs(accepted_req.hicache_restore_state, _RestoreStates.READY)
+        self.assertIs(accepted_events[0][0], _RestoreEvents.FINALIZED)
+        self.assertFalse(accepted_events[0][1]["short_tail_recompute"])
+        self.assertTrue(
+            any("schema=rh_ready_host.v1" in record[0] for record in accepted_logs)
+        )
 
 
 if __name__ == "__main__":
