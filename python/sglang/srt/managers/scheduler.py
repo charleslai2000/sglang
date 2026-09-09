@@ -4192,7 +4192,10 @@ class Scheduler(
         for rank, view in enumerate(frontier_reqs, start=1):
             entry = self._ready_horizon_negatives.get(view.rid)
             if view.rid in issue_rids:
-                decision, reason = "issue", "issued"
+                # The authoritative issue decision is emitted after the
+                # prefetch claim is acquired and _prefetch_kvcache returns.
+                # Until then there is no joinable attempt_id.
+                continue
             elif view.rid in decline_reasons:
                 decision, reason = "hold", "reserve_floor"
             elif entry is not None:
@@ -4256,9 +4259,62 @@ class Scheduler(
                 if isinstance(result, PrefetchIssueResult)
                 else result
             )
-            issued = result_status is HiCachePrefetchIssueStatus.ISSUED
+            result_attempt_id = (
+                result.attempt_id
+                if isinstance(result, PrefetchIssueResult)
+                else getattr(req, "hicache_prefetch_active_attempt_id", None)
+                or getattr(req, "hicache_prefetch_last_attempt_id", None)
+            )
+            status_issued = result_status is HiCachePrefetchIssueStatus.ISSUED
+            result_reason = (
+                result.reason
+                if isinstance(result, PrefetchIssueResult)
+                else "issued" if status_issued else "declined"
+            )
+            issued = status_issued and result_attempt_id is not None
+            if status_issued and result_attempt_id is None:
+                result_reason = "missing_attempt_id"
+            if issued:
+                decision, reason = "issue", "issued"
+            elif result_status is HiCachePrefetchIssueStatus.SKIPPED_ACTIVE:
+                decision, reason = "hold", "active_attempt"
+            elif result_status is HiCachePrefetchIssueStatus.SKIPPED_STATE:
+                decision, reason = "exclude", "no_restore_potential"
+            else:
+                decision, reason = "hold", (
+                    "physical_budget"
+                    if "rate_limited" in result_reason
+                    else "state_funnel"
+                )
+            self._emit_rh_decision(
+                view,
+                rank=next(
+                    (
+                        i
+                        for i, candidate in enumerate(frontier_reqs, 1)
+                        if candidate.rid == req.rid
+                    ),
+                    0,
+                ),
+                frontier_n=len(frontier_reqs),
+                decision=decision,
+                reason=reason,
+                epochs=epochs,
+                headroom=headroom,
+                reserve_floor=reserve_floor,
+                physical_limit=physical_limit,
+                physical_used=physical_used,
+                speculative_limit=speculative_limit,
+                speculative_used=speculative_used,
+                negative_entry=self._ready_horizon_negatives.get(req.rid),
+                issue_origin=HiCachePrefetchOrigin.READY_HORIZON,
+                attempt_id=result_attempt_id,
+                force=True,
+            )
             result_name = (
-                result_status.name.lower()
+                "failed_before_issue"
+                if status_issued and result_attempt_id is None
+                else result_status.name.lower()
                 if isinstance(result_status, HiCachePrefetchIssueStatus)
                 else "issued" if issued else "declined"
             )
@@ -4272,12 +4328,7 @@ class Scheduler(
                 time.monotonic_ns(),
                 req.rid,
                 getattr(req, "hicache_last_rh_decision_id", None),
-                (
-                    result.attempt_id
-                    if isinstance(result, PrefetchIssueResult)
-                    else getattr(req, "hicache_prefetch_active_attempt_id", None)
-                    or getattr(req, "hicache_prefetch_last_attempt_id", None)
-                ),
+                result_attempt_id,
                 HiCachePrefetchOrigin.READY_HORIZON.name,
                 False,
                 result.state_before if isinstance(result, PrefetchIssueResult) else "null",
@@ -4285,7 +4336,7 @@ class Scheduler(
                     state.name if state is not None else "null"
                 ),
                 result_name,
-                result.reason if isinstance(result, PrefetchIssueResult) else "issued" if issued else "declined",
+                result_reason,
                 next((i for i, candidate in enumerate(frontier_reqs, 1) if candidate.rid == req.rid), 0),
                 headroom,
                 reserve_floor,
