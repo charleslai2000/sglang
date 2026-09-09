@@ -278,6 +278,10 @@ class TestHostPoolGroup(CustomTestCase):
 
     def test_resolve_rolls_back_partial_allocation(self):
         group = self._group(kv=4, swa=2, mamba=1)
+        changes = []
+        group.host_allocability_change_fn = (
+            lambda pool, cause, units: changes.append((pool, cause, units))
+        )
         transfers = [
             PoolTransfer(name=PoolName.SWA, device_indices=torch.arange(2)),
             PoolTransfer(name=PoolName.MAMBA, device_indices=torch.arange(2)),
@@ -286,6 +290,21 @@ class TestHostPoolGroup(CustomTestCase):
         self.assertIsNone(group.resolve_host_transfers(transfers))
         self.assertIsNone(transfers[0].host_indices)
         self.assertEqual(group.available_size(PoolName.SWA), 2)
+        self.assertIn((PoolName.SWA, "direct_free", 2), changes)
+        self.assertNotIn((PoolName.KV, "direct_free", 2), changes)
+
+    def test_release_transfers_notifies_each_owned_pool(self):
+        group = self._group(kv=4, mamba=2)
+        changes = []
+        group.host_allocability_change_fn = (
+            lambda pool, cause, units: changes.append((pool, cause, units))
+        )
+        transfers = [
+            PoolTransfer(name=PoolName.MAMBA, device_indices=torch.arange(2))
+        ]
+        self.assertIsNotNone(group.resolve_host_transfers(transfers))
+        group.release_transfers(transfers)
+        self.assertIn((PoolName.MAMBA, "direct_free", 2), changes)
 
 
 if __name__ == "__main__":

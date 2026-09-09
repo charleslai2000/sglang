@@ -23,6 +23,9 @@ from enum import Enum, auto
 from typing import Deque, Hashable, Mapping, Optional, Tuple
 
 
+HOST_ALLOC_TELEMETRY_SCHEMA_VERSION = "host_alloc.v1"
+
+
 @dataclass(frozen=True)
 class HostAllocabilitySnapshot:
     """Read-only, cache-owned host allocability state.

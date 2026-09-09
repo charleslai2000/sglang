@@ -1,5 +1,7 @@
 """Deterministic HOST_ALLOC generation and wake regressions."""
 
+import inspect
+import json
 import unittest
 from types import SimpleNamespace
 
@@ -9,6 +11,7 @@ from sglang.srt.managers.scheduler_components.hicache_restore import (
     HostAllocabilitySnapshot,
     HostAllocWaitCursor,
     HostAllocWakeArbiter,
+    RestoreEvent,
     RestoreState,
     RestoreWaitReason,
 )
@@ -144,6 +147,40 @@ class HostAllocabilityWakeTests(unittest.TestCase):
             ],
         )
         self.assertFalse(_storage_hit_crop_is_safe(operation, 54975))
+
+    def test_positive_hit_retry_has_no_lower_frontier_crop_path(self):
+        from sglang.srt.mem_cache.unified_radix_cache import UnifiedRadixCache
+
+        source = inspect.getsource(
+            UnifiedRadixCache._drain_storage_control_queues_impl
+        )
+        self.assertNotIn("_storage_hit_crop_is_safe(operation", source)
+
+    def test_waiter_departure_removes_fifo_entry_immediately(self):
+        cache = _SnapshotCache(_snapshot())
+        scheduler = self._scheduler(cache)
+        req = _request("depart", _snapshot())
+        scheduler._host_alloc_wake_arbiter.enqueue(req.rid)
+        scheduler._apply_restore_event(req, RestoreEvent.TIMEOUT)
+        self.assertEqual(scheduler._host_alloc_wake_arbiter.ordered_rids(), ())
+
+    def test_lock_release_telemetry_uses_numeric_zero_units_and_schema(self):
+        from sglang.srt.mem_cache.unified_radix_cache import UnifiedRadixCache
+
+        cache = UnifiedRadixCache.__new__(UnifiedRadixCache)
+        cache._host_allocability_generations = {"kv": 0}
+        cache._host_allocability_instance_id = 1
+        cache._host_allocability_telemetry_seq = 0
+        cache._host_evictable_signature = lambda _pool: (0, frozenset())
+        with self.assertLogs(
+            "sglang.srt.mem_cache.unified_radix_cache", level="INFO"
+        ) as records:
+            cache._bump_host_allocability("kv", "lock_release_evictable")
+        payload = json.loads(records.output[-1].split("[HAE] ", 1)[1])
+        self.assertEqual(payload["schema"], "host_alloc.v1")
+        self.assertEqual(payload["returned_units"], 0)
+        self.assertIsInstance(payload["ts_mono_ns"], int)
+        self.assertIn("rank", payload)
 
     def test_cache_generation_bumps_only_for_completed_or_changed_mutations(self):
         from sglang.srt.mem_cache.unified_radix_cache import UnifiedRadixCache
