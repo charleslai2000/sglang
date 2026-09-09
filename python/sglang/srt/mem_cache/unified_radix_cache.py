@@ -3643,7 +3643,8 @@ class UnifiedRadixCache(BasePrefixCache):
         evictable_after: Optional[int] = None,
     ) -> None:
         """Advance one pool generation after a completed causal mutation."""
-        if returned_units is not None and returned_units <= 0:
+        returned_units = int(returned_units or 0)
+        if returned_units <= 0 and cause != "lock_release_evictable":
             return
         pool = getattr(pool, "value", pool)
         before = self._host_allocability_generations.get(pool, 0)
@@ -3665,6 +3666,7 @@ class UnifiedRadixCache(BasePrefixCache):
             evictable_after=int(evictable_after),
             causal_rid=None,
             trace_context=None,
+            telemetry_seq=self._host_allocability_telemetry_seq,
         )
 
     def _bump_changed_host_allocability(
@@ -3727,6 +3729,46 @@ class UnifiedRadixCache(BasePrefixCache):
             free_units_by_pool=free_units,
             evictable_units_by_pool=evictable_units,
         )
+
+    def _release_aux_transfers_before_host_alloc_snapshot(
+        self, comp_xfers: dict[ComponentType, list[PoolTransfer]]
+    ) -> None:
+        """Complete failed-prefetch auxiliary cleanup before taking its cursor."""
+        transfers = [transfer for xfers in comp_xfers.values() for transfer in xfers]
+        if not transfers:
+            return
+        group = getattr(self, "host_pool_group", None)
+        if group is not None:
+            callback = getattr(group, "host_allocability_change_fn", None)
+            group.release_transfers(transfers)
+            if callback is None:
+                for transfer in transfers:
+                    if transfer.indices_from_pool is None and transfer.host_indices is not None:
+                        self._bump_host_allocability(
+                            getattr(transfer.name, "value", transfer.name),
+                            "direct_free",
+                            len(transfer.host_indices),
+                        )
+                    transfer.host_indices = None
+            else:
+                for transfer in transfers:
+                    if transfer.indices_from_pool is None:
+                        transfer.host_indices = None
+            return
+        host_pool = getattr(getattr(self, "cache_controller", None), "mem_pool_host", None)
+        for transfer in transfers:
+            if transfer.indices_from_pool is not None or transfer.host_indices is None:
+                continue
+            released = host_pool.free(
+                transfer.host_indices,
+                pool=transfer.name,
+            )
+            self._bump_host_allocability(
+                getattr(transfer.name, "value", transfer.name),
+                "direct_free",
+                int(released or len(transfer.host_indices)),
+            )
+            transfer.host_indices = None
 
     def _drain_host_frees(
         self, host_frees: dict[ComponentType, list[torch.Tensor]]
@@ -5234,11 +5276,6 @@ class UnifiedRadixCache(BasePrefixCache):
                 self.storage_metrics_collector.log_prefetch_aux_alloc_failed_tokens(
                     len(prefetch_key)
                 )
-            self.cache_controller.append_host_mem_release(
-                extra_pools=[x for xfers in comp_xfers.values() for x in xfers],
-            )
-            if anchor_lock_params is not None:
-                self.dec_host_lock_ref(last_host_node_id, anchor_lock_params)
             failed_pool = self._host_allocability_pool_for_component(ct)
             required_aux_units = {
                 getattr(transfer.name, "value", transfer.name): len(transfer.host_indices)
@@ -5247,22 +5284,35 @@ class UnifiedRadixCache(BasePrefixCache):
                 if transfer.host_indices is not None
             }
             required_aux_units.setdefault(failed_pool, len(prefetch_key))
+            self._release_aux_transfers_before_host_alloc_snapshot(comp_xfers)
+            if anchor_lock_params is not None:
+                self.dec_host_lock_ref(last_host_node_id, anchor_lock_params)
             snapshot = self.host_allocability_snapshot(
                 [PoolName.KV.value, *required_aux_units]
             )
+            telemetry_pools = {
+                PoolName.KV.value: len(prefetch_key),
+                **required_aux_units,
+            }
             _log_host_alloc_telemetry(
                 "restore_host_alloc_retry_result",
                 rid=req_id,
-                attempt_id=None,
+                attempt_id=host_alloc_attempt_id,
+                cache_instance_id=snapshot.cache_instance_id,
+                trace_context=None,
                 generation_vector_id=snapshot.generation_vector(),
+                captured_generations=dict(snapshot.generation_by_pool),
+                current_generations=dict(snapshot.generation_by_pool),
                 full_frontier_tokens=int(len(prefetch_key)),
                 crop_attempted=False,
                 lower_checkpoint_queried=False,
                 per_pool={
                     pool: {
                         "required": int(required),
-                        "free_before": None,
-                        "evictable_before": None,
+                        "free_before": int(snapshot.free_units_by_pool.get(pool, 0)),
+                        "evictable_before": int(
+                            snapshot.evictable_units_by_pool.get(pool, 0)
+                        ),
                         "alloc1": None,
                         "reclaimed": 0,
                         "alloc2": None,
@@ -5271,9 +5321,12 @@ class UnifiedRadixCache(BasePrefixCache):
                             snapshot.evictable_units_by_pool.get(pool, 0)
                         ),
                     }
-                    for pool, required in required_aux_units.items()
+                    for pool, required in telemetry_pools.items()
                 },
                 failed_domains=[str(failed_pool)],
+                retry_grant=host_alloc_attempt_id is not None,
+                retry_skip=False,
+                retry_outcome="forfeited_alloc_failed",
                 terminal="forfeited_alloc_failed",
                 genuine_miss=False,
                 captured_generations_after=dict(snapshot.generation_by_pool),
@@ -5456,6 +5509,20 @@ class UnifiedRadixCache(BasePrefixCache):
             anchor_lock_params,
             prefetch_key,
         ):
+            _log_host_alloc_telemetry(
+                "restore_hybrid_finalize",
+                rid=req_id,
+                attempt_id=getattr(operation, "host_alloc_attempt_id", None),
+                cache_instance_id=getattr(self, "_host_allocability_instance_id", 0),
+                trace_context=getattr(operation, "trace_context", None),
+                kv_expected=int(len(hash_value) * self.page_size),
+                kv_fetched=int(completed_tokens),
+                sidecars=self._host_alloc_hybrid_sidecar_counts(operation),
+                per_sidecar=self._host_alloc_hybrid_sidecar_counts(operation),
+                all_or_nothing=self._host_alloc_hybrid_is_all_or_nothing(operation),
+                result="discarded",
+                restore_state_after="RECOMPUTE",
+            )
             # Hybrid all-or-nothing check failed; result already discarded.
             _log_restore_disposition(
                 req_id,
@@ -5465,6 +5532,21 @@ class UnifiedRadixCache(BasePrefixCache):
                 "hybrid_discard",
             )
             return
+
+        _log_host_alloc_telemetry(
+            "restore_hybrid_finalize",
+            rid=req_id,
+            attempt_id=getattr(operation, "host_alloc_attempt_id", None),
+            cache_instance_id=getattr(self, "_host_allocability_instance_id", 0),
+            trace_context=getattr(operation, "trace_context", None),
+            kv_expected=int(len(hash_value) * self.page_size),
+            kv_fetched=int(completed_tokens),
+            sidecars=self._host_alloc_hybrid_sidecar_counts(operation),
+            per_sidecar=self._host_alloc_hybrid_sidecar_counts(operation),
+            all_or_nothing=self._host_alloc_hybrid_is_all_or_nothing(operation),
+            result="accepted",
+            restore_state_after="READY",
+        )
 
         requested = operation.stats_requested_tokens or 0
         if completed_tokens <= 0:
@@ -5558,6 +5640,33 @@ class UnifiedRadixCache(BasePrefixCache):
         if self.enable_storage_metrics and self.storage_metrics_collector is not None:
             self.storage_metrics_collector.log_prefetched_tokens(loaded_from_storage)
         return
+
+    @staticmethod
+    def _host_alloc_hybrid_is_all_or_nothing(operation: PrefetchOperation) -> bool:
+        transfers = getattr(operation, "pool_transfers", None) or []
+        return any(
+            transfer.hit_policy == PoolHitPolicy.TRAILING_PAGES
+            for transfer in transfers
+        )
+
+    def _host_alloc_hybrid_sidecar_counts(self, operation: PrefetchOperation) -> dict:
+        hit_pages = getattr(
+            getattr(operation, "pool_storage_result", None),
+            "extra_pool_hit_pages",
+            {},
+        ) or {}
+        sidecars = {}
+        for transfer in getattr(operation, "pool_transfers", None) or []:
+            if transfer.indices_from_pool == PoolName.KV:
+                continue
+            pool = getattr(transfer.name, "value", transfer.name)
+            expected = len(transfer.keys or ())
+            fetched = hit_pages.get(transfer.name, hit_pages.get(pool, 0))
+            sidecars[str(pool)] = {
+                "expected": int(expected),
+                "fetched": int(fetched),
+            }
+        return sidecars
 
     def _check_hybrid_prefetch_result(
         self,
@@ -6080,13 +6189,27 @@ class UnifiedRadixCache(BasePrefixCache):
             self.buffer_pipeline.pop_prefix_ctx(req_id)
             self.buffer_pipeline.release_anchor_lock(req_id)
         cc = self.cache_controller
-        cc.append_host_mem_release(
-            extra_pools=[x for xfers in comp_xfers.values() for x in xfers]
-        )
+        required_aux_units_before_cleanup = {}
+        if revoke_reason == "alloc_failed":
+            for transfer in getattr(operation, "pool_transfers", None) or []:
+                pool = getattr(transfer.name, "value", transfer.name)
+                if pool == PoolName.KV.value or transfer.indices_from_pool is not None:
+                    continue
+                required_aux_units_before_cleanup[pool] = (
+                    len(transfer.host_indices)
+                    if transfer.host_indices is not None
+                    else len(transfer.keys or ())
+                )
+        if revoke_reason == "alloc_failed":
+            self._release_aux_transfers_before_host_alloc_snapshot(comp_xfers)
+        else:
+            cc.append_host_mem_release(
+                extra_pools=[x for xfers in comp_xfers.values() for x in xfers]
+            )
         if anchor_lock_params is not None:
             self.dec_host_lock_ref(last_host_node_id, anchor_lock_params)
         if revoke_reason == "alloc_failed":
-            required_aux_units = {}
+            required_aux_units = dict(required_aux_units_before_cleanup)
             blocked_domains = {PoolName.KV.value}
             sidecar_hit_pages = {PoolName.KV.value: operation.storage_hit_count}
             pool_storage_result = getattr(operation, "pool_storage_result", None)
@@ -6097,11 +6220,6 @@ class UnifiedRadixCache(BasePrefixCache):
                 pool = getattr(transfer.name, "value", transfer.name)
                 if pool == PoolName.KV.value or transfer.indices_from_pool is not None:
                     continue
-                required_aux_units[pool] = (
-                    len(transfer.host_indices)
-                    if transfer.host_indices is not None
-                    else len(transfer.keys or ())
-                )
                 hit_pages = hit_pages_by_pool.get(
                     transfer.name,
                     hit_pages_by_pool.get(pool, 0),
@@ -6168,12 +6286,20 @@ class UnifiedRadixCache(BasePrefixCache):
                 "restore_host_alloc_retry_result",
                 rid=req_id,
                 attempt_id=getattr(operation, "host_alloc_attempt_id", None),
+                cache_instance_id=snapshot.cache_instance_id,
+                trace_context=getattr(operation, "trace_context", None),
                 generation_vector_id=snapshot.generation_vector(),
+                captured_generations=dict(snapshot.generation_by_pool),
+                current_generations=dict(snapshot.generation_by_pool),
                 full_frontier_tokens=int(operation.storage_hit_count),
                 crop_attempted=False,
                 lower_checkpoint_queried=False,
                 per_pool=per_pool,
+                required_aux_units=dict(required_aux_units),
                 failed_domains=sorted(map(str, blocked_domains)),
+                retry_grant=getattr(operation, "host_alloc_attempt_id", None) is not None,
+                retry_skip=False,
+                retry_outcome="revoked_alloc_failed",
                 terminal="revoked_alloc_failed",
                 genuine_miss=False,
                 captured_generations_after=dict(snapshot.generation_by_pool),

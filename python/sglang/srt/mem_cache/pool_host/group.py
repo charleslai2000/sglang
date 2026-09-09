@@ -56,10 +56,11 @@ class HostPoolGroup:
 
     def _notify_host_free(self, pool: PoolName, indices: torch.Tensor) -> None:
         callback = self.host_allocability_change_fn
-        if callback is None or len(indices) == 0:
+        if len(indices) == 0:
             return
         released = int(self.free(indices, pool=pool) or len(indices))
-        callback(pool, "direct_free", released)
+        if callback is not None:
+            callback(pool, "direct_free", released)
 
     def _refresh_transfer_capabilities(self) -> None:
         child_write_back_jit = [
