@@ -17,6 +17,7 @@ the same torch-free pattern as test_drain_reentry.py.
 """
 
 import importlib.util
+import json
 import os
 import sys
 import threading
@@ -520,6 +521,16 @@ def _load_modules():
             "managers",
             "scheduler_components",
             "hicache_restore.py",
+        ),
+    )
+    _load_real(
+        "sglang.srt.mem_cache.trace_context",
+        os.path.join(
+            _PYTHON_DIR,
+            "sglang",
+            "srt",
+            "mem_cache",
+            "trace_context.py",
         ),
     )
     cc_mod = _load_real(
@@ -2472,6 +2483,10 @@ class _RestoreMarkTree(_FakeTreeCore):
 
 def _make_restore_cache(tree_core=None):
     cache = _make_cache(tree_core=tree_core)
+    cache.components = {}
+    cache._host_allocability_generations = {"kv": 0}
+    cache._host_allocability_instance_id = 1
+    cache._host_allocability_telemetry_seq = 0
     cache.page_size = 1
     cache.enable_storage_metrics = False
     cache.cache_controller.mem_pool_host = SimpleNamespace(
@@ -2508,9 +2523,19 @@ class RestoreDurabilityMarkingTests(unittest.TestCase):
         cache = _make_restore_cache(tree_core=tree)
         operation = _make_operation(4)
         operation.completed_tokens = 4
-        _drive_prefetch_result(cache, operation)
+        with self.assertLogs(level="INFO") as records:
+            _drive_prefetch_result(cache, operation)
         self.assertEqual(tree.marked, [77])
         self.assertEqual(tree.commit_calls, 1)
+        self.assertEqual(cache._storage_prefetch_terminal.get("test-rid"), "finalized")
+        finalize = next(
+            json.loads(record.getMessage().split("[HAE] ", 1)[1])
+            for record in records.records
+            if "[HAE] " in record.getMessage()
+            and '"evt": "restore_hybrid_finalize"' in record.getMessage()
+        )
+        self.assertEqual(finalize["result"], "accepted")
+        self.assertEqual(finalize["restore_state_after"], "READY")
 
     def test_shortfall_marks_only_completed_prefix(self):
         # A partial restore inserts exactly the completed prefix: the split
@@ -2542,9 +2567,71 @@ class RestoreDurabilityMarkingTests(unittest.TestCase):
             update_extra_pool_hit_pages=lambda *a, **k: None,
             extra_pool_hit_pages={},  # the sidecar served nothing
         )
-        _drive_prefetch_result(cache, operation)
+        with self.assertLogs(level="INFO") as records:
+            _drive_prefetch_result(cache, operation)
         self.assertEqual(tree.marked, [])
         self.assertEqual(tree.commit_calls, 0)  # never reached the insert
+        self.assertEqual(cache._storage_prefetch_terminal.get("test-rid"), "finalized")
+        finalize = next(
+            json.loads(record.getMessage().split("[HAE] ", 1)[1])
+            for record in records.records
+            if "[HAE] " in record.getMessage()
+            and '"evt": "restore_hybrid_finalize"' in record.getMessage()
+        )
+        self.assertEqual(finalize["result"], "discarded")
+        self.assertEqual(finalize["restore_state_after"], "READY")
+
+    def test_hybrid_telemetry_accepts_duck_typed_transfer_gaps(self):
+        # Current source-loaded fixtures use SimpleNamespace transfers rather
+        # than PoolTransfer. Observational telemetry must tolerate omitted
+        # optional fields and an omitted hit-page map.
+        cache = _make_restore_cache()
+        operation = SimpleNamespace(
+            pool_transfers=[
+                SimpleNamespace(
+                    indices_from_pool=_PoolName.SWA,
+                    name="swa",
+                    keys=["k1", "k2"],
+                ),
+                SimpleNamespace(),
+            ],
+            pool_storage_result=SimpleNamespace(),
+        )
+        self.assertTrue(
+            UnifiedRadixCache._host_alloc_hybrid_is_all_or_nothing(operation)
+            is False
+        )
+        self.assertEqual(
+            cache._host_alloc_hybrid_sidecar_counts(operation),
+            {
+                "swa": {"expected": 2, "fetched": 0},
+                "unknown": {"expected": 0, "fetched": 0},
+            },
+        )
+
+
+class HostAllocMutationTelemetryTests(unittest.TestCase):
+    def test_cache_mutation_telemetry_is_bounded_under_repetition(self):
+        cache = _make_cache()
+        cache._host_allocability_generations = {"kv": 0}
+        cache._host_allocability_instance_id = 1
+        cache._host_allocability_telemetry_seq = 0
+        cache._host_evictable_signature = lambda _pool: (0, frozenset())
+        with self.assertLogs(level="INFO") as records:
+            for _ in range(5000):
+                cache._bump_host_allocability(
+                    "kv", "direct_free", 1, evictable_before=0, evictable_after=0
+                )
+        payloads = [
+            json.loads(record.getMessage().split("[HAE] ", 1)[1])
+            for record in records.records
+            if "[HAE] " in record.getMessage()
+        ]
+        self.assertLessEqual(len(payloads), 64)
+        self.assertEqual(cache._host_allocability_generations["kv"], 5000)
+        self.assertEqual(cache._host_allocability_telemetry_seq, 5000)
+        self.assertEqual(payloads[0]["telemetry_seq"], 1)
+        self.assertGreater(payloads[-1]["telemetry_coalesced_mutations"], 0)
 
 
 class _SplitComponent:
