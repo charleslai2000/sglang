@@ -2579,7 +2579,7 @@ class RestoreDurabilityMarkingTests(unittest.TestCase):
             and '"evt": "restore_hybrid_finalize"' in record.getMessage()
         )
         self.assertEqual(finalize["result"], "discarded")
-        self.assertEqual(finalize["restore_state_after"], "READY")
+        self.assertEqual(finalize["restore_state_after"], "NONE")
 
     def test_hybrid_telemetry_accepts_duck_typed_transfer_gaps(self):
         # Current source-loaded fixtures use SimpleNamespace transfers rather

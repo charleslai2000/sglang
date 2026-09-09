@@ -3783,8 +3783,25 @@ class Scheduler(
                 active_attempt_id,
             )
             return
+        completion = None
+        discarded_finalization = False
         if outcome == "finalized":
-            event, genuine_miss = RestoreEvent.FINALIZED, False
+            completion = getattr(
+                self.tree_cache,
+                "pop_storage_prefetch_completion",
+                lambda _rid: None,
+            )(req.rid) or {}
+            discarded_finalization = completion.get("finalize_result") in (
+                "discarded",
+                "rejected",
+            )
+            if discarded_finalization:
+                # The finalizer rejected/discarded the all-or-nothing hybrid
+                # material. Keep the terminal handoff, but release the
+                # request to recompute instead of treating it as READY.
+                event, genuine_miss = RestoreEvent.DENIED_SHORT, False
+            else:
+                event, genuine_miss = RestoreEvent.FINALIZED, False
         elif outcome == "revoked_terminated":
             event, genuine_miss = RestoreEvent.REVOKED_TERMINATED, False
         elif outcome == "revoked_backup_pending":
@@ -3823,7 +3840,12 @@ class Scheduler(
         )
         attempt_id = getattr(req, "hicache_prefetch_active_attempt_id", None)
         attempt_origin = getattr(req, "hicache_prefetch_active_origin", None)
-        self._apply_restore_event(req, event, genuine_miss=genuine_miss)
+        self._apply_restore_event(
+            req,
+            event,
+            genuine_miss=genuine_miss,
+            short_tail_recompute=discarded_finalization,
+        )
         if event is RestoreEvent.DENIED_ALLOC:
             self._capture_host_alloc_wait(req, failure)
         if terminal_attempt_id is not None:
@@ -3835,11 +3857,7 @@ class Scheduler(
             staged_tokens = getattr(
                 self.tree_cache, "peek_prefetch_loaded_tokens", lambda _rid: None
             )(req.rid)
-            completion = getattr(
-                self.tree_cache,
-                "pop_storage_prefetch_completion",
-                lambda _rid: None,
-            )(req.rid) or {}
+            completion = completion or {}
             logger.info(
                 "[P3] ts_ns=%d evt=ready_host schema=rh_ready_host.v1 rid=%s "
                 "attempt_id=%s issue_origin=%s completed_kv_tokens=%s "
