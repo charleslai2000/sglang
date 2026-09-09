@@ -17,6 +17,7 @@ the sglang import tree (torch-less dev boxes).
 import importlib.util
 import os
 import sys
+import threading
 import types
 import unittest
 from contextlib import nullcontext
@@ -63,6 +64,7 @@ def _identity_decorator(*args, **kwargs):
 def _install_stubenv():
     fake_torch = types.ModuleType("torch")
     fake_torch.distributed = types.ModuleType("torch.distributed")
+    fake_torch.distributed.is_available = lambda: False
     sys.modules["torch"] = fake_torch
 
     _fake_package("sglang")
@@ -125,7 +127,7 @@ def _install_stubenv():
         durable_trace_enabled=lambda: False,
         is_inert_release_token=lambda *a, **k: False,
         make_trace_context=lambda *a, **k: {},
-        ordered_key_set_digest=lambda *a, **k: "",
+        ordered_key_set_digest=lambda values, *a, **k: ("", len(values)),
         remember_slot_context=lambda *a, **k: None,
         retire_slot_token=lambda *a, **k: None,
         slot_context=lambda *a, **k: nullcontext(),
@@ -273,7 +275,13 @@ def _backup_ack(op_id, completed_tokens, total_tokens):
     """An ack as queued by backup_thread_func: the operation object itself
     (full write: completed_tokens == len(host_indices); partial: less)."""
     return SimpleNamespace(
-        id=op_id, completed_tokens=completed_tokens, host_indices=[0] * total_tokens
+        id=op_id,
+        completed_tokens=completed_tokens,
+        host_indices=[0] * total_tokens,
+        hash_value=[],
+        pool_transfers=[],
+        pool_storage_result=SimpleNamespace(extra_pool_hit_pages={}),
+        trace_context=None,
     )
 
 
@@ -313,6 +321,9 @@ class _FakeTreeCore:
         # P3 prefetch_revoke instrumentation reads the publish epoch for the
         # storage_generation field.
         return self._publish_epoch
+
+    def anchor_storage_version(self, node_id):
+        return 0
         # P2-IO T15: per-node page hashes (empty for nodes not on any
         # modeled request chain) and the modeled request's page hashes.
         self.node_hashes: dict[int, list[str]] = {}
@@ -353,6 +364,15 @@ class _FakeTreeCore:
 
     def node_exists(self, node_id):
         return node_id not in self.deleted
+
+    def node_by_id(self, node_id):
+        if node_id in self.deleted:
+            raise KeyError(node_id)
+        return SimpleNamespace(
+            parent=None,
+            hash_value=["h"],
+            get_last_hash_value=lambda: "",
+        )
 
     def collect_storage_gap(self, node_id):
         if node_id in self.deleted:
@@ -486,6 +506,9 @@ class _FakeTreeCore:
         # storage_restored; this fake has no restore source.
         return node_id in self.persisted
 
+    def get_component_device_value(self, node_id, component_type):
+        return _DeviceValue()
+
 
 class _FakeController:
     """Stub for HybridCacheController: D->H writes complete immediately."""
@@ -515,7 +538,7 @@ class _FakeController:
 
     def write(self, device_indices, node_id=-1, extra_pools=None):
         self.ack_write_queue.append(_FakeAck([node_id]))
-        return [0] * len(device_indices)
+        return _DeviceValue()
 
     def write_storage(
         self,
@@ -525,6 +548,7 @@ class _FakeController:
         prefix_keys,
         extra_pools=None,
         node_id=None,
+        **kwargs,
     ):
         self.storage_ops.append(len(self.storage_ops))
         return len(self.storage_ops) - 1
@@ -538,6 +562,7 @@ def _make_cache(tree_core, *, backup_park=True):
     cache.disable = False
     # tree_core must exist before enable_storage: the property proxies onto it.
     cache.tree_core = tree_core
+    cache.components = {}
     cache.enable_storage = True
     cache.buffer_pipeline = None
     cache.sidecar_pool_specs = []
@@ -551,11 +576,17 @@ def _make_cache(tree_core, *, backup_park=True):
     cache.ongoing_backup = {}
     cache._pending_storage_writes = []
     cache._storage_persist_skip_count = 0
+    cache._t38c_durability_evidence = {}
+    cache._storage_gap_skipped_d2h_count = 0
+    cache._storage_gap_skipped_nokv_count = 0
     cache._storage_frontier_waiters = {}
     cache._storage_frontier_ready = set()
     cache._storage_prefetch_terminal = {}
     cache._storage_prefetch_failures = {}
     cache._storage_prefetch_missed_rids = set()
+    cache._t38c_residency_queue_blocked = set()
+    cache.tp_world_size = 1
+    cache.tp_group = None
     cache._prefetch_outcome_stats = {
         "attempts": 0,
         "issued": 0,
@@ -575,6 +606,7 @@ def _make_cache(tree_core, *, backup_park=True):
     cache.page_size = 1  # tokens == pages in these tests
     cache.prefetch_loaded_tokens_by_reqid = {}
     cache._drain_write_through_depth = 0
+    cache._t38c_residency_lock = threading.RLock()
     cache._backup_wait_spans = {}
     cache._demand_restore_rids = set()
     # T15 bypass gate (P2-IO Phase 1): the park-mechanism tests run with
@@ -932,7 +964,9 @@ class DrainReentryRegressionTest(unittest.TestCase):
         tree_core = _FakeTreeCore([[10, 20, 30]])
         cache = _make_cache(tree_core)
         cache._pending_storage_writes.append(30)
-        cache.cache_controller.mem_pool_host.available_size = lambda: 8
+        cache.cache_controller.mem_pool_host.available_size = (
+            lambda: 8 if tree_core.host_evict_deletes else 1 << 30
+        )
         tree_core.host_evict_deletes = [30]
         components_mod = sys.modules["sglang.srt.mem_cache.unified_cache.components"]
 

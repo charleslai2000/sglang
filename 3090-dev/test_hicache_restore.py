@@ -987,7 +987,12 @@ class T15BypassOffTests(unittest.TestCase):
 
         cache._drain_storage_control_queues_impl(1, 0, 0, 0, {}, False)
 
-        self.assertEqual(cache._storage_prefetch_terminal.get("r1"), "revoked_miss")
+        # The flag-off path bypasses T15 parking, but this positive hit cannot
+        # stage its full span and therefore remains a non-miss allocation
+        # failure.
+        self.assertEqual(
+            cache._storage_prefetch_terminal.get("r1"), "revoked_alloc_failed"
+        )
         self.assertNotIn("r1", cache._backup_wait_spans)
         self.assertNotIn("r1", cache.ongoing_prefetch)
 

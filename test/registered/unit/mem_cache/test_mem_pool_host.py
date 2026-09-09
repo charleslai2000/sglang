@@ -306,6 +306,17 @@ class TestHostPoolGroup(CustomTestCase):
         group.release_transfers(transfers)
         self.assertIn((PoolName.MAMBA, "direct_free", 2), changes)
 
+    def test_resolve_rolls_back_without_observer(self):
+        group = self._group(kv=4, swa=2, mamba=1)
+        transfers = [
+            PoolTransfer(name=PoolName.SWA, device_indices=torch.arange(2)),
+            PoolTransfer(name=PoolName.MAMBA, device_indices=torch.arange(2)),
+        ]
+
+        self.assertIsNone(group.resolve_host_transfers(transfers))
+        self.assertIsNone(transfers[0].host_indices)
+        self.assertEqual(group.available_size(PoolName.SWA), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

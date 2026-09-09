@@ -400,10 +400,33 @@ def _log_host_alloc_telemetry(
     rank,
     rid: Optional[str] = None,
     attempt_id: Optional[str] = None,
+    cache_instance_id=None,
+    trace_context=None,
     **fields,
 ) -> None:
     """Emit bounded, request-correlated HOST_ALLOC observability records."""
     import json as _json
+
+    if event == "restore_host_alloc_wake_decision":
+        decision = fields.get("decision")
+        key = (rid, attempt_id)
+        signature = (
+            decision,
+            fields.get("generation_vector_id"),
+            tuple(sorted(fields.get("current_generations", {}).items())),
+        )
+        last = _HOST_ALLOC_WAKE_TELEMETRY_LAST.get(key)
+        if signature == last:
+            return
+        _HOST_ALLOC_WAKE_TELEMETRY_LAST[key] = signature
+        if decision != "grant":
+            count = _HOST_ALLOC_WAKE_TELEMETRY_HOLDS.get(key, 0) + 1
+            _HOST_ALLOC_WAKE_TELEMETRY_HOLDS[key] = count
+            if count > 64:
+                return
+        if len(_HOST_ALLOC_WAKE_TELEMETRY_LAST) > 4096:
+            _HOST_ALLOC_WAKE_TELEMETRY_LAST.clear()
+            _HOST_ALLOC_WAKE_TELEMETRY_HOLDS.clear()
 
     record = {
         "schema": HOST_ALLOC_TELEMETRY_SCHEMA_VERSION,
@@ -414,9 +437,15 @@ def _log_host_alloc_telemetry(
         "rank": rank,
         "rid": rid,
         "attempt_id": attempt_id,
+        "cache_instance_id": cache_instance_id,
+        "trace_context": trace_context,
     }
     record.update(fields)
     logger.info("[HAE] %s", _json.dumps(record, sort_keys=True, default=str))
+
+
+_HOST_ALLOC_WAKE_TELEMETRY_LAST = {}
+_HOST_ALLOC_WAKE_TELEMETRY_HOLDS = {}
 
 
 # B1.5-PROBE (T31 rebase of T23; read-only instrumentation, appends JSON lines to
@@ -3168,6 +3197,15 @@ class Scheduler(
         )
 
     @staticmethod
+    def _host_alloc_trace_context(req):
+        context = getattr(req, "trace_context", None)
+        if context is None:
+            context = getattr(getattr(req, "time_stats", None), "trace_ctx", None)
+        if context is None or isinstance(context, (str, int, float, bool, dict, list)):
+            return context
+        return str(context)
+
+    @staticmethod
     def _host_alloc_generation_vector_id(vector) -> Optional[str]:
         if vector is None:
             return None
@@ -3268,6 +3306,8 @@ class Scheduler(
             rank=rank,
             rid=req.rid,
             attempt_id=getattr(req, "hicache_host_alloc_last_attempt_id", None),
+            cache_instance_id=failure.allocability_snapshot.cache_instance_id,
+            trace_context=self._host_alloc_trace_context(req),
             state="WAIT_CAPACITY",
             reason="HOST_ALLOC",
             positive_hit_tokens=int(failure.positive_hit_tokens),
@@ -3276,12 +3316,16 @@ class Scheduler(
             required_aux_units=dict(failure.required_aux_units),
             blocked_domains=sorted(map(str, failure.failed_domains)),
             captured_generations=dict(failure.allocability_snapshot.generation_by_pool),
+            current_generations=dict(failure.allocability_snapshot.generation_by_pool),
             free_units=dict(failure.allocability_snapshot.free_units_by_pool),
             evictable_units=dict(failure.allocability_snapshot.evictable_units_by_pool),
             prefetch_reservation_held=False,
             fifo_sequence=sequence,
             wait_started_mono_ns=wait_started_mono_ns,
             deadline_mono_ns=deadline_mono_ns,
+            retry_grant=False,
+            retry_skip=False,
+            retry_outcome="parked",
         )
 
     def _remove_host_alloc_waiter(self, rid: str) -> None:
@@ -3450,6 +3494,10 @@ class Scheduler(
                         attempt_id=getattr(
                             req, "hicache_host_alloc_attempt_id", None
                         ),
+                        cache_instance_id=(
+                            current.cache_instance_id if current is not None else None
+                        ),
+                        trace_context=self._host_alloc_trace_context(req),
                         decision=decision_name,
                         captured_generations=captured_generations,
                         current_generations=current_generations,
@@ -3458,12 +3506,29 @@ class Scheduler(
                         )
                         if cursor
                         else [],
+                        required_aux_units=(
+                            dict(cursor.required_aux_units) if cursor else {}
+                        ),
+                        requested_primary_tokens=(
+                            int(cursor.requested_primary_tokens) if cursor else 0
+                        ),
                         fifo_sequence=cursor.fifo_sequence if cursor else None,
                         generation_vector_id=self._host_alloc_generation_vector_id(
                             vector
                         ),
                         global_grant_used=decision_name == "hold_global_grant_used",
                         budget_available=decision_name != "hold_budget",
+                        free_units=(
+                            dict(current.free_units_by_pool) if current is not None else {}
+                        ),
+                        evictable_units=(
+                            dict(current.evictable_units_by_pool)
+                            if current is not None
+                            else {}
+                        ),
+                        retry_grant=False,
+                        retry_skip=decision_name != "grant",
+                        retry_outcome=decision_name,
                     )
                     continue
                 _log_host_alloc_telemetry(
@@ -3472,16 +3537,37 @@ class Scheduler(
                     rank=rank,
                     rid=req.rid,
                     attempt_id=getattr(req, "hicache_host_alloc_attempt_id", None),
+                    cache_instance_id=(
+                        current.cache_instance_id if current is not None else None
+                    ),
+                    trace_context=self._host_alloc_trace_context(req),
                     decision="grant",
                     captured_generations=captured_generations,
                     current_generations=current_generations,
                     blocked_domains=sorted(map(str, cursor.blocked_domains))
                     if cursor
                     else [],
+                    required_aux_units=(
+                        dict(cursor.required_aux_units) if cursor else {}
+                    ),
+                    requested_primary_tokens=(
+                        int(cursor.requested_primary_tokens) if cursor else 0
+                    ),
                     fifo_sequence=cursor.fifo_sequence if cursor else None,
                     generation_vector_id=self._host_alloc_generation_vector_id(vector),
                     global_grant_used=True,
                     budget_available=True,
+                    free_units=(
+                        dict(current.free_units_by_pool) if current is not None else {}
+                    ),
+                    evictable_units=(
+                        dict(current.evictable_units_by_pool)
+                        if current is not None
+                        else {}
+                    ),
+                    retry_grant=True,
+                    retry_skip=False,
+                    retry_outcome="grant",
                 )
             if not self._restore_wait_capacity_fits(req):
                 continue

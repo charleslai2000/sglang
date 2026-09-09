@@ -125,6 +125,35 @@ class HostAllocabilityWakeTests(unittest.TestCase):
         cache.snapshot = _snapshot(kv=1, mamba=1, free_kv=54976, free_mamba=1)
         self.assertEqual(scheduler._select_host_alloc_waiter(), "hybrid")
 
+    def test_aux_cleanup_generation_cannot_self_wake(self):
+        before_cleanup = _snapshot(kv=0, mamba=0, free_kv=1024, free_mamba=0)
+        cache = _SnapshotCache(before_cleanup)
+        scheduler = self._scheduler(cache)
+        req = _request(
+            "aux-failure",
+            before_cleanup,
+            blocked=("mamba",),
+            aux={"mamba": 1},
+        )
+        scheduler.waiting_queue = [req]
+
+        # The staged auxiliary allocation failure releases its mamba slots
+        # before the cursor is captured. The arbiter must see the post-cleanup
+        # generation as the cursor, so the request's own release is not a wake.
+        after_cleanup = _snapshot(
+            kv=0, mamba=1, free_kv=1024, free_mamba=1
+        )
+        req.hicache_host_alloc_wait_cursor = HostAllocWaitCursor(
+            snapshot=after_cleanup,
+            blocked_domains=frozenset({"mamba"}),
+            requested_primary_tokens=54976,
+            required_aux_units={"mamba": 1},
+            fifo_sequence=0,
+        )
+        cache.snapshot = after_cleanup
+        scheduler._host_alloc_wake_arbiter.enqueue(req.rid)
+        self.assertIsNone(scheduler._select_host_alloc_waiter())
+
     def test_failure_is_full_span_and_trailing_sidecar_cannot_be_cropped(self):
         snapshot = _snapshot(kv=3, mamba=1)
         failure = HostAllocFailure(
