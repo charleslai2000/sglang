@@ -164,8 +164,8 @@ class BackupPendingSchedulerFeedTests(unittest.TestCase):
             req.hicache_restore_state = RestoreState.WAIT_CAPACITY
             req.hicache_restore_wait_reason = RestoreWaitReason.BACKUP_PENDING
             req.hicache_restore_state_ts = time.perf_counter()
-            scheduler._prefetch_kvcache = (
-                lambda r, *, demand_restore=False: issued.append(demand_restore)
+            scheduler._prefetch_kvcache = lambda r, *, origin, demand_restore=False: (
+                issued.append(demand_restore)
             )
 
             scheduler._reconcile_restore_states()
@@ -218,6 +218,7 @@ class CapacitySemanticsSchedulerFeedTests(unittest.TestCase):
     def test_positive_alloc_failure_maps_to_host_capacity_wait(self):
         tree_cache = SimpleNamespace(
             pop_storage_prefetch_terminal=lambda rid: "revoked_alloc_failed",
+            pop_host_alloc_failure=lambda rid: None,
         )
         scheduler = self._scheduler(tree_cache)
         req = self._req()
@@ -230,7 +231,7 @@ class CapacitySemanticsSchedulerFeedTests(unittest.TestCase):
         self.assertIsNone(req.hicache_restore_miss_anchor)
         self.assertIsNone(req.hicache_restore_miss_generation)
 
-    def test_host_alloc_wait_wakes_only_for_complete_requested_span(self):
+    def test_host_alloc_wait_wakes_for_complete_requested_span(self):
         available = [54976]
         tree_cache = SimpleNamespace(
             cache_controller=SimpleNamespace(
@@ -248,7 +249,7 @@ class CapacitySemanticsSchedulerFeedTests(unittest.TestCase):
         req.full_untruncated_fill_ids = list(range(55000))
         req._compute_max_prefix_len = lambda input_len: 55000
 
-        self.assertFalse(scheduler._restore_wait_capacity_fits(req))
+        self.assertTrue(scheduler._restore_wait_capacity_fits(req))
         available[0] = 54992
         self.assertTrue(scheduler._restore_wait_capacity_fits(req))
 
@@ -262,6 +263,7 @@ class CapacitySemanticsSchedulerFeedTests(unittest.TestCase):
             get_last_hash_value=lambda node: "tail",
             prefetch_from_storage=lambda *args, **kwargs: "declined_too_short",
             pop_storage_prefetch_miss=lambda rid: marker.remove(rid) is None,
+            pop_host_alloc_failure=lambda rid: None,
             node_exists=lambda node: False,
             is_l3_durable=lambda node: False,
         )

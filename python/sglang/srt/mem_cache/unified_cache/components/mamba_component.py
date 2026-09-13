@@ -30,6 +30,7 @@ from sglang.srt.mem_cache.trace_context import (
     durable_trace_enabled,
     slot_context,
 )
+from sglang.srt.mem_cache.telemetry_context import producer_context
 from sglang.srt.mem_cache.unified_cache.cache_action import (
     FreeComponentDeviceSlot,
     FreeComponentHostSlot,
@@ -110,6 +111,7 @@ def _t38c_durable_log(rec):
             _T38C_DURABLE_SEQ[thread_id] = local_seq
         run_id = os.environ.get("T38C_RUN_ID") or f"pid-{os.getpid()}"
         record = attach_trace_context(dict(rec))
+        record.setdefault("producer", producer_context(component="mamba"))
         record.setdefault("schema_version", "p0_durable.v2")
         record.setdefault("run_id", run_id)
         record.setdefault(

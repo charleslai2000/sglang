@@ -515,6 +515,7 @@ class _FakeController:
 
     write_policy = "write_back"
     storage_failure_reason = None
+    speculative_release_epoch = 0
 
     def __init__(self):
         self.ack_write_queue = []
@@ -607,6 +608,8 @@ def _make_cache(tree_core, *, backup_park=True):
     cache.prefetch_loaded_tokens_by_reqid = {}
     cache._drain_write_through_depth = 0
     cache._t38c_residency_lock = threading.RLock()
+    cache._t38c_node_context_index = {}
+    cache._host_allocability_telemetry_seq = 0
     cache._backup_wait_spans = {}
     cache._demand_restore_rids = set()
     # T15 bypass gate (P2-IO Phase 1): the park-mechanism tests run with

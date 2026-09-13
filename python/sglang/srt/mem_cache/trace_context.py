@@ -88,6 +88,12 @@ def attach_trace_context(
     if context and context.get("session_id") and context.get("build_rid"):
         record.update(dict(context))
         record["schema_version"] = TRACE_SCHEMA
+    # Marker-gated durability records keep their existing run_id/process_id
+    # semantics for backward compatibility; the non-forgeable producer
+    # identity is attached under a dedicated nested key.
+    from sglang.srt.mem_cache.telemetry_context import producer_context
+
+    record.setdefault("producer", producer_context(component="durable"))
     return record
 
 

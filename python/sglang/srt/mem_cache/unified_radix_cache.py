@@ -70,6 +70,16 @@ from sglang.srt.mem_cache.trace_context import (
     slot_context_for_token,
     slot_token,
 )
+from sglang.srt.mem_cache.telemetry_context import (
+    host_alloc_lineage_fields,
+    next_event_id,
+    producer_context,
+)
+from sglang.srt.mem_cache.p2a_timing_probe import (
+    emit as _p2a_emit,
+    p2a_enabled as _p2a_enabled,
+    probe_identity as _p2a_probe_identity,
+)
 from sglang.srt.mem_cache.unified_cache.cache_action import (
     BackupKV,
     CacheAction,
@@ -145,6 +155,7 @@ logger = logging.getLogger(__name__)
 
 _T38C_DURABLE_SEQ = {}
 _T38C_DURABLE_SEQ_LOCK = threading.Lock()
+_ACTIVE_PRODUCER_CONTEXT = None
 
 # Cache-side mutation records are sampled independently of scheduler wake
 # records.  The mutation sequence remains complete and monotonic for joins;
@@ -178,8 +189,56 @@ def _log_host_alloc_telemetry(
         "rid": rid,
         "attempt_id": attempt_id,
     }
+    record.update(
+        getattr(_log_host_alloc_telemetry, "producer_context", None)
+        or producer_context(component="cache")
+    )
+    record["event_id"] = fields.pop("event_id", None) or next_event_id("host-alloc")
+    for field in (
+        "lifecycle_key",
+        "wait_id",
+        "predecessor_wait_id",
+        "predecessor_terminal_event_id",
+        "predecessor_terminal_state",
+        "wake_event_id",
+        "attempt_number",
+        "attempt_origin",
+        "parent_wait_id",
+        "deadline_mono_ns",
+    ):
+        record.setdefault(field, fields.get(field))
     record.update(fields)
     logger.info("[HAE] %s", _json.dumps(record, sort_keys=True, default=str))
+
+
+def _set_host_alloc_telemetry_context(context):
+    _log_host_alloc_telemetry.producer_context = dict(context)
+
+
+def _host_alloc_join_fields(req_id) -> dict:
+    """Read the scheduler-owned lineage back for a cache-side producer event.
+
+    The cache never derives ``lifecycle_key`` from the process run id: the
+    scheduler is the authority and publishes ``rid:session_generation`` plus
+    the granted ``wake_event_id`` into the shared registry.  A missing record
+    yields an empty mapping so the cache publishes no fabricated identity.
+    """
+    try:
+        lineage = host_alloc_lineage_fields(req_id)
+    except Exception:
+        lineage = {}
+    if not lineage:
+        return {}
+    return {
+        "lifecycle_key": lineage.get("lifecycle_key"),
+        "wait_id": lineage.get("wait_id"),
+        "wake_event_id": lineage.get("wake_event_id"),
+        "parent_wait_id": lineage.get("parent_wait_id"),
+        "predecessor_wait_id": lineage.get("predecessor_wait_id"),
+        "predecessor_terminal_event_id": lineage.get("predecessor_terminal_event_id"),
+        "predecessor_terminal_state": lineage.get("predecessor_terminal_state"),
+        "predecessor_lineage_reason": lineage.get("predecessor_lineage_reason"),
+    }
 
 
 def _storage_hit_crop_is_safe(operation, alloc_len: int) -> bool:
@@ -1557,6 +1616,10 @@ class UnifiedRadixCache(BasePrefixCache):
         params: CacheInitParams,
     ):
         self.req_to_token_pool = params.req_to_token_pool
+        _set_host_alloc_telemetry_context(
+            getattr(params, "producer_telemetry_context", None)
+            or producer_context(component="cache")
+        )
         self.token_to_kv_pool_allocator = params.token_to_kv_pool_allocator
         self.disable = params.disable
 
@@ -3755,6 +3818,11 @@ class UnifiedRadixCache(BasePrefixCache):
             telemetry_coalesced_mutations=max(
                 0, mutation_count - previous_emitted_mutation - 1
             ),
+            lifecycle_key=None,
+            wait_id=None,
+            blocked_pool_generations=dict(
+                getattr(self, "_host_allocability_generations", {})
+            ),
         )
 
     def _bump_changed_host_allocability(
@@ -5141,6 +5209,7 @@ class UnifiedRadixCache(BasePrefixCache):
             cc.inflight_speculative_tokens = max(
                 0, cc.inflight_speculative_tokens - reservation.tokens
             )
+            cc.speculative_release_epoch += 1
 
     def frontier_anchor_ready(self, node_id: NodeId) -> bool:
         """P2-1 M2 T11: whether a FRONTIER waiter's anchor can serve a
@@ -5430,6 +5499,11 @@ class UnifiedRadixCache(BasePrefixCache):
                 genuine_miss=False,
                 captured_generations_after=dict(snapshot.generation_by_pool),
                 reservation_released=True,
+                **_host_alloc_join_fields(req_id),
+                attempt_number=1 if host_alloc_attempt_id is not None else 0,
+                attempt_origin=(
+                    "HOST_ALLOC_WAKE" if host_alloc_attempt_id is not None else "HOST_ALLOC_WAIT"
+                ),
             )
             self.record_host_alloc_failure(
                 req_id,
@@ -5471,7 +5545,24 @@ class UnifiedRadixCache(BasePrefixCache):
         operation.host_alloc_attempt_id = host_alloc_attempt_id
         operation.prefetch_attempt_id = prefetch_attempt_id
         stats["issued"] += 1
-        logger.info("[P2A] ts_ms=%d evt=prefetch_issued rid=%s prefetch_length=%d", int(time.time() * 1000), req_id, prefetch_length)
+        if _p2a_enabled():
+            _p2a_block_start = time.monotonic_ns()
+            _p2a_identity = _p2a_probe_identity(operation, trace_context)
+            if _p2a_identity.get("node_id") is None:
+                _p2a_identity["node_id"] = last_host_node_id
+            _p2a_probe_ns = time.monotonic_ns() - _p2a_block_start
+            _p2a_emit(
+                _p2a_block_start,
+                "prefetch_issued",
+                _p2a_probe_ns,
+                rid=req_id,
+                prefetch_length=prefetch_length,
+                prefetch_issue_mono_ns=_p2a_block_start,
+                attempt_id=prefetch_attempt_id,
+                **_p2a_identity,
+            )
+        else:
+            logger.info("[P2A] ts_ms=%d evt=prefetch_issued rid=%s prefetch_length=%d", int(time.time() * 1000), req_id, prefetch_length)
         try:
             _t38c_log({"evt": "pc_outcome", "phase": "issue", "rid": req_id,
                        "outcome": "issued",
@@ -5626,6 +5717,7 @@ class UnifiedRadixCache(BasePrefixCache):
                 # can consume the authoritative discarded completion and
                 # release the request to recompute without entering READY.
                 restore_state_after="NONE",
+                **_host_alloc_join_fields(req_id),
             )
             self.record_storage_prefetch_completion(
                 req_id,
@@ -5657,6 +5749,13 @@ class UnifiedRadixCache(BasePrefixCache):
             all_or_nothing=self._host_alloc_hybrid_is_all_or_nothing(operation),
             result="accepted",
             restore_state_after="READY",
+            **_host_alloc_join_fields(req_id),
+            attempt_number=1 if getattr(operation, "host_alloc_attempt_id", None) else 0,
+            attempt_origin=(
+                "HOST_ALLOC_WAKE"
+                if getattr(operation, "host_alloc_attempt_id", None)
+                else "HOST_ALLOC_INITIAL"
+            ),
         )
         self.record_storage_prefetch_completion(
             req_id,
@@ -6517,6 +6616,7 @@ class UnifiedRadixCache(BasePrefixCache):
                 genuine_miss=False,
                 captured_generations_after=dict(snapshot.generation_by_pool),
                 reservation_released=True,
+                **_host_alloc_join_fields(req_id),
             )
             self.record_host_alloc_failure(
                 req_id,

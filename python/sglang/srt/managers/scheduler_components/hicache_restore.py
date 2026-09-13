@@ -73,6 +73,24 @@ class HostAllocWaitCursor:
     fifo_sequence: int
 
 
+@dataclass(frozen=True)
+class HostAllocWaiterTerminal:
+    """Producer-owned terminal record for one released HOST_ALLOC waiter.
+
+    Telemetry only: the arbiter keeps a bounded history of the released
+    waiters so a later grant can name the immediately preceding waiter in the
+    same blocked-domain FIFO and its terminal event.  The values are written
+    by the scheduler from producer state (never from a request payload).
+    """
+
+    rid: str
+    sequence: int
+    wait_id: Optional[str]
+    terminal_event_id: Optional[str]
+    terminal_state: Optional[str]
+    blocked_domains: frozenset
+
+
 class HostAllocWakeArbiter:
     """Scheduler-owned FIFO admission for bounded HOST_ALLOC retries."""
 
@@ -81,6 +99,12 @@ class HostAllocWakeArbiter:
         self._sequence_by_rid: dict[str, int] = {}
         self._next_sequence = 0
         self._last_granted_vector = None
+        # Bounded, append-only terminal history.  Released waiters are removed
+        # from the admission queue (``remove``) but their terminal facts stay
+        # here so the next grant can name its FIFO predecessor without
+        # trusting the verification harness.  This history is read-only
+        # telemetry: it never changes ``choose``/``enqueue``/``remove`` policy.
+        self._terminal_history: Deque[HostAllocWaiterTerminal] = deque(maxlen=4096)
 
     def enqueue(self, rid: str) -> int:
         sequence = self._sequence_by_rid.get(rid)
@@ -107,6 +131,70 @@ class HostAllocWakeArbiter:
         return tuple(
             rid for rid in self._queue if rid in self._sequence_by_rid
         )
+
+    def record_terminal(
+        self,
+        rid: str,
+        *,
+        sequence: Optional[int],
+        wait_id: Optional[str],
+        terminal_event_id: Optional[str],
+        terminal_state: Optional[str],
+        blocked_domains=(),
+    ) -> None:
+        """Append a released waiter's terminal facts to the FIFO history."""
+        if sequence is None:
+            sequence = self._sequence_by_rid.get(rid)
+        self._terminal_history.append(
+            HostAllocWaiterTerminal(
+                rid=str(rid),
+                sequence=int(sequence) if sequence is not None else -1,
+                wait_id=wait_id,
+                terminal_event_id=terminal_event_id,
+                terminal_state=terminal_state,
+                blocked_domains=frozenset(str(pool) for pool in blocked_domains),
+            )
+        )
+
+    def predecessor_for(
+        self,
+        rid: str,
+        *,
+        sequence: Optional[int],
+        blocked_domains,
+        released_states,
+    ) -> tuple[Optional[HostAllocWaiterTerminal], Optional[str]]:
+        """Return the immediately preceding released waiter for one grant.
+
+        The predecessor is the most recently history-recorded terminal in the
+        same blocked-domain FIFO whose FIFO sequence strictly precedes this
+        waiter.  The same rid may be its own predecessor across a re-park: a
+        request that is woken and then re-parks has its earlier release as the
+        immediately preceding FIFO entry.
+
+        The second return value is a fail-closed reason:
+          - ``None`` when a complete predecessor was resolved;
+          - ``"no_released_predecessor"`` when no earlier release exists;
+          - ``"predecessor_terminal_incomplete"`` when the immediate
+            predecessor carries a contradictory (half-set) terminal;
+          - ``"predecessor_terminal_state_unrecognized"`` when its terminal
+            state is not an accepted release state.
+        A reason always accompanies ``None``, so the caller never fabricates
+        predecessor lineage.
+        """
+        target = frozenset(str(pool) for pool in blocked_domains)
+        target_sequence = int(sequence) if sequence is not None else None
+        for entry in reversed(self._terminal_history):
+            if entry.blocked_domains != target:
+                continue
+            if target_sequence is not None and entry.sequence >= target_sequence:
+                continue
+            if entry.terminal_state is None or entry.terminal_event_id is None:
+                return None, "predecessor_terminal_incomplete"
+            if entry.terminal_state not in released_states:
+                return None, "predecessor_terminal_state_unrecognized"
+            return entry, None
+        return None, "no_released_predecessor"
 
     def choose(self, eligible, vector_for) -> Optional[str]:
         """Choose the first eligible waiter for a new generation vector."""
