@@ -309,6 +309,17 @@ from sglang.srt.managers.utils import (
     validate_input_length,
 )
 from sglang.srt.mem_cache import kv_cache_builder
+from sglang.srt.mem_cache.telemetry_context import (
+    configure_producer_context,
+    host_alloc_lineage,
+    lifecycle_key as host_alloc_lifecycle_key,
+    next_event_id,
+    producer_context,
+    record_host_alloc_lineage,
+)
+from sglang.srt.mem_cache.p2a_timing_probe import (
+    mark_enqueue as _p2a_mark_enqueue,
+)
 from sglang.srt.mem_cache.common import (
     maybe_cache_unfinished_req,
     release_kv_cache,
@@ -405,31 +416,41 @@ def _log_host_alloc_telemetry(
     attempt_id: Optional[str] = None,
     cache_instance_id=None,
     trace_context=None,
+    producer_context_override=None,
     **fields,
-) -> None:
+) -> Optional[str]:
     """Emit bounded, request-correlated HOST_ALLOC observability records."""
     import json as _json
 
     if event == "restore_host_alloc_wake_decision":
         decision = fields.get("decision")
         key = (rid, attempt_id)
+        current_generations = fields.get("current_generations") or {}
         signature = (
             decision,
+            fields.get("wait_id"),
             fields.get("generation_vector_id"),
-            tuple(sorted(fields.get("current_generations", {}).items())),
+            tuple(sorted(current_generations.items()))
+            if isinstance(current_generations, dict)
+            else (),
         )
-        last = _HOST_ALLOC_WAKE_TELEMETRY_LAST.get(key)
-        if signature == last:
-            return
-        _HOST_ALLOC_WAKE_TELEMETRY_LAST[key] = signature
-        if decision != "grant":
+        # A grant is the single authoritative wake record that later
+        # retry/finalize/READY events reference, and a release is the single
+        # terminal record a successor grant references.  Neither may be
+        # coalesced away (which would return None and produce a null
+        # wake_event_id / terminal_event_id).  Only hold records are bounded.
+        if decision not in ("grant", "release"):
+            last = _HOST_ALLOC_WAKE_TELEMETRY_LAST.get(key)
+            if signature == last:
+                return None
+            _HOST_ALLOC_WAKE_TELEMETRY_LAST[key] = signature
             count = _HOST_ALLOC_WAKE_TELEMETRY_HOLDS.get(key, 0) + 1
             _HOST_ALLOC_WAKE_TELEMETRY_HOLDS[key] = count
             if count > 64:
-                return
-        if len(_HOST_ALLOC_WAKE_TELEMETRY_LAST) > 4096:
-            _HOST_ALLOC_WAKE_TELEMETRY_LAST.clear()
-            _HOST_ALLOC_WAKE_TELEMETRY_HOLDS.clear()
+                return None
+            if len(_HOST_ALLOC_WAKE_TELEMETRY_LAST) > 4096:
+                _HOST_ALLOC_WAKE_TELEMETRY_LAST.clear()
+                _HOST_ALLOC_WAKE_TELEMETRY_HOLDS.clear()
 
     record = {
         "schema": HOST_ALLOC_TELEMETRY_SCHEMA_VERSION,
@@ -443,12 +464,42 @@ def _log_host_alloc_telemetry(
         "cache_instance_id": cache_instance_id,
         "trace_context": trace_context,
     }
+    record.update(
+        producer_context_override
+        or producer_context(component="scheduler")
+    )
+    record["event_id"] = fields.pop("event_id", None) or next_event_id("host-alloc")
+    record.setdefault("lifecycle_key", fields.get("lifecycle_key"))
+    record.setdefault("wait_id", fields.get("wait_id"))
+    record.setdefault("predecessor_wait_id", fields.get("predecessor_wait_id"))
+    record.setdefault("predecessor_terminal_event_id", fields.get("predecessor_terminal_event_id"))
+    record.setdefault("predecessor_terminal_state", fields.get("predecessor_terminal_state"))
+    record.setdefault(
+        "predecessor_lineage_reason", fields.get("predecessor_lineage_reason")
+    )
+    record.setdefault("wake_event_id", fields.get("wake_event_id"))
+    record.setdefault("attempt_number", fields.get("attempt_number"))
+    record.setdefault("attempt_origin", fields.get("attempt_origin"))
+    record.setdefault("parent_wait_id", fields.get("parent_wait_id"))
+    record.setdefault("deadline_mono_ns", fields.get("deadline_mono_ns"))
+    record.setdefault("terminal_event_id", fields.get("terminal_event_id"))
+    record.setdefault("terminal_state", fields.get("terminal_state"))
+    record.setdefault("terminal_reason", fields.get("terminal_reason"))
     record.update(fields)
     logger.info("[HAE] %s", _json.dumps(record, sort_keys=True, default=str))
+    return record["event_id"]
 
 
 _HOST_ALLOC_WAKE_TELEMETRY_LAST = {}
 _HOST_ALLOC_WAKE_TELEMETRY_HOLDS = {}
+_ACTIVE_PRODUCER_CONTEXT = None
+
+# Producer-owned terminal states that count as a released FIFO waiter, so a
+# later grant may name that waiter as its predecessor.  These are the states a
+# WAIT_CAPACITY/HOST_ALLOC waiter can leave through in the scheduler.
+_HOST_ALLOC_RELEASED_TERMINAL_STATES = frozenset(
+    {"RELEASED", "TIMEOUT", "RESTORED", "MISS", "ABORTED", "RECOMPUTE", "ABANDONED"}
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -600,6 +651,26 @@ class Scheduler(
 
         # Parse args
         self.server_args = server_args
+        self._producer_telemetry_context = configure_producer_context(
+            profile_values={
+                key: getattr(server_args, key, None)
+                for key in (
+                    "model_path",
+                    "tp_size",
+                    "pp_size",
+                    "dp_size",
+                    "max_total_num_tokens",
+                    "kv_cache_dtype",
+                    "hicache_host_memory_mode",
+                    "hicache_ratio",
+                    "ready_horizon_frontier_n",
+                    "ready_host_watermark_low",
+                    "ready_host_watermark_high",
+                )
+            },
+        )
+        global _ACTIVE_PRODUCER_CONTEXT
+        _ACTIVE_PRODUCER_CONTEXT = self._producer_telemetry_context
         self.nccl_port = port_args.nccl_port
         self.schedule_policy = get_schedule().schedule_policy
         self.enable_priority_scheduling = get_schedule().enable_priority_scheduling
@@ -751,6 +822,9 @@ class Scheduler(
         self.token_to_kv_pool_allocator = result.token_to_kv_pool_allocator
         self.disable_radix_cache = result.disable_radix_cache
         self.tree_cache = result.tree_cache
+        self.tree_cache._producer_telemetry_context = dict(
+            self._producer_telemetry_context
+        )
         self.emit_metrics_constants()
         self.maybe_init_hccl_dp_prewarm()
 
@@ -1506,6 +1580,10 @@ class Scheduler(
         # refill's own traffic only ever lowers it, so it can never
         # self-trigger.
         self._ready_host_release_last_level: Optional[int] = None
+        # Last observed speculative reservation-release epoch. The controller
+        # increments this at each SPECULATIVE release, including releases that
+        # complete between two scheduler snapshots.
+        self._ready_spec_budget_release_epoch = 0
         # P3 M3 (user adjudication): per-rid causal negative-cache
         # (rid -> NegativeCacheEntry). A staged request that declined
         # parks here with its subscribed epoch's cursor; it is not re-
@@ -3332,6 +3410,11 @@ class Scheduler(
                     if tree_cache.hicache_storage_pass_prefix_keys
                     else None
                 )
+                # Publish the producer-owned lifecycle_key before the
+                # cache-side forfeit/finalize producers can read it back, so
+                # every cache HOST_ALLOC event carries the scheduler's
+                # authoritative key even on the very first issue.
+                self._record_host_alloc_lineage(req)
                 outcome = tree_cache.prefetch_from_storage(
                     req.rid,
                     last_host_node,
@@ -3474,6 +3557,165 @@ class Scheduler(
             f"{pool}={generation}" for pool, generation in generations
         )
 
+    def _host_alloc_lifecycle_key(self, req) -> str:
+        """The scheduler-authoritative lifecycle key for one request.
+
+        Both the HOST_ALLOC family and the cache/READY producers must publish
+        this exact value; the cache side reads it back from the producer-owned
+        registry instead of deriving a divergent ``rid:run_id`` form.
+        """
+        return host_alloc_lifecycle_key(
+            req.rid, getattr(req, "session_generation", None)
+        )
+
+    def _host_alloc_lineage_fields(self, req, *, attempt_number=None, origin=None):
+        wait_id = getattr(req, "hicache_host_alloc_wait_id", None)
+        return {
+            "lifecycle_key": self._host_alloc_lifecycle_key(req),
+            "wait_id": wait_id,
+            "wake_event_id": getattr(req, "hicache_host_alloc_wake_event_id", None),
+            "attempt_number": (
+                getattr(req, "hicache_host_alloc_attempt_number", 0)
+                if attempt_number is None
+                else attempt_number
+            ),
+            "attempt_origin": origin,
+            "parent_wait_id": wait_id,
+        }
+
+    def _record_host_alloc_lineage(
+        self, req, *, attempt_number=None, origin=None, replace_missing=False, **extra
+    ) -> None:
+        """Publish this producer's lineage snapshot to the shared registry."""
+        fields = self._host_alloc_lineage_fields(
+            req, attempt_number=attempt_number, origin=origin
+        )
+        fields.update(extra)
+        attempt_id = getattr(req, "hicache_host_alloc_last_attempt_id", None)
+        if attempt_id is None:
+            attempt_id = getattr(req, "hicache_host_alloc_attempt_id", None)
+        record_host_alloc_lineage(
+            req.rid,
+            attempt_id=attempt_id,
+            replace_missing=replace_missing,
+            **fields,
+        )
+
+    def _host_alloc_predecessor_lineage(self, req):
+        """Resolve the predecessor terminal from the producer-owned FIFO.
+
+        Returns ``(wait_id, terminal_event_id, terminal_state, reason)``.  A
+        resolved predecessor carries ``reason=None``; otherwise the identity
+        fields are explicit ``None`` and ``reason`` names the fail-closed
+        cause.  No predecessor fact is ever inferred from the request payload.
+        """
+        cursor = getattr(req, "hicache_host_alloc_wait_cursor", None)
+        arbiter = getattr(self, "_host_alloc_wake_arbiter", None)
+        if cursor is None or arbiter is None:
+            return None, None, None, "no_wait_cursor"
+        predecessor, reason = arbiter.predecessor_for(
+            req.rid,
+            sequence=cursor.fifo_sequence,
+            blocked_domains=cursor.blocked_domains,
+            released_states=_HOST_ALLOC_RELEASED_TERMINAL_STATES,
+        )
+        if predecessor is None:
+            return None, None, None, reason
+        return (
+            predecessor.wait_id,
+            predecessor.terminal_event_id,
+            predecessor.terminal_state,
+            None,
+        )
+
+    @staticmethod
+    def _host_alloc_terminal_state_for(event, next_state) -> str:
+        if event is RestoreEvent.TIMEOUT:
+            return "TIMEOUT"
+        if event is RestoreEvent.ABORT:
+            return "ABORTED"
+        if next_state is RestoreState.READY:
+            return "RESTORED"
+        if next_state is RestoreState.MISS_RECOMPUTE:
+            return "MISS"
+        if next_state is RestoreState.NONE:
+            return "RECOMPUTE"
+        return "RELEASED"
+
+    def _record_host_alloc_terminal(
+        self, rid, terminal_state, reason, req=None
+    ) -> Optional[str]:
+        """Emit and register the terminal fact for one released waiter.
+
+        The terminal record reuses the real ``restore_host_alloc_wake_decision``
+        event name (``decision="release"``); no new event taxonomy is
+        introduced.  Its ``event_id`` is also its ``terminal_event_id``, so a
+        successor grant's ``predecessor_terminal_event_id`` names a real,
+        non-forgeable producer record.
+        """
+        records = getattr(self, "_host_alloc_wait_records", None)
+        if not records:
+            return None
+        record = records.get(str(rid))
+        if record is None or record.get("terminal_state") is not None:
+            return None
+        terminal_event_id = next_event_id("host-alloc")
+        worker, rank = self._host_alloc_telemetry_identity()
+        _log_host_alloc_telemetry(
+            "restore_host_alloc_wake_decision",
+            worker=worker,
+            rank=rank,
+            rid=str(rid),
+            attempt_id=record.get("attempt_id"),
+            cache_instance_id=record.get("cache_instance_id"),
+            trace_context=(
+                self._host_alloc_trace_context(req) if req is not None else None
+            ),
+            decision="release",
+            event_id=terminal_event_id,
+            terminal_event_id=terminal_event_id,
+            terminal_state=terminal_state,
+            terminal_reason=reason,
+            lifecycle_key=record.get("lifecycle_key"),
+            wait_id=record.get("wait_id"),
+            wake_event_id=record.get("wake_event_id"),
+            predecessor_wait_id=record.get("predecessor_wait_id"),
+            predecessor_terminal_event_id=record.get("predecessor_terminal_event_id"),
+            predecessor_terminal_state=record.get("predecessor_terminal_state"),
+            predecessor_lineage_reason=record.get("predecessor_lineage_reason"),
+            attempt_number=record.get("attempt_number"),
+            attempt_origin="HOST_ALLOC_RELEASE",
+            parent_wait_id=record.get("wait_id"),
+            fifo_sequence=record.get("fifo_sequence"),
+            blocked_pool_generations=record.get("blocked_pool_generations"),
+            retry_grant=False,
+            retry_skip=True,
+            retry_outcome="released",
+        )
+        record["terminal_event_id"] = terminal_event_id
+        record["terminal_state"] = terminal_state
+        record["terminal_reason"] = reason
+        # Publish to the shared registry so cache/READY producers can read the
+        # terminal fact back without trusting the verification harness.
+        record_host_alloc_lineage(
+            rid,
+            attempt_id=record.get("attempt_id"),
+            terminal_event_id=terminal_event_id,
+            terminal_state=terminal_state,
+            terminal_reason=reason,
+        )
+        arbiter = getattr(self, "_host_alloc_wake_arbiter", None)
+        if arbiter is not None:
+            arbiter.record_terminal(
+                str(rid),
+                sequence=record.get("fifo_sequence"),
+                wait_id=record.get("wait_id"),
+                terminal_event_id=terminal_event_id,
+                terminal_state=terminal_state,
+                blocked_domains=record.get("blocked_domains") or (),
+            )
+        return terminal_event_id
+
     def _host_alloc_wait_eligible(self, req) -> bool:
         cursor = getattr(req, "hicache_host_alloc_wait_cursor", None)
         if cursor is None:
@@ -3481,11 +3723,39 @@ class Scheduler(
         current = self._host_alloc_snapshot_for_req(req)
         if current is None or current.cache_instance_id != cursor.snapshot.cache_instance_id:
             return False
-        return all(
-            current.generation_by_pool.get(pool, 0)
-            > cursor.snapshot.generation_by_pool.get(pool, 0)
-            for pool in cursor.blocked_domains
-        )
+        # Per-domain eligibility.  A blocked domain stops blocking as soon as
+        # EITHER signal says it is no longer a constraint:
+        #   (a) its generation advanced since the park (the original
+        #       invalidation signal), OR
+        #   (b) it is already capacity-satisfiable right now.
+        # (b) is required for liveness: a domain can be admitted into
+        # ``blocked_domains`` even though its requirement was already met
+        # (e.g. mamba ``free 75 >= required 1``).  Its host EVICTABLE set then
+        # never changes, so its generation never advances -- demanding one
+        # starves the waiter even after the material domain (kv) becomes
+        # satisfiable.  Generation is an invalidation signal only; the cache
+        # allocator remains authoritative, so admitting a retry when
+        # ``free + evictable`` already covers the requirement is safe.
+        for pool in cursor.blocked_domains:
+            if current.generation_by_pool.get(
+                pool, 0
+            ) > cursor.snapshot.generation_by_pool.get(pool, 0):
+                continue
+            # KV is the primary domain: its requirement is the request's
+            # durable token span.  Aux domains use their per-pool units.
+            if str(pool) == "kv":
+                required = int(cursor.requested_primary_tokens)
+            else:
+                required = int(cursor.required_aux_units.get(str(pool), 0))
+            # A blocked domain with no positive requirement is not a real
+            # constraint: treat it as satisfied rather than starve.
+            if required <= 0:
+                continue
+            free = int(current.free_units_by_pool.get(str(pool), 0))
+            evictable = int(current.evictable_units_by_pool.get(str(pool), 0))
+            if free + evictable < required:
+                return False
+        return True
 
     def _host_alloc_generation_vector_for_req(self, req):
         cursor = req.hicache_host_alloc_wait_cursor
@@ -3531,6 +3801,9 @@ class Scheduler(
         if not hasattr(self, "_host_alloc_wake_arbiter"):
             self._host_alloc_wake_arbiter = HostAllocWakeArbiter()
         arbiter = self._host_alloc_wake_arbiter
+        wait_records = getattr(self, "_host_alloc_wait_records", None)
+        if wait_records is None:
+            wait_records = self._host_alloc_wait_records = {}
         if getattr(req, "hicache_host_alloc_attempt_id", None) is not None:
             req.hicache_host_alloc_last_attempt_id = req.hicache_host_alloc_attempt_id
             attempt_snapshot = self._host_alloc_global_snapshot()
@@ -3541,6 +3814,45 @@ class Scheduler(
             req.hicache_host_alloc_attempt_id = None
         else:
             sequence = arbiter.enqueue(req.rid)
+        # Each (re-)park is a distinct producer-owned wait keyed to its own
+        # FIFO sequence.  Reusing the previous park's wait_id would make the
+        # request's own earlier release indistinguishable from its current
+        # wait (the predecessor_wait_id would equal wait_id), so the identity
+        # is refreshed on every park.
+        req.hicache_host_alloc_wait_id = f"{req.rid}:wait:{sequence}"
+        lifecycle_key = self._host_alloc_lifecycle_key(req)
+        wait_record = wait_records.setdefault(
+            req.rid,
+            {
+                "wait_id": req.hicache_host_alloc_wait_id,
+                "terminal_event_id": None,
+                "terminal_state": None,
+            },
+        )
+        # A (re-)park opens a fresh producer-owned wait: refresh the terminal
+        # and predecessor slots so a release from an earlier wait can never be
+        # joined to this one.
+        wait_record["wait_id"] = req.hicache_host_alloc_wait_id
+        wait_record["rid"] = req.rid
+        wait_record["fifo_sequence"] = sequence
+        wait_record["blocked_domains"] = sorted(
+            str(pool) for pool in (failure.failed_domains or frozenset({"kv"}))
+        )
+        wait_record["cache_instance_id"] = (
+            failure.allocability_snapshot.cache_instance_id
+        )
+        wait_record["lifecycle_key"] = lifecycle_key
+        wait_record["terminal_event_id"] = None
+        wait_record["terminal_state"] = None
+        wait_record["terminal_reason"] = None
+        wait_record["predecessor_wait_id"] = None
+        wait_record["predecessor_terminal_event_id"] = None
+        wait_record["predecessor_terminal_state"] = None
+        wait_record["predecessor_lineage_reason"] = None
+        wait_record["attempt_id"] = getattr(
+            req, "hicache_host_alloc_last_attempt_id", None
+        )
+        wait_record["wake_event_id"] = None
         req.hicache_host_alloc_wait_cursor = HostAllocWaitCursor(
             snapshot=failure.allocability_snapshot,
             blocked_domains=failure.failed_domains or frozenset({"kv"}),
@@ -3560,7 +3872,7 @@ class Scheduler(
         deadline_mono_ns = (
             wait_started_mono_ns + int(timeout_s * 1e9) if timeout_s > 0 else None
         )
-        _log_host_alloc_telemetry(
+        req.hicache_host_alloc_wait_event_id = _log_host_alloc_telemetry(
             "restore_host_alloc_wait",
             worker=worker,
             rank=rank,
@@ -3586,9 +3898,48 @@ class Scheduler(
             retry_grant=False,
             retry_skip=False,
             retry_outcome="parked",
+            lifecycle_key=lifecycle_key,
+            wait_id=wait_record["wait_id"],
+            predecessor_wait_id=None,
+            predecessor_terminal_event_id=None,
+            predecessor_terminal_state=None,
+            predecessor_lineage_reason=None,
+            attempt_number=0,
+            attempt_origin="HOST_ALLOC_WAIT",
+            parent_wait_id=None,
+            terminal_event_id=None,
+            terminal_state=None,
+            terminal_reason=None,
+            wake_event_id=None,
+        )
+        self._record_host_alloc_lineage(
+            req,
+            attempt_number=0,
+            origin="HOST_ALLOC_WAIT",
+            replace_missing=True,
+            wake_event_id=None,
+            terminal_event_id=None,
+            terminal_state=None,
+            terminal_reason=None,
+            predecessor_wait_id=None,
+            predecessor_terminal_event_id=None,
+            predecessor_terminal_state=None,
+            predecessor_lineage_reason=None,
+            fifo_sequence=sequence,
+            cache_instance_id=failure.allocability_snapshot.cache_instance_id,
+            blocked_pool_generations=dict(
+                failure.allocability_snapshot.generation_by_pool
+            ),
+            current_generations=dict(failure.allocability_snapshot.generation_by_pool),
+            deadline_mono_ns=deadline_mono_ns,
+            wait_started_mono_ns=wait_started_mono_ns,
         )
 
-    def _remove_host_alloc_waiter(self, rid: str) -> None:
+    def _remove_host_alloc_waiter(
+        self, rid: str, *, terminal_state=None, reason=None, req=None
+    ) -> None:
+        if terminal_state is not None:
+            self._record_host_alloc_terminal(rid, terminal_state, reason, req)
         arbiter = getattr(self, "_host_alloc_wake_arbiter", None)
         if arbiter is not None:
             arbiter.remove(rid)
@@ -3601,7 +3952,12 @@ class Scheduler(
         for rid in arbiter.ordered_rids():
             req = requests.get(rid)
             if req is None or req.hicache_restore_state is not RestoreState.WAIT_CAPACITY:
-                self._remove_host_alloc_waiter(rid)
+                self._remove_host_alloc_waiter(
+                    rid,
+                    terminal_state="ABANDONED",
+                    reason="stale_fifo_entry",
+                    req=req,
+                )
         if not requests:
             return None
         controller = getattr(self.tree_cache, "cache_controller", None)
@@ -3632,6 +3988,112 @@ class Scheduler(
             return "hold_no_generation"
         return "hold_global_grant_used"
 
+    def _emit_host_alloc_wake_grant(self, req) -> Optional[str]:
+        """Emit the authoritative grant record for one woken waiter.
+
+        The record carries the producer-owned predecessor lineage resolved
+        from the FIFO arbiter terminal history, and its own ``event_id`` as
+        ``wake_event_id`` so later retry/finalize/READY events join to exactly
+        this grant.  A grant is never coalesced away.
+        """
+        worker, rank = self._host_alloc_telemetry_identity()
+        cursor = getattr(req, "hicache_host_alloc_wait_cursor", None)
+        current = self._host_alloc_snapshot_for_req(req)
+        current_generations = (
+            dict(current.generation_by_pool) if current is not None else {}
+        )
+        captured_generations = (
+            dict(cursor.snapshot.generation_by_pool) if cursor else {}
+        )
+        vector = current.generation_vector() if current is not None else None
+        (
+            predecessor_wait_id,
+            predecessor_terminal_event_id,
+            predecessor_terminal_state,
+            predecessor_reason,
+        ) = self._host_alloc_predecessor_lineage(req)
+        grant_event_id = next_event_id("host-alloc")
+        event_id = _log_host_alloc_telemetry(
+            "restore_host_alloc_wake_decision",
+            worker=worker,
+            rank=rank,
+            rid=req.rid,
+            attempt_id=getattr(req, "hicache_host_alloc_attempt_id", None),
+            cache_instance_id=(
+                current.cache_instance_id if current is not None else None
+            ),
+            trace_context=self._host_alloc_trace_context(req),
+            decision="grant",
+            captured_generations=captured_generations,
+            current_generations=current_generations,
+            blocked_domains=sorted(map(str, cursor.blocked_domains))
+            if cursor
+            else [],
+            required_aux_units=(dict(cursor.required_aux_units) if cursor else {}),
+            requested_primary_tokens=(
+                int(cursor.requested_primary_tokens) if cursor else 0
+            ),
+            fifo_sequence=cursor.fifo_sequence if cursor else None,
+            generation_vector_id=self._host_alloc_generation_vector_id(vector),
+            global_grant_used=True,
+            budget_available=True,
+            free_units=(
+                dict(current.free_units_by_pool) if current is not None else {}
+            ),
+            evictable_units=(
+                dict(current.evictable_units_by_pool)
+                if current is not None
+                else {}
+            ),
+            retry_grant=True,
+            retry_skip=False,
+            retry_outcome="grant",
+            event_id=grant_event_id,
+            wake_event_id=grant_event_id,
+            lifecycle_key=self._host_alloc_lifecycle_key(req),
+            wait_id=getattr(req, "hicache_host_alloc_wait_id", None),
+            predecessor_wait_id=predecessor_wait_id,
+            predecessor_terminal_event_id=predecessor_terminal_event_id,
+            predecessor_terminal_state=predecessor_terminal_state,
+            predecessor_lineage_reason=predecessor_reason,
+            attempt_number=getattr(req, "hicache_host_alloc_attempt_number", 0),
+            attempt_origin="HOST_ALLOC_WAKE",
+            parent_wait_id=getattr(req, "hicache_host_alloc_wait_id", None),
+        )
+        if event_id is None:
+            # The grant is the authority for wake_event_id; never advertise a
+            # wake id that has no producer record behind it.
+            return None
+        req.hicache_host_alloc_wake_event_id = event_id
+        records = getattr(self, "_host_alloc_wait_records", None)
+        wait_record = records.get(str(req.rid)) if records else None
+        if wait_record is not None:
+            wait_record["wake_event_id"] = event_id
+            wait_record["predecessor_wait_id"] = predecessor_wait_id
+            wait_record["predecessor_terminal_event_id"] = (
+                predecessor_terminal_event_id
+            )
+            wait_record["predecessor_terminal_state"] = predecessor_terminal_state
+            wait_record["predecessor_lineage_reason"] = predecessor_reason
+        self._record_host_alloc_lineage(
+            req,
+            attempt_number=getattr(req, "hicache_host_alloc_attempt_number", 0),
+            origin="HOST_ALLOC_WAKE",
+            replace_missing=True,
+            wake_event_id=event_id,
+            predecessor_wait_id=predecessor_wait_id,
+            predecessor_terminal_event_id=predecessor_terminal_event_id,
+            predecessor_terminal_state=predecessor_terminal_state,
+            predecessor_lineage_reason=predecessor_reason,
+            fifo_sequence=cursor.fifo_sequence if cursor else None,
+            cache_instance_id=(
+                current.cache_instance_id if current is not None else None
+            ),
+            blocked_pool_generations=captured_generations,
+            current_generations=current_generations,
+        )
+        return event_id
+
     def _reconcile_restore_states(self):
         """Per-pass restore-state reconciliation (P2-1 M1b/M2; evolved from
         _retry_missed_storage_prefetches). Feeds terminal prefetch outcomes
@@ -3642,7 +4104,9 @@ class Scheduler(
         if not self.waiting_queue:
             arbiter = getattr(self, "_host_alloc_wake_arbiter", None)
             for rid in arbiter.ordered_rids() if arbiter is not None else ():
-                self._remove_host_alloc_waiter(rid)
+                self._remove_host_alloc_waiter(
+                    rid, terminal_state="ABANDONED", reason="empty_waiting_queue"
+                )
             return
 
         # 1) Terminal outcomes recorded by the drain this pass (same thread).
@@ -3790,46 +4254,14 @@ class Scheduler(
                         retry_grant=False,
                         retry_skip=decision_name != "grant",
                         retry_outcome=decision_name,
+                        lifecycle_key=self._host_alloc_lifecycle_key(req),
+                        wait_id=getattr(req, "hicache_host_alloc_wait_id", None),
+                        wake_event_id=None,
+                        attempt_number=0,
+                        attempt_origin="HOST_ALLOC_WAKE_HOLD",
                     )
                     continue
-                _log_host_alloc_telemetry(
-                    "restore_host_alloc_wake_decision",
-                    worker=worker,
-                    rank=rank,
-                    rid=req.rid,
-                    attempt_id=getattr(req, "hicache_host_alloc_attempt_id", None),
-                    cache_instance_id=(
-                        current.cache_instance_id if current is not None else None
-                    ),
-                    trace_context=self._host_alloc_trace_context(req),
-                    decision="grant",
-                    captured_generations=captured_generations,
-                    current_generations=current_generations,
-                    blocked_domains=sorted(map(str, cursor.blocked_domains))
-                    if cursor
-                    else [],
-                    required_aux_units=(
-                        dict(cursor.required_aux_units) if cursor else {}
-                    ),
-                    requested_primary_tokens=(
-                        int(cursor.requested_primary_tokens) if cursor else 0
-                    ),
-                    fifo_sequence=cursor.fifo_sequence if cursor else None,
-                    generation_vector_id=self._host_alloc_generation_vector_id(vector),
-                    global_grant_used=True,
-                    budget_available=True,
-                    free_units=(
-                        dict(current.free_units_by_pool) if current is not None else {}
-                    ),
-                    evictable_units=(
-                        dict(current.evictable_units_by_pool)
-                        if current is not None
-                        else {}
-                    ),
-                    retry_grant=True,
-                    retry_skip=False,
-                    retry_outcome="grant",
-                )
+                self._emit_host_alloc_wake_grant(req)
             if not self._restore_wait_capacity_fits(req):
                 continue
             # Captured before _apply_restore_event clears the reason: a
@@ -3851,8 +4283,18 @@ class Scheduler(
                 req.hicache_host_alloc_attempt_id = (
                     f"{req.rid}:{self._host_alloc_attempt_seq}"
                 )
+                req.hicache_host_alloc_attempt_number = (
+                    getattr(req, "hicache_host_alloc_attempt_number", 0) + 1
+                )
                 req.hicache_host_alloc_attempt_snapshot = (
                     self._host_alloc_snapshot_for_req(req)
+                )
+                # Publish the attempt identity so the cache's retry_result and
+                # the terminal READY join to the granted wake event.
+                self._record_host_alloc_lineage(
+                    req,
+                    attempt_number=req.hicache_host_alloc_attempt_number,
+                    origin="HOST_ALLOC_WAKE",
                 )
                 logger.info(
                     "[P2A] ts_ms=%d evt=restore_retry rid=%s cause=capacity attempt_id=%s",
@@ -3967,12 +4409,46 @@ class Scheduler(
                 self.tree_cache, "peek_prefetch_loaded_tokens", lambda _rid: None
             )(req.rid)
             completion = completion or {}
+            # READY must carry the same producer-owned identity and lineage as
+            # the HOST_ALLOC family so the live-chain oracle can join the
+            # terminal READY back to the park/wake without trusting the
+            # harness.  All values are produced here, never caller-supplied.
+            ready_context = producer_context(component="ready")
+            ready_event_id = next_event_id("ready")
+            ready_snapshot = self._host_alloc_snapshot_for_req(req)
+            # Read the scheduler-owned lineage back from the producer registry
+            # so READY joins to the exact grant record (wake_event_id) and
+            # lifecycle_key the HOST_ALLOC family published.
+            ready_lineage = host_alloc_lineage(req.rid)
+            ready_lifecycle_key = (
+                ready_lineage.get("lifecycle_key")
+                or self._host_alloc_lifecycle_key(req)
+            )
+            ready_wait_id = ready_lineage.get("wait_id") or getattr(
+                req, "hicache_host_alloc_wait_id", None
+            )
+            ready_wake_event_id = ready_lineage.get("wake_event_id") or getattr(
+                req, "hicache_host_alloc_wake_event_id", None
+            )
+            ready_predecessor_wait_id = ready_lineage.get("predecessor_wait_id")
+            ready_predecessor_terminal_event_id = ready_lineage.get(
+                "predecessor_terminal_event_id"
+            )
+            ready_predecessor_terminal_state = ready_lineage.get(
+                "predecessor_terminal_state"
+            )
             logger.info(
                 "[P3] ts_ns=%d evt=ready_host schema=rh_ready_host.v1 rid=%s "
                 "attempt_id=%s issue_origin=%s completed_kv_tokens=%s "
                 "required_aux_pools=%s completed_aux_units=%s "
                 "restore_state_before=%s restore_state_after=%s "
-                "finalize_result=%s ready_monotonic_ns=%d",
+                "finalize_result=%s ready_monotonic_ns=%d "
+                "event_id=%s run_id=%s process_id=%s profile_id=%s "
+                "source_build=%s deployment_manifest_digest=%s "
+                "lifecycle_key=%s wait_id=%s wake_event_id=%s "
+                "predecessor_wait_id=%s predecessor_terminal_event_id=%s "
+                "predecessor_terminal_state=%s "
+                "cache_instance_id=%s generation_vector_id=%s",
                 time.monotonic_ns(),
                 req.rid,
                 attempt_id
@@ -3989,6 +4465,26 @@ class Scheduler(
                 else "null",
                 completion.get("finalize_result", "null"),
                 time.monotonic_ns(),
+                ready_event_id,
+                ready_context["run_id"],
+                ready_context["process_id"],
+                ready_context["profile_id"],
+                ready_context["source_build"],
+                ready_context["deployment_manifest_digest"],
+                ready_lifecycle_key,
+                ready_wait_id,
+                ready_wake_event_id,
+                ready_predecessor_wait_id,
+                ready_predecessor_terminal_event_id,
+                ready_predecessor_terminal_state,
+                ready_snapshot.cache_instance_id
+                if ready_snapshot is not None
+                else None,
+                self._host_alloc_generation_vector_id(
+                    ready_snapshot.generation_vector()
+                    if ready_snapshot is not None
+                    else None
+                ),
             )
         if (
             event is RestoreEvent.REVOKED_MISS
@@ -4105,7 +4601,15 @@ class Scheduler(
                 and wait_reason_for(event, genuine_miss=genuine_miss)
                 is RestoreWaitReason.HOST_ALLOC
             ):
-                self._remove_host_alloc_waiter(req.rid)
+                terminal_state = self._host_alloc_terminal_state_for(
+                    event, next_state
+                )
+                self._remove_host_alloc_waiter(
+                    req.rid,
+                    terminal_state=terminal_state,
+                    reason=f"restore_event:{event.name}",
+                    req=req,
+                )
                 req.hicache_host_alloc_wait_cursor = None
         req.hicache_restore_state = next_state
         if next_state is RestoreState.WAIT_CAPACITY:
@@ -4802,8 +5306,21 @@ class Scheduler(
                 host_release=epochs.host_release,
                 spec_budget=cc.inflight_speculative_tokens,
                 waiting_frontier=epochs.waiting_frontier,
+                spec_budget_release_epoch=epochs.spec_budget_release_epoch,
             )
             if issued:
+                previous_entry = self._ready_horizon_negatives.pop(req.rid, None)
+                if previous_entry is not None and state in (
+                    RestoreState.NONE,
+                    RestoreState.MISS_RECOMPUTE,
+                    RestoreState.WAIT_CAPACITY,
+                ):
+                    # A terminal/test issue path can leave the request
+                    # eligible. Refresh its park at the post-issue cursor so
+                    # the same causal event cannot re-arm it later.
+                    self._park_ready_decline(
+                        req.rid, view, previous_entry.reason, post_issue_epochs, now
+                    )
                 decision, reason = "issue", "issued"
             elif result_status is HiCachePrefetchIssueStatus.SKIPPED_ACTIVE:
                 decision, reason = "hold", "active_attempt"
@@ -4939,6 +5456,11 @@ class Scheduler(
             prefix_len=view.prefix_len,
             generation=view.generation,
             anchor=anchor,
+            release_epoch_cursor=(
+                epochs.spec_budget_release_epoch
+                if reason is DeclineReason.SPEC_BUDGET
+                else 0
+            ),
         )
         self._ready_horizon_negatives[rid] = entry
 
@@ -5006,6 +5528,11 @@ class Scheduler(
         host_release = self._ready_host_release_epoch
         last_level = self._ready_host_release_last_level
         available = cc.mem_pool_host.available_size()
+        spec_budget_release_epoch = max(
+            self._ready_spec_budget_release_epoch,
+            getattr(cc, "speculative_release_epoch", 0),
+        )
+        self._ready_spec_budget_release_epoch = spec_budget_release_epoch
         if last_level is not None and available > last_level:
             host_release += 1
         self._ready_host_release_epoch = host_release
@@ -5016,6 +5543,7 @@ class Scheduler(
             host_release=host_release,
             spec_budget=cc.inflight_speculative_tokens,
             waiting_frontier=tuple(r.rid for r in frontier_reqs),
+            spec_budget_release_epoch=spec_budget_release_epoch,
         )
 
     def _ready_host_headroom(self, cc, views) -> int:
@@ -5544,6 +6072,7 @@ class Scheduler(
                     req, origin=HiCachePrefetchOrigin.EAGER_RH_OFF
                 )
             self.waiting_queue.append(req)
+            _p2a_mark_enqueue(req)
             req.time_stats.set_wait_queue_entry_time()
         elif self.disaggregation_mode == DisaggregationMode.PREFILL:
             self._prefetch_kvcache(
@@ -5621,7 +6150,12 @@ class Scheduler(
                         getattr(candidate_req, "hicache_prefetch_active_attempt_id", None),
                         "queued_priority_abort",
                     )
-                self._remove_host_alloc_waiter(candidate_req.rid)
+                self._remove_host_alloc_waiter(
+                    candidate_req.rid,
+                    terminal_state="ABORTED",
+                    reason="queued_priority_abort",
+                    req=candidate_req,
+                )
                 self.waiting_queue.pop(idx)
                 self.beam_coordinator.retire_group(candidate_req)
                 req_to_abort = candidate_req
@@ -5658,7 +6192,12 @@ class Scheduler(
                         getattr(req, "hicache_prefetch_active_attempt_id", None),
                         "queued_abort",
                     )
-                self._remove_host_alloc_waiter(req.rid)
+                self._remove_host_alloc_waiter(
+                    req.rid,
+                    terminal_state="ABORTED",
+                    reason="waiting_timeout_abort",
+                    req=req,
+                )
                 self.ipc_channels.send_to_tokenizer.send_output(
                     _make_abort_req(
                         req,
@@ -7610,7 +8149,12 @@ class Scheduler(
             # This only works for requests that have not started anything.
             # We still need to send something back to TokenizerManager to clean up the state.
             req = self.waiting_queue.pop(i)
-            self._remove_host_alloc_waiter(req.rid)
+            self._remove_host_alloc_waiter(
+                req.rid,
+                terminal_state="ABORTED",
+                reason="abort_request",
+                req=req,
+            )
             self.beam_coordinator.retire_group(req)
             if self.enable_hicache_storage:
                 # to release prefetch events associated with the request

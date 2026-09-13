@@ -49,6 +49,7 @@ import sglang.srt.managers.scheduler as scheduler_mod
 from sglang.srt.disaggregation.utils import DisaggregationMode
 from sglang.srt.managers.scheduler import Scheduler
 from sglang.srt.managers.scheduler_components.hicache_restore import (
+    HiCachePrefetchIssueStatus,
     HiCachePrefetchOrigin,
     PrefetchIssueResult,
     RestoreState,
@@ -157,6 +158,7 @@ def _neg(
     prefix_len=PREFIX_LEN,
     generation=None,
     anchor=None,
+    release_epoch=0,
 ):
     """A negative-cache park input; rid is cosmetic (dict key carries it)."""
     return NegativeCacheEntry(
@@ -166,6 +168,7 @@ def _neg(
         prefix_len=prefix_len,
         generation=generation,
         anchor=anchor,
+        release_epoch_cursor=release_epoch,
     )
 
 
@@ -180,8 +183,10 @@ class _Cc:
         physical_limit=10**9,
         available=10**9,
         size=10**9,
+        spec_release_epoch=0,
     ):
         self.inflight_speculative_tokens = spec_inflight
+        self.speculative_release_epoch = spec_release_epoch
         self.prefetch_speculative_capacity_limit = spec_limit
         self.prefetch_tokens_occupied = physical_occupied
         self.prefetch_capacity_limit = physical_limit
@@ -240,6 +245,7 @@ def _epochs(
     spec=0,
     frontier=("r1",),
     release=0,
+    spec_release=0,
 ):
     return CausalEpochs(
         l3_publish=l3,
@@ -247,6 +253,7 @@ def _epochs(
         spec_budget=spec,
         waiting_frontier=tuple(frontier),
         host_release=release,
+        spec_budget_release_epoch=spec_release,
     )
 
 
@@ -517,6 +524,22 @@ class NegativeCacheTests(unittest.TestCase):
         # Inflight still high / growing is not a release.
         self.assertFalse(self._cleared(entry, epochs=_epochs(spec=25)))
 
+        # A literal zero cursor must remain strict: without a monotonic
+        # release event, 0 -> 0 is not a wake.
+        zero_entry = _neg(reason=SPEC_BUDGET, cursor=0)
+        self.assertFalse(self._cleared(zero_entry, epochs=_epochs(spec=0)))
+        self.assertTrue(
+            self._cleared(zero_entry, epochs=_epochs(spec=0, spec_release=1))
+        )
+
+    def test_spec_budget_release_event_clears_unsampled_aba(self):
+        # The level returns to its original value between scheduler snapshots;
+        # the monotonic release event is the only observable causal signal.
+        entry = _neg(reason=SPEC_BUDGET, cursor=0)
+        self.assertTrue(
+            self._cleared(entry, epochs=_epochs(spec=0, spec_release=1))
+        )
+
     def test_prefix_change_clears_any_park(self):
         # A new question deserves a new probe: the old negative judgment
         # was for the OLD prefix.
@@ -740,13 +763,22 @@ class CausalEpochEventTests(unittest.TestCase):
     deltas (L3 published / host pages released / budget released / frontier
     changed) fire; the refill's own issue traffic never does."""
 
-    def _epoch(self, l3=0, headroom=1000, spec=0, frontier=("r1",), release=0):
+    def _epoch(
+        self,
+        l3=0,
+        headroom=1000,
+        spec=0,
+        frontier=("r1",),
+        release=0,
+        spec_release=0,
+    ):
         return CausalEpochs(
             l3_publish=l3,
             host_headroom=headroom,
             spec_budget=spec,
             waiting_frontier=frontier,
             host_release=release,
+            spec_budget_release_epoch=spec_release,
         )
 
     def test_first_pass_is_event(self):
@@ -952,6 +984,7 @@ class ReadyHorizonPassTests(unittest.TestCase):
         # staged through the real issue path (speculative).
         self.assertEqual(scheduler.issued, ["r1", "r2"])
 
+
     def test_no_event_epoch_no_refill(self):
         # A second pass with an unchanged causal epoch (and the refill just
         # run) issues nothing: M3's no-poll guarantee at the pass level. A
@@ -976,7 +1009,14 @@ class ReadyHorizonPassTests(unittest.TestCase):
 
         def impl(req, *, origin, demand_restore=False):
             impl_calls.append((origin, demand_restore))
-            return PrefetchIssueResult.ISSUED
+            return PrefetchIssueResult(
+                status=HiCachePrefetchIssueStatus.ISSUED,
+                attempt_id=f"{req.rid}:prefetch:1",
+                origin=origin,
+                reason="issued",
+                state_before=NONE.name,
+                state_after=NONE.name,
+            )
 
         scheduler._prefetch_kvcache_impl = impl
 
@@ -987,8 +1027,10 @@ class ReadyHorizonPassTests(unittest.TestCase):
             req, origin=HiCachePrefetchOrigin.READY_HORIZON
         )
 
-        self.assertIs(first, PrefetchIssueResult.ISSUED)
-        self.assertIs(second, PrefetchIssueResult.ACTIVE)
+        self.assertIsInstance(first, PrefetchIssueResult)
+        self.assertIs(first.status, HiCachePrefetchIssueStatus.ISSUED)
+        self.assertIsInstance(second, PrefetchIssueResult)
+        self.assertIs(second.status, HiCachePrefetchIssueStatus.SKIPPED_ACTIVE)
         self.assertEqual(
             impl_calls, [(HiCachePrefetchOrigin.READY_HORIZON, False)]
         )
@@ -1001,7 +1043,8 @@ class ReadyHorizonPassTests(unittest.TestCase):
             origin=HiCachePrefetchOrigin.DEMAND_RETRY,
             demand_restore=True,
         )
-        self.assertIs(retry, PrefetchIssueResult.ISSUED)
+        self.assertIsInstance(retry, PrefetchIssueResult)
+        self.assertIs(retry.status, HiCachePrefetchIssueStatus.ISSUED)
         self.assertEqual(
             impl_calls,
             [
@@ -1036,15 +1079,25 @@ class ReadyHorizonPassTests(unittest.TestCase):
         # The first issue fills the speculative budget. The un-tried tail
         # must park at the observed post-issue counter, not the pass's
         # pre-issue snapshot (which is zero in this shape).
+        from sglang.srt.mem_cache.unified_radix_cache import (
+            PrefetchKind,
+            UnifiedRadixCache,
+        )
+
         patch, clock = self._clock_patch()
         with patch:
             cc = _Cc(spec_limit=CHAIN_TOKENS)
+            cache = object.__new__(UnifiedRadixCache)
+            cache._prefetch_reservations = {}
+            cache.cache_controller = cc
             scheduler = _pass_scheduler(
                 queue=[_req("r1", NONE), _req("r2", NONE)], cc=cc
             )
 
             def issue(req, *, origin, demand_restore=False, prepared_match=None):
-                cc.inflight_speculative_tokens += CHAIN_TOKENS
+                cache.reserve_prefetch(
+                    req.rid, CHAIN_TOKENS, PrefetchKind.SPECULATIVE
+                )
                 req.hicache_restore_state = RESTORING
                 scheduler.issued.append(req.rid)
                 return PrefetchIssueResult(
@@ -1062,13 +1115,95 @@ class ReadyHorizonPassTests(unittest.TestCase):
             entry = scheduler._ready_horizon_negatives["r2"]
             self.assertEqual(entry.reason, SPEC_BUDGET)
             self.assertEqual(entry.epoch_cursor, CHAIN_TOKENS)
+            self.assertEqual(entry.release_epoch_cursor, 0)
 
             # A budget release below the parked cursor is causal and wakes
             # the candidate once the safety fuse has elapsed.
-            cc.inflight_speculative_tokens = 0
+            cache.release_prefetch("r1", "test_release")
+            self.assertEqual(cc.inflight_speculative_tokens, 0)
+            self.assertEqual(cc.speculative_release_epoch, 1)
             clock.advance(10.0)
             scheduler._ready_horizon_pass()
             self.assertEqual(scheduler.issued, ["r1", "r2"])
+            cache.release_prefetch("r2", "test_cleanup")
+            self.assertEqual(cc.speculative_release_epoch, 2)
+            self.assertEqual(cache._prefetch_reservations, {})
+
+    def test_spec_budget_park_wakes_after_unsampled_aba_release(self):
+        # Use the production reservation/release helper so this regression
+        # observes the real monotonic release event, not a test-only counter
+        # mutation.
+        from sglang.srt.mem_cache.unified_radix_cache import (
+            PrefetchKind,
+            UnifiedRadixCache,
+        )
+
+        patch, clock = self._clock_patch()
+        with patch:
+            cc = _Cc(spec_limit=CHAIN_TOKENS)
+            cache = object.__new__(UnifiedRadixCache)
+            cache._prefetch_reservations = {}
+            cache.cache_controller = cc
+            scheduler = _pass_scheduler(
+                queue=[_req("r1", NONE), _req("r2", NONE)], cc=cc
+            )
+
+            def issue(req, *, origin, demand_restore=False, prepared_match=None):
+                if req.rid == "r1":
+                    cache.reserve_prefetch(
+                        req.rid, CHAIN_TOKENS, PrefetchKind.SPECULATIVE
+                    )
+                req.hicache_restore_state = RESTORING
+                state_after = RESTORING.name
+                scheduler.issued.append(req.rid)
+                return PrefetchIssueResult(
+                    status=PrefetchIssueResult.ISSUED,
+                    attempt_id=f"{req.rid}:prefetch:1",
+                    origin=origin,
+                    reason="issued",
+                    state_before=NONE.name,
+                    state_after=state_after,
+                )
+
+            scheduler._prefetch_kvcache = issue
+            scheduler._ready_horizon_pass()
+            self.assertEqual(scheduler.issued, ["r1"])
+            self.assertEqual(
+                scheduler._ready_horizon_negatives["r2"].epoch_cursor,
+                CHAIN_TOKENS,
+            )
+            self.assertEqual(cc.speculative_release_epoch, 0)
+
+            # Complete a 0 -> N -> 0 cycle between scheduler snapshots. Both
+            # releases use the production helper, so the scheduler sees only
+            # the monotonic event and never samples the transient levels.
+            cache.release_prefetch("r1", "test_release")
+            cache.reserve_prefetch(
+                "replacement", CHAIN_TOKENS, PrefetchKind.SPECULATIVE
+            )
+            cache.release_prefetch("replacement", "test_replacement_release")
+            self.assertEqual(cc.inflight_speculative_tokens, 0)
+            self.assertEqual(cc.speculative_release_epoch, 2)
+
+            clock.advance(10.0)
+            scheduler._ready_horizon_pass()
+            self.assertEqual(scheduler.issued, ["r1", "r2"])
+
+            # The same release event cannot trigger a second issue on the
+            # next pass. A later unrelated frontier event must also leave the
+            # already-restoring request alone.
+            self.assertEqual(
+                scheduler.waiting_queue[1].hicache_restore_state, RESTORING
+            )
+            scheduler.waiting_queue.append(_req("r3", NONE))
+            scheduler._ready_horizon_pass()
+            self.assertEqual(scheduler.issued[:2], ["r1", "r2"])
+            self.assertEqual(scheduler.issued.count("r2"), 1)
+            self.assertIn("r3", scheduler.issued)
+            self.assertEqual(cc.speculative_release_epoch, 2)
+            self.assertNotIn("r2", scheduler._ready_horizon_negatives)
+            self.assertEqual(cc.inflight_speculative_tokens, 0)
+            self.assertEqual(cache._prefetch_reservations, {})
 
     def test_physical_only_limiter_does_not_create_spec_budget_park(self):
         # A physical-only exhaustion is not a speculative-budget event and
@@ -1274,7 +1409,11 @@ class ReadyHorizonPassTests(unittest.TestCase):
         with self.assertLogs("sglang.srt.managers.scheduler", level="INFO") as logs:
             scheduler._ready_horizon_pass()
         self.assertTrue(
-            any("evt=ready_stage.v2 rid=r1" in m and "result=issued" in m for m in logs.output),
+            any(
+                "evt=ready_stage schema=rh_stage.v2 rid=r1" in m
+                and "result=issued" in m
+                for m in logs.output
+            ),
             logs.output,
         )
 
@@ -1359,7 +1498,7 @@ class DeterministicMissParkTests(unittest.TestCase):
             anchor_versions=anchor_versions,
         )
 
-        def charge(req, *, demand_restore=False, prepared_match=None):
+        def charge(req, *, origin, demand_restore=False, prepared_match=None):
             cc.inflight_speculative_tokens += CHAIN_TOKENS
             req.hicache_restore_state = RESTORING
             scheduler.issued.append(req.rid)

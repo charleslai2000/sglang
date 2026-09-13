@@ -43,6 +43,8 @@ from sglang.srt.mem_cache.trace_context import (
     ordered_key_set_digest,
     remember_slot_context,
 )
+from sglang.srt.mem_cache.telemetry_context import next_event_id, producer_context
+from sglang.srt.mem_cache.p2a_timing_probe import begin_storage_query_probe
 
 if TYPE_CHECKING:
     from sglang.srt.mem_cache.allocator import BaseTokenToKVPoolAllocator
@@ -51,6 +53,7 @@ logger = logging.getLogger(__name__)
 
 _T38C_DURABLE_SEQ = {}
 _T38C_DURABLE_SEQ_LOCK = threading.Lock()
+_ACTIVE_PRODUCER_CONTEXT = None
 
 # T38C-PROBE (L3 read-chain observation; log-only. Appends JSON lines to
 # /tmp/t38c-probe.log only when /tmp/t38c-on exists; zero numeric-path change;
@@ -86,6 +89,17 @@ def _t38c_durable_log(rec):
             "event_id",
             f"{run_id}:{os.getpid()}:{thread_id}:controller:{local_seq}",
         )
+        # Never overwrite the existing p0_durable run_id/process_id fields:
+        # the non-forgeable producer identity is a nested record.
+        record.setdefault(
+            "producer",
+            globals().get("_ACTIVE_PRODUCER_CONTEXT")
+            or producer_context(component="storage"),
+        )
+        record["event_id"] = record.get("event_id") or next_event_id("durable")
+        record.setdefault("lifecycle_key", record.get("operation_id"))
+        record.setdefault("wait_id", None)
+        record.setdefault("wake_event_id", None)
         record.setdefault("process_id", os.getpid())
         record.setdefault("rank", os.environ.get("RANK"))
         record.setdefault("thread_id", thread_id)
@@ -849,6 +863,7 @@ class HybridCacheController(BaseHiCacheController):
         return operation.id
 
     def _storage_hit_query(self, operation) -> tuple[list[str], int]:
+        _p2a_probe = begin_storage_query_probe()
         hash_value = self.get_hash_str(
             operation.token_ids, operation.last_hash, page_size=self.page_size
         )
@@ -870,7 +885,11 @@ class HybridCacheController(BaseHiCacheController):
             # tokens that are not in storage; those tokens must not become
             # the sidecar's trailing window and reject an otherwise complete
             # historical KV prefix.
+            if _p2a_probe is not None:
+                _p2a_backend_t0 = time.monotonic_ns()
             kv_hit_pages = self.storage_backend.batch_exists(hash_value, extra_info)
+            if _p2a_probe is not None:
+                _p2a_probe.note_backend_lookup(_p2a_backend_t0)
             kv_hit_pages = max(0, min(kv_hit_pages, len(hash_value)))
             query_hashes = hash_value[:kv_hit_pages]
             query_transfers = self._align_storage_query_transfers(
@@ -890,11 +909,19 @@ class HybridCacheController(BaseHiCacheController):
                 transfer._t38c_trace_context = getattr(
                     operation, "trace_context", None
                 )
+            if _p2a_probe is not None:
+                _p2a_backend_t0 = time.monotonic_ns()
             hit_result = self.storage_backend.batch_exists_v2(
                 query_hashes, query_transfers, extra_info
             )
+            if _p2a_probe is not None:
+                _p2a_probe.note_backend_lookup(_p2a_backend_t0)
         else:
+            if _p2a_probe is not None:
+                _p2a_backend_t0 = time.monotonic_ns()
             kv_hit_count = self.storage_backend.batch_exists(hash_value, extra_info)
+            if _p2a_probe is not None:
+                _p2a_probe.note_backend_lookup(_p2a_backend_t0)
             hit_result = PoolTransferResult(
                 kv_hit_pages=kv_hit_count, extra_pool_hit_pages={}
             )
@@ -912,6 +939,13 @@ class HybridCacheController(BaseHiCacheController):
                                          for k, v in hit_result.extra_pool_hit_pages.items()}})
         except Exception:
             pass
+
+        if _p2a_probe is not None:
+            _p2a_probe.emit(
+                operation,
+                query_len=len(hash_value),
+                kv_hit_pages=int(kv_hit_pages),
+            )
 
         return (
             hash_value[:kv_hit_pages],
@@ -1053,83 +1087,33 @@ class HybridCacheController(BaseHiCacheController):
             for transfer in operation.pool_transfers or []
             if self.should_backup(transfer)
         ]
+        has_sidecar = any(bool(transfer.keys) for transfer in backup_transfers)
+        has_kv = bool(operation.hash_value) and not self.backup_skip
+        group_api = all(
+            callable(getattr(self.storage_backend, method, None))
+            for method in ("open_group", "commit_group", "abort_group")
+        )
+        group_id = None
+        committed = False
+        if group_api and (has_kv or has_sidecar):
+            group_id = self.storage_backend.open_group()
+            operation.group_id = group_id
 
-        if backup_transfers:
-            self._resolve_sidecar_kv_derived_pool_transfers(operation)
-            self._resolve_sidecar_nonkv_derived_pool_transfers(operation)
-            results = self.storage_backend.batch_set_v2(backup_transfers)
-            pool_hits = count_pool_hits(results)
-            operation.pool_storage_result.update_extra_pool_hit_pages(pool_hits)
-            for transfer in backup_transfers:
-                result = results.get(transfer.name)
-                if result is None:
-                    result = results.get(transfer.name.value)
-                _t38c_durable_log(
-                    {
-                        "evt": "batch_set_result",
-                        "trace_context": getattr(
-                            operation, "trace_context", None
-                        ),
-                        "operation_id": operation.id,
-                        "attempt_id": getattr(
-                            operation, "trace_id", f"storage-{operation.id}"
-                        ),
-                        "node_id": str(getattr(operation, "node_id", "") or ""),
-                        "final_kv_hash": (
-                            operation.hash_value[-1]
-                            if operation.hash_value
-                            else ""
-                        ),
-                        "pool": getattr(transfer.name, "value", transfer.name),
-                        "requested_pages": len(transfer.keys or []),
-                        "succeeded_pages": sum(bool(ok) for ok in (result or [])),
-                        "result": bool(result) and all(bool(ok) for ok in result),
-                    }
+        try:
+            sidecar_ok = True
+            if backup_transfers:
+                self._resolve_sidecar_kv_derived_pool_transfers(operation)
+                self._resolve_sidecar_nonkv_derived_pool_transfers(operation)
+                results = (
+                    self.storage_backend.batch_set_v2(
+                        backup_transfers, group_id=group_id
+                    )
+                    if group_id is not None
+                    else self.storage_backend.batch_set_v2(backup_transfers)
                 )
-
-        kv_before = operation.completed_tokens
-        trace_context = {
-            **(operation.trace_context or {}),
-            "operation_id": operation.id,
-            "attempt_id": getattr(operation, "trace_id", f"storage-{operation.id}"),
-            "node_id": str(getattr(operation, "node_id", "") or ""),
-            "final_kv_hash": operation.hash_value[-1] if operation.hash_value else "",
-            "pool": "kv",
-        }
-        if not self.backup_skip:
-            previous_context = getattr(
-                self.storage_backend, "_t38c_durable_context", None
-            )
-            try:
-                self.storage_backend._t38c_durable_context = trace_context
-            except Exception:
-                previous_context = None
-            try:
-                super()._page_backup(operation)
-            finally:
-                try:
-                    if previous_context is None:
-                        del self.storage_backend._t38c_durable_context
-                    else:
-                        self.storage_backend._t38c_durable_context = previous_context
-                except Exception:
-                    pass
-            _t38c_durable_log(
-                {
-                    **trace_context,
-                    "evt": "batch_set_result",
-                    "requested_pages": len(operation.hash_value),
-                    "succeeded_pages": max(
-                        0,
-                        (operation.completed_tokens - kv_before) // self.page_size,
-                    ),
-                    "result": operation.completed_tokens
-                    >= len(operation.hash_value) * self.page_size,
-                }
-            )
-        else:
-            sidecar_ok = bool(backup_transfers)
-            if sidecar_ok:
+                operation.pool_storage_result.update_extra_pool_hit_pages(
+                    count_pool_hits(results)
+                )
                 for transfer in backup_transfers:
                     result = results.get(transfer.name)
                     if result is None:
@@ -1137,16 +1121,61 @@ class HybridCacheController(BaseHiCacheController):
                     expected = len(transfer.keys or [])
                     if expected == 0 and transfer.host_indices is not None:
                         expected = int(transfer.host_indices.numel())
-                    if (
-                        not isinstance(result, (list, tuple))
-                        or len(result) != expected
-                        or not all(bool(ok) for ok in result)
-                    ):
-                        sidecar_ok = False
-                        break
-            operation.completed_tokens = (
-                len(operation.hash_value) * self.page_size if sidecar_ok else 0
-            )
+                    sidecar_ok = sidecar_ok and (
+                        isinstance(result, (list, tuple))
+                        and len(result) == expected
+                        and all(bool(ok) for ok in result)
+                    )
+                if not sidecar_ok:
+                    return False
+
+            kv_ok = True
+            if has_kv:
+                previous_context = getattr(
+                    self.storage_backend, "_t38c_durable_context", None
+                )
+                try:
+                    self.storage_backend._t38c_durable_context = {
+                        **(operation.trace_context or {}),
+                        "operation_id": operation.id,
+                        "attempt_id": getattr(
+                            operation, "trace_id", f"storage-{operation.id}"
+                        ),
+                        "node_id": str(getattr(operation, "node_id", "") or ""),
+                        "final_kv_hash": operation.hash_value[-1]
+                        if operation.hash_value
+                        else "",
+                        "pool": "kv",
+                    }
+                except Exception:
+                    previous_context = None
+                try:
+                    kv_ok = super()._page_backup(operation)
+                finally:
+                    try:
+                        if previous_context is None:
+                            del self.storage_backend._t38c_durable_context
+                        else:
+                            self.storage_backend._t38c_durable_context = previous_context
+                    except Exception:
+                        pass
+            elif self.backup_skip:
+                operation.completed_tokens = (
+                    len(operation.hash_value) * self.page_size if has_sidecar else 0
+                )
+
+            if not kv_ok:
+                return False
+            if group_id is not None:
+                committed = bool(self.storage_backend.commit_group(group_id))
+                return committed
+            return sidecar_ok and (not has_kv or kv_ok)
+        except Exception:
+            return False
+        finally:
+            if group_id is not None and not committed:
+                self.storage_backend.abort_group(group_id)
+            operation.group_id = None
 
     def should_backup(self, transfer: PoolTransfer) -> bool:
         if not self.backup_skip:
@@ -1182,7 +1211,8 @@ class HybridCacheController(BaseHiCacheController):
                 operation = self.backup_queue.get(block=True, timeout=1)
                 if operation is None:
                     continue
-                self._page_backup(operation)
+                if not self._page_backup(operation):
+                    continue
                 transfers = operation.pool_transfers or []
                 mamba_transfers = [
                     transfer

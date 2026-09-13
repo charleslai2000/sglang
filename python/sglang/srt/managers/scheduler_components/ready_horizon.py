@@ -130,6 +130,9 @@ class NegativeCacheEntry(msgspec.Struct):
     prefix_len: int
     generation: Optional[int] = None
     anchor: Optional[int] = None
+    # Monotonic SPEC_BUDGET release events catch a full level ABA cycle that
+    # can occur between scheduler snapshots; `epoch_cursor` remains the level.
+    release_epoch_cursor: int = 0
 
 
 class ReadyHorizonView(msgspec.Struct):
@@ -184,6 +187,9 @@ class CausalEpochs(msgspec.Struct):
     # subscribes to the release epoch, not the transient level).)
     spec_budget: int  # speculative inflight tokens (down = event)
     waiting_frontier: tuple  # frontier rids, any change = event
+    # Monotonic reservation-release event count; catches a complete level ABA
+    # cycle that occurs between scheduler snapshots.
+    spec_budget_release_epoch: int = 0
 
 
 class ReadyHorizonPolicy:
@@ -361,8 +367,14 @@ class ReadyHorizonPolicy:
         else:
             cur = ReadyHorizonPolicy._epoch_value(epochs, name)
             if name == "spec_budget":
-                # Budget released: inflight dropped below the decline cursor.
-                if cur < entry.epoch_cursor:
+                # A level drop is the normal release signal. The monotonic
+                # release epoch also catches a complete level ABA cycle that
+                # occurred between scheduler snapshots.
+                if (
+                    cur < entry.epoch_cursor
+                    or epochs.spec_budget_release_epoch
+                    > entry.release_epoch_cursor
+                ):
                     return True
             else:  # host_release (Fix A)
                 # A genuine host-capacity-releasing event advanced the release
@@ -560,6 +572,7 @@ class ReadyHorizonPolicy:
             or cur.host_headroom > prev.host_headroom
             or cur.host_release > prev.host_release
             or cur.spec_budget < prev.spec_budget
+            or cur.spec_budget_release_epoch > prev.spec_budget_release_epoch
             or cur.waiting_frontier != prev.waiting_frontier
         )
 

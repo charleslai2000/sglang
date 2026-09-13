@@ -279,6 +279,9 @@ class StorageOperation:
         # Prefetch-outcome accounting, set at enqueue by the tree cache.
         self.stats_requested_tokens = 0
         self.stats_total_tokens = 0
+        # Transient backend group identity for one hybrid backup operation.
+        # This is backend-owned context, not durable operation identity.
+        self.group_id = None
 
         self.id = StorageOperation.counter
         StorageOperation.counter += 1
@@ -371,6 +374,9 @@ class HiCacheController:
         # tree overrides this from server_args at init_hicache; the limit
         # itself is computed at attach.
         self.prefetch_speculative_fraction = 0.6
+        # Monotonic release events let Ready Horizon observe a complete
+        # speculative-budget ABA cycle between scheduler snapshots.
+        self.speculative_release_epoch = 0
         # Buffer mode: wired by the tree cache after attach; the load rate
         # limiter subtracts write staging from actual pool usage.
         self.host_write_staged_tokens_fn: Optional[Callable[[], int]] = None
@@ -670,7 +676,6 @@ class HiCacheController:
             # prefetches (a subset of prefetch_tokens_occupied), updated by
             # the main scheduler thread via reserve/release_prefetch.
             self.inflight_speculative_tokens = 0
-
             # Use dedicated gloo groups so storage prefetch sync is isolated
             # from other collectives and consistent across CPxTP participants.
             self.prefetch_hits_sync_groups = self._create_sync_groups()
@@ -1376,6 +1381,31 @@ class HiCacheController:
         ]
         return self.storage_backend.batch_set(hash_values, data)
 
+    def _page_set_for_operation(
+        self, hash_values, host_indices, extra_info, operation
+    ) -> bool:
+        """Write one KV batch, preserving the operation's transient group."""
+        group_id = getattr(operation, "group_id", None)
+        if group_id is None:
+            return self.page_set_func(hash_values, host_indices, extra_info)
+
+        transfer = PoolTransfer(
+            name=PoolName.KV,
+            host_indices=host_indices,
+            keys=hash_values,
+        )
+        results = self.storage_backend.batch_set_v2(
+            [transfer], extra_info=extra_info, group_id=group_id
+        )
+        result = results.get(transfer.name)
+        if result is None:
+            result = results.get(transfer.name.value)
+        return (
+            isinstance(result, (list, tuple))
+            and len(result) == len(hash_values)
+            and all(bool(ok) for ok in result)
+        )
+
     def _page_set_zero_copy(self, hash_values, host_indices, extra_info=None) -> bool:
         return all(
             self.storage_backend.batch_set_v1(hash_values, host_indices, extra_info)
@@ -1385,6 +1415,7 @@ class HiCacheController:
     def _page_backup(self, operation):
         # Backup batch by batch
         prefix_keys = operation.prefix_keys
+        success = True
         for i in range(0, len(operation.hash_value), STORAGE_BATCH_SIZE):
             batch_hashes = operation.hash_value[i : i + STORAGE_BATCH_SIZE]
             batch_host_indices = operation.host_indices[
@@ -1393,8 +1424,11 @@ class HiCacheController:
             # Set one batch token, and record if success.
             # todo: allow partial success
             extra_info = HiCacheStorageExtraInfo(prefix_keys=prefix_keys)
-            success = self.page_set_func(batch_hashes, batch_host_indices, extra_info)
-            if not success:
+            batch_success = self._page_set_for_operation(
+                batch_hashes, batch_host_indices, extra_info, operation
+            )
+            if not batch_success:
+                success = False
                 logger.warning(
                     f"Write page to storage: {len(batch_hashes)} pages failed."
                 )
@@ -1403,6 +1437,7 @@ class HiCacheController:
             if prefix_keys and len(prefix_keys) > 0:
                 prefix_keys += batch_hashes
             operation.completed_tokens += self.page_size * len(batch_hashes)
+        return success
 
     def backup_thread_func(self):
         """
