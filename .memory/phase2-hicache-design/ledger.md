@@ -7228,3 +7228,81 @@ EVIDENCE: `/mnt/data/nerun-dev/p3/LOCAL-PROD-BASELINE-v1/B1-9B-gpu-runtime-disab
 `manifest.json`, `argv.txt`, `logs/operation.log`, `logs/server.log`,
 `logs/server.err`, GPU identity/capacity/final-process artifacts, and
 `residual.txt`.
+
+
+### 2026-09-16 — 分支整合：`3060-12g-qwen35-4b` → `3090-24g-opt`，hicache 合并为超集
+
+USER RULING: 整个 `3060-12g-qwen35-4b` 分支的工作实质都是 opt 相关工作（名字是历史残留），
+因此合并入 `3090-24g-opt` 并删除该分支；待将来适配 4B 时再新建分支。
+用户选择方案 A：push hicache、保留 opt、后续工作继续在 opt 分支展开。
+
+FACT — 分支谱系（已按 reflog 与 merge-base 核实，全程线性无 merge commit）：
+`upstream/main b644771e07` → `54c394a2e1`（= `origin/5090-32-hicache` tip，即 `origin/HEAD`）
+→ 7 commits（P2-IO extent L3 storage backend）→ `202a37eba4`（freeze 3090-24g-hicache stable
+baseline，即 `3090-24g-opt` 的创建点）→ `fac8ccb4cf`（= 原 `origin/3090-24g-hicache`）
+→ 10 hicache fixes → `9c9e7b7c`（原 `origin/3090-24g-opt`）→ `d49214e592`（= `3090-24g-opt`
+local tip，同时是 `codex/phase2-hicache-opt-20260908` 的别名 ref，也是
+`3060-12g-qwen35-4b` 的创建点）→ 35 commits → `34bd2ed49f`。
+`3060-12g-qwen35-4b` 名字来源：最老 6–8 个 commit 为 12GB RTX 3060 的 sm_86 kernel/loader
+适配（`4e1e7cfeb5` build: add minimal SM86 kernel source option；
+`ac1a869e6d` fix 3060 Torch runtime compatibility）。sm_86 同为 RTX 3090 架构，
+故该批工作被 3090 复用，只是 `12g`/`4b` 字样已失效。
+
+FACT — 整合动作与结果（全部已用命令输出核对）：
+
+```
+3090-24g-opt     d49214e592 → 34bd2ed49f   (git fetch . 3060-12g-qwen35-4b:3090-24g-opt, FF)
+worktree 分支     3060-12g-qwen35-4b → 3090-24g-opt
+本地分支          3060-12g-qwen35-4b 删除 (was 34bd2ed49f)
+push              origin/3090-24g-opt 9c9e7b7c → 34bd2ed49f (36 commits)
+push --delete     origin/3060-12g-qwen35-4b (其 tip 与 origin/3090-24g-opt 同为 34bd2ed49f，
+                  删除前已核对相等，无 commit 丢失)
+merge             opt → hicache: 560f9ad525, parents 0a725c6385 + 34bd2ed49f
+push              origin/3090-24g-hicache fac8ccb4cf → 560f9ad525
+```
+
+结果拓扑：`3090-24g-opt` unique vs hicache = 0；hicache unique vs opt = 3
+（2 个 22151 文档 commit + merge commit）。merge 结果相对 opt 仅差
+`3090-dev/{README.md,handover-22151.md,prod-deploy-issues.md,prod-deploy/relaunch-e1.sh}`
+= 4 files / +278 行。约定后续 merge 方向为 **opt → hicache**。
+
+CONTROL — 未提交 baseline 工作零改动（本次整合的核心安全条件）：
+worktree dirty fingerprint `sha256(git status --porcelain | sort)` 在整合前后均为
+`41aff138c2aacc195a8e7105480aed407092a1e5ecf1351ae275e6e90778a119`；
+`git diff --shortstat` 恒为 `15 files changed, 455 insertions(+), 19 deletions(-)`。
+即 loader shim + 未终审的 P0 telemetry（含 untracked `hicache_telemetry.py`、
+`test_hicache_request_telemetry.py`）**未受任何字节影响**，仍以未提交形式保留在
+`3090-24g-opt` worktree 中；本次整合**未**把这些未审字节提交入库。
+`refs/heads/checkpoint/pre-v0.5.19-20260913` 与同名 tag 仍在 `993ef8e5`。
+
+FACT — production source 身份不变（关键）：
+`tree(34bd2ed49f) = tree(993ef8e5) + .memory/`；且
+`git diff --name-only 993ef8e5 34bd2ed49f -- . ':(exclude).memory'` 为空，
+即除 `.memory/` 外两者逐字节相同。canonical tree manifest
+`sha256(git ls-tree -r 993ef8e5 --full-tree)` 重算 = `5fe5a694…`，与既有记录一致。
+（注意：`993ef8e5` 时 `.memory/` 尚未被跟踪。opt HEAD tree = `8f812b66…`。）
+
+BLOCKER-FOUND-AND-RESOLVED — hicache merge 首次被 git 正确拒绝（此前未识别）：
+hicache worktree 有 9 个未跟踪文件与 opt 的 tracked 路径重名，其中 8 个内容不同，
+且**全部不在 merge-base `fac8ccb4cf` 中**（即 merge 需新建它们）：
+`3090-dev/{gate3_capacity.py,gate3_parked.py,gate3_parked_analyze.py}`、
+`.memory/phase2-hicache-design/{context.md,ledger.md,plan.md}`、
+`.memory/phase2-hicache-design/work/{P0-A-REMOTE-FINAL-20260911-R16,P0-A-REVIEW-TYPED-20260911-R5,P0-B-HARNESS-IMPLEMENT-20260911-R76}.md`。
+这些是 2026-09-07～09-11 的旧快照（例：ledger.md 4668 行 vs opt 已维护版 7230 行）。
+首次 `git merge` 返回 `error: The following untracked working tree files would be
+overwritten by merge ... Aborting`，HEAD 与 worktree 均未变化，无内容被覆盖。
+处理：**移动**（非删除）9 个文件并先行保全整个未跟踪集。
+
+EVIDENCE（整合）：
+`/mnt/data/nerun-dev/p3/LOCAL-PROD-BASELINE-v1/hicache-worktree-collision-backup-20260916/`
+含 `untracked-snapshot-20260916.tar.gz`（3,098,996 bytes / 619 entries / `tar -tzf` 校验 OK）、
+`moved-aside/`（9 files，保留原相对路径）、`moved-aside-manifest.txt`
+（逐文件 sha256 + mtime + 行数，记录 worktree HEAD 为 `0a725c6385`）。
+
+CONTROL — `.memory` 中刻意保持 epoch 语义、未随本次整合改写者（已知含过时 branch 字段）：
+`plan.md`、`authority.yaml`（`run_epoch: G1-20260912`，其 digest 受 repin 纪律追踪，
+改动会产生未被本 ledger 记录的新 digest，故不改）、以及全部日期化的
+`work/*2026090*` / `*2026091*` 记录。已在这些文件的读取入口
+（`context.md` 顶部 banner、本 ledger 条目、`HANDOFF-20260914`、`WORK-INVENTORY-20260914`）
+明确标注其为历史证据。`ledger.md:5731` 与 `work/*` 中的旧 branch 引用**保留原样**，
+不改写历史记录。

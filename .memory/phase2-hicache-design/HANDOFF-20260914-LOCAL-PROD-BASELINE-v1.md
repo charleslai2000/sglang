@@ -33,11 +33,27 @@ B0 GROUP_COMMIT acceptance
 | 项 | 值 |
 |---|---|
 | repo | `/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt` |
-| HEAD | `993ef8e5c3a6448aff2e752cf66cc45deadab59a` |
-| git tree object | `75d8d1af8dfef5680085e67767c670554d7163af` |
+| current branch | `3090-24g-opt`（working branch；后续工作在此展开） |
+| current HEAD | `34bd2ed49f2b2e6fef504019bfe3840eb30ac061`（`.memory` 交接提交） |
+| production-source identity | commit `993ef8e5c3a6448aff2e752cf66cc45deadab59a` |
+| git tree object (`993ef8e5`) | `75d8d1af8dfef5680085e67767c670554d7163af` |
 | canonical tree manifest SHA256 | `5fe5a694a628867ee6c5a7be10a7dfa5dd854501e9c2b75e475c24b6a033f338` |
-| branch | `3060-12g-qwen35-4b`（历史命名，不代表模型） |
-| protected refs | `refs/heads/3060-12g-qwen35-4b`、`refs/heads/checkpoint/pre-v0.5.19-20260913`、`refs/tags/checkpoint/pre-v0.5.19-20260913` |
+| superset archive branch | `3090-24g-hicache` @ `560f9ad5256ad95b8075f474a679918340fcca47`（= opt + 22151 部署文档 4 files / +278 行） |
+| protected refs | `refs/heads/checkpoint/pre-v0.5.19-20260913`、`refs/tags/checkpoint/pre-v0.5.19-20260913` |
+
+**身份关系（2026-09-16 分支整合后已核实）**
+
+```
+tree(34bd2ed49f) = tree(993ef8e5) + .memory/          (opt HEAD tree = 8f812b66…)
+git diff --name-only 993ef8e5 34bd2ed49f -- . ':(exclude).memory'   → 空
+```
+
+即除 `.memory/` 外，production source 在两个 commit 之间**逐字节相同**。
+`git ls-tree -r 993ef8e5 --full-tree | sha256sum` 重算 = `5fe5a694…`，与上表一致。
+
+历史分支 `3060-12g-qwen35-4b`（tip `34bd2ed49f`）已于 2026-09-16 快进合并入
+`3090-24g-opt`，并从本地与 `origin` 删除；其全部 35 个 commit 现在都位于
+`3090-24g-opt` 的历史中，无 commit 丢失。
 
 注意：canonical tree manifest 的方法是
 `sha256(git ls-tree -r HEAD --full-tree bytes)`；它**不等于** git tree object ID，两者必须分开记录。
