@@ -1,0 +1,205 @@
+## R68 item(4) 8897 MiB vs empty nvidia-smi process list reconciliation (read-only)
+## utc: 2026-09-11T05:48:11Z
+=== /proc/self/ns/pid (shell) ===
+pid:[4026533899]
+=== /proc/218072/ns/pid (server) ===
+pid:[4026533899]
+=== /proc/218072/ns/pid_for_children ===
+pid:[4026533899]
+=== fuser -v /dev/nvidia* (which? check existence first) ===
+crw-rw-rw- 1 root root 195,   1 Jun  1 10:12 /dev/nvidia1
+crw-rw-rw- 1 root root 195, 255 Jun  1 10:12 /dev/nvidiactl
+crw-rw-rw- 1 root root 509,   0 Jun  1 10:12 /dev/nvidia-uvm
+crw-rw-rw- 1 root root 509,   1 Jun  1 10:12 /dev/nvidia-uvm-tools
+--- fuser ---
+bash: line 5: fuser: command not found
+fuser_exit=127
+=== /proc/218072/fd entries matching nvidia ===
+lrwx------ 1 root root 64 Sep 11 13:47 10 -> /dev/nvidia1
+lrwx------ 1 root root 64 Sep 11 13:47 11 -> /dev/nvidia1
+lrwx------ 1 root root 64 Sep 11 13:47 12 -> /dev/nvidia1
+lrwx------ 1 root root 64 Sep 11 13:47 13 -> /dev/nvidia1
+lrwx------ 1 root root 64 Sep 11 13:47 15 -> /dev/nvidiactl
+lrwx------ 1 root root 64 Sep 11 13:47 16 -> /dev/nvidia1
+lrwx------ 1 root root 64 Sep 11 13:47 17 -> /dev/nvidia-uvm
+lrwx------ 1 root root 64 Sep 11 13:47 18 -> /dev/nvidia1
+lrwx------ 1 root root 64 Sep 11 13:47 19 -> /dev/nvidia1
+lrwx------ 1 root root 64 Sep 11 13:47 66 -> /dev/nvidia1
+lrwx------ 1 root root 64 Sep 11 13:47 67 -> /dev/nvidia1
+lrwx------ 1 root root 64 Sep 11 13:47 68 -> /dev/nvidia1
+lrwx------ 1 root root 64 Sep 11 13:47 69 -> /dev/nvidia1
+lrwx------ 1 root root 64 Sep 11 13:47 70 -> /dev/nvidia1
+lrwx------ 1 root root 64 Sep 11 13:47 71 -> /dev/nvidia1
+lrwx------ 1 root root 64 Sep 11 13:47 73 -> /dev/nvidia1
+lrwx------ 1 root root 64 Sep 11 13:47 74 -> /dev/nvidia1
+lrwx------ 1 root root 64 Sep 11 13:47 75 -> /dev/nvidia1
+lrwx------ 1 root root 64 Sep 11 13:47 76 -> /dev/nvidia1
+lrwx------ 1 root root 64 Sep 11 13:47 77 -> /dev/nvidia1
+lrwx------ 1 root root 64 Sep 11 13:47 78 -> /dev/nvidia1
+lrwx------ 1 root root 64 Sep 11 13:47 79 -> /dev/nvidia1
+lrwx------ 1 root root 64 Sep 11 13:47 8 -> /dev/nvidiactl
+lrwx------ 1 root root 64 Sep 11 13:47 80 -> /dev/nvidia1
+lrwx------ 1 root root 64 Sep 11 13:47 9 -> /dev/nvidia-uvm
+=== /proc/218072/maps entries matching /dev/nvidia ===
+28
+200200000-200400000 rw-s 00000000 00:05 715                              /dev/nvidia1
+200400000-203400000 rw-s 00000000 00:05 713                              /dev/nvidiactl
+204400000-204600000 rw-s 00000000 00:05 713                              /dev/nvidiactl
+204600000-204800000 rw-s 00000000 00:05 713                              /dev/nvidiactl
+204800000-204a00000 rw-s 00000000 00:05 713                              /dev/nvidiactl
+204a00000-204c00000 rw-s 204a00000 00:05 718                             /dev/nvidia-uvm
+204c00000-204e00000 rw-s 00000000 00:05 713                              /dev/nvidiactl
+205000000-205200000 rw-s 00000000 00:05 713                              /dev/nvidiactl
+7f3b0c400000-7f3b0c600000 rw-s 00000000 00:05 713                        /dev/nvidiactl
+7f3b0d000000-7f3b0d200000 rw-s 00000000 00:05 713                        /dev/nvidiactl
+=== NVML compute-apps ===
+pid, process_name, used_gpu_memory [MiB]
+3709554, [Not Found], 120 MiB
+3709747, [Not Found], 8754 MiB
+nvml_apps_exit=0
+=== device memory used/total ===
+memory.used [MiB], memory.total [MiB]
+8897 MiB, 12288 MiB
+=== GPU name/uuid ===
+index, name, uuid, compute_mode
+0, NVIDIA GeForce RTX 3060, GPU-11b93eab-99ae-a34f-5c5f-df9b43b28e62, Default
+=== nvidia-smi -q -d PIDS ===
+
+==============NVSMI LOG==============
+
+Timestamp                                 : Fri Sep 11 13:48:12 2026
+Driver Version                            : 550.144.03
+CUDA Version                              : 12.4
+
+Attached GPUs                             : 1
+GPU 00000000:41:00.0
+    Processes
+        GPU instance ID                   : N/A
+        Compute instance ID               : N/A
+        Process ID                        : 3709554
+            Type                          : C
+            Name                          : 
+            Used GPU Memory               : 120 MiB
+        GPU instance ID                   : N/A
+        Compute instance ID               : N/A
+        Process ID                        : 3709747
+            Type                          : C
+            Name                          : 
+            Used GPU Memory               : 8754 MiB
+
+=== procfs holders scan: all /proc/*/fd referencing /dev/nvidia ===
+218072 python -m sglang.launch_server --model-path /hy-tmp/models/Qwen3.5-4B-AWQ --tokenizer-path
+218121 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218175 sglang::scheduler                                                                         
+218176 sglang::detokenizer                                                                       
+218272 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218274 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218276 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218278 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218280 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218282 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218284 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218286 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218288 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218290 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218292 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218294 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218296 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218298 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218300 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218302 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218304 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218306 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218308 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218310 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218312 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218314 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218316 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218318 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218320 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218322 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218324 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218326 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218328 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218330 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218332 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218334 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218392 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218394 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218506 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218508 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218510 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218512 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218514 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218516 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218518 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218520 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218522 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218524 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218526 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218528 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218530 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218532 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218534 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218536 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218538 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218540 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218542 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218544 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218546 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218548 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218550 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218552 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218554 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218556 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218558 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218560 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218562 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218564 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218566 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218568 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218574 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218576 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218578 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218580 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218582 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218584 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218586 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218588 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218590 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218592 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218594 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218596 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218598 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218600 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218602 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218604 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218606 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218608 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218610 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218612 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218614 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218616 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218618 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218620 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218622 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218624 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218626 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218628 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218630 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218632 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218634 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+218636 /root/sglang-env-3060-4b/bin/python /root/sglang-env-3060-4b/lib/python3.11/site-packages/
+procfs_scan_done
+=== contexts on device (nvidia-smi -q -d COMPUTE/MEMORY brief) ===
+    FB Memory Usage
+        Total                             : 12288 MiB
+        Used                              : 8897 MiB
+        Free                              : 3141 MiB
+        Total                             : 256 MiB
+        Used                              : 7 MiB
+        Free                              : 249 MiB
+        Total                             : 0 MiB
+        Used                              : 0 MiB
+        Free                              : 0 MiB
+## remote_ssh_exit=0

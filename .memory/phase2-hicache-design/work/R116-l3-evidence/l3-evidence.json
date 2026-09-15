@@ -1,0 +1,78 @@
+{
+  "format": "p0b.l3-evidence.v1",
+  "captured_utc": "2026-09-11T14:48:00.028595+00:00",
+  "l3_backend_dir": "/mnt/data/neuron/sglang-3090-r112-20260911/l3",
+  "note": "point-in-time snapshot; server PID 48746 was running. Enumerated keys are the target prefix's pc_storage_query key set (identical at build record and restore records).",
+  "target": {
+    "rid": "d4cd1983020c4c5799012e909d7a31b4",
+    "session_id": "r114-c1",
+    "session_generation": 10,
+    "build_rid": "1e3dbabc421748acbd27fae9990fff57",
+    "prefix_tokens": 27008
+  },
+  "key_set_sha256": "dadcfa5e932db49d12df614fcbc3374502a787189b73a2d1865b95f927bbc16f",
+  "key_count": 8,
+  "objects": [
+    {
+      "key": "4d70f4a881c72812c075e9727da84e0cb9b771859100d10815cc6f9a502818e2",
+      "src": "/mnt/data/neuron/sglang-3090-r112-20260911/l3/4d70f4a881c72812c075e9727da84e0cb9b771859100d10815cc6f9a502818e2_-mnt-data-models-qwen35-gptq_0_1.bin",
+      "frozen_copy": "objects/4d70f4a881c72812c075e9727da84e0cb9b771859100d10815cc6f9a502818e2.bin",
+      "size": 16384,
+      "sha256": "b9bae0a78068efee9c2ca0725b318ba5f74e97fe9ce973b5e3eccfc5405da5ba"
+    },
+    {
+      "key": "11c32b12b8ae15e127a8db0b7d118f9359ef9936223cade8bd460fcd892a56c4",
+      "src": "/mnt/data/neuron/sglang-3090-r112-20260911/l3/11c32b12b8ae15e127a8db0b7d118f9359ef9936223cade8bd460fcd892a56c4_-mnt-data-models-qwen35-gptq_0_1.bin",
+      "frozen_copy": "objects/11c32b12b8ae15e127a8db0b7d118f9359ef9936223cade8bd460fcd892a56c4.bin",
+      "size": 16384,
+      "sha256": "7c886b7c67622fd8a1a433faef6fd35a1873dd5a9efb7515954e29b20a9dcab1"
+    },
+    {
+      "key": "5f0e7b5c3c8fb9e91c7e3058404f72d8189eb6414d7f308607c25361b446e290",
+      "src": "/mnt/data/neuron/sglang-3090-r112-20260911/l3/5f0e7b5c3c8fb9e91c7e3058404f72d8189eb6414d7f308607c25361b446e290_-mnt-data-models-qwen35-gptq_0_1.bin",
+      "frozen_copy": "objects/5f0e7b5c3c8fb9e91c7e3058404f72d8189eb6414d7f308607c25361b446e290.bin",
+      "size": 16384,
+      "sha256": "56476988f0b9885d01ef667ecbde3cbe099393004907b0516f248ca930f258ea"
+    },
+    {
+      "key": "7e4133babbc2f57ecb58dbe7f5e6ecc7683f8e2904a0523356454563472adc62",
+      "src": "/mnt/data/neuron/sglang-3090-r112-20260911/l3/7e4133babbc2f57ecb58dbe7f5e6ecc7683f8e2904a0523356454563472adc62_-mnt-data-models-qwen35-gptq_0_1.bin",
+      "frozen_copy": "objects/7e4133babbc2f57ecb58dbe7f5e6ecc7683f8e2904a0523356454563472adc62.bin",
+      "size": 16384,
+      "sha256": "e0c7ae403107637e0972bdeebed965b33a94a26c2211130239d04c7557707e96"
+    },
+    {
+      "key": "0b079ac3f70cb269dda556812979b24868f5f9fe6d82c15c1289e0783109659b",
+      "src": "/mnt/data/neuron/sglang-3090-r112-20260911/l3/0b079ac3f70cb269dda556812979b24868f5f9fe6d82c15c1289e0783109659b_-mnt-data-models-qwen35-gptq_0_1.bin",
+      "frozen_copy": "objects/0b079ac3f70cb269dda556812979b24868f5f9fe6d82c15c1289e0783109659b.bin",
+      "size": 16384,
+      "sha256": "6c8c7abce6b8784fc760adadf9ebf464e0330e994515cc6e07ffa2b68819a7a0"
+    },
+    {
+      "key": "833afb11d804f840d2b2bf48bfecfdfa9fec84a4ef37a4872490e938d3d1165e",
+      "src": "/mnt/data/neuron/sglang-3090-r112-20260911/l3/833afb11d804f840d2b2bf48bfecfdfa9fec84a4ef37a4872490e938d3d1165e_-mnt-data-models-qwen35-gptq_0_1.bin",
+      "frozen_copy": "objects/833afb11d804f840d2b2bf48bfecfdfa9fec84a4ef37a4872490e938d3d1165e.bin",
+      "size": 16384,
+      "sha256": "f9bd6f5083a3f99ad940566835f66e726fc10929c41d03132b92f215c1bcabf8"
+    },
+    {
+      "key": "c41e0a79ef19646dd03a494a6eaaedb809102977d973c2df89a382e69da553c3",
+      "src": "/mnt/data/neuron/sglang-3090-r112-20260911/l3/c41e0a79ef19646dd03a494a6eaaedb809102977d973c2df89a382e69da553c3_-mnt-data-models-qwen35-gptq_0_1.bin",
+      "frozen_copy": "objects/c41e0a79ef19646dd03a494a6eaaedb809102977d973c2df89a382e69da553c3.bin",
+      "size": 16384,
+      "sha256": "8f603a172aa8496a97d3b87d1324eb067d5f77ceb3d37cce058209963c056812"
+    },
+    {
+      "key": "f96ec2e38705141bbfeae6b98e8e8b4ec222f3560f13c3a084b3b77c429fa806",
+      "src": "/mnt/data/neuron/sglang-3090-r112-20260911/l3/f96ec2e38705141bbfeae6b98e8e8b4ec222f3560f13c3a084b3b77c429fa806_-mnt-data-models-qwen35-gptq_0_1.bin",
+      "frozen_copy": "objects/f96ec2e38705141bbfeae6b98e8e8b4ec222f3560f13c3a084b3b77c429fa806.bin",
+      "size": 16384,
+      "sha256": "1dec5e944a64e09ff338d4ab30881df67337d944ba882de0b0b11a3d9bf0bd38"
+    }
+  ],
+  "l3_backend_stats": {
+    "files_total": 484747,
+    "kv_16k_files": 484504,
+    "mamba_51m_files": 243
+  }
+}

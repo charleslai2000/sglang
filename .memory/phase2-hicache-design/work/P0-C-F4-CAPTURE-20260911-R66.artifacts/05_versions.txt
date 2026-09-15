@@ -1,0 +1,53 @@
+### env python --version
+Python 3.11.11
+### torch
+torch 2.6.0+cu124 cuda 12.4 avail True
+### sglang import
+sglang.__version__= 0.0.0.dev0 file= /root/sglang-3060-12g-hicache/python/sglang/__init__.py
+### importlib.metadata
+sglang 0.0.0.dev0
+torch 2.6.0
+transformers 5.12.1
+compressed-tensors 0.18.0
+compressed_tensors 0.18.0
+### pip show sglang
+WARNING: Ignoring invalid distribution ~etuptools (/usr/local/lib/python3.11/dist-packages)
+Name: sglang
+Version: 0.0.0.dev0
+Summary: SGLang is a fast serving framework for large language models and vision language models.
+Home-page: https://github.com/sgl-project/sglang
+Author: 
+Author-email: 
+License: 
+Location: /root/sglang-env-3060-4b/lib/python3.11/site-packages
+Editable project location: /root/sglang-3060-12g-hicache/python
+Requires: aiohttp, anthropic, apache-tvm-ffi, blobfile, build, compressed-tensors, cuda-python, cuda-tile, datasets, distro, easydict, einops, fastapi, flash-attn-4, flashinfer_python, gguf, humming-kernels, interegular, IPython, kernels, llguidance, mistral_common, modelscope, msgspec, ninja, numba, numpy, nvidia-cutlass-dsl, nvidia-mathdx, nvidia-ml-py, openai, openai-harmony, orjson, outlines, packaging, partial_json_parser, pillow, prometheus-client, psutil, py-spy, pybase64, pydantic, python-multipart, pyzmq, quack-kernels, requests, scipy, sentencepiece, setproctitle, sgl-deep-ep, sgl-deep-gemm, sglang-kernel, smg-grpc-servicer, soundfile, tiktoken, tilelang, timm, tokenizers, tokenspeed_mla, torch, torch_memory_saver, torchaudio, torchcodec, torchvision, tqdm, transformers, uvicorn, uvloop, watchfiles, xgrammar, xxhash, zstandard
+Required-by: 
+### nvcc
+bash: line 67: nvcc: command not found
+### python exe
+/usr/bin/python3.11
+### get_server_info saved + version/revision fields
+1854d8ff2c549b764a6ae45e7e1b293209796826c874da53985d76b1e307dc19  /tmp/r66-capture/08_get_server_info.json
+top-level keys count: 507
+FIELD model_path = /hy-tmp/models/Qwen3.5-4B-AWQ
+FIELD tokenizer_path = /hy-tmp/models/Qwen3.5-4B-AWQ
+FIELD tokenizer_mode = auto
+FIELD tokenizer_backend = huggingface
+FIELD tokenizer_worker_num = 1
+FIELD detokenizer_worker_num = 1
+FIELD skip_tokenizer_init = False
+FIELD revision = None
+FIELD served_model_name = /hy-tmp/models/Qwen3.5-4B-AWQ
+FIELD weight_version = default
+FIELD tokenizer_metrics_custom_labels_header = x-custom-labels
+FIELD tokenizer_metrics_allowed_custom_labels = None
+FIELD speculative_draft_model_path = None
+FIELD speculative_draft_model_revision = None
+FIELD num_reserved_decode_tokens = 512
+FIELD enable_dynamic_batch_tokenizer = False
+FIELD dynamic_batch_tokenizer_batch_size = 32
+FIELD dynamic_batch_tokenizer_batch_timeout = 0.002
+FIELD enable_tokenizer_batch_encode = False
+FIELD disable_tokenizer_batch_decode = False
+FIELD version = 0.0.0.dev0

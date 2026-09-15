@@ -1,0 +1,13 @@
+## R68 supplementary: local WORKTREE (branch 3090-24g-hicache HEAD 0a725c6385805f21138111e09bf69464ec29f1dc) sha256
+## method: sha256sum <7 paths>
+ccf41ca552ac4f8c61f6c9edc376620fc2c7059ec6f6aed1fd267b9170fdb7dd  python/sglang/srt/managers/schedule_batch.py
+ae3bfac5dd96538e3cad4982503ed008122816dc93ded7bd1400a885405bf0f2  python/sglang/srt/managers/scheduler.py
+34b59fc97d4a18ebd57208ee915e13b699549fe2b5427398c58b7342e4349295  python/sglang/srt/managers/scheduler_components/hicache_restore.py
+c48f412ed9d2af8d908222047e80b041b4a8b5231b4f499f4cf52cdfc5aa93a7  python/sglang/srt/mem_cache/hybrid_cache/hybrid_cache_controller.py
+7c8a29f2c08c6daa31ef04983421fd4c073e0ea9d2159adf6e2da1609da97a95  python/sglang/srt/mem_cache/hybrid_cache/hybrid_pool_assembler.py
+2d191a40f7d6808d88d0ff31c51af7c5b0663c9bf09974c8245c1db8204ba8a8  python/sglang/srt/mem_cache/pool_host/group.py
+b162b1289043441dbffbe1d4dc8f6317766039a0a320d71209eb7fd3766d207b  python/sglang/srt/mem_cache/unified_radix_cache.py
+## ---- 3060 branch tip 4f41f5ba anchors ----
+dc94b91af41786f5704901435ae4b846344717fb9399b2b16b898e6684fd30f8  4f41f5bab562b99562f30c67540eb05344d13637:python/sglang/srt/managers/schedule_batch.py
+e3a78d4856743c4842243a25307db84dec24a6f0303fb81c2fd2f0fa2f8f7d4e  4f41f5bab562b99562f30c67540eb05344d13637:python/sglang/srt/managers/scheduler.py
+9a5ac1214d686cc255114b523730f99db88eaa71f6f4388fd542e8f45ecad0b0  4f41f5bab562b99562f30c67540eb05344d13637:python/sglang/srt/mem_cache/unified_radix_cache.py

@@ -1,0 +1,323 @@
+{
+  "task_id": "P1-DURABLE-PREFIX-REPLAY-20260912-R125",
+  "contract": {
+    "path": "work/R125-bundle/P1-R125-DURABLE-PREFIX-REPLAY-CONTRACT.md",
+    "sha256": "f78a2fc698de375de612ace8c023e4a6518a6781c155c2f5e92b66dd521f3c1f"
+  },
+  "identity": {
+    "gate0_key_set_sha256": "73e15a5fa454204f8ac3b0d1181235999bacaeb59d71f9f5eb208444cf92dcb8",
+    "gate0_expected": "73e15a5fa454204f8ac3b0d1181235999bacaeb59d71f9f5eb208444cf92dcb8",
+    "nonce_used": "p3",
+    "nonce_verification": "p1 gives T_K=252 n_tokens=27170 (no match); p3 gives T_K=240 n_tokens=27340 and reproduces the 8-key set exactly",
+    "durable_objects_on_disk": "8/8 R121 T keys present; F1 durable coverage 42944/42959, F2 42944/43002 (single-pass scandir of L3)"
+  },
+  "D_req": 27328,
+  "requested_primary_tokens": 27339,
+  "external_tail_tokens": 11,
+  "run1": {
+    "storage_queries": [
+      {
+        "probe_line": 2718,
+        "keys": [
+          "195f0625351762a3a6d9a010b7f858b5990e260023ffeb0f9f16d64eeb75ca73",
+          "3f676d20b0be2678d9fd0288bf87b35369829da630ce243cbabd03076d76346b",
+          "e711270eff4efc26153823b2fd9cba8a66aec5f877d1ac62236553203ecc1257",
+          "cf38ec4b8b2668fbc8e8fb332adb53de2a528cd02534ea08661d1f3f27377806",
+          "dc50c5021520e84299afd7b2a4cbc15c5a8c34b27eb4f74f54296e2cbde59100",
+          "26827c2720166d4ba17ea34d73b798a4266b472490ebda37c7a3a994eada446b",
+          "5a996e2add555dffd4449e034c7faa24a7747a49371022716732d0a062274dae",
+          "adab1b6dcd6269838e76684555e7965656a12bafcaf806f7dd803020157d13df"
+        ],
+        "query_suffix_len": 27339,
+        "kv_hit_pages": 27328,
+        "storage_hit_count": 27328,
+        "sidecar_hits": {
+          "kv": 27328,
+          "mamba": 27328
+        },
+        "keys_prefix8_equal": true
+      },
+      {
+        "probe_line": 2809,
+        "keys": [
+          "195f0625351762a3a6d9a010b7f858b5990e260023ffeb0f9f16d64eeb75ca73",
+          "3f676d20b0be2678d9fd0288bf87b35369829da630ce243cbabd03076d76346b",
+          "e711270eff4efc26153823b2fd9cba8a66aec5f877d1ac62236553203ecc1257",
+          "cf38ec4b8b2668fbc8e8fb332adb53de2a528cd02534ea08661d1f3f27377806",
+          "dc50c5021520e84299afd7b2a4cbc15c5a8c34b27eb4f74f54296e2cbde59100",
+          "26827c2720166d4ba17ea34d73b798a4266b472490ebda37c7a3a994eada446b",
+          "5a996e2add555dffd4449e034c7faa24a7747a49371022716732d0a062274dae",
+          "adab1b6dcd6269838e76684555e7965656a12bafcaf806f7dd803020157d13df"
+        ],
+        "query_suffix_len": 27339,
+        "kv_hit_pages": 27328,
+        "storage_hit_count": 27328,
+        "sidecar_hits": {
+          "kv": 27328,
+          "mamba": 27328
+        },
+        "keys_prefix8_equal": true
+      }
+    ],
+    "t_prefetch_issued": [
+      {
+        "raw_line": 75,
+        "prefetch_length": 27339
+      },
+      {
+        "raw_line": 128047,
+        "prefetch_length": 27339
+      }
+    ],
+    "decisions": [
+      {
+        "raw_line": 40801,
+        "decision": "hold_no_generation",
+        "retry_outcome": "hold_no_generation",
+        "wait_id": "r121-p3-R-T:wait:8",
+        "ts_mono_ns": 24118421802639,
+        "captured_generations": {
+          "kv": 278,
+          "mamba": 345
+        },
+        "current_generations": {
+          "kv": 278,
+          "mamba": 345
+        },
+        "free_units": {
+          "kv": 262,
+          "mamba": 42
+        },
+        "evictable_units": {
+          "kv": 5950,
+          "mamba": 43
+        },
+        "per_domain": {
+          "kv": {
+            "gen_before": 278,
+            "gen_after": 278,
+            "advanced": false,
+            "free": 262,
+            "evictable": 5950,
+            "required": 27328,
+            "free_plus_evictable": 6212,
+            "cap_satisfied": false,
+            "new_clause_decides": false
+          },
+          "mamba": {
+            "gen_before": 345,
+            "gen_after": 345,
+            "advanced": false,
+            "free": 42,
+            "evictable": 43,
+            "required": 1,
+            "free_plus_evictable": 85,
+            "cap_satisfied": true,
+            "new_clause_decides": true
+          }
+        },
+        "deciding_domains": [
+          "mamba"
+        ],
+        "both_advanced": false,
+        "terminal_reason": null
+      },
+      {
+        "raw_line": 128043,
+        "decision": "grant",
+        "retry_outcome": "grant",
+        "wait_id": "r121-p3-R-T:wait:8",
+        "ts_mono_ns": 24150110953157,
+        "captured_generations": {
+          "kv": 278,
+          "mamba": 345
+        },
+        "current_generations": {
+          "kv": 279,
+          "mamba": 346
+        },
+        "free_units": {
+          "kv": 2242,
+          "mamba": 64
+        },
+        "evictable_units": {
+          "kv": 1984,
+          "mamba": 21
+        },
+        "per_domain": {
+          "kv": {
+            "gen_before": 278,
+            "gen_after": 279,
+            "advanced": true,
+            "free": 2242,
+            "evictable": 1984,
+            "required": 27328,
+            "free_plus_evictable": 4226,
+            "cap_satisfied": false,
+            "new_clause_decides": false
+          },
+          "mamba": {
+            "gen_before": 345,
+            "gen_after": 346,
+            "advanced": true,
+            "free": 64,
+            "evictable": 21,
+            "required": 1,
+            "free_plus_evictable": 85,
+            "cap_satisfied": true,
+            "new_clause_decides": false
+          }
+        },
+        "deciding_domains": [],
+        "both_advanced": true,
+        "terminal_reason": null
+      },
+      {
+        "raw_line": 128044,
+        "decision": "release",
+        "retry_outcome": "released",
+        "wait_id": "r121-p3-R-T:wait:8",
+        "ts_mono_ns": 24150111328421,
+        "captured_generations": null,
+        "current_generations": null,
+        "free_units": null,
+        "evictable_units": null,
+        "per_domain": {},
+        "deciding_domains": [],
+        "both_advanced": false,
+        "terminal_reason": "restore_event:CAPACITY_FITS"
+      }
+    ],
+    "waits": [
+      {
+        "raw_line": 40800,
+        "wait_id": "r121-p3-R-T:wait:8",
+        "fifo_sequence": 8,
+        "captured_generations": {
+          "kv": 278,
+          "mamba": 345
+        },
+        "free_units": {
+          "kv": 262,
+          "mamba": 42
+        },
+        "evictable_units": {
+          "kv": 5950,
+          "mamba": 43
+        },
+        "blocked_domains": [
+          "kv",
+          "mamba"
+        ],
+        "requested_primary_tokens": 27328,
+        "required_aux_units": {
+          "mamba": 1
+        },
+        "sidecar_hit_pages": {
+          "kv": 27328,
+          "mamba": 0
+        },
+        "deadline_mono_ns": 24178421434716,
+        "wait_started_mono_ns": 24118421434716,
+        "ts_mono_ns": 24118421508137
+      }
+    ],
+    "dispositions": [
+      {
+        "raw_line": 40797,
+        "disposition": "WAIT",
+        "requested": 27339,
+        "granted": 27328,
+        "reason": "revoked:alloc_failed"
+      },
+      {
+        "raw_line": 271088,
+        "disposition": "PARTIAL",
+        "requested": 27339,
+        "granted": 27328,
+        "reason": "shortfall"
+      }
+    ],
+    "success": {
+      "raw_line": 271098,
+      "n_tokens": 27326
+    },
+    "finalize": {
+      "raw_line": 271087,
+      "kv_expected": 27328,
+      "kv_fetched": 27328,
+      "per_sidecar": {
+        "mamba": {
+          "expected": 1,
+          "fetched": 1
+        }
+      },
+      "sidecars": {
+        "mamba": {
+          "expected": 1,
+          "fetched": 1
+        }
+      },
+      "restore_state_after": "READY",
+      "result": "accepted",
+      "all_or_nothing": true,
+      "wait_id": "r121-p3-R-T:wait:8",
+      "wake_event_id": "run-3086752-18457721201699:host-alloc:112",
+      "ts_mono_ns": 24203001770040
+    },
+    "recompute": [],
+    "hybrid_discard": [],
+    "t_prefill_batches": 0,
+    "retries": [
+      {
+        "raw_line": 40798,
+        "retry_outcome": "revoked_alloc_failed",
+        "per_pool": {
+          "kv": {
+            "alloc1": false,
+            "alloc2": false,
+            "evictable_after": 5950,
+            "evictable_before": 5950,
+            "free_after": 262,
+            "free_before": 262,
+            "reclaimed": 0,
+            "required": 27328
+          },
+          "mamba": {
+            "alloc1": null,
+            "alloc2": null,
+            "evictable_after": 43,
+            "evictable_before": 43,
+            "free_after": 42,
+            "free_before": 41,
+            "reclaimed": 0,
+            "required": 1
+          }
+        },
+        "failed_domains": [
+          "kv",
+          "mamba"
+        ]
+      }
+    ]
+  },
+  "run2": {
+    "storage_queries": [],
+    "t_prefetch_issued": [],
+    "decisions": [],
+    "waits": [],
+    "dispositions": [],
+    "success": null,
+    "finalize": null,
+    "recompute": [],
+    "hybrid_discard": [],
+    "t_prefill_batches": 0
+  },
+  "conclusion": {
+    "gate0_identity": "PASS (both runs: T pc_storage_query keys == R121 8-key set, kv_hit_pages==27328)",
+    "gate1_no_premature_consumption_run1": "PASS (T issue epoch 18 >= release epoch 18; no T prefetch/restore before release; T admission after release)",
+    "gate2_new_predicate_clause": "NON-EVIDENCE (run1 T grant raw:128043 both kv and mamba generations advanced; run2 produced no grant)",
+    "gate3_full_restore_run1": "DURABLE BOUNDARY FULLY FETCHED (kv_fetched==27328, mamba 1/1, READY,accepted) but disposition=PARTIAL reason=shortfall (11-token external tail) and restore_success.n_tokens=27326==D_req-2",
+    "verdict": "NOT_VERIFIED (fix new-clause not runtime-exercised); no product defect implicated"
+  }
+}

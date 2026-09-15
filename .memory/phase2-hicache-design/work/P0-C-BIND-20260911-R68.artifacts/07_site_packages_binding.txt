@@ -1,0 +1,25 @@
+## R68 item(2b) which sglang package the interpreter would import (read-only, no import)
+=== sglang* in site-packages ===
+-rw-r--r--   1 root root  26466 Sep  8 20:42 __editable___sglang_0_0_0_dev0_finder.py
+-rw-r--r--   1 root root     93 Sep  8 20:42 __editable__.sglang-0.0.0.dev0.pth
+drwxr-xr-x   2 root root    151 Sep  8 20:42 sglang-0.0.0.dev0.dist-info
+drwxr-xr-x   3 root root    122 Sep  8 22:47 sglang_kernel-0.4.6.post1.dist-info
+=== .pth / egg-link referencing sglang or checkout ===
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/__editable__.sglang-0.0.0.dev0.pth
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/__editable___sglang_0_0_0_dev0_finder.py
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/__editable__.sglang-0.0.0.dev0.pth
+--- /root/sglang-env-3060-4b/lib/python3.11/site-packages/distutils-precedence.pth
+import os; var = 'SETUPTOOLS_USE_DISTUTILS'; enabled = os.environ.get(var, 'local') == 'local'; enabled and __import__('_distutils_hack').add_shim(); 
+--- /root/sglang-env-3060-4b/lib/python3.11/site-packages/__editable__.sglang-0.0.0.dev0.pth
+import __editable___sglang_0_0_0_dev0_finder; __editable___sglang_0_0_0_dev0_finder.install()=== sglang dir type ===
+=== python sys.path WITHOUT importing sglang (isolated -S -I, cwd=checkout) ===
+/usr/lib/python311.zip
+/usr/lib/python3.11
+/usr/lib/python3.11/lib-dynload
+/usr/local/lib/python3.11/dist-packages
+/usr/lib/python3/dist-packages
+=== direct sglang file identity the interpreter would load (spec finder) ===
+Traceback (most recent call last):
+  File "<string>", line 4, in <module>
+AttributeError: 'NoneType' object has no attribute 'origin'
+## remote_ssh_exit=1
