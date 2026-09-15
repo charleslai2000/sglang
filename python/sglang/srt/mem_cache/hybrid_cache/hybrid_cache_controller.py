@@ -203,6 +203,11 @@ class PrefetchOperation(StorageOperation):
         self._terminated_flag = False
         self.storage_hit_count = 0
         self.start_time = time.monotonic()
+        self.telemetry_enabled = False
+        self.prefetch_issue_mono_ns = None
+        self.telemetry_session_generation = None
+        self.storage_query_start_mono_ns = None
+        self.storage_query_end_mono_ns = None
         super().__init__(
             None,
             token_ids,
@@ -812,6 +817,11 @@ class HybridCacheController(BaseHiCacheController):
         prefix_keys: Optional[List[str]] = None,
         extra_pools: Optional[list[PoolTransfer]] = None,
         trace_context: Optional[dict] = None,
+        telemetry_enabled: bool = False,
+        session_generation: Optional[int] = None,
+        prefetch_attempt_id: Optional[str] = None,
+        matched_prefix_l3_proof: Optional[dict] = None,
+        matched_prefix_tokens: Optional[int] = None,
     ) -> PrefetchOperation:
         operation = PrefetchOperation(
             request_id,
@@ -821,8 +831,19 @@ class HybridCacheController(BaseHiCacheController):
             pool_transfers=extra_pools,
             trace_context=trace_context,
         )
+        operation.telemetry_enabled = telemetry_enabled
+        operation.telemetry_session_generation = (
+            session_generation if telemetry_enabled else None
+        )
+        operation.prefetch_attempt_id = prefetch_attempt_id
+        operation.matched_prefix_l3_proof = matched_prefix_l3_proof
+        operation.stats_matched_prefix_tokens = matched_prefix_tokens
         for transfer in extra_pools or []:
             transfer._t38c_trace_context = operation.trace_context
+        if telemetry_enabled:
+            # This is the controller-owned acceptance/publication seam.  Keep
+            # the value immutable after this point: workers only observe it.
+            operation.prefetch_issue_mono_ns = time.monotonic_ns()
         self.prefetch_queue.put(operation)
         return operation
 
@@ -863,6 +884,8 @@ class HybridCacheController(BaseHiCacheController):
         return operation.id
 
     def _storage_hit_query(self, operation) -> tuple[list[str], int]:
+        if getattr(operation, "telemetry_enabled", False):
+            operation.storage_query_start_mono_ns = time.monotonic_ns()
         _p2a_probe = begin_storage_query_probe()
         hash_value = self.get_hash_str(
             operation.token_ids, operation.last_hash, page_size=self.page_size
@@ -927,6 +950,8 @@ class HybridCacheController(BaseHiCacheController):
             )
 
         kv_hit_pages = hit_result.kv_hit_pages
+        if getattr(operation, "telemetry_enabled", False):
+            operation.storage_query_end_mono_ns = time.monotonic_ns()
         operation.pool_storage_result.update_kv_hit_pages(kv_hit_pages)
         try:
             _t38c_log({"evt": "pc_storage_query",

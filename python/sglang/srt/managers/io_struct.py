@@ -1490,6 +1490,7 @@ class BatchTokenIDOutput(BaseBatchReq, kw_only=True):
     customized_info: Optional[PickleWrapper] = None
     # Detailed breakdown of cached tokens by source (device/host/storage)
     cached_tokens_details: Optional[List[Optional[CachedTokensDetails]]] = None
+    hicache_telemetry: Optional[List[Optional[Dict[str, Any]]]] = None
     # DP rank of the scheduler that processed each request
     dp_ranks: Optional[List[Optional[int]]] = None
 
@@ -1587,6 +1588,7 @@ class BatchStrOutput(BaseBatchReq, kw_only=True):
     customized_info: Optional[PickleWrapper] = None
     # Detailed breakdown of cached tokens by source (device/host/storage)
     cached_tokens_details: Optional[List[Optional[CachedTokensDetails]]] = None
+    hicache_telemetry: Optional[List[Optional[Dict[str, Any]]]] = None
     # DP rank of the scheduler that processed each request
     dp_ranks: Optional[List[Optional[int]]] = None
 
@@ -1632,6 +1634,7 @@ class BatchEmbeddingOutput(BaseBatchReq, kw_only=True):
     retraction_counts: Optional[List[int]] = None
     # Detailed breakdown of cached tokens by source (device/host/storage)
     cached_tokens_details: Optional[List[Optional[CachedTokensDetails]]] = None
+    hicache_telemetry: Optional[List[Optional[Dict[str, Any]]]] = None
 
     # For observability
     # Pickled Optional[List[SchedulerReqTimeStats]]

@@ -56,6 +56,10 @@ def _make_batch_str_output() -> BatchStrOutput:
             {"device": 3, "host": 0},
             {"device": 1, "host": 3},
         ],
+        hicache_telemetry=[
+            {"schema": "hicache_request.v1", "prompt_tokens": 10},
+            {"schema": "hicache_request.v1", "prompt_tokens": 20},
+        ],
         input_token_logprobs_val=[[], []],
         input_token_logprobs_idx=[[], []],
         output_token_logprobs_val=[[], []],
@@ -98,6 +102,10 @@ class TestMultiTokenizerMixin(unittest.TestCase):
         self.assertEqual(
             single_output.cached_tokens_details,
             [{"device": 1, "host": 3}],
+        )
+        self.assertEqual(
+            single_output.hicache_telemetry,
+            [{"schema": "hicache_request.v1", "prompt_tokens": 20}],
         )
 
     def test_batch_str_output_keeps_weight_versions_nested_per_request(self):
