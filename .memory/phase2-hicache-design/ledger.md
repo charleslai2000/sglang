@@ -7306,3 +7306,63 @@ CONTROL — `.memory` 中刻意保持 epoch 语义、未随本次整合改写者
 （`context.md` 顶部 banner、本 ledger 条目、`HANDOFF-20260914`、`WORK-INVENTORY-20260914`）
 明确标注其为历史证据。`ledger.md:5731` 与 `work/*` 中的旧 branch 引用**保留原样**，
 不改写历史记录。
+
+
+### 2026-09-16 — 提交在制品、vendored 权威证据、默认分支改为 3090-24g-opt
+
+USER RULING（三项同时授权）：(1) 把 P0 在制品字节提交到分支并推送；
+(2) 把 packet 与权威文档提交入库（在分支上，不并入 main 语义）；
+(3) 修改该 repo 的默认分支。用户澄清换机来源是 **charleslai2000 的 GitHub 账户**
+（此前误报为 Gitea；已核实 Gitea `gitea.lorestack.dev` 上 40 个仓库中**不存在** sglang，
+`charles/sglang` 等均 404，故不涉及 Gitea）。
+
+FACT — 为什么另一台机器此前"看不到 `.memory`"（已定位，非缺陷）：
+`.memory` 于 2026-09-16 才**首次**进 git（在此之前一直是未跟踪目录，不属于任何 ref）；
+它存在于 `origin/3090-24g-opt` 与 `origin/3090-24g-hicache`（实测各 393 个 `.memory` 文件），
+而 `origin/main` 与 `upstream/main` 均为 0。fresh clone 默认检出 `main`，
+故 `git ls-tree -r`（查 HEAD=`main`）自然"全库无匹配"。
+附带事实：本机 `refs/remotes/origin/HEAD` 是**过期 symref**，指向 `origin/5090-32-hicache`，
+与真实默认分支 `main` 不符；按"默认分支"解析的脚本会得到错误结果。
+
+FACT — 提交（branch `wip/p0-telemetry-current-17`，按 provenance 分组，避免混淆验收状态）：
+
+```
+ce73d6671f  docs(memory): vendor P0 权威证据（28 files / 232,699 bytes）
+48233f3aba  fix(qwen3_5_text): loader shim                      ← 已验收
+a207b567fe  wip(p0-telemetry): 15 files UNREVIEWED 快照          ← CHANGES_REQUIRED
+1dcaa80473  test(extent-g1): KV+Mamba grouped fixture            ← B2/G1 既有 test-only
+```
+
+17 = 1 (loader shim) + 15 (P0 telemetry) + 1 (extent-g1 test-only)。分组依据：
+loader shim 已通过独立复审 + GPU 验证，不应与未审 P0 字节混为一条记录；
+extent-g1 属 B2/G1 既有 test-only 改动，provenance 亦不同。
+
+Vendored 证据位置与校验（**换机可用性**是本项的目的）：
+`.memory/phase2-hicache-design/evidence/p0-telemetry-20260914/{README.md,packet/,authority/,review/}`。
+packet 内 `hashes.sha256` 的路径是 **repo-root-relative**，须在 repo 根执行
+`sha256sum -c .../packet/hashes.sha256`；提交后复测 **17/17 通过**（提交不改变文件对象）。
+
+CONTROL — "已提交" ≠ "已验收"：`a207b567fe` 的 15 个文件仍是未验收实现，
+终审维持 `CHANGES_REQUIRED`（三项缺陷）。禁止据此解锁 telemetry-enabled 性能重跑、
+cache/agent 矩阵、soak/restart、scorecard freeze、B4。冻结身份仍是 `993ef8e5` 与
+`refs/heads/checkpoint/pre-v0.5.19-20260913`（+ 同名 tag），未被上述提交触及。
+
+FACT — 默认分支变更：`charleslai2000/sglang` 默认分支由 `main` 改为 `3090-24g-opt`
+（内容变更见 `1352a69997`）。影响 fresh clone 默认检出与新建 PR 的默认 base。
+`main` 未删除、未改动（仍 `5263568bcbf9da7b463e25c136f6aa92eedc3c08`）。
+撤销方式：`gh repo edit charleslai2000/sglang --default-branch main`。
+
+FACT — 文档修正（此前记录有误，已改正，避免重复误导）：
+
+- `PERFORMANCE-BASELINE-SPEC-v2.*` 与 `...-ERRATUM-20260914.*` 位于
+  `performance-baseline-v1/manifest/`（**单数**）；`manifests/`（**复数**）存放 SPEC-v1、
+  P0 design、Expert Gate、telemetry-availability、prefill-context-reconciliation。
+  两个目录都存在且内容不同。`manifests/telemetry-availability.json` **无**日期后缀。
+- B3 semantic aggregate 的 summary 位于
+  `runs/B3-semantic-aggregate-20260914T1348Z/summaries/SEMANTIC-AGGREGATE-BASELINE.md`，
+  **不在**顶层 `summaries/`。
+
+CONTROL — 换机接续的界限（写入 `HANDOFF-20260914` §11）：仓库可跨机取回，
+但本机 `/mnt/data` 全部内容（模型权重、venv、原始 run 日志与 `*.jsonl`、各 gate 证据目录、
+`3090.lock`）**不会**随之过去。取不到的必须标 `UNAVAILABLE`，不得臆造；
+且 §2.5 的 GPU NVML/CUDA ordinal 反转是**本机**特性，换机需重新验证。
