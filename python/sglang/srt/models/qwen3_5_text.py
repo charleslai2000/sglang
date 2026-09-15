@@ -166,7 +166,11 @@ class Qwen3_5ForCausalLM(nn.Module):
 
         body_weights = []
         for name, loaded_weight in weights:
-            if name.startswith(_MODEL_PREFIX):
+            if name.startswith("model.language_model."):
+                body_weights.append(
+                    (name[len("model.language_model.") :], loaded_weight)
+                )
+            elif name.startswith(_MODEL_PREFIX):
                 body_weights.append((name[len(_MODEL_PREFIX) :], loaded_weight))
             elif name == "lm_head.weight":
                 if self.config.tie_word_embeddings:
