@@ -1,0 +1,67 @@
+{
+  "task_id": "LOCAL-P0-CURRENT-CORRECTION-PACKET-17-20260914",
+  "repository": "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt",
+  "captured_utc": "2026-09-14T12:26:56.888893+00:00",
+  "head": "993ef8e5c3a6448aff2e752cf66cc45deadab59a",
+  "head_tree": "75d8d1af8dfef5680085e67767c670554d7163af",
+  "manifest_inputs": [
+    "/mnt/data/nerun-dev/p3/LOCAL-PROD-BASELINE-v1/P0-provenance-rebuild-20260914/manifest.json",
+    "/mnt/data/nerun-dev/p3/LOCAL-PROD-BASELINE-v1/P0-post-restart-provenance-exec-20260914/manifest.json"
+  ],
+  "bounded_file_count": 17,
+  "bounded_file_set": [
+    "python/sglang/srt/managers/detokenizer_manager.py",
+    "python/sglang/srt/managers/io_struct.py",
+    "python/sglang/srt/managers/multi_tokenizer_mixin.py",
+    "python/sglang/srt/managers/schedule_batch.py",
+    "python/sglang/srt/managers/scheduler.py",
+    "python/sglang/srt/managers/scheduler_components/batch_result_processor.py",
+    "python/sglang/srt/managers/scheduler_components/output_streamer.py",
+    "python/sglang/srt/managers/tokenizer_manager.py",
+    "python/sglang/srt/mem_cache/hiradix_cache.py",
+    "python/sglang/srt/mem_cache/hybrid_cache/hybrid_cache_controller.py",
+    "python/sglang/srt/mem_cache/unified_radix_cache.py",
+    "python/sglang/srt/models/qwen3_5_text.py",
+    "python/sglang/srt/observability/hicache_telemetry.py",
+    "python/sglang/srt/observability/metrics_collector.py",
+    "test/registered/unit/managers/test_multi_tokenizer_mixin.py",
+    "test/registered/unit/mem_cache/test_extent_g1_metadata_unit.py",
+    "test/registered/unit/observability/test_hicache_request_telemetry.py"
+  ],
+  "external_reviewed_artifacts": {
+    "gate/P0-TELEMETRY-EXPERT-GATE-20260914.md": {
+      "path": "/mnt/data/cache/performance-baseline-v1/manifests/P0-TELEMETRY-EXPERT-GATE-20260914.md",
+      "sha256": "48b4faade00d2261889eb94f2bce44d11a62d12139b6d9200d7289c3c74f8c17",
+      "exists": true,
+      "current_sha256": "48b4faade00d2261889eb94f2bce44d11a62d12139b6d9200d7289c3c74f8c17"
+    },
+    "gate/P0-TELEMETRY-EXPERT-GATE-20260914.json": {
+      "path": "/mnt/data/cache/performance-baseline-v1/manifests/P0-TELEMETRY-EXPERT-GATE-20260914.json",
+      "sha256": "1e8277e9762cafc7336156479973d725d9bce973d245d1f62974ad407795e374",
+      "exists": true,
+      "current_sha256": "1e8277e9762cafc7336156479973d725d9bce973d245d1f62974ad407795e374"
+    },
+    "review/REVIEW.md": {
+      "path": "/mnt/data/nerun-dev/p3/LOCAL-PROD-BASELINE-v1/P0-telemetry-final-review-20260914/REVIEW.md",
+      "sha256": "a1809676cc01da01d453ce76dde7b7a3fc4457d23452122292513b94e7a6f5b3",
+      "exists": true,
+      "current_sha256": "a1809676cc01da01d453ce76dde7b7a3fc4457d23452122292513b94e7a6f5b3"
+    },
+    "review/decision.json": {
+      "path": "/mnt/data/nerun-dev/p3/LOCAL-PROD-BASELINE-v1/P0-telemetry-final-review-20260914/decision.json",
+      "sha256": "e68868faf7da8639616118b098fa397df34a1f848de4f39eae738442b3dfdb92",
+      "exists": true,
+      "current_sha256": "e68868faf7da8639616118b098fa397df34a1f848de4f39eae738442b3dfdb92"
+    },
+    "review/evidence-index.md": {
+      "path": "/mnt/data/nerun-dev/p3/LOCAL-PROD-BASELINE-v1/P0-telemetry-final-review-20260914/evidence-index.md",
+      "sha256": "e7b716e51e0491ae235ec8e228d824f2dbd26e8e379ffc648616cd23a3a7f9ee",
+      "exists": true,
+      "current_sha256": "e7b716e51e0491ae235ec8e228d824f2dbd26e8e379ffc648616cd23a3a7f9ee"
+    }
+  },
+  "tests_executed": false,
+  "gpu_started": false,
+  "server_started": false,
+  "performance_executed": false
+}
