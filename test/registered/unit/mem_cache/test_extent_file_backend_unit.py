@@ -25,6 +25,7 @@ register_cpu_ci(est_time=20, suite="base-a-test-cpu")
 import os
 import shutil
 import tempfile
+import threading
 import unittest
 from unittest import mock
 
@@ -46,6 +47,22 @@ from sglang.srt.mem_cache.storage.extent.extent_allocator import (
 from sglang.srt.mem_cache.storage.extent.extent_file_backend import (
     ExtentFileBackend,
     _page_byte_view,
+)
+from sglang.srt.mem_cache.storage.extent.extent_metadata import (
+    FRAME_BATCH_COMMIT,
+    FRAME_CLEAR,
+    FRAME_DROP_SLOT,
+    FRAME_GROUP_COMMIT,
+    GroupCommitPayload,
+    RecoveryError,
+    component_from_pool_name,
+    decode_group_commit_payload,
+    encode_group_commit_payload,
+    iter_segment_frames,
+    read_manifest,
+    read_current,
+    segment_path,
+    write_manifest_atomic,
 )
 from sglang.test.test_utils import CustomTestCase
 
@@ -267,6 +284,280 @@ class ExtentBackendTestBase(CustomTestCase):
 
 
 class TestExtentV1(ExtentBackendTestBase):
+    def test_group_commit_blocks_reader_until_all_members_install(self):
+        group_id = self.backend.open_group()
+        keys = self._make_keys(2)
+        storage_keys = [self.backend._storage_key(key) for key in keys]
+        self.assertTrue(
+            self.backend._write_pages(
+                [storage_keys[0]], [self._page_bytes(1)], group_id=group_id
+            )
+        )
+        self.assertTrue(
+            self.backend._write_pages(
+                [storage_keys[1]], [self._page_bytes(2)], group_id=group_id
+            )
+        )
+
+        install_started = threading.Event()
+        allow_install = threading.Event()
+        reader_started = threading.Event()
+        reader_done = threading.Event()
+        reader_result = []
+        original_install = self.backend._allocator.commit_install
+
+        def paused_install(install_keys, refs):
+            install_started.set()
+            self.assertTrue(allow_install.wait(2))
+            return original_install(install_keys, refs)
+
+        def reader():
+            reader_started.set()
+            reader_result.append(self.backend.batch_exists(keys))
+            reader_done.set()
+
+        with mock.patch.object(
+            self.backend._allocator, "commit_install", side_effect=paused_install
+        ):
+            commit_thread = threading.Thread(
+                target=self.backend.commit_group, args=(group_id,)
+            )
+            commit_thread.start()
+            self.assertTrue(install_started.wait(2))
+
+            reader_thread = threading.Thread(target=reader)
+            reader_thread.start()
+            self.assertTrue(reader_started.wait(2))
+            self.assertFalse(reader_done.wait(0.1))
+
+            allow_install.set()
+            commit_thread.join(2)
+            reader_thread.join(2)
+
+        self.assertFalse(commit_thread.is_alive())
+        self.assertFalse(reader_thread.is_alive())
+        self.assertEqual(reader_result, [len(keys)])
+
+    def test_same_namespace_backend_open_is_fenced_until_close(self):
+        with self.assertRaises(RecoveryError) as raised:
+            ExtentFileBackend(
+                _make_config(
+                    extra_config={
+                        "storage_dir": self.tmpdir,
+                        "extent_size": "16Ki",
+                        "file_size": "64Ki",
+                    }
+                )
+            )
+        self.assertEqual(raised.exception.failure_class, "lock-busy")
+        self.assertTrue(self.backend.set("first", self._page_bytes(1)))
+
+        self.backend.close()
+        self.backend = ExtentFileBackend(
+            _make_config(
+                extra_config={
+                    "storage_dir": self.tmpdir,
+                    "extent_size": "16Ki",
+                    "file_size": "64Ki",
+                }
+            )
+        )
+        self.assertTrue(self.backend.exists("first"))
+
+    def test_conflicting_duplicate_does_not_truncate_live_data_file(self):
+        values = [self._page_bytes(i) for i in range(17)]
+        keys = self._make_keys(len(values))
+        self.assertTrue(self.backend.batch_set(keys, values))
+        target_key = keys[-1]
+        target_value = values[-1]
+        data_path = self.backend._data_path
+        original_size = os.stat(data_path).st_size
+        self.assertEqual(original_size, 64 * 1024)
+        self.assertEqual(
+            bytes(self.backend.get(target_key, bytearray(len(target_value)))),
+            bytes(target_value),
+        )
+
+        with self.assertRaises(RecoveryError) as raised:
+            ExtentFileBackend(
+                _make_config(
+                    extra_config={
+                        "storage_dir": self.tmpdir,
+                        "extent_size": "16Ki",
+                        "file_size": "16Ki",
+                    }
+                )
+            )
+        self.assertEqual(raised.exception.failure_class, "lock-busy")
+        self.assertEqual(os.stat(data_path).st_size, original_size)
+        self.assertEqual(
+            bytes(self.backend.get(target_key, bytearray(len(target_value)))),
+            bytes(target_value),
+        )
+
+        later_key = "after-conflicting-duplicate"
+        later_value = self._page_bytes(99)
+        self.assertTrue(self.backend.set(later_key, later_value))
+        self.assertEqual(
+            bytes(self.backend.get(later_key, bytearray(len(later_value)))),
+            bytes(later_value),
+        )
+
+    def test_separate_config_suffix_can_open_while_namespace_is_held(self):
+        other = ExtentFileBackend(
+            _make_config(
+                model_name="othermodel",
+                extra_config={
+                    "storage_dir": self.tmpdir,
+                    "extent_size": "16Ki",
+                    "file_size": "64Ki",
+                },
+            )
+        )
+        try:
+            self.assertNotEqual(self.backend.config_suffix, other.config_suffix)
+            self.assertTrue(other.set("other", self._page_bytes(2)))
+        finally:
+            other.close()
+
+    def test_group_open_uses_backend_epoch_and_monotonic_seq(self):
+        first = self.backend.open_group()
+        second = self.backend.open_group()
+        self.assertEqual(first[0], self.backend._namespace_epoch)
+        self.assertTrue(any(first[0]))
+        self.assertEqual(first[1], 1)
+        self.assertEqual(second, (first[0], 2))
+        self.assertNotEqual(first, (b"\x00" * 16, 0))
+
+    def test_grouped_write_is_hidden_until_commit(self):
+        group_id = self.backend.open_group()
+        self.assertTrue(
+            self.backend._write_pages(
+                [self.backend._storage_key("staged")],
+                [self._page_bytes(3)],
+                group_id=group_id,
+            )
+        )
+        self.assertFalse(self.backend.exists("staged"))
+        self.assertTrue(self.backend.commit_group(group_id))
+        self.assertTrue(self.backend.exists("staged"))
+
+    def test_abort_group_leaves_no_visible_entries(self):
+        group_id = self.backend.open_group()
+        self.assertTrue(
+            self.backend._write_pages(
+                [self.backend._storage_key("aborted")],
+                [self._page_bytes(4)],
+                group_id=group_id,
+            )
+        )
+        self.assertTrue(self.backend.abort_group(group_id))
+        self.assertFalse(self.backend.exists("aborted"))
+        self.assertFalse(self.backend.commit_group(group_id))
+
+    def test_group_commit_wal_and_restart_restore(self):
+        group_id = self.backend.open_group()
+        self.assertTrue(
+            self.backend._write_pages(
+                [self.backend._storage_key("grouped")],
+                [self._page_bytes(5)],
+                group_id=group_id,
+            )
+        )
+        self.assertTrue(self.backend.commit_group(group_id))
+        frames = iter_segment_frames(
+            segment_path(self.tmpdir, self.backend.config_suffix, self.backend._wal_generation),
+            active=True,
+        )
+        self.assertIn(FRAME_GROUP_COMMIT, [frame.frame_type for frame in frames])
+        self.backend.close()
+        self.backend = ExtentFileBackend(
+            _make_config(extra_config={"storage_dir": self.tmpdir, "extent_size": "16Ki", "file_size": "64Ki"})
+        )
+        self.assertTrue(self.backend.exists("grouped"))
+
+    def test_incomplete_group_wal_is_dropped_on_restart(self):
+        group_id = self.backend.open_group()
+        self.assertTrue(
+            self.backend._write_pages(
+                [self.backend._storage_key("incomplete")],
+                [self._page_bytes(6)],
+                group_id=group_id,
+            )
+        )
+        self.assertFalse(self.backend.exists("incomplete"))
+        # Simulate a crash close: preserve the durable SET/BATCH_COMMIT prefix
+        # and skip the normal close-time checkpoint/abort path.
+        self.backend._constructor_complete = False
+        self.backend.close()
+        self.backend = ExtentFileBackend(
+            _make_config(extra_config={"storage_dir": self.tmpdir, "extent_size": "16Ki", "file_size": "64Ki"})
+        )
+        self.assertFalse(self.backend.exists("incomplete"))
+
+    def test_group_commit_member_count_mismatch_stays_invisible_after_restart(self):
+        group_id = self.backend.open_group()
+        keys = self._make_keys(2)
+        storage_keys = [self.backend._storage_key(key) for key in keys]
+        self.assertTrue(
+            self.backend._write_pages(
+                storage_keys,
+                [self._page_bytes(8), self._page_bytes(9)],
+                group_id=group_id,
+            )
+        )
+        # The staged batch has two entries, but this durable commit advertises
+        # one.  Replay must reject the whole group rather than installing a
+        # partial group.
+        self.backend._append_wal_frame(
+            FRAME_GROUP_COMMIT,
+            encode_group_commit_payload(
+                GroupCommitPayload(group_id[0], group_id[1], member_count=1)
+            ),
+        )
+        self.backend._sync_wal()
+        frames = iter_segment_frames(
+            segment_path(self.tmpdir, self.backend.config_suffix, self.backend._wal_generation),
+            active=True,
+        )
+        group_commits = [
+            decode_group_commit_payload(frame.payload)
+            for frame in frames
+            if frame.frame_type == FRAME_GROUP_COMMIT
+        ]
+        self.assertEqual(group_commits[-1].member_count, 1)
+
+        self.backend._constructor_complete = False
+        self.backend.close()
+        self.backend = ExtentFileBackend(
+            _make_config(
+                extra_config={
+                    "storage_dir": self.tmpdir,
+                    "extent_size": "16Ki",
+                    "file_size": "64Ki",
+                }
+            )
+        )
+        self.assertFalse(any(self.backend.exists(key) for key in keys))
+        self.assertTrue(
+            all(self.backend._allocator.lookup(key) is None for key in storage_keys)
+        )
+
+    def test_invalid_group_ids_fail_closed(self):
+        with self.assertRaises(ValueError):
+            self.backend.commit_group((b"\x00" * 16, 1))
+        with self.assertRaises(ValueError):
+            self.backend.abort_group((self.backend._namespace_epoch, 0))
+        with self.assertRaises(ValueError):
+            self.backend.commit_group((self.backend._namespace_epoch, 0))
+        self.assertFalse(
+            self.backend._write_pages(
+                [self.backend._storage_key("invalid")],
+                [self._page_bytes(7)],
+                group_id=(b"\x00" * 16, 1),
+            )
+        )
+
     def test_single_key_round_trip(self):
         self.assertTrue(self.backend.set("k0", self._page_bytes(1)))
         self.assertTrue(self.backend.exists("k0"))
@@ -309,6 +600,7 @@ class TestExtentV1(ExtentBackendTestBase):
         # issue exactly one pread (double-checked via stats and a syscall spy).
         backend = ExtentFileBackend(
             _make_config(
+                model_name="aggregate-read",
                 extra_config={
                     "storage_dir": self.tmpdir,
                     "extent_size": "128Ki",
@@ -333,6 +625,7 @@ class TestExtentV1(ExtentBackendTestBase):
     def test_aggregate_write_one_pwrite_per_extent(self):
         backend = ExtentFileBackend(
             _make_config(
+                model_name="aggregate-write",
                 extra_config={
                     "storage_dir": self.tmpdir,
                     "extent_size": "128Ki",
@@ -356,6 +649,7 @@ class TestExtentV1(ExtentBackendTestBase):
         # regions, but every page must come back byte-identical.
         backend = ExtentFileBackend(
             _make_config(
+                model_name="multi-extent",
                 extra_config={
                     "storage_dir": self.tmpdir,
                     "extent_size": "16Ki",
@@ -390,6 +684,7 @@ class TestExtentV1(ExtentBackendTestBase):
     def test_watermark_gc_keeps_used_bytes_under_cap(self):
         backend = ExtentFileBackend(
             _make_config(
+                model_name="watermark-gc",
                 extra_config={
                     "storage_dir": self.tmpdir,
                     "extent_size": "16Ki",
@@ -422,6 +717,7 @@ class TestExtentV1(ExtentBackendTestBase):
     def test_min_free_space_pressure_evicts_oldest(self):
         backend = ExtentFileBackend(
             _make_config(
+                model_name="min-free-space",
                 extra_config={
                     "storage_dir": self.tmpdir,
                     "extent_size": "16Ki",
@@ -458,12 +754,115 @@ class TestExtentV1(ExtentBackendTestBase):
         self._write_keys(3)
         self.assertTrue(self.backend.exists("k0000"))
 
-    def test_crash_reopen_all_cold(self):
+    def test_checkpoint_rotates_and_reopens_manifest_snapshot(self):
+        keys = self._write_keys(5)
+        old_generation = self.backend._wal_generation
+        self.assertTrue(self.backend.checkpoint())
+        state = read_manifest(self.backend._manifest_path)
+        self.assertEqual(state.wal_floor, old_generation + 1)
+        self.assertEqual(read_current(self.backend._wal_current_path), old_generation + 1)
+        self.assertTrue(os.path.exists(segment_path(self.tmpdir, self.backend.config_suffix, old_generation + 1)))
+        self.backend.close()
+        self.backend = ExtentFileBackend(
+            _make_config(extra_config={"storage_dir": self.tmpdir, "extent_size": "16Ki", "file_size": "64Ki"})
+        )
+        self.assertTrue(all(self.backend.exists(key) for key in keys))
+
+    def test_close_checkpoint_reopens_entries(self):
+        keys = self._write_keys(3)
+        self.backend.close()
+        self.backend = ExtentFileBackend(
+            _make_config(extra_config={"storage_dir": self.tmpdir, "extent_size": "16Ki", "file_size": "64Ki"})
+        )
+        self.assertTrue(all(self.backend.exists(key) for key in keys))
+
+    def test_clear_is_durable_and_keeps_generations_monotonic(self):
+        self._write_keys(3)
+        before = list(self.backend._allocator._generations)
+        self.assertTrue(self.backend.clear())
+        self.assertEqual(read_manifest(self.backend._manifest_path).entries, [])
+        self.backend.close()
+        self.backend = ExtentFileBackend(
+            _make_config(extra_config={"storage_dir": self.tmpdir, "extent_size": "16Ki", "file_size": "64Ki"})
+        )
+        self.assertEqual(self.backend._allocator.used_bytes, 0)
+        self.assertGreaterEqual(self.backend._allocator._generations, before)
+
+    def test_pending_rotation_manifest_is_promoted_on_reopen(self):
+        keys = self._write_keys(2)
+        active = self.backend._wal_generation
+        with self.backend._lock:
+            pending = self.backend._checkpoint_state(active + 1, active)
+        write_manifest_atomic(self.backend._manifest_path, pending)
+        create_path = segment_path(self.tmpdir, self.backend.config_suffix, active + 1)
+        self.backend._constructor_complete = False
+        self.backend.close()
+        self.backend = ExtentFileBackend(
+            _make_config(extra_config={"storage_dir": self.tmpdir, "extent_size": "16Ki", "file_size": "64Ki"})
+        )
+        self.assertEqual(self.backend._wal_generation, active + 1)
+        self.assertTrue(os.path.exists(create_path))
+        self.assertTrue(all(self.backend.exists(key) for key in keys))
+
+    def test_checkpoint_unlinks_only_named_generations_below_floor(self):
+        self._write_keys(2)
+        first = self.backend._wal_generation
+        self.assertTrue(self.backend.checkpoint())
+        second = self.backend._wal_generation
+        self.assertTrue(self.backend.checkpoint())
+        state = read_manifest(self.backend._manifest_path)
+        self.assertEqual(state.wal_floor, self.backend._wal_generation)
+        self.assertFalse(os.path.exists(segment_path(self.tmpdir, self.backend.config_suffix, first)))
+        self.assertFalse(os.path.exists(segment_path(self.tmpdir, self.backend.config_suffix, second)))
+        with mock.patch.object(os, "listdir", side_effect=AssertionError("recovery must not listdir")):
+            self.backend.close()
+            self.backend = ExtentFileBackend(
+                _make_config(extra_config={"storage_dir": self.tmpdir, "extent_size": "16Ki", "file_size": "64Ki"})
+            )
+
+    def test_checkpoint_holds_gate_through_unlink_and_releases_writer(self):
+        self._write_keys(1)
+        old_generation = self.backend._wal_generation
+        unlink_started = threading.Event()
+        allow_unlink = threading.Event()
+        writer_done = threading.Event()
+        original_unlink = os.unlink
+
+        def unlink(path):
+            if path == segment_path(self.tmpdir, self.backend.config_suffix, old_generation):
+                self.assertTrue(self.backend._write_gate._is_owned())
+                unlink_started.set()
+                self.assertTrue(allow_unlink.wait(2))
+            return original_unlink(path)
+
+        def writer():
+            try:
+                self.backend.set("after-checkpoint", self._page_bytes(8))
+            finally:
+                writer_done.set()
+
+        with mock.patch.object(os, "unlink", side_effect=unlink):
+            checkpoint_thread = threading.Thread(target=self.backend.checkpoint)
+            checkpoint_thread.start()
+            self.assertTrue(unlink_started.wait(2))
+            writer_thread = threading.Thread(target=writer)
+            writer_thread.start()
+            self.assertFalse(writer_done.wait(0.1))
+            allow_unlink.set()
+            checkpoint_thread.join(2)
+            writer_thread.join(2)
+        self.assertFalse(checkpoint_thread.is_alive())
+        self.assertFalse(writer_thread.is_alive())
+        self.assertTrue(self.backend.exists("after-checkpoint"))
+
+    def test_crash_reopen_restores_durable_entries(self):
         keys = self._write_keys(5)
         for k in keys:
             self.assertTrue(self.backend.exists(k))
         self.backend.close()
-        # Reopen on the same directory: no metadata persistence, all cold.
+        # G1 oracle change: the manifest/WAL rebuild restores entries after a
+        # process restart. This is process-crash semantics only; power-loss
+        # data durability is a separate, stronger tier (D1(b)).
         reopened = ExtentFileBackend(
             _make_config(
                 extra_config={
@@ -475,17 +874,121 @@ class TestExtentV1(ExtentBackendTestBase):
         )
         try:
             for k in keys:
-                self.assertFalse(reopened.exists(k))
-                self.assertIsNone(reopened.get(k, bytearray(1000)))
+                self.assertTrue(reopened.exists(k))
+                self.assertIsNotNone(reopened.get(k, bytearray(1000)))
             stats = reopened.stats_snapshot()
-            self.assertEqual(stats["preads"], 0)
+            self.assertGreater(stats["preads"], 0)
             self.assertEqual(stats["pwrites"], 0)
             self.assertEqual(stats["opens"], 1)
-            # New writes land in the same file without touching old pages.
+            # New writes land in the same file after rebuild.
             self.assertTrue(reopened.set("fresh", self._page_bytes(1)))
             self.assertTrue(reopened.exists("fresh"))
         finally:
             reopened.close()
+
+    def test_manifest_absent_with_persistent_lock_fails_closed(self):
+        manifest_path = self.backend._manifest_path
+        current_path = self.backend._wal_current_path
+        lock_path = self.backend._meta_lock_path
+        config_suffix = self.backend.config_suffix
+        self.backend.close()
+        self.backend = None
+
+        active_generation = read_current(current_path)
+        wal_active_path = segment_path(
+            self.tmpdir, config_suffix, active_generation
+        )
+        wal_one_path = segment_path(
+            self.tmpdir, config_suffix, active_generation + 1
+        )
+        os.unlink(manifest_path)
+        os.unlink(current_path)
+        os.replace(wal_active_path, wal_one_path)
+
+        with self.assertRaises(RecoveryError) as raised:
+            ExtentFileBackend(
+                _make_config(
+                    extra_config={
+                        "storage_dir": self.tmpdir,
+                        "extent_size": "16Ki",
+                        "file_size": "64Ki",
+                    }
+                )
+            )
+        self.assertEqual(raised.exception.failure_class, "manifest-absent")
+        self.assertTrue(os.path.exists(lock_path))
+
+    def test_drop_slot_is_durable_before_reuse_pwrite(self):
+        backend = ExtentFileBackend(
+            _make_config(
+                model_name="drop-slot",
+                extra_config={
+                    "storage_dir": self.tmpdir,
+                    "extent_size": "16Ki",
+                    "file_size": "64Ki",
+                    "max_size": "1Ki",
+                    "eviction_ratio": 0.5,
+                }
+            )
+        )
+        try:
+            self.assertTrue(backend.set("old", self._page_bytes(1)))
+            original = backend._pwritev
+            observed = []
+
+            def pwrite(offset, buffers):
+                frames = iter_segment_frames(
+                    segment_path(self.tmpdir, backend.config_suffix, 0), active=True
+                )
+                observed.append([frame.frame_type for frame in frames])
+                return original(offset, buffers)
+
+            with mock.patch.object(backend, "_pwritev", side_effect=pwrite):
+                self.assertTrue(backend.set("new", self._page_bytes(2)))
+            self.assertTrue(observed)
+            self.assertIn(FRAME_DROP_SLOT, observed[-1])
+        finally:
+            backend.close()
+
+    def test_batch_commit_fsync_follows_successful_data_pwrite(self):
+        events = []
+        original = self.backend._pwritev
+
+        def pwrite(offset, buffers):
+            events.append("pwrite")
+            return original(offset, buffers)
+
+        with mock.patch.object(self.backend, "_pwritev", side_effect=pwrite):
+            with mock.patch.object(
+                os, "fdatasync", side_effect=lambda fd: events.append("fdatasync")
+            ):
+                self.assertTrue(self.backend.set("ordered", self._page_bytes(1)))
+        self.assertEqual(events, ["pwrite", "fdatasync"])
+
+    def test_pwrite_failure_has_no_batch_commit_or_ack(self):
+        with mock.patch.object(self.backend, "_pwritev", return_value=False):
+            self.assertFalse(self.backend.set("failed", self._page_bytes(1)))
+        frames = iter_segment_frames(
+            segment_path(self.tmpdir, self.backend.config_suffix, 0), active=True
+        )
+        self.assertNotIn(FRAME_BATCH_COMMIT, [frame.frame_type for frame in frames])
+        self.assertFalse(self.backend.exists("failed"))
+
+    def test_successful_ungrouped_write_rebuilds_after_restart(self):
+        value = self._page_bytes(7)
+        self.assertTrue(self.backend.set("restart", value))
+        self.backend.close()
+        self.backend = ExtentFileBackend(
+            _make_config(
+                extra_config={
+                    "storage_dir": self.tmpdir,
+                    "extent_size": "16Ki",
+                    "file_size": "64Ki",
+                }
+            )
+        )
+        self.assertTrue(self.backend.exists("restart"))
+        self.assertEqual(bytes(self.backend.get("restart", bytearray(1000))), bytes(value))
 
     def test_stats_counters_accumulate(self):
         keys = self._write_keys(10)
@@ -538,6 +1041,106 @@ class TestExtentV2(ExtentBackendTestBase):
         for i, v in enumerate(values):
             self.assertEqual(bytes(kv._pages[i]), bytes(v))
 
+    def test_v2_grouped_write_stages_until_backend_commit(self):
+        kv, _ = self._register_pools()
+        key = self._make_keys(1)[0]
+        value = self._page_bytes(8)
+        kv._pages[0][:] = value
+        group_id = self.backend.open_group()
+        self.assertEqual(
+            self.backend.batch_set_v2(
+                [self._transfer(PoolName.KV, [key])], group_id=group_id
+            ),
+            {PoolName.KV: [True]},
+        )
+        self.assertFalse(self.backend.exists(key))
+        self.assertTrue(self.backend.commit_group(group_id))
+        self.assertTrue(self.backend.exists(key))
+        self.assertEqual(
+            self.backend.batch_get_v2([self._transfer(PoolName.KV, [key])]),
+            {PoolName.KV: [True]},
+        )
+        self.assertEqual(bytes(kv._pages[0]), bytes(value))
+
+    def test_group_members_restore_after_crash_reopen_with_component_metadata(self):
+        kv, mamba = self._register_pools()
+        kv_key, mamba_key = self._make_keys(2)
+        kv_value = self._page_bytes(10)
+        mamba_value = self._page_bytes(11)
+        kv._pages[0][:] = kv_value
+        mamba._pages[0][:] = mamba_value
+        group_id = self.backend.open_group()
+
+        self.assertEqual(
+            self.backend.batch_set_v2(
+                [self._transfer(PoolName.KV, [kv_key])], group_id=group_id
+            ),
+            {PoolName.KV: [True]},
+        )
+        self.assertEqual(
+            self.backend.batch_set_v2(
+                [self._transfer(PoolName.MAMBA, [mamba_key])], group_id=group_id
+            ),
+            {PoolName.MAMBA: [True]},
+        )
+        self.assertFalse(self.backend.exists(kv_key))
+        self.assertFalse(self.backend.exists(mamba_key))
+        self.assertTrue(self.backend.commit_group(group_id))
+
+        frames = iter_segment_frames(
+            segment_path(self.tmpdir, self.backend.config_suffix, self.backend._wal_generation),
+            active=True,
+        )
+        group_commits = [
+            decode_group_commit_payload(frame.payload)
+            for frame in frames
+            if frame.frame_type == FRAME_GROUP_COMMIT
+        ]
+        self.assertEqual(group_commits[-1].member_count, 2)
+
+        self.backend._constructor_complete = False
+        self.backend.close()
+        self.backend = ExtentFileBackend(
+            _make_config(
+                extra_config={
+                    "storage_dir": self.tmpdir,
+                    "extent_size": "16Ki",
+                    "file_size": "64Ki",
+                }
+            )
+        )
+        restored_kv, restored_mamba = self._register_pools()
+        self.assertTrue(self.backend.exists(kv_key))
+        self.assertIsNotNone(
+            self.backend._allocator.lookup(
+                self.backend._component_key(PoolName.MAMBA, mamba_key)
+            )
+        )
+        self.assertEqual(
+            self.backend._components[self.backend._component_key(PoolName.KV, kv_key)],
+            component_from_pool_name(PoolName.KV),
+        )
+        self.assertEqual(
+            self.backend._components[
+                self.backend._component_key(PoolName.MAMBA, mamba_key)
+            ],
+            component_from_pool_name(PoolName.MAMBA),
+        )
+        self.assertEqual(
+            self.backend.batch_get_v2(
+                [self._transfer(PoolName.KV, [kv_key])]
+            )[PoolName.KV],
+            [True],
+        )
+        self.assertEqual(
+            self.backend.batch_get_v2(
+                [self._transfer(PoolName.MAMBA, [mamba_key])]
+            )[PoolName.MAMBA],
+            [True],
+        )
+        self.assertEqual(bytes(restored_kv._pages[0]), bytes(kv_value))
+        self.assertEqual(bytes(restored_mamba._pages[0]), bytes(mamba_value))
+
     def test_v2_sidecar_component_keys_do_not_share_index(self):
         _, mamba = self._register_pools()
         keys = self._make_keys(3)
@@ -561,6 +1164,37 @@ class TestExtentV2(ExtentBackendTestBase):
             keys, [self._transfer(PoolName.MAMBA, keys)]
         )
         self.assertEqual(result.kv_hit_pages, 0)
+
+    def test_v2_mamba_component_survives_restart_checkpoint(self):
+        _, mamba = self._register_pools()
+        key = self._make_keys(1)[0]
+        mamba._pages[0][:] = self._page_bytes(1)
+        self.assertEqual(
+            self.backend.batch_set_v2([self._transfer(PoolName.MAMBA, [key])]),
+            {PoolName.MAMBA: [True]},
+        )
+        storage_key = self.backend._component_key(PoolName.MAMBA, key)
+
+        self.backend.close()
+        self.backend = ExtentFileBackend(
+            _make_config(
+                extra_config={
+                    "storage_dir": self.tmpdir,
+                    "extent_size": "16Ki",
+                    "file_size": "64Ki",
+                }
+            )
+        )
+        self.assertTrue(self.backend.checkpoint())
+        manifest_entry = next(
+            entry
+            for entry in read_manifest(self.backend._manifest_path).entries
+            if entry.storage_key.decode("utf-8") == storage_key
+        )
+        self.assertEqual(
+            manifest_entry.component,
+            component_from_pool_name(PoolName.MAMBA),
+        )
 
     def test_v2_prefix_semantics(self):
         kv, mamba = self._register_pools()
@@ -659,6 +1293,7 @@ class TestExtentV2(ExtentBackendTestBase):
         # Larger extent to hold the 2048-page live chain (test base is 16Ki).
         backend = ExtentFileBackend(
             _make_config(
+                model_name="trailing-live-shape",
                 extra_config={
                     "storage_dir": self.tmpdir,
                     "extent_size": "64Mi",
@@ -1118,6 +1753,7 @@ class TestExtentV1ZeroCopy(ExtentBackendTestBase):
         # v1 contract must return a bool list instead.
         backend = ExtentFileBackend(
             _make_config(
+                model_name="v1-unregistered",
                 extra_config={
                     "storage_dir": self.tmpdir,
                     "extent_size": "16Ki",
@@ -1176,6 +1812,7 @@ class TestExtentV1ZeroCopy(ExtentBackendTestBase):
     def test_v1_read_one_pread_per_extent(self):
         backend = ExtentFileBackend(
             _make_config(
+                model_name="full-file",
                 extra_config={
                     "storage_dir": self.tmpdir,
                     "extent_size": "128Ki",
@@ -1268,6 +1905,7 @@ class TestExtentV1ZeroCopy(ExtentBackendTestBase):
         """
         backend = ExtentFileBackend(
             _make_config(
+                model_name="large-iov",
                 extra_config={
                     "storage_dir": self.tmpdir,
                     "extent_size": "256Ki",
@@ -1389,6 +2027,7 @@ class TestExtentClosedLoop2048(ExtentBackendTestBase):
         self.addCleanup(budget_patch.stop)
         backend = ExtentFileBackend(
             _make_config(
+                model_name="closed-loop-2048",
                 extra_config={
                     "storage_dir": self.tmpdir,
                     "extent_size": "64Mi",
@@ -1589,6 +2228,7 @@ class TestExtentReadAmplification(ExtentBackendTestBase):
         # request (25x); exact-range reads must pull exactly the 4 pages.
         backend = ExtentFileBackend(
             _make_config(
+                model_name="sparse-read",
                 extra_config={
                     "storage_dir": self.tmpdir,
                     "extent_size": "64Mi",
@@ -1886,6 +2526,7 @@ class TestExtentFullFile(ExtentBackendTestBase):
         # carries across batches and page spans cross batch boundaries.
         backend = ExtentFileBackend(
             _make_config(
+                model_name="full-file-round-trip",
                 extra_config={
                     "storage_dir": self.tmpdir,
                     "extent_size": "16Ki",

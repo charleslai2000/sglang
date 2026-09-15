@@ -693,7 +693,17 @@ class HiRadixCache(RadixCache):
 
         def _drain_release():
             host_indices_list = []
-            for host_indices in _drain_queue(cc.host_mem_release_queue, n_release):
+            pop_pair = getattr(cc, "_t38c_pop_host_mem_release_pair", None)
+            if pop_pair is None:
+                release_pages = _drain_queue(cc.host_mem_release_queue, n_release)
+            else:
+                release_pages = []
+                while n_release is None or len(release_pages) < n_release:
+                    pair = pop_pair(cc.host_mem_release_queue, PoolName.KV)
+                    if pair is None:
+                        break
+                    release_pages.append(pair[0])
+            for host_indices in release_pages:
                 host_indices_list.append(host_indices)
             if host_indices_list:
                 host_indices = torch.cat(host_indices_list, dim=0)

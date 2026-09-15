@@ -1,0 +1,41 @@
+{
+  "format": "p0b.raw-bundle.v3",
+  "task_id": "P1-SPEC-BUDGET-FULLCHAIN-20260911-R120",
+  "invocation": "ses-p1-spec-budget-fullchain-r120-20260911",
+  "epoch": "2026-09-11",
+  "runtime": {
+    "process_id": 48806,
+    "run_id": "run-48806-4187756182262",
+    "profile_id": "profile-97ee3d5d3bfdca6237dc746e",
+    "source_build": "4f41f5bab562b99562f30c67540eb05344d13637:03750d8519fdae277a0d04938c53c73ff2d5400be8c6f9f51a3d2bc7b3338d07"
+  },
+  "target": {
+    "rid": "r120-p1-R-T",
+    "lifecycle_key": null,
+    "session_id": "r120-s-R",
+    "session_generation": 41,
+    "note": "T never parked/finalized; lifecycle_key absent (chain not produced)"
+  },
+  "raw_files": {
+    "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/.memory/phase2-hicache-design/work/R120-bundle/raw.log": "0cb8ea6bc7898f392e99e66a570e16326447f1c3e4a440064282aecd5d3f2347",
+    "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/.memory/phase2-hicache-design/work/R120-bundle/probe.log": "7936097d8a6de7ce8c76efab659ae31967aa2b4bfaa1bd37fcf5d93c597287b1"
+  },
+  "request_files": {
+    "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/.memory/phase2-hicache-design/work/R120-bundle/requests.jsonl": "39a327bad565eb2cc0341bd7d5a2012f6f9aba96f2dbf8bc3b95a7f325ba9f17",
+    "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/.memory/phase2-hicache-design/work/R120-bundle/state.jsonl": "31d7dd015e251431ff3d1789b7fabef8b2441217b3d723a5326b070ae1abd5f4"
+  },
+  "source_files": {
+    "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/python/sglang/srt/managers/scheduler.py": "daf32da48b2d084976a19280b5b8eff2d232dfc1df2db9b2f4641a8f0ed9dd1d",
+    "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/python/sglang/srt/mem_cache/unified_radix_cache.py": "5d3db1528638dd1c593b9cd62fc1b380d278cac4cc1b4e1319e6bf89c0ac375b",
+    "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/python/sglang/srt/mem_cache/telemetry_context.py": "d55b057c98a4941c307bb138002340c3e8a5a5361f58417f84a3ea176658f948",
+    "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/python/sglang/srt/managers/scheduler_components/hicache_restore.py": "1cc9d2b8277039e271ce65a1e4aa7b128781b378367346edd438daee42bb3604",
+    "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/python/sglang/srt/mem_cache/hybrid_cache/hybrid_cache_controller.py": "a71acb88d886af1b5ba888828b55aae57156ceb43cd37ef7480da6ffcad06669",
+    "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/python/sglang/srt/managers/scheduler_components/ready_horizon.py": "954161ce4d32ef2d376a735ccc4315b4300e1874792e4dd11ef467dfc705aeda"
+  },
+  "baseline_offsets": "baseline-offsets.txt",
+  "acceptance_file": {
+    "path": "P1-ACCEPTANCE-CONDITIONS.md",
+    "sha256": "b5ffa106be7863a2baedd528249eb6bccb63469619af73970a4c477813c27822"
+  },
+  "verdict": "NOT_VERIFIED"
+}

@@ -1,0 +1,685 @@
+
+=== COMMAND PYTHONPATH=/root/sglang-3060-12g-hicache/python:/root/sglang-3060-12g-hicache/test /root/sglang-env-3060-4b/bin/python -m pytest -q 3090-dev/test_ready_horizon_unit.py -k "spec_budget_cleared_only_by_budget_release or spec_budget_release_event_clears_unsampled_aba or spec_budget_park_uses_post_issue_cursor_and_wakes_on_release or spec_budget_park_wakes_after_unsampled_aba_release or physical_only_limiter_does_not_create_spec_budget_park or release_counter_monotonic_survives_reconsumption or active_prefetch_claim_blocks_duplicate_and_classifies_retry or no_event_epoch_no_refill or causal_epoch_change_triggers_new_refill or miss_recorded_and_held_across_ordinary_changes or anchor_version_advance_clears_and_reprobes_once or unrelated_chain_global_bump_never_clears_no_l3 or after_reprobe_miss_reparks_at_new_cursor" ===
+.............                                                            [100%]
+=============================== warnings summary ===============================
+<frozen importlib._bootstrap_external>:1241
+  <frozen importlib._bootstrap_external>:1241: DeprecationWarning: The cuda.cudart module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.runtime module instead.
+
+<frozen importlib._bootstrap_external>:1241
+  <frozen importlib._bootstrap_external>:1241: DeprecationWarning: The cuda.nvrtc module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.nvrtc module instead.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+13 passed, 61 deselected, 2 warnings in 13.77s
+=== EXIT CODE: 0 ===
+
+=== COMMAND PYTHONPATH=/root/sglang-3060-12g-hicache/python:/root/sglang-3060-12g-hicache/test /root/sglang-env-3060-4b/bin/python -m pytest -q 3090-dev/test_prefetch_budget_split_unit.py -k "reserve_release_roundtrip or double_release_idempotent or release_without_reservation_noop or demand_reservation_does_not_touch_spec_counter or revoke_path_releases_speculative_reservation or abort_path_releases_speculative_reservation or finalize_path_releases_speculative_reservation or hybrid_discard_path_releases_speculative_reservation or detach_path_releases_speculative_reservation" ===
+F.F.....F                                                                [100%]
+=================================== FAILURES ===================================
+_ PrefetchReservationExactlyOnceTests.test_abort_path_releases_speculative_reservation _
+
+self = <test_prefetch_budget_split_unit.PrefetchReservationExactlyOnceTests testMethod=test_abort_path_releases_speculative_reservation>
+
+    def test_abort_path_releases_speculative_reservation(self):
+        cache = _make_budget_cache()
+>       self.assertEqual(_issue(cache, "r1", 600), "issued")
+                         ^^^^^^^^^^^^^^^^^^^^^^^^
+
+3090-dev/test_prefetch_budget_split_unit.py:333: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+3090-dev/test_prefetch_budget_split_unit.py:195: in _issue
+    return cache.prefetch_from_storage(
+python/sglang/srt/mem_cache/unified_radix_cache.py:5461: in prefetch_from_storage
+    trace_context = self._t38c_trace_context_for_prefetch(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sglang.srt.mem_cache.unified_radix_cache.UnifiedRadixCache object at 0x7f2e91b1e290>
+req_id = 'r1', node_id = 1
+
+    def _t38c_trace_context_for_prefetch(self, req_id, node_id):
+        context = self._t38c_trace_context_for_node(node_id)
+        if context is None:
+            context = next(
+                (
+                    value
+>                   for key, value in self._t38c_request_contexts.items()
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                    if key[2] == str(req_id)
+                ),
+                None,
+            )
+E           AttributeError: 'UnifiedRadixCache' object has no attribute '_t38c_request_contexts'
+
+python/sglang/srt/mem_cache/unified_radix_cache.py:2424: AttributeError
+_ PrefetchReservationExactlyOnceTests.test_detach_path_releases_speculative_reservation _
+
+self = <test_prefetch_budget_split_unit.PrefetchReservationExactlyOnceTests testMethod=test_detach_path_releases_speculative_reservation>
+
+    @unittest.skipUnless(
+        _harness_has_torch(), "real StorageAttachment requires torch"
+    )
+    def test_detach_path_releases_speculative_reservation(self):
+        # The detach safety net (_release_pending_storage_ops) exits every
+        # still-tracked prefetch through release_prefetch.
+        from sglang.srt.mem_cache.unified_cache.storage_attachment import (
+            StorageAttachment,
+        )
+    
+        cache = _make_budget_cache()
+>       self.assertEqual(_issue(cache, "r1", 600), "issued")
+                         ^^^^^^^^^^^^^^^^^^^^^^^^
+
+3090-dev/test_prefetch_budget_split_unit.py:407: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+3090-dev/test_prefetch_budget_split_unit.py:195: in _issue
+    return cache.prefetch_from_storage(
+python/sglang/srt/mem_cache/unified_radix_cache.py:5461: in prefetch_from_storage
+    trace_context = self._t38c_trace_context_for_prefetch(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sglang.srt.mem_cache.unified_radix_cache.UnifiedRadixCache object at 0x7f2e5747b2d0>
+req_id = 'r1', node_id = 1
+
+    def _t38c_trace_context_for_prefetch(self, req_id, node_id):
+        context = self._t38c_trace_context_for_node(node_id)
+        if context is None:
+            context = next(
+                (
+                    value
+>                   for key, value in self._t38c_request_contexts.items()
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                    if key[2] == str(req_id)
+                ),
+                None,
+            )
+E           AttributeError: 'UnifiedRadixCache' object has no attribute '_t38c_request_contexts'
+
+python/sglang/srt/mem_cache/unified_radix_cache.py:2424: AttributeError
+_ PrefetchReservationExactlyOnceTests.test_revoke_path_releases_speculative_reservation _
+
+self = <test_prefetch_budget_split_unit.PrefetchReservationExactlyOnceTests testMethod=test_revoke_path_releases_speculative_reservation>
+
+    def test_revoke_path_releases_speculative_reservation(self):
+        # Issue (reservation created) then revoke: the reservation is gone
+        # and both counters return to zero.
+        cache = _make_budget_cache()
+>       self.assertEqual(_issue(cache, "r1", 600), "issued")
+                         ^^^^^^^^^^^^^^^^^^^^^^^^
+
+3090-dev/test_prefetch_budget_split_unit.py:325: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+3090-dev/test_prefetch_budget_split_unit.py:195: in _issue
+    return cache.prefetch_from_storage(
+python/sglang/srt/mem_cache/unified_radix_cache.py:5461: in prefetch_from_storage
+    trace_context = self._t38c_trace_context_for_prefetch(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sglang.srt.mem_cache.unified_radix_cache.UnifiedRadixCache object at 0x7f2e574fa210>
+req_id = 'r1', node_id = 1
+
+    def _t38c_trace_context_for_prefetch(self, req_id, node_id):
+        context = self._t38c_trace_context_for_node(node_id)
+        if context is None:
+            context = next(
+                (
+                    value
+>                   for key, value in self._t38c_request_contexts.items()
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                    if key[2] == str(req_id)
+                ),
+                None,
+            )
+E           AttributeError: 'UnifiedRadixCache' object has no attribute '_t38c_request_contexts'
+
+python/sglang/srt/mem_cache/unified_radix_cache.py:2424: AttributeError
+=========================== short test summary info ============================
+FAILED 3090-dev/test_prefetch_budget_split_unit.py::PrefetchReservationExactlyOnceTests::test_abort_path_releases_speculative_reservation
+FAILED 3090-dev/test_prefetch_budget_split_unit.py::PrefetchReservationExactlyOnceTests::test_detach_path_releases_speculative_reservation
+FAILED 3090-dev/test_prefetch_budget_split_unit.py::PrefetchReservationExactlyOnceTests::test_revoke_path_releases_speculative_reservation
+3 failed, 6 passed, 15 deselected in 13.67s
+=== EXIT CODE: 1 ===
+
+=== COMMAND PYTHONPATH=/root/sglang-3060-12g-hicache/python:/root/sglang-3060-12g-hicache/test /root/sglang-env-3060-4b/bin/python -m pytest -q 3090-dev/test_ready_horizon_unit.py ===
+........................................................................ [ 97%]
+..                                                                       [100%]
+=============================== warnings summary ===============================
+<frozen importlib._bootstrap_external>:1241
+  <frozen importlib._bootstrap_external>:1241: DeprecationWarning: The cuda.cudart module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.runtime module instead.
+
+<frozen importlib._bootstrap_external>:1241
+  <frozen importlib._bootstrap_external>:1241: DeprecationWarning: The cuda.nvrtc module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.nvrtc module instead.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+74 passed, 2 warnings in 13.92s
+=== EXIT CODE: 0 ===
+
+=== COMMAND PYTHONPATH=/root/sglang-3060-12g-hicache/python:/root/sglang-3060-12g-hicache/test /root/sglang-env-3060-4b/bin/python -m pytest -q 3090-dev/test_prefetch_budget_split_unit.py ===
+F..FFF.F.....FFFFFFF....                                                 [100%]
+=================================== FAILURES ===================================
+____ PrefetchBudgetSplitTests.test_demand_issue_not_charged_to_spec_counter ____
+
+self = <test_prefetch_budget_split_unit.PrefetchBudgetSplitTests testMethod=test_demand_issue_not_charged_to_spec_counter>
+
+    def test_demand_issue_not_charged_to_spec_counter(self):
+        cache = _make_budget_cache()
+>       self.assertEqual(_issue(cache, "rid-demand", 600, demand_restore=True), "issued")
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+3090-dev/test_prefetch_budget_split_unit.py:257: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+3090-dev/test_prefetch_budget_split_unit.py:195: in _issue
+    return cache.prefetch_from_storage(
+python/sglang/srt/mem_cache/unified_radix_cache.py:5461: in prefetch_from_storage
+    trace_context = self._t38c_trace_context_for_prefetch(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sglang.srt.mem_cache.unified_radix_cache.UnifiedRadixCache object at 0x7f46d8edfd50>
+req_id = 'rid-demand', node_id = 1
+
+    def _t38c_trace_context_for_prefetch(self, req_id, node_id):
+        context = self._t38c_trace_context_for_node(node_id)
+        if context is None:
+            context = next(
+                (
+                    value
+>                   for key, value in self._t38c_request_contexts.items()
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                    if key[2] == str(req_id)
+                ),
+                None,
+            )
+E           AttributeError: 'UnifiedRadixCache' object has no attribute '_t38c_request_contexts'
+
+python/sglang/srt/mem_cache/unified_radix_cache.py:2424: AttributeError
+_ PrefetchBudgetSplitTests.test_spec_budget_full_declines_speculative_passes_demand _
+
+self = <test_prefetch_budget_split_unit.PrefetchBudgetSplitTests testMethod=test_spec_budget_full_declines_speculative_passes_demand>
+
+    def test_spec_budget_full_declines_speculative_passes_demand(self):
+        # Spec limit (600) exhausted by in-flight speculative staging: a
+        # new speculative issue is declined while the physical budget still
+        # has room and a demand restore issues.
+        cache = _make_budget_cache()
+        cc = cache.cache_controller
+        cc.inflight_speculative_tokens = cc.prefetch_speculative_capacity_limit
+    
+        outcome = _issue(cache, "rid-spec", 600)
+        self.assertEqual(outcome, "declined_rate_limited")
+        self.assertEqual(cc.issued, [])
+        self.assertIn("rid-spec", cache._storage_prefetch_missed_rids)
+    
+>       outcome = _issue(cache, "rid-demand", 600, demand_restore=True)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+3090-dev/test_prefetch_budget_split_unit.py:223: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+3090-dev/test_prefetch_budget_split_unit.py:195: in _issue
+    return cache.prefetch_from_storage(
+python/sglang/srt/mem_cache/unified_radix_cache.py:5461: in prefetch_from_storage
+    trace_context = self._t38c_trace_context_for_prefetch(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sglang.srt.mem_cache.unified_radix_cache.UnifiedRadixCache object at 0x7f46b351e790>
+req_id = 'rid-demand', node_id = 1
+
+    def _t38c_trace_context_for_prefetch(self, req_id, node_id):
+        context = self._t38c_trace_context_for_node(node_id)
+        if context is None:
+            context = next(
+                (
+                    value
+>                   for key, value in self._t38c_request_contexts.items()
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                    if key[2] == str(req_id)
+                ),
+                None,
+            )
+E           AttributeError: 'UnifiedRadixCache' object has no attribute '_t38c_request_contexts'
+
+python/sglang/srt/mem_cache/unified_radix_cache.py:2424: AttributeError
+_____ PrefetchBudgetSplitTests.test_speculative_issue_charges_spec_counter _____
+
+self = <test_prefetch_budget_split_unit.PrefetchBudgetSplitTests testMethod=test_speculative_issue_charges_spec_counter>
+
+    def test_speculative_issue_charges_spec_counter(self):
+        cache = _make_budget_cache()
+>       self.assertEqual(_issue(cache, "rid-spec", 600), "issued")
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+3090-dev/test_prefetch_budget_split_unit.py:247: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+3090-dev/test_prefetch_budget_split_unit.py:195: in _issue
+    return cache.prefetch_from_storage(
+python/sglang/srt/mem_cache/unified_radix_cache.py:5461: in prefetch_from_storage
+    trace_context = self._t38c_trace_context_for_prefetch(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sglang.srt.mem_cache.unified_radix_cache.UnifiedRadixCache object at 0x7f46b3292090>
+req_id = 'rid-spec', node_id = 1
+
+    def _t38c_trace_context_for_prefetch(self, req_id, node_id):
+        context = self._t38c_trace_context_for_node(node_id)
+        if context is None:
+            context = next(
+                (
+                    value
+>                   for key, value in self._t38c_request_contexts.items()
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                    if key[2] == str(req_id)
+                ),
+                None,
+            )
+E           AttributeError: 'UnifiedRadixCache' object has no attribute '_t38c_request_contexts'
+
+python/sglang/srt/mem_cache/unified_radix_cache.py:2424: AttributeError
+_ PrefetchReservationExactlyOnceTests.test_abort_path_releases_speculative_reservation _
+
+self = <test_prefetch_budget_split_unit.PrefetchReservationExactlyOnceTests testMethod=test_abort_path_releases_speculative_reservation>
+
+    def test_abort_path_releases_speculative_reservation(self):
+        cache = _make_budget_cache()
+>       self.assertEqual(_issue(cache, "r1", 600), "issued")
+                         ^^^^^^^^^^^^^^^^^^^^^^^^
+
+3090-dev/test_prefetch_budget_split_unit.py:333: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+3090-dev/test_prefetch_budget_split_unit.py:195: in _issue
+    return cache.prefetch_from_storage(
+python/sglang/srt/mem_cache/unified_radix_cache.py:5461: in prefetch_from_storage
+    trace_context = self._t38c_trace_context_for_prefetch(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sglang.srt.mem_cache.unified_radix_cache.UnifiedRadixCache object at 0x7f46b34d7710>
+req_id = 'r1', node_id = 1
+
+    def _t38c_trace_context_for_prefetch(self, req_id, node_id):
+        context = self._t38c_trace_context_for_node(node_id)
+        if context is None:
+            context = next(
+                (
+                    value
+>                   for key, value in self._t38c_request_contexts.items()
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                    if key[2] == str(req_id)
+                ),
+                None,
+            )
+E           AttributeError: 'UnifiedRadixCache' object has no attribute '_t38c_request_contexts'
+
+python/sglang/srt/mem_cache/unified_radix_cache.py:2424: AttributeError
+_ PrefetchReservationExactlyOnceTests.test_detach_path_releases_speculative_reservation _
+
+self = <test_prefetch_budget_split_unit.PrefetchReservationExactlyOnceTests testMethod=test_detach_path_releases_speculative_reservation>
+
+    @unittest.skipUnless(
+        _harness_has_torch(), "real StorageAttachment requires torch"
+    )
+    def test_detach_path_releases_speculative_reservation(self):
+        # The detach safety net (_release_pending_storage_ops) exits every
+        # still-tracked prefetch through release_prefetch.
+        from sglang.srt.mem_cache.unified_cache.storage_attachment import (
+            StorageAttachment,
+        )
+    
+        cache = _make_budget_cache()
+>       self.assertEqual(_issue(cache, "r1", 600), "issued")
+                         ^^^^^^^^^^^^^^^^^^^^^^^^
+
+3090-dev/test_prefetch_budget_split_unit.py:407: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+3090-dev/test_prefetch_budget_split_unit.py:195: in _issue
+    return cache.prefetch_from_storage(
+python/sglang/srt/mem_cache/unified_radix_cache.py:5461: in prefetch_from_storage
+    trace_context = self._t38c_trace_context_for_prefetch(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sglang.srt.mem_cache.unified_radix_cache.UnifiedRadixCache object at 0x7f46b335c7d0>
+req_id = 'r1', node_id = 1
+
+    def _t38c_trace_context_for_prefetch(self, req_id, node_id):
+        context = self._t38c_trace_context_for_node(node_id)
+        if context is None:
+            context = next(
+                (
+                    value
+>                   for key, value in self._t38c_request_contexts.items()
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                    if key[2] == str(req_id)
+                ),
+                None,
+            )
+E           AttributeError: 'UnifiedRadixCache' object has no attribute '_t38c_request_contexts'
+
+python/sglang/srt/mem_cache/unified_radix_cache.py:2424: AttributeError
+_ PrefetchReservationExactlyOnceTests.test_revoke_path_releases_speculative_reservation _
+
+self = <test_prefetch_budget_split_unit.PrefetchReservationExactlyOnceTests testMethod=test_revoke_path_releases_speculative_reservation>
+
+    def test_revoke_path_releases_speculative_reservation(self):
+        # Issue (reservation created) then revoke: the reservation is gone
+        # and both counters return to zero.
+        cache = _make_budget_cache()
+>       self.assertEqual(_issue(cache, "r1", 600), "issued")
+                         ^^^^^^^^^^^^^^^^^^^^^^^^
+
+3090-dev/test_prefetch_budget_split_unit.py:325: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+3090-dev/test_prefetch_budget_split_unit.py:195: in _issue
+    return cache.prefetch_from_storage(
+python/sglang/srt/mem_cache/unified_radix_cache.py:5461: in prefetch_from_storage
+    trace_context = self._t38c_trace_context_for_prefetch(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sglang.srt.mem_cache.unified_radix_cache.UnifiedRadixCache object at 0x7f46b33e1350>
+req_id = 'r1', node_id = 1
+
+    def _t38c_trace_context_for_prefetch(self, req_id, node_id):
+        context = self._t38c_trace_context_for_node(node_id)
+        if context is None:
+            context = next(
+                (
+                    value
+>                   for key, value in self._t38c_request_contexts.items()
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                    if key[2] == str(req_id)
+                ),
+                None,
+            )
+E           AttributeError: 'UnifiedRadixCache' object has no attribute '_t38c_request_contexts'
+
+python/sglang/srt/mem_cache/unified_radix_cache.py:2424: AttributeError
+____ SpeculativeStagingNoEvictTests.test_demand_alloc_failure_still_evicts _____
+
+self = <test_prefetch_budget_split_unit.SpeculativeStagingNoEvictTests testMethod=test_demand_alloc_failure_still_evicts>
+
+    def test_demand_alloc_failure_still_evicts(self):
+        # The demand restore keeps the baseline behavior: alloc failure
+        # triggers eviction before the revoke fallback.
+        h = _harness()
+        cache = _make_budget_cache()
+        evicted = []
+        cache.evict_host = lambda needed, *a, **k: evicted.append(needed) or 0
+        operation = self._stage_operation(
+            cache, "r1", 300, _kind().DEMAND
+        )
+    
+>       _drain_one_hit(cache, operation)
+
+3090-dev/test_prefetch_budget_split_unit.py:488: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+3090-dev/test_prefetch_budget_split_unit.py:426: in _drain_one_hit
+    cache._drain_storage_control_queues_impl(1, 0, 0, 0, {}, False)
+python/sglang/srt/mem_cache/unified_radix_cache.py:7264: in _drain_storage_control_queues_impl
+    _t38c_residency_release_queues_drained(self)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cache = <sglang.srt.mem_cache.unified_radix_cache.UnifiedRadixCache object at 0x7f46b32916d0>
+
+    def _t38c_residency_release_queues_drained(cache):
+        """Reconcile queue-blocked identities after the owning drain commits."""
+        if not _t38c_durable_enabled():
+            return
+>       with cache._t38c_residency_lock:
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'UnifiedRadixCache' object has no attribute '_t38c_residency_lock'
+
+python/sglang/srt/mem_cache/unified_radix_cache.py:510: AttributeError
+__ SpeculativeStagingNoEvictTests.test_speculative_alloc_failure_never_evicts __
+
+self = <test_prefetch_budget_split_unit.SpeculativeStagingNoEvictTests testMethod=test_speculative_alloc_failure_never_evicts>
+
+    def test_speculative_alloc_failure_never_evicts(self):
+        # Host pool exhausted: the speculative hit is revoked (silent
+        # decline) without a single evict_host call -- staging eats free
+        # headroom only (M2).
+        h = _harness()
+        cache = _make_budget_cache()
+        evicted = []
+        cache.evict_host = lambda needed, *a, **k: evicted.append(needed) or 0
+        operation = self._stage_operation(
+            cache, "r1", 300, _kind().SPECULATIVE
+        )
+    
+>       _drain_one_hit(cache, operation)
+
+3090-dev/test_prefetch_budget_split_unit.py:467: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+3090-dev/test_prefetch_budget_split_unit.py:426: in _drain_one_hit
+    cache._drain_storage_control_queues_impl(1, 0, 0, 0, {}, False)
+python/sglang/srt/mem_cache/unified_radix_cache.py:7264: in _drain_storage_control_queues_impl
+    _t38c_residency_release_queues_drained(self)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cache = <sglang.srt.mem_cache.unified_radix_cache.UnifiedRadixCache object at 0x7f46b339b210>
+
+    def _t38c_residency_release_queues_drained(cache):
+        """Reconcile queue-blocked identities after the owning drain commits."""
+        if not _t38c_durable_enabled():
+            return
+>       with cache._t38c_residency_lock:
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'UnifiedRadixCache' object has no attribute '_t38c_residency_lock'
+
+python/sglang/srt/mem_cache/unified_radix_cache.py:510: AttributeError
+_____ ReadyHorizonOffModeTests.test_off_alloc_failure_evicts_like_baseline _____
+
+self = <test_prefetch_budget_split_unit.ReadyHorizonOffModeTests testMethod=test_off_alloc_failure_evicts_like_baseline>
+
+    def test_off_alloc_failure_evicts_like_baseline(self):
+        # The M2 gate must not change the flag-off behavior either: a
+        # staging alloc failure still evicts (no reservation to classify).
+        h = _harness()
+        cache = _make_budget_cache(ready_horizon=False)
+        evicted = []
+        cache.evict_host = lambda needed, *a, **k: evicted.append(needed) or 0
+        operation = h._make_operation(300)
+        operation.request_id = "r1"
+        operation.completed_tokens = 300
+        operation.stats_total_tokens = 300
+        operation.all_hash_values = [f"h{i}" for i in range(300)]
+        cache.ongoing_prefetch["r1"] = _ongoing_prefetch(
+            0,
+            h._RadixKey(_array("q", list(range(300))), None),
+            None,
+            operation,
+        )
+    
+>       _drain_one_hit(cache, operation)
+
+3090-dev/test_prefetch_budget_split_unit.py:554: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+3090-dev/test_prefetch_budget_split_unit.py:426: in _drain_one_hit
+    cache._drain_storage_control_queues_impl(1, 0, 0, 0, {}, False)
+python/sglang/srt/mem_cache/unified_radix_cache.py:7264: in _drain_storage_control_queues_impl
+    _t38c_residency_release_queues_drained(self)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cache = <sglang.srt.mem_cache.unified_radix_cache.UnifiedRadixCache object at 0x7f46b3397690>
+
+    def _t38c_residency_release_queues_drained(cache):
+        """Reconcile queue-blocked identities after the owning drain commits."""
+        if not _t38c_durable_enabled():
+            return
+>       with cache._t38c_residency_lock:
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'UnifiedRadixCache' object has no attribute '_t38c_residency_lock'
+
+python/sglang/srt/mem_cache/unified_radix_cache.py:510: AttributeError
+_________ ReadyHorizonOffModeTests.test_off_demand_bypasses_rate_check _________
+
+self = <test_prefetch_budget_split_unit.ReadyHorizonOffModeTests testMethod=test_off_demand_bypasses_rate_check>
+
+    def test_off_demand_bypasses_rate_check(self):
+        # Baseline T15 ticket semantics: demand restores bypass the
+        # PREFETCH_BUDGET entirely, physical full or not.
+        cache = _make_budget_cache(ready_horizon=False)
+        cc = cache.cache_controller
+        cc.prefetch_tokens_occupied = cc.prefetch_capacity_limit
+    
+        self.assertEqual(
+>           _issue(cache, "rid-demand", 600, demand_restore=True), "issued"
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        )
+
+3090-dev/test_prefetch_budget_split_unit.py:532: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+3090-dev/test_prefetch_budget_split_unit.py:195: in _issue
+    return cache.prefetch_from_storage(
+python/sglang/srt/mem_cache/unified_radix_cache.py:5461: in prefetch_from_storage
+    trace_context = self._t38c_trace_context_for_prefetch(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sglang.srt.mem_cache.unified_radix_cache.UnifiedRadixCache object at 0x7f46b334bd50>
+req_id = 'rid-demand', node_id = 1
+
+    def _t38c_trace_context_for_prefetch(self, req_id, node_id):
+        context = self._t38c_trace_context_for_node(node_id)
+        if context is None:
+            context = next(
+                (
+                    value
+>                   for key, value in self._t38c_request_contexts.items()
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                    if key[2] == str(req_id)
+                ),
+                None,
+            )
+E           AttributeError: 'UnifiedRadixCache' object has no attribute '_t38c_request_contexts'
+
+python/sglang/srt/mem_cache/unified_radix_cache.py:2424: AttributeError
+______ ReadyHorizonOffModeTests.test_off_single_track_physical_check_only ______
+
+self = <test_prefetch_budget_split_unit.ReadyHorizonOffModeTests testMethod=test_off_single_track_physical_check_only>
+
+    def test_off_single_track_physical_check_only(self):
+        # Spec budget exhausted is irrelevant off-mode; only the physical
+        # budget gates speculative issues.
+        cache = _make_budget_cache(ready_horizon=False)
+        cc = cache.cache_controller
+        cc.inflight_speculative_tokens = cc.prefetch_speculative_capacity_limit
+        cc.prefetch_tokens_occupied = 0
+    
+>       self.assertEqual(_issue(cache, "rid-spec", 600), "issued")
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+3090-dev/test_prefetch_budget_split_unit.py:522: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+3090-dev/test_prefetch_budget_split_unit.py:195: in _issue
+    return cache.prefetch_from_storage(
+python/sglang/srt/mem_cache/unified_radix_cache.py:5461: in prefetch_from_storage
+    trace_context = self._t38c_trace_context_for_prefetch(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sglang.srt.mem_cache.unified_radix_cache.UnifiedRadixCache object at 0x7f46b34d5c10>
+req_id = 'rid-spec', node_id = 1
+
+    def _t38c_trace_context_for_prefetch(self, req_id, node_id):
+        context = self._t38c_trace_context_for_node(node_id)
+        if context is None:
+            context = next(
+                (
+                    value
+>                   for key, value in self._t38c_request_contexts.items()
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                    if key[2] == str(req_id)
+                ),
+                None,
+            )
+E           AttributeError: 'UnifiedRadixCache' object has no attribute '_t38c_request_contexts'
+
+python/sglang/srt/mem_cache/unified_radix_cache.py:2424: AttributeError
+_ ReadyHorizonOffModeTests.test_off_speculative_issue_never_grows_spec_counter _
+
+self = <test_prefetch_budget_split_unit.ReadyHorizonOffModeTests testMethod=test_off_speculative_issue_never_grows_spec_counter>
+
+    def test_off_speculative_issue_never_grows_spec_counter(self):
+        cache = _make_budget_cache(ready_horizon=False)
+>       self.assertEqual(_issue(cache, "rid-spec", 600), "issued")
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+3090-dev/test_prefetch_budget_split_unit.py:508: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+3090-dev/test_prefetch_budget_split_unit.py:195: in _issue
+    return cache.prefetch_from_storage(
+python/sglang/srt/mem_cache/unified_radix_cache.py:5461: in prefetch_from_storage
+    trace_context = self._t38c_trace_context_for_prefetch(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sglang.srt.mem_cache.unified_radix_cache.UnifiedRadixCache object at 0x7f46b33d0f10>
+req_id = 'rid-spec', node_id = 1
+
+    def _t38c_trace_context_for_prefetch(self, req_id, node_id):
+        context = self._t38c_trace_context_for_node(node_id)
+        if context is None:
+            context = next(
+                (
+                    value
+>                   for key, value in self._t38c_request_contexts.items()
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                    if key[2] == str(req_id)
+                ),
+                None,
+            )
+E           AttributeError: 'UnifiedRadixCache' object has no attribute '_t38c_request_contexts'
+
+python/sglang/srt/mem_cache/unified_radix_cache.py:2424: AttributeError
+=============================== warnings summary ===============================
+3090-dev/test_prefetch_budget_split_unit.py::ReadyHorizonSchedulerWiringTests::test_off_t11_backup_pending_wake_still_demand
+  <frozen importlib._bootstrap_external>:1241: DeprecationWarning: The cuda.cudart module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.runtime module instead.
+
+3090-dev/test_prefetch_budget_split_unit.py::ReadyHorizonSchedulerWiringTests::test_off_t11_backup_pending_wake_still_demand
+  <frozen importlib._bootstrap_external>:1241: DeprecationWarning: The cuda.nvrtc module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.nvrtc module instead.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED 3090-dev/test_prefetch_budget_split_unit.py::PrefetchBudgetSplitTests::test_demand_issue_not_charged_to_spec_counter
+FAILED 3090-dev/test_prefetch_budget_split_unit.py::PrefetchBudgetSplitTests::test_spec_budget_full_declines_speculative_passes_demand
+FAILED 3090-dev/test_prefetch_budget_split_unit.py::PrefetchBudgetSplitTests::test_speculative_issue_charges_spec_counter
+FAILED 3090-dev/test_prefetch_budget_split_unit.py::PrefetchReservationExactlyOnceTests::test_abort_path_releases_speculative_reservation
+FAILED 3090-dev/test_prefetch_budget_split_unit.py::PrefetchReservationExactlyOnceTests::test_detach_path_releases_speculative_reservation
+FAILED 3090-dev/test_prefetch_budget_split_unit.py::PrefetchReservationExactlyOnceTests::test_revoke_path_releases_speculative_reservation
+FAILED 3090-dev/test_prefetch_budget_split_unit.py::SpeculativeStagingNoEvictTests::test_demand_alloc_failure_still_evicts
+FAILED 3090-dev/test_prefetch_budget_split_unit.py::SpeculativeStagingNoEvictTests::test_speculative_alloc_failure_never_evicts
+FAILED 3090-dev/test_prefetch_budget_split_unit.py::ReadyHorizonOffModeTests::test_off_alloc_failure_evicts_like_baseline
+FAILED 3090-dev/test_prefetch_budget_split_unit.py::ReadyHorizonOffModeTests::test_off_demand_bypasses_rate_check
+FAILED 3090-dev/test_prefetch_budget_split_unit.py::ReadyHorizonOffModeTests::test_off_single_track_physical_check_only
+FAILED 3090-dev/test_prefetch_budget_split_unit.py::ReadyHorizonOffModeTests::test_off_speculative_issue_never_grows_spec_counter
+12 failed, 12 passed, 2 warnings in 17.46s
+=== EXIT CODE: 1 ===
+
+=== COMMAND PYTHONPATH=/root/sglang-3060-12g-hicache/python:/root/sglang-3060-12g-hicache/test /root/sglang-env-3060-4b/bin/python -m pytest -q 3090-dev/test_hicache_restore_scheduler_feed.py ===
+..............................................                           [100%]
+=============================== warnings summary ===============================
+<frozen importlib._bootstrap_external>:1241
+  <frozen importlib._bootstrap_external>:1241: DeprecationWarning: The cuda.cudart module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.runtime module instead.
+
+<frozen importlib._bootstrap_external>:1241
+  <frozen importlib._bootstrap_external>:1241: DeprecationWarning: The cuda.nvrtc module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.nvrtc module instead.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+46 passed, 2 warnings in 13.91s
+=== EXIT CODE: 0 ===
+
+=== COMMAND PYTHONPATH=/root/sglang-3060-12g-hicache/python:/root/sglang-3060-12g-hicache/test /root/sglang-env-3060-4b/bin/python -m pytest -q 3090-dev/test_ready_horizon_partition.py ===
+..................                                                       [100%]
+=============================== warnings summary ===============================
+3090-dev/test_ready_horizon_partition.py::SchedulerGateWiringTests::test_off_gate_keeps_calc_priority_order
+  <frozen importlib._bootstrap_external>:1241: DeprecationWarning: The cuda.cudart module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.runtime module instead.
+
+3090-dev/test_ready_horizon_partition.py::SchedulerGateWiringTests::test_off_gate_keeps_calc_priority_order
+  <frozen importlib._bootstrap_external>:1241: DeprecationWarning: The cuda.nvrtc module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.nvrtc module instead.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+18 passed, 2 warnings in 14.52s
+=== EXIT CODE: 0 ===
+
+=== COMMAND PYTHONPATH=/root/sglang-3060-12g-hicache/python:/root/sglang-3060-12g-hicache/test /root/sglang-env-3060-4b/bin/python -m pytest -q 3090-dev/test_prefetch_gate_skip_regression.py ===
+..                                                                       [100%]
+2 passed in 0.18s
+=== EXIT CODE: 0 ===
+
+=== COMMAND PYTHONPATH=/root/sglang-3060-12g-hicache/python:/root/sglang-3060-12g-hicache/test /root/sglang-env-3060-4b/bin/python -m pytest -q 3090-dev/test_rh_contract_dependency_free.py ===
+...................                                                      [100%]
+19 passed in 2.06s
+=== EXIT CODE: 0 ===
+
+SSH EXIT CODE: 0

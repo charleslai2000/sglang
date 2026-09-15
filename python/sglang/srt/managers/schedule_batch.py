@@ -1043,6 +1043,36 @@ class Req(ReqDllmMixin):
         self.hicache_restore_state: Optional[RestoreState] = None
         self.hicache_restore_wait_reason: Optional[RestoreWaitReason] = None
         self.hicache_restore_state_ts: float = 0.0
+        # Scheduler-local prefetch ownership.  The active claim spans an
+        # issued restore until its terminal outcome; retries get a fresh
+        # attempt and origin, so RH cannot duplicate an in-flight issue.
+        self.hicache_prefetch_attempt_seq: int = 0
+        self.hicache_prefetch_active_attempt_id: Optional[str] = None
+        self.hicache_prefetch_active_origin = None
+        self.hicache_prefetch_last_attempt_id: Optional[str] = None
+        self.hicache_prefetch_last_origin = None
+        self.hicache_last_rh_decision_id: Optional[str] = None
+        self.hicache_last_rh_decision_fingerprint = None
+        self.hicache_request_enqueue_seq: Optional[int] = None
+        # Cache-provided HOST_ALLOC cursor; the scheduler owns FIFO admission
+        # and consumes at most one retry per observed generation vector.
+        self.hicache_host_alloc_wait_cursor = None
+        self.hicache_host_alloc_attempt_id: Optional[str] = None
+        self.hicache_host_alloc_last_attempt_id: Optional[str] = None
+        self.hicache_host_alloc_attempt_snapshot = None
+        # P1 sticky-miss negative evidence (RestoreState.MISS_RECOMPUTE),
+        # phase2-peranchor: the ANCHOR's per-anchor storage_version at which
+        # the request's prefix was proven L3-missing, the anchor node it was
+        # proven on, and the session generation (identity) at that probe.
+        # The admission re-arm refuses to re-enter WAIT while that SAME
+        # anchor's version is unchanged and the generation matches -- the
+        # same-probe restore churn gate. Cleared when the miss is overridden
+        # (the anchor's substantive durability change / re-anchor / a
+        # generation change) or the episode ends forward (READY). The global
+        # l3_publish_epoch is diagnostic only and never re-arms a miss.
+        self.hicache_restore_miss_epoch: Optional[int] = None
+        self.hicache_restore_miss_generation: Optional[int] = None
+        self.hicache_restore_miss_anchor: Optional[int] = None
         # The node to lock until for swa radix tree lock ref
         self.swa_uuid_for_lock: Optional[int] = None
         # Whether the prefill-time SWA tree lock has been released early

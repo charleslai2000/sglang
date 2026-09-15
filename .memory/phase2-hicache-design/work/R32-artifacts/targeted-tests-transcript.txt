@@ -1,0 +1,88 @@
+COMMAND: targeted HOST_ALLOC terminal/wake/full-span tests
+START_UTC: 2026-09-10T22:08:30Z
+......F                                                                  [100%]
+=================================== FAILURES ===================================
+_ BackupPendingRevokeTests.test_positive_alloc_failure_is_retryable_and_releases_reservation _
+
+self = <test_drain_reentry.BackupPendingRevokeTests testMethod=test_positive_alloc_failure_is_retryable_and_releases_reservation>
+
+    def test_positive_alloc_failure_is_retryable_and_releases_reservation(self):
+        # A positive full hit that cannot stage its validated span is a
+        # capacity wait, not L3-miss evidence. The revoke still releases the
+        # speculative reservation before removing the operation, so the
+        # host-capacity wake cannot be blocked by its own request.
+        cache = _make_cache(_FakeTreeCore([[10]]))
+        cache.ongoing_prefetch = {}
+        cache.cache_controller.inflight_speculative_tokens = 54976
+        cache_mod = sys.modules[UnifiedRadixCache.__module__]
+        cache._prefetch_reservations["r1"] = cache_mod.PrefetchReservation(
+            54976, cache_mod.PrefetchKind.SPECULATIVE
+        )
+        operation = SimpleNamespace(
+            request_id="r1",
+            is_terminated=lambda: False,
+            storage_hit_count=54976,
+            stats_requested_tokens=55000,
+            all_hash_values=None,
+            completed_tokens=0,
+        )
+        cache.ongoing_prefetch["r1"] = _OngoingPrefetch(
+            anchor_node_id=10,
+            prefetch_key=[0] * 54976,
+            host_indices=None,
+            operation=operation,
+            anchor_lock_params=None,
+            comp_xfers={},
+        )
+    
+>       cache.revoke_pending_prefetch("r1", alloc_failed=True)
+
+3090-dev/test_drain_reentry.py:1085: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/sglang/srt/mem_cache/unified_radix_cache.py:6315: in revoke_pending_prefetch
+    self.release_prefetch(req_id, "revoke")
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sglang.srt.mem_cache.unified_radix_cache.UnifiedRadixCache object at 0x7f71ec4daa10>
+req_id = 'r1', reason = 'revoke'
+
+    def release_prefetch(self, req_id: str, reason: str) -> None:
+        """P3 M5: the single exactly-once release of a prefetch's
+        inflight-budget charge.
+    
+        Every ongoing_prefetch removal point -- finalize, revoke, abort,
+        hybrid discard, detach -- exits through here (upstream #31445
+        abort-leak guard). Idempotent: a second release or a release of an
+        unreserved rid (Ready Horizon off) is a no-op. `reason` names the
+        removal path at the call site. The physical counter is released by
+        the existing per-site accounting; this helper owns the speculative
+        counter and the `released` marker."""
+        reservation = self._prefetch_reservations.get(req_id)
+        if reservation is None or reservation.released:
+            return
+        reservation.released = True
+        del self._prefetch_reservations[req_id]
+        if reservation.kind is PrefetchKind.SPECULATIVE:
+            cc = self.cache_controller
+            cc.inflight_speculative_tokens = max(
+                0, cc.inflight_speculative_tokens - reservation.tokens
+            )
+>           cc.speculative_release_epoch += 1
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           AttributeError: '_FakeController' object has no attribute 'speculative_release_epoch'
+
+python/sglang/srt/mem_cache/unified_radix_cache.py:5144: AttributeError
+=============================== warnings summary ===============================
+<frozen importlib._bootstrap_external>:1241
+  <frozen importlib._bootstrap_external>:1241: DeprecationWarning: The cuda.cudart module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.runtime module instead.
+
+<frozen importlib._bootstrap_external>:1241
+  <frozen importlib._bootstrap_external>:1241: DeprecationWarning: The cuda.nvrtc module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.nvrtc module instead.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED 3090-dev/test_drain_reentry.py::BackupPendingRevokeTests::test_positive_alloc_failure_is_retryable_and_releases_reservation
+1 failed, 6 passed, 162 deselected, 2 warnings in 12.59s
+REMOTE_EXIT=1
+END_UTC: 2026-09-10T22:08:46Z
+LOCAL_PIPE_EXIT=1

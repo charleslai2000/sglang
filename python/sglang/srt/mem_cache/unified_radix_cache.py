@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import atexit
 import logging
+import os
 import threading
 import time
 from dataclasses import replace
@@ -15,6 +16,9 @@ from sglang.srt.distributed.communication_tags import P2PTag
 from sglang.srt.environ import envs
 from sglang.srt.managers.cache_controller import CacheOperation
 from sglang.srt.managers.scheduler_components.hicache_restore import (
+    HostAllocFailure,
+    HostAllocabilitySnapshot,
+    HOST_ALLOC_TELEMETRY_SCHEMA_VERSION,
     backup_wait_applies,
     backup_wake_applies,
     promotion_budget_fits,
@@ -41,6 +45,7 @@ from sglang.srt.mem_cache.buffer_mode.storage_existence_cache import (
 )
 from sglang.srt.mem_cache.common import RetractionBackup
 from sglang.srt.mem_cache.hicache_storage import (
+    PoolHitPolicy,
     PoolName,
     PoolTransfer,
     SidecarPoolSpec,
@@ -51,6 +56,30 @@ from sglang.srt.mem_cache.hybrid_cache.hybrid_cache_controller import (
 from sglang.srt.mem_cache.memory_pool import MHATokenToKVPool
 from sglang.srt.mem_cache.radix_cache import RadixKey
 from sglang.srt.mem_cache.swa_memory_pool import SWAKVPool
+from sglang.srt.mem_cache.trace_context import (
+    attach_trace_context,
+    complete_trace_context,
+    complete_slot_context,
+    durable_trace_enabled,
+    is_inert_release_token,
+    make_trace_context,
+    ordered_key_set_digest,
+    remember_slot_context,
+    retire_slot_token,
+    slot_context,
+    slot_context_for_token,
+    slot_token,
+)
+from sglang.srt.mem_cache.telemetry_context import (
+    host_alloc_lineage_fields,
+    next_event_id,
+    producer_context,
+)
+from sglang.srt.mem_cache.p2a_timing_probe import (
+    emit as _p2a_emit,
+    p2a_enabled as _p2a_enabled,
+    probe_identity as _p2a_probe_identity,
+)
 from sglang.srt.mem_cache.unified_cache.cache_action import (
     BackupKV,
     CacheAction,
@@ -124,6 +153,143 @@ COMPONENT_REGISTRY: dict[ComponentType, type[TreeComponent]] = {
 
 logger = logging.getLogger(__name__)
 
+_T38C_DURABLE_SEQ = {}
+_T38C_DURABLE_SEQ_LOCK = threading.Lock()
+_ACTIVE_PRODUCER_CONTEXT = None
+
+# Cache-side mutation records are sampled independently of scheduler wake
+# records.  The mutation sequence remains complete and monotonic for joins;
+# only emitted log records are bounded.  Each request/cause/trace key emits
+# its first 16 mutations, then every 128th mutation, up to 64 records.  A
+# cache instance emits at most 256 mutation records in total.
+_HOST_ALLOC_MUTATION_TELEMETRY_HEAD = 16
+_HOST_ALLOC_MUTATION_TELEMETRY_STRIDE = 128
+_HOST_ALLOC_MUTATION_TELEMETRY_MAX_PER_KEY = 64
+_HOST_ALLOC_MUTATION_TELEMETRY_MAX_TOTAL = 256
+_HOST_ALLOC_MUTATION_TELEMETRY_MAX_KEYS = 4096
+
+
+def _log_host_alloc_telemetry(
+    event: str,
+    *,
+    rid: Optional[str] = None,
+    attempt_id: Optional[str] = None,
+    **fields,
+) -> None:
+    """Emit bounded, observational HOST_ALLOC records with a stable schema."""
+    import json as _json
+
+    record = {
+        "schema": HOST_ALLOC_TELEMETRY_SCHEMA_VERSION,
+        "evt": event,
+        "ts_mono_ns": time.monotonic_ns(),
+        "ts_wall_ms": int(time.time() * 1000),
+        "worker": os.environ.get("SGLANG_WORKER_ID") or f"pid-{os.getpid()}",
+        "rank": os.environ.get("RANK"),
+        "rid": rid,
+        "attempt_id": attempt_id,
+    }
+    record.update(
+        getattr(_log_host_alloc_telemetry, "producer_context", None)
+        or producer_context(component="cache")
+    )
+    record["event_id"] = fields.pop("event_id", None) or next_event_id("host-alloc")
+    for field in (
+        "lifecycle_key",
+        "wait_id",
+        "predecessor_wait_id",
+        "predecessor_terminal_event_id",
+        "predecessor_terminal_state",
+        "wake_event_id",
+        "attempt_number",
+        "attempt_origin",
+        "parent_wait_id",
+        "deadline_mono_ns",
+    ):
+        record.setdefault(field, fields.get(field))
+    record.update(fields)
+    logger.info("[HAE] %s", _json.dumps(record, sort_keys=True, default=str))
+
+
+def _set_host_alloc_telemetry_context(context):
+    _log_host_alloc_telemetry.producer_context = dict(context)
+
+
+def _host_alloc_join_fields(req_id) -> dict:
+    """Read the scheduler-owned lineage back for a cache-side producer event.
+
+    The cache never derives ``lifecycle_key`` from the process run id: the
+    scheduler is the authority and publishes ``rid:session_generation`` plus
+    the granted ``wake_event_id`` into the shared registry.  A missing record
+    yields an empty mapping so the cache publishes no fabricated identity.
+    """
+    try:
+        lineage = host_alloc_lineage_fields(req_id)
+    except Exception:
+        lineage = {}
+    if not lineage:
+        return {}
+    return {
+        "lifecycle_key": lineage.get("lifecycle_key"),
+        "wait_id": lineage.get("wait_id"),
+        "wake_event_id": lineage.get("wake_event_id"),
+        "parent_wait_id": lineage.get("parent_wait_id"),
+        "predecessor_wait_id": lineage.get("predecessor_wait_id"),
+        "predecessor_terminal_event_id": lineage.get("predecessor_terminal_event_id"),
+        "predecessor_terminal_state": lineage.get("predecessor_terminal_state"),
+        "predecessor_lineage_reason": lineage.get("predecessor_lineage_reason"),
+    }
+
+
+def _storage_hit_crop_is_safe(operation, alloc_len: int) -> bool:
+    """Whether a host-capacity crop preserves the validated storage frontier."""
+    if alloc_len >= operation.storage_hit_count:
+        return True
+    trailing_pages = getattr(PoolHitPolicy, "TRAILING_PAGES", None)
+    return not any(
+        trailing_pages is not None
+        and getattr(transfer, "hit_policy", None) == trailing_pages
+        for transfer in getattr(operation, "pool_transfers", None) or []
+    )
+
+
+def _t38c_residency_identity(context, node_id, final_kv_hash):
+    if not isinstance(context, dict):
+        return None
+    required_fields = (
+        "schema_version",
+        "run_id",
+        "session_id",
+        "session_generation",
+        "build_rid",
+        "warm_rid",
+        "node_id",
+        "final_kv_hash",
+    )
+    if (
+        any(field not in context for field in required_fields)
+        or context.get("schema_version") != "p0_durable.v3"
+        or not isinstance(context.get("run_id"), str)
+        or not context.get("run_id").strip()
+        or not context.get("session_id")
+        or context.get("session_generation") is None
+        or not context.get("build_rid")
+        or context.get("warm_rid") is not None
+        or not node_id
+        or not isinstance(final_kv_hash, str)
+        or not final_kv_hash
+        or not complete_trace_context(context, node_id, final_kv_hash)
+    ):
+        return None
+    return (
+        context["run_id"],
+        str(context["session_id"]),
+        context["session_generation"],
+        str(context["build_rid"]),
+        str(node_id),
+        final_kv_hash,
+    )
+
 # B1.5-PROBE (T31 rebase of T23; read-only instrumentation, appends JSON lines to
 # /tmp/b15-probe.log only, zero numeric-path change; removed after experiment)
 def _b15_log(rec):
@@ -152,6 +318,1179 @@ def _t38c_log(rec):
         rec["ts"] = round(_time.time(), 3)
         with open("/tmp/t38c-probe.log", "a") as _f:
             _f.write(_json.dumps(rec, default=str) + "\n")
+    except Exception:
+        pass
+
+
+def _t38c_durable_enabled() -> bool:
+    import os as _os
+
+    return _os.path.exists("/tmp/t38c-durable-trace")
+
+
+def _t38c_slot_digest(pool, values) -> str | None:
+    """Hash slot metadata and indices without recording slot/state contents."""
+    if not _t38c_durable_enabled():
+        return None
+    import hashlib as _hashlib
+
+    digest = _hashlib.sha256()
+    pool_name = getattr(pool, "value", pool)
+    for value in values:
+        try:
+            tensor = value.detach()
+            shape = tuple(int(dim) for dim in tensor.shape)
+            indices = tensor.reshape(-1).to(device="cpu", dtype=torch.int64)
+            raw = indices.contiguous().numpy().tobytes()
+            dtype = str(tensor.dtype)
+        except AttributeError:
+            shape = (len(value),)
+            dtype = type(value).__name__
+            raw = bytes(str(tuple(value)), "utf-8")
+        digest.update(str(pool_name).encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(dtype.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(repr(shape).encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(raw)
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _t38c_durable_log(rec):
+    """Marker-gated p0 durability trace; identities/counters only."""
+    try:
+        import json as _json
+        import os as _os
+
+        if not _os.path.exists("/tmp/t38c-durable-trace"):
+            return
+        thread_id = threading.get_ident()
+        with _T38C_DURABLE_SEQ_LOCK:
+            local_seq = _T38C_DURABLE_SEQ.get(thread_id, 0) + 1
+            _T38C_DURABLE_SEQ[thread_id] = local_seq
+        run_id = _os.environ.get("T38C_RUN_ID") or f"pid-{_os.getpid()}"
+        record = attach_trace_context(dict(rec))
+        record.setdefault("schema_version", "p0_durable.v2")
+        record.setdefault("run_id", run_id)
+        record.setdefault(
+            "event_id",
+            f"{run_id}:{_os.getpid()}:{thread_id}:radix:{local_seq}",
+        )
+        record.setdefault("process_id", _os.getpid())
+        record.setdefault("rank", _os.environ.get("RANK"))
+        record.setdefault("thread_id", thread_id)
+        record.setdefault("local_seq", local_seq)
+        record.setdefault("operation", record.get("operation_id"))
+        record.setdefault("attempt", record.get("attempt_id"))
+        for field in (
+            "operation_id",
+            "attempt_id",
+            "node_id",
+            "anchor_id",
+            "pool",
+            "tier",
+            "final_kv_hash",
+            "storage_key",
+            "mamba_key",
+            "extent_id",
+            "extent_generation",
+            "old_generation",
+            "new_generation",
+            "slot_digest",
+            "requested_pages",
+            "succeeded_pages",
+            "reason",
+            "predecessor_event_id",
+            "evidence_ref",
+        ):
+            record.setdefault(field, None)
+        record.setdefault("result", None)
+        record["ts_wall_ns"] = time.time_ns()
+        record["ts_mono_ns"] = time.monotonic_ns()
+        record["trace"] = "p0_durable"
+        record["ts_ms"] = int(time.time() * 1000)
+        with open("/tmp/t38c-probe.log", "a") as _f:
+            _f.write(_json.dumps(record, default=str) + "\n")
+        return record["event_id"]
+    except Exception:
+        pass
+
+
+def _t38c_build_complete_debug(reason: str) -> None:
+    """Marker-gated diagnostics for suppressed build identity emission."""
+    if os.environ.get("T38C_BUILD_COMPLETE_DEBUG") == "1":
+        logger.warning("T38C build_complete suppressed: %s", reason)
+
+
+def _t38c_free_slots(frees) -> int:
+    total = 0
+    for values in frees.values():
+        for value in values:
+            try:
+                total += int(value.numel())
+            except AttributeError:
+                total += len(value)
+    return total
+
+
+def _t38c_pool_name(component_type):
+    return _COMPONENT_POOL_LABEL.get(component_type, str(component_type))
+
+
+def _t38c_residency_component_snapshot(node):
+    """Return privacy-safe required-component presence evidence."""
+    manifest = (
+        (ComponentType.FULL, "FULL", "kv"),
+        (ComponentType.MAMBA, "MAMBA", "mamba"),
+    )
+    component_data = getattr(node, "component_data", None)
+    tiers = []
+    live_count = 0
+    complete = component_data is not None
+    required_keys = set()
+
+    def _lookup(component_type, name):
+        if isinstance(component_data, dict):
+            for key in (component_type, name, name.lower()):
+                if key in component_data:
+                    return component_data[key]
+            return None
+        try:
+            return component_data[component_type]
+        except (IndexError, KeyError, TypeError):
+            return None
+
+    def _slot_count(value):
+        if value is None:
+            return 0
+        try:
+            return int(value.numel())
+        except (AttributeError, TypeError, ValueError):
+            try:
+                return len(value)
+            except (TypeError, ValueError):
+                return 1
+
+    for component_type, name, pool in manifest:
+        required_keys.add(component_type)
+        required_keys.add(name)
+        required_keys.add(name.lower())
+        data = _lookup(component_type, name)
+        if data is None:
+            complete = False
+            device_value = host_value = None
+            device_lock_ref = host_lock_ref = 0
+        else:
+            device_value = getattr(data, "value", None)
+            host_value = getattr(data, "host_value", None)
+            device_lock_ref = int(getattr(data, "lock_ref", 0) or 0)
+            host_lock_ref = int(getattr(data, "host_lock_ref", 0) or 0)
+        device_present = device_value is not None
+        host_present = host_value is not None
+        if device_present or host_present:
+            live_count += 1
+        tiers.append(
+            {
+                "component": name,
+                "pool": pool,
+                "device_present": device_present,
+                "device_slot_count": _slot_count(device_value),
+                "device_lock_ref": device_lock_ref,
+                "host_present": host_present,
+                "host_slot_count": _slot_count(host_value),
+                "host_lock_ref": host_lock_ref,
+            }
+        )
+
+    unsupported = False
+    if isinstance(component_data, dict):
+        items = component_data.items()
+    elif component_data is None:
+        items = ()
+    else:
+        items = enumerate(component_data)
+    for key, data in items:
+        key_name = getattr(key, "name", str(key)).upper()
+        if key in required_keys or key_name in ("FULL", "MAMBA"):
+            continue
+        if data is not None and (
+            getattr(data, "value", None) is not None
+            or getattr(data, "host_value", None) is not None
+        ):
+            unsupported = True
+
+    return {
+        "required_component_manifest": [name for _ct, name, _pool in manifest],
+        "component_tiers": tiers,
+        "live_component_count": live_count,
+        "snapshot_complete": bool(complete),
+        "unsupported_component": unsupported,
+    }
+
+
+def _t38c_residency_retire(
+    cache, identity, reason, context=None, *, trigger="identity_retired"
+):
+    if not identity or len(identity) != 6:
+        return
+    with cache._t38c_residency_lock:
+        getattr(cache, "_t38c_residency_retired", set()).add(identity)
+        lifecycle = getattr(cache, "_t38c_residency_lifecycle", {}).get(identity)
+        expected = getattr(cache, "_t38c_residency_detached", {}).pop(
+            identity, set()
+        )
+        completed = getattr(cache, "_t38c_residency_completed", set())
+        for _node, pool, tier, digest, token in expected:
+            completed.discard((identity, pool, tier, digest, token))
+            retire_slot_token(token)
+        getattr(cache, "_t38c_residency_reconcile_ready", set()).discard(identity)
+        getattr(cache, "_t38c_residency_queue_blocked", set()).discard(identity)
+        if lifecycle is not None:
+            lifecycle["state"] = "RETIRED_INVALID"
+            lifecycle["retirement_reason"] = reason
+            lifecycle["trigger"] = trigger
+        _t38c_residency_outcome(
+            cache,
+            identity,
+            context,
+            reason,
+            trigger=trigger,
+            result=False,
+            terminal=True,
+        )
+
+
+def _t38c_residency_release_queues_drained(cache):
+    """Reconcile queue-blocked identities after the owning drain commits."""
+    if not _t38c_durable_enabled():
+        return
+    with cache._t38c_residency_lock:
+        pending = tuple(
+            getattr(cache, "_t38c_residency_queue_blocked", set())
+        )
+        cache._t38c_residency_queue_blocked.difference_update(pending)
+    for identity in pending:
+        _t38c_residency_reconcile(cache, identity, "release_queues_drained")
+
+
+def _t38c_residency_reconcile(cache, identity, trigger):
+    if not identity or len(identity) != 6:
+        return
+    ready = getattr(cache, "_t38c_residency_reconcile_ready", None)
+    if ready is not None:
+        ready.add(identity)
+    _t38c_residency_barrier(
+        cache,
+        identity[4],
+        expected_identity=identity,
+        trigger=trigger,
+    )
+
+
+def _t38c_note_detach(cache, node_id, pool, tier, slot_digest):
+    if not slot_digest or not _t38c_durable_enabled():
+        return
+    with cache._t38c_residency_lock:
+        context = cache._t38c_trace_context_for_node(node_id)
+        identity = _t38c_residency_identity(
+            context,
+            node_id,
+            context.get("final_kv_hash") if context else None,
+        )
+        if identity is None or identity in cache._t38c_residency_barriers:
+            return
+        if identity not in getattr(cache, "_t38c_build_identities", set()):
+            _t38c_residency_outcome(
+                cache,
+                identity,
+                context,
+                "nonterminal_not_build_registered",
+                trigger="eligible_detach_registered",
+            )
+            return
+        if identity in getattr(cache, "_t38c_residency_retired", set()):
+            return
+        lifecycle = cache._t38c_residency_lifecycle.setdefault(
+            identity,
+            {
+                "state": "BUILD_CREATED",
+                "build_event_id": None,
+                "durability_event_id": None,
+                "component_snapshot": None,
+                "queue_snapshot": None,
+                "publication_event_id": None,
+                "retirement_reason": None,
+                "reconcile_attempt_count": 0,
+                "reason_attempt_counts": {},
+                "diagnostic_reason_set": set(),
+                "suppressed_diagnostic_count": 0,
+                "first_failure_reason": None,
+                "first_failure_event_id": None,
+                "first_attempt_ts_mono_ns": None,
+                "last_attempt_ts_mono_ns": None,
+                "first_attempt_event_id": None,
+                "last_attempt_event_id": None,
+                "terminal_event_id": None,
+                "detach_expectations_registered": False,
+                "detach_manifest": set(),
+            },
+        )
+        if lifecycle.get("detach_expectations_registered"):
+            expected = cache._t38c_residency_detached.get(identity, set())
+            if not any(
+                entry[1:4] == (pool, tier, slot_digest)
+                for entry in expected
+            ):
+                _t38c_residency_retire(
+                    cache,
+                    identity,
+                    "late_detach_after_seal",
+                    context,
+                    trigger="eligible_detach_registered",
+                )
+            return
+        lifecycle = {
+            "run_id": context["run_id"],
+            "node_id": str(node_id),
+            "session_generation": context["session_generation"],
+        }
+        token = remember_slot_context(
+            pool, tier, slot_digest, context, lifecycle=lifecycle
+        )
+        if token is not None:
+            cache._t38c_residency_detached.setdefault(identity, set()).add(
+                (str(node_id), pool, tier, slot_digest, token)
+            )
+            cache._t38c_residency_lifecycle.setdefault(
+                identity, lifecycle
+            )
+            _t38c_residency_reconcile(
+                cache, identity, "eligible_detach_registered"
+            )
+
+
+def _t38c_residency_seal_detach(
+    cache, node_id, manifest, *, unsupported=False
+):
+    """Seal the exact production detach manifest before DETACH_SEALED."""
+    if not _t38c_durable_enabled():
+        return
+    with cache._t38c_residency_lock:
+        context = cache._t38c_trace_context_for_node(node_id)
+        identity = _t38c_residency_identity(
+            context,
+            node_id,
+            context.get("final_kv_hash") if context else None,
+        )
+        if identity is None or identity in cache._t38c_residency_barriers:
+            return
+        if identity not in getattr(cache, "_t38c_build_identities", set()):
+            _t38c_residency_outcome(
+                cache,
+                identity,
+                context,
+                "nonterminal_not_build_registered",
+                trigger="detach_seal",
+            )
+            return
+        lifecycle = cache._t38c_residency_lifecycle.setdefault(
+            identity,
+            {
+                "state": "BUILD_CREATED",
+                "build_event_id": None,
+                "durability_event_id": None,
+                "component_snapshot": None,
+                "queue_snapshot": None,
+                "publication_event_id": None,
+                "retirement_reason": None,
+                "reconcile_attempt_count": 0,
+                "reason_attempt_counts": {},
+                "diagnostic_reason_set": set(),
+                "suppressed_diagnostic_count": 0,
+                "first_failure_reason": None,
+                "first_failure_event_id": None,
+                "first_attempt_ts_mono_ns": None,
+                "last_attempt_ts_mono_ns": None,
+                "first_attempt_event_id": None,
+                "last_attempt_event_id": None,
+                "terminal_event_id": None,
+                "detach_expectations_registered": False,
+                "detach_manifest": set(),
+            },
+        )
+        manifest = set(manifest or ())
+        supported_components = {"kv", "mamba"}
+        observed_components = {pool for pool, _tier in manifest}
+        if unsupported or observed_components != supported_components:
+            _t38c_residency_retire(
+                cache,
+                identity,
+                "detach_manifest_incomplete"
+                if not unsupported
+                else "unsupported_component",
+                context,
+                trigger="detach_seal",
+            )
+            return
+        if lifecycle.get("detach_expectations_registered"):
+            if manifest != lifecycle.get("detach_manifest", set()):
+                _t38c_residency_retire(
+                    cache,
+                    identity,
+                    "late_detach_after_seal",
+                    context,
+                    trigger="detach_seal",
+                )
+            return
+        expected = cache._t38c_residency_detached.get(identity, set())
+        registered = {(pool, tier) for _node, pool, tier, _digest, _token in expected}
+        if registered != manifest:
+            _t38c_residency_retire(
+                cache,
+                identity,
+                "detach_manifest_incomplete",
+                context,
+                trigger="detach_seal",
+            )
+            return
+        lifecycle["detach_manifest"] = manifest
+        lifecycle["detach_expectations_registered"] = True
+        _t38c_residency_reconcile(cache, identity, "detach_sealed")
+
+
+def _t38c_note_completion(cache, pool, tier, slot_digest, token=None):
+    if (
+        slot_digest
+        and token is not None
+        and not is_inert_release_token(token)
+        and _t38c_durable_enabled()
+    ):
+        with cache._t38c_residency_lock:
+            owned_entry = None
+            for identity, expected in cache._t38c_residency_detached.items():
+                owned_entry = next(
+                    (
+                        entry
+                        for entry in expected
+                        if entry[1:4] == (pool, tier, slot_digest)
+                        and entry[4] == token
+                    ),
+                    None,
+                )
+                if owned_entry is not None:
+                    break
+            # A token presented to a different cache is not evidence for this
+            # cache and must not be completed or retired here.
+            if owned_entry is None:
+                return
+            completed_token = complete_slot_context(
+                pool, tier, slot_digest, token=token
+            )
+            if completed_token is not None:
+                cache._t38c_residency_completed.add(
+                    (identity, pool, tier, slot_digest, completed_token)
+                )
+                retire_slot_token(completed_token)
+                _t38c_residency_reconcile(cache, identity, "free_complete")
+
+
+def _t38c_residency_queue_snapshot(cache):
+    """Read release-queue emptiness under the controller handoff lock."""
+    snapshot = {
+        "queue_snapshot_locked": False,
+        "primary_queue_empty": None,
+        "extra_queue_empty": None,
+        "extra_queue_emptiness": {},
+    }
+    try:
+        cache_controller = getattr(cache, "cache_controller", None)
+        if cache_controller is None:
+            return snapshot
+        release_handoff_lock = getattr(
+            cache_controller, "_t38c_release_handoff_lock", None
+        )
+        release_queue = getattr(
+            cache_controller, "host_mem_release_queue", None
+        )
+        extra_release_queues = getattr(
+            cache_controller, "extra_host_mem_release_queues", None
+        )
+        if (
+            release_handoff_lock is None
+            or release_queue is None
+            or extra_release_queues is None
+        ):
+            return snapshot
+        with release_handoff_lock:
+            extra_emptiness = {
+                str(pool): queue.empty()
+                for pool, queue in extra_release_queues.items()
+            }
+            snapshot.update(
+                queue_snapshot_locked=True,
+                primary_queue_empty=release_queue.empty(),
+                extra_queue_empty=all(extra_emptiness.values()),
+                extra_queue_emptiness=extra_emptiness,
+            )
+    except Exception:
+        return snapshot
+    return snapshot
+
+
+def _t38c_residency_outcome(
+    cache,
+    identity,
+    context,
+    reason,
+    *,
+    retry_epoch=0,
+    poll_attempt=0,
+    result=False,
+    exception_type=None,
+    queue_snapshot=None,
+    component_snapshot=None,
+    trigger="reconcile",
+    terminal=False,
+):
+    """Emit bounded diagnostics without affecting the strict state machine."""
+    if not _t38c_durable_enabled() or not identity or len(identity) != 6:
+        return
+    try:
+        outcomes = getattr(cache, "_t38c_residency_outcomes", set())
+        lifecycle = getattr(cache, "_t38c_residency_lifecycle", {}).get(identity)
+        outcome_key = (identity, reason)
+        if lifecycle is not None:
+            lifecycle.setdefault("diagnostic_reason_set", set()).add(reason)
+            counts = lifecycle.setdefault("reason_attempt_counts", {})
+            counts[reason] = counts.get(reason, 0) + 1
+        if outcome_key in outcomes:
+            if lifecycle is not None:
+                lifecycle["suppressed_diagnostic_count"] = (
+                    lifecycle.get("suppressed_diagnostic_count", 0) + 1
+                )
+            return
+        if queue_snapshot is None:
+            queue_snapshot = _t38c_residency_queue_snapshot(cache)
+        if component_snapshot is None and lifecycle is not None:
+            component_snapshot = lifecycle.get("component_snapshot")
+        component_snapshot = component_snapshot or {
+            "required_component_manifest": ["FULL", "MAMBA"],
+            "component_tiers": [],
+            "live_component_count": None,
+            "snapshot_complete": False,
+        }
+        if lifecycle is not None:
+            lifecycle["queue_snapshot"] = dict(queue_snapshot)
+            if not result and lifecycle.get("first_failure_reason") is None:
+                lifecycle["first_failure_reason"] = reason
+                lifecycle["first_failure_event_id"] = None
+        record = {
+            "evt": "residency_barrier_outcome",
+            "schema_version": "p0_residency.v3",
+            "trace_context": context,
+            "run_id": identity[0],
+            "session_id": identity[1],
+            "session_generation": identity[2],
+            "build_rid": identity[3],
+            "node_id": identity[4],
+            "final_kv_hash": identity[5],
+            "result": bool(result),
+            "reason": reason,
+            "predicate": reason,
+            "trigger": trigger,
+            "lifecycle_state": lifecycle.get("state") if lifecycle else None,
+            "reconcile_attempt_count": lifecycle.get("reconcile_attempt_count", 0)
+            if lifecycle
+            else 0,
+            "reason_attempt_counts": dict(
+                lifecycle.get("reason_attempt_counts", {})
+            )
+            if lifecycle
+            else {},
+            "suppressed_diagnostic_count": lifecycle.get(
+                "suppressed_diagnostic_count", 0
+            )
+            if lifecycle
+            else 0,
+            "observed_reasons": sorted(
+                lifecycle.get("diagnostic_reason_set", set()) | {reason}
+            )
+            if lifecycle
+            else [reason],
+            "first_attempt_ts_mono_ns": lifecycle.get(
+                "first_attempt_ts_mono_ns"
+            )
+            if lifecycle
+            else None,
+            "last_attempt_ts_mono_ns": lifecycle.get("last_attempt_ts_mono_ns")
+            if lifecycle
+            else None,
+            "first_attempt_event_id": lifecycle.get("first_attempt_event_id")
+            if lifecycle
+            else None,
+            "last_attempt_event_id": lifecycle.get("last_attempt_event_id")
+            if lifecycle
+            else None,
+            "required_component_manifest": component_snapshot.get(
+                "required_component_manifest", []
+            ),
+            "component_tiers": component_snapshot.get("component_tiers", []),
+            "live_component_count": component_snapshot.get("live_component_count"),
+            "snapshot_complete": component_snapshot.get("snapshot_complete", False),
+            "build_event_id": lifecycle.get("build_event_id") if lifecycle else None,
+            "durability_event_id": lifecycle.get("durability_event_id")
+            if lifecycle
+            else None,
+            "expected_release_count": len(
+                getattr(cache, "_t38c_residency_detached", {}).get(identity, ())
+            ),
+            "completed_release_count": sum(
+                1
+                for completed in getattr(cache, "_t38c_residency_completed", ())
+                if completed[0] == identity
+            ),
+            "device_detach_seen": any(
+                entry[2] == "device"
+                for entry in getattr(cache, "_t38c_residency_detached", {}).get(
+                    identity, ()
+                )
+            ),
+            "detach_sealed": bool(lifecycle and lifecycle.get("detach_sealed")),
+            "first_failure_reason": lifecycle.get("first_failure_reason")
+            if lifecycle
+            else reason,
+            "first_failure_event_id": lifecycle.get("first_failure_event_id")
+            if lifecycle
+            else None,
+            "terminal_event_id": lifecycle.get("terminal_event_id")
+            if lifecycle
+            else None,
+            "publication_event_id": lifecycle.get("publication_event_id")
+            if lifecycle
+            else None,
+            "retirement_reason": lifecycle.get("retirement_reason")
+            if lifecycle
+            else None,
+            "publication_cause": (
+                "residency_barrier"
+                if lifecycle and lifecycle.get("publication_event_id")
+                else None
+            ),
+            "retirement_cause": lifecycle.get("retirement_reason")
+            if lifecycle
+            else None,
+            "terminal": bool(terminal),
+            **queue_snapshot,
+        }
+        if exception_type is not None:
+            record["exception_type"] = exception_type
+        event_id = _t38c_durable_log(record)
+        if event_id is not None:
+            outcomes.add(outcome_key)
+            if lifecycle is not None:
+                if not result and lifecycle.get("first_failure_event_id") is None:
+                    lifecycle["first_failure_event_id"] = event_id
+                if terminal:
+                    lifecycle["terminal_event_id"] = event_id
+    except Exception:
+        # Diagnostics must never change the strict fold's fail-closed result.
+        return
+
+
+def _t38c_residency_node_lookup(cache, node_id):
+    """Resolve a serialized identity node ID without joining the wrong node."""
+    if node_id is None or isinstance(node_id, bool):
+        return None
+    lookup_ids = [node_id]
+    if isinstance(node_id, str):
+        try:
+            typed_node_id = int(node_id)
+        except (TypeError, ValueError):
+            typed_node_id = None
+        if typed_node_id is not None and str(typed_node_id) == node_id:
+            lookup_ids.append(typed_node_id)
+    candidates = []
+    for lookup_id in lookup_ids:
+        try:
+            node = cache.tree_core.node_by_id(lookup_id)
+        except (AttributeError, IndexError, KeyError, TypeError):
+            continue
+        if node is None:
+            continue
+        if str(getattr(node, "id", None)) != str(node_id):
+            return None
+        if all(node is not candidate for candidate in candidates):
+            candidates.append(node)
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def _t38c_residency_barrier(
+    cache,
+    node_id,
+    expected_identity=None,
+    retry_epoch=0,
+    poll_attempt=0,
+    trigger="reconcile",
+):
+    """Publish cold residency only after keyed detaches have actually freed."""
+    if not _t38c_durable_enabled():
+        return
+    with cache._t38c_residency_lock:
+        identity = expected_identity
+        context = None
+        final_kv_hash = (
+            expected_identity[5]
+            if expected_identity is not None and len(expected_identity) == 6
+            else ""
+        )
+        try:
+            node = _t38c_residency_node_lookup(cache, node_id)
+            if node is None:
+                _t38c_residency_outcome(
+                    cache,
+                    identity,
+                    context,
+                    "node_lookup",
+                    retry_epoch=retry_epoch,
+                    poll_attempt=poll_attempt,
+                    trigger=trigger,
+                )
+                return
+            if node is cache.tree_core.root_node or getattr(
+                node, "forced_miss_tombstone", False
+            ):
+                _t38c_residency_outcome(
+                    cache,
+                    identity,
+                    context,
+                    "root_or_forced_miss",
+                    retry_epoch=retry_epoch,
+                    poll_attempt=poll_attempt,
+                    trigger=trigger,
+                )
+                return
+            final_kv_hash = node.get_last_hash_value() or ""
+            context = cache._t38c_trace_context_for_node(node_id)
+            identity = _t38c_residency_identity(context, node_id, final_kv_hash)
+            if identity is None or (
+                expected_identity is not None and identity != expected_identity
+            ):
+                if expected_identity is not None:
+                    _t38c_residency_retire(
+                        cache,
+                        expected_identity,
+                        "invalid_identity",
+                        context,
+                        trigger=trigger,
+                    )
+                    return
+                _t38c_residency_outcome(
+                    cache,
+                    expected_identity or identity,
+                    context,
+                    "invalid_identity",
+                    retry_epoch=retry_epoch,
+                    poll_attempt=poll_attempt,
+                    trigger=trigger,
+                )
+                return
+            if identity not in getattr(cache, "_t38c_build_identities", set()):
+                _t38c_residency_outcome(
+                    cache,
+                    identity,
+                    context,
+                    "build_not_ready",
+                    retry_epoch=retry_epoch,
+                    poll_attempt=poll_attempt,
+                    trigger=trigger,
+                )
+                return
+            if identity in getattr(cache, "_t38c_residency_retired", set()):
+                return
+            lifecycle = cache._t38c_residency_lifecycle.setdefault(
+                identity,
+                {
+                    "state": "BUILD_CREATED",
+                    "build_event_id": None,
+                    "durability_event_id": None,
+                    "component_snapshot": None,
+                    "queue_snapshot": None,
+                    "publication_event_id": None,
+                    "retirement_reason": None,
+                    "reconcile_attempt_count": 0,
+                    "reason_attempt_counts": {},
+                    "diagnostic_reason_set": set(),
+                    "suppressed_diagnostic_count": 0,
+                    "first_failure_reason": None,
+                    "first_failure_event_id": None,
+                    "first_attempt_ts_mono_ns": None,
+                    "last_attempt_ts_mono_ns": None,
+                    "first_attempt_event_id": None,
+                    "last_attempt_event_id": None,
+                    "terminal_event_id": None,
+                    "detach_expectations_registered": False,
+                    "detach_manifest": set(),
+                },
+            )
+            attempt_count = lifecycle.get("reconcile_attempt_count", 0) + 1
+            attempt_event_id = (
+                f"{identity[0]}:{identity[3]}:reconcile:{attempt_count}"
+            )
+            attempt_ts = time.monotonic_ns()
+            lifecycle["reconcile_attempt_count"] = attempt_count
+            lifecycle.setdefault("first_attempt_ts_mono_ns", attempt_ts)
+            lifecycle["last_attempt_ts_mono_ns"] = attempt_ts
+            lifecycle.setdefault("first_attempt_event_id", attempt_event_id)
+            lifecycle["last_attempt_event_id"] = attempt_event_id
+            if identity in cache._t38c_residency_barriers:
+                _t38c_residency_outcome(
+                    cache,
+                    identity,
+                    context,
+                    "barrier_already_published",
+                    retry_epoch=retry_epoch,
+                    poll_attempt=poll_attempt,
+                    trigger=trigger,
+                )
+                return
+            expected = cache._t38c_residency_detached.get(identity, set())
+            if not lifecycle.get("detach_expectations_registered"):
+                _t38c_residency_outcome(
+                    cache,
+                    identity,
+                    context,
+                    "detach_not_sealed",
+                    retry_epoch=retry_epoch,
+                    poll_attempt=poll_attempt,
+                    trigger=trigger,
+                )
+                return
+            if not expected:
+                _t38c_residency_outcome(
+                    cache,
+                    identity,
+                    context,
+                    "no_detach",
+                    retry_epoch=retry_epoch,
+                    poll_attempt=poll_attempt,
+                    trigger=trigger,
+                )
+                return
+            if not any(key[2] == "device" for key in expected):
+                _t38c_residency_outcome(
+                    cache,
+                    identity,
+                    context,
+                    "no_device_detach",
+                    retry_epoch=retry_epoch,
+                    poll_attempt=poll_attempt,
+                    trigger=trigger,
+                )
+                return
+            if lifecycle.get("state") == "BUILD_CREATED":
+                lifecycle["state"] = "DETACHING"
+            snapshot = _t38c_residency_component_snapshot(node)
+            lifecycle["component_snapshot"] = snapshot
+            if snapshot.get("unsupported_component"):
+                _t38c_residency_retire(
+                    cache,
+                    identity,
+                    "unsupported_component",
+                    context,
+                    trigger=trigger,
+                )
+                return
+            if not snapshot["snapshot_complete"]:
+                _t38c_residency_outcome(
+                    cache,
+                    identity,
+                    context,
+                    "component_snapshot_incomplete",
+                    retry_epoch=retry_epoch,
+                    poll_attempt=poll_attempt,
+                    trigger=trigger,
+                    component_snapshot=snapshot,
+                )
+                return
+            if snapshot["live_component_count"]:
+                if lifecycle.get("detach_sealed"):
+                    _t38c_residency_retire(
+                        cache,
+                        identity,
+                        "component_reattached_after_seal",
+                        context,
+                        trigger=trigger,
+                    )
+                    return
+                _t38c_residency_outcome(
+                    cache,
+                    identity,
+                    context,
+                    "live_component_value",
+                    retry_epoch=retry_epoch,
+                    poll_attempt=poll_attempt,
+                    trigger=trigger,
+                    component_snapshot=snapshot,
+                )
+                return
+            lifecycle["detach_sealed"] = True
+            lifecycle["state"] = "DETACH_SEALED"
+            if identity not in getattr(cache, "_t38c_durability_ready", set()):
+                _t38c_residency_outcome(
+                    cache,
+                    identity,
+                    context,
+                    "durability_not_ready",
+                    retry_epoch=retry_epoch,
+                    poll_attempt=poll_attempt,
+                    trigger=trigger,
+                    component_snapshot=snapshot,
+                )
+                return
+            lifecycle["state"] = "DURABILITY_READY"
+            if any(
+                (identity, pool, tier, digest, token)
+                not in cache._t38c_residency_completed
+                for _node, pool, tier, digest, token in expected
+            ):
+                _t38c_residency_outcome(
+                    cache,
+                    identity,
+                    context,
+                    "token_incomplete",
+                    retry_epoch=retry_epoch,
+                    poll_attempt=poll_attempt,
+                    trigger=trigger,
+                    component_snapshot=snapshot,
+                )
+                return
+            lifecycle["state"] = "FREES_COMPLETE"
+            cache_controller = getattr(cache, "cache_controller", None)
+            if cache_controller is None:
+                _t38c_residency_outcome(
+                    cache,
+                    identity,
+                    context,
+                    "queue_surface_missing",
+                    retry_epoch=retry_epoch,
+                    poll_attempt=poll_attempt,
+                    trigger=trigger,
+                    component_snapshot=snapshot,
+                )
+                return
+            release_handoff_lock = getattr(
+                cache_controller, "_t38c_release_handoff_lock", None
+            )
+            release_queue = getattr(cache_controller, "host_mem_release_queue", None)
+            extra_release_queues = getattr(
+                cache_controller, "extra_host_mem_release_queues", None
+            )
+            if (
+                release_handoff_lock is None
+                or release_queue is None
+                or extra_release_queues is None
+            ):
+                _t38c_residency_outcome(
+                    cache,
+                    identity,
+                    context,
+                    "queue_surface_missing",
+                    retry_epoch=retry_epoch,
+                    poll_attempt=poll_attempt,
+                    trigger=trigger,
+                    component_snapshot=snapshot,
+                )
+                return
+            with release_handoff_lock:
+                extra_emptiness = {
+                    str(pool): queue.empty()
+                    for pool, queue in extra_release_queues.items()
+                }
+                queue_snapshot = {
+                    "queue_snapshot_locked": True,
+                    "primary_queue_empty": release_queue.empty(),
+                    "extra_queue_empty": all(extra_emptiness.values()),
+                    "extra_queue_emptiness": extra_emptiness,
+                }
+                lifecycle["queue_snapshot"] = queue_snapshot
+                if not queue_snapshot["primary_queue_empty"] or not queue_snapshot[
+                    "extra_queue_empty"
+                ]:
+                    cache._t38c_residency_queue_blocked.add(identity)
+                    cache._t38c_residency_reconcile_ready.add(identity)
+                    _t38c_residency_outcome(
+                        cache,
+                        identity,
+                        context,
+                        "queue_nonempty",
+                        retry_epoch=retry_epoch,
+                        poll_attempt=poll_attempt,
+                        trigger=trigger,
+                        queue_snapshot=queue_snapshot,
+                        component_snapshot=snapshot,
+                    )
+                    return
+                lifecycle["state"] = "QUEUES_EMPTY"
+                event_id = _t38c_durable_log(
+                    {
+                        "evt": "residency_barrier",
+                        "trace_context": context,
+                        "run_id": identity[0],
+                        "session_id": identity[1],
+                        "session_generation": identity[2],
+                        "build_rid": identity[3],
+                        "warm_rid": None,
+                        "node_id": str(node_id),
+                        "final_kv_hash": final_kv_hash,
+                        "result": True,
+                        "reason": "all_detached_frees_complete",
+                        "cold_residency": True,
+                        "lifecycle_state_before": "QUEUES_EMPTY",
+                        "trigger": trigger,
+                        "build_event_id": lifecycle.get("build_event_id"),
+                        "durability_event_id": lifecycle.get("durability_event_id"),
+                        "expected_release_count": len(expected),
+                        "completed_release_count": sum(
+                            1
+                            for completed in cache._t38c_residency_completed
+                            if completed[0] == identity
+                        ),
+                        **snapshot,
+                        **queue_snapshot,
+                        "reconcile_attempt_count": lifecycle.get(
+                            "reconcile_attempt_count", 0
+                        ),
+                        "suppressed_diagnostic_count": lifecycle.get(
+                            "suppressed_diagnostic_count", 0
+                        ),
+                    }
+                )
+            if event_id is None:
+                _t38c_residency_outcome(
+                    cache,
+                    identity,
+                    context,
+                    "logger_failed",
+                    retry_epoch=retry_epoch,
+                    poll_attempt=poll_attempt,
+                    queue_snapshot=queue_snapshot,
+                    trigger=trigger,
+                    component_snapshot=snapshot,
+                )
+                return
+            lifecycle["state"] = "RESIDENCY_PUBLISHED"
+            lifecycle["publication_event_id"] = event_id
+            _t38c_residency_outcome(
+                cache,
+                identity,
+                context,
+                "published",
+                retry_epoch=retry_epoch,
+                poll_attempt=poll_attempt,
+                result=True,
+                queue_snapshot=queue_snapshot,
+                trigger=trigger,
+                component_snapshot=snapshot,
+                terminal=True,
+            )
+            # The identity, rather than the physical token set, is the
+            # logical publication key. New recycle tokens cannot republish it.
+            cache._t38c_residency_barriers.add(identity)
+            cache._t38c_residency_reconcile_ready.discard(identity)
+            cache._t38c_residency_queue_blocked.discard(identity)
+            for _node, _pool, _tier, _digest, token in expected:
+                cache._t38c_residency_completed.discard(
+                    (identity, _pool, _tier, _digest, token)
+                )
+                retire_slot_token(token)
+            cache._t38c_residency_detached.pop(identity, None)
+        except Exception as exc:
+            # A deleted node cannot be snapshotted; keyed detach/completion
+            # records remain the only valid evidence in that case.
+            _t38c_residency_outcome(
+                cache,
+                identity,
+                context,
+                "exception",
+                retry_epoch=retry_epoch,
+                poll_attempt=poll_attempt,
+                exception_type=type(exc).__name__,
+                trigger=trigger,
+            )
+            return
+
+
+def _t38c_poll_residency_barriers(cache):
+    """Reconcile only explicitly queued identities; watchdog is optional."""
+    if not _t38c_durable_enabled():
+        return
+    with cache._t38c_residency_lock:
+        retry_epoch = getattr(cache, "_t38c_residency_retry_epoch", 0) + 1
+        cache._t38c_residency_retry_epoch = retry_epoch
+        # Defensive one-time cleanup for fixtures or a process that inherited
+        # legacy pending entries. Current detach admission never creates these.
+        for identity in tuple(cache._t38c_residency_detached):
+            if identity not in getattr(cache, "_t38c_build_identities", set()):
+                cache._t38c_residency_retired.add(identity)
+                _t38c_residency_retire(
+                    cache, identity, "retired_ineligible", trigger="poll_prune"
+                )
+        pending = tuple(
+            getattr(cache, "_t38c_residency_reconcile_ready", set())
+        )
+        cache._t38c_residency_reconcile_ready.difference_update(pending)
+    for poll_attempt, identity in enumerate(pending, start=1):
+        _t38c_residency_barrier(
+            cache,
+            identity[4],
+            expected_identity=identity,
+            retry_epoch=retry_epoch,
+            poll_attempt=poll_attempt,
+            trigger="release_queues_drained",
+        )
+
+
+def _t38c_residency_log(cache, node_id, result, reason: str) -> None:
+    if not _t38c_durable_enabled():
+        return
+    try:
+        node = cache.tree_core.node_by_id(node_id)
+        manifest = set()
+        unsupported = False
+        for tier, frees in (
+            ("device", result.device_frees),
+            ("host", result.host_frees),
+        ):
+            for component_type, values in frees.items():
+                if not values:
+                    continue
+                pool = _t38c_pool_name(component_type)
+                if component_type not in (ComponentType.FULL, ComponentType.MAMBA):
+                    unsupported = True
+                    continue
+                manifest.add((pool, tier))
+                digest = _t38c_slot_digest(pool, values)
+                _t38c_durable_log(
+                    {
+                        "evt": "residency_detach",
+                        "trace_context": cache._t38c_trace_context_for_node(node_id),
+                        "node_id": str(node_id),
+                        "final_kv_hash": node.get_last_hash_value() or "",
+                        "pool": pool,
+                        "tier": tier,
+                        "slot_count": _t38c_free_slots({component_type: values}),
+                        "slot_digest": digest,
+                        "reason": reason,
+                        "result": "detached",
+                    }
+                )
+                _t38c_note_detach(cache, node_id, pool, tier, digest)
+        if manifest or unsupported:
+            _t38c_residency_seal_detach(
+                cache, node_id, manifest, unsupported=unsupported
+            )
     except Exception:
         pass
 
@@ -277,6 +1616,10 @@ class UnifiedRadixCache(BasePrefixCache):
         params: CacheInitParams,
     ):
         self.req_to_token_pool = params.req_to_token_pool
+        _set_host_alloc_telemetry_context(
+            getattr(params, "producer_telemetry_context", None)
+            or producer_context(component="cache")
+        )
         self.token_to_kv_pool_allocator = params.token_to_kv_pool_allocator
         self.disable = params.disable
 
@@ -394,11 +1737,840 @@ class UnifiedRadixCache(BasePrefixCache):
         # must not clobber it.
         self.promotion_margin_tokens = 2048
 
+        self._t38c_node_contexts = {}
+        self._t38c_node_context_index = {}
+        self._t38c_session_contexts = {}
+        self._t38c_session_builds = {}
+        self._t38c_request_contexts = {}
+        self._t38c_durability_evidence = {}
+        self._t38c_mamba_boundaries = {}
+        self._t38c_build_identities = set()
+        self._t38c_durability_ready = set()
+        self._t38c_residency_lock = threading.RLock()
+        self._t38c_residency_detached = {}
+        self._t38c_residency_completed = set()
+        self._t38c_residency_barriers = set()
+        self._t38c_residency_outcomes = set()
+        self._t38c_residency_retry_epoch = 0
+        self._t38c_residency_lifecycle = {}
+        self._t38c_residency_retired = set()
+        self._t38c_residency_reconcile_ready = set()
+        self._t38c_residency_queue_blocked = set()
+
+        # Cache-owned, process-local invalidation state for HOST_ALLOC wakes.
+        # The scheduler may observe this state but never synthesizes or mutates
+        # it.  A reset creates a new instance identity so old cursors cannot
+        # compare equal to the new cache state.
+        self._host_allocability_instance_id = 0
+        self._host_allocability_generations: dict[str, int] = {}
+        self._host_allocability_telemetry_seq = 0
+        self._host_allocability_telemetry_mutations = {}
+        self._host_allocability_telemetry_emitted = {}
+        self._host_allocability_telemetry_last_emitted = {}
+        self._host_allocability_telemetry_total_emitted = 0
+
         self.reset()
         logger.info(
             f"Init Unified Radix Cache. Components: {self.tree_components}. "
             f"Tree Core: {type(self.tree_core).__name__}"
         )
+
+    def _t38c_note_residency_detach(
+        self, node_id, pool, tier, slot_digest
+    ) -> None:
+        _t38c_note_detach(self, node_id, pool, tier, slot_digest)
+
+    def _t38c_note_residency_completion(self, pool, tier, slot_digest) -> None:
+        _t38c_note_completion(
+            self,
+            pool,
+            tier,
+            slot_digest,
+            token=slot_token(pool, tier, slot_digest),
+        )
+
+    @staticmethod
+    def _t38c_req_session_id(req):
+        return getattr(req, "session_id", None) or getattr(
+            getattr(req, "session", None), "session_id", None
+        )
+
+    def _t38c_trace_context_for_req(self, req, warm: bool = False):
+        if not durable_trace_enabled() or req is None:
+            return None
+        session_id = self._t38c_req_session_id(req)
+        session_generation = getattr(req, "session_generation", None)
+        if not session_id or session_generation is None:
+            return None
+        session_key = (str(session_id), session_generation)
+        build_rid = self._t38c_session_builds.get(session_key)
+        context = (
+            self._t38c_session_contexts.get(
+                (session_key[0], session_key[1], build_rid)
+            )
+            if build_rid is not None
+            else None
+        )
+        if context is None:
+            context = make_trace_context(
+                session_id,
+                session_generation,
+                getattr(req, "rid", None),
+            )
+        if context is None:
+            return None
+        context = dict(context)
+        run_id = os.environ.get("T38C_RUN_ID")
+        if not isinstance(run_id, str) or not run_id.strip():
+            return None
+        context["run_id"] = run_id
+        if warm and context.get("build_rid") != getattr(req, "rid", None):
+            context["warm_rid"] = str(getattr(req, "rid", "")) or None
+        return context
+
+    def _t38c_retire_session_trace(self, session_id) -> None:
+        # The V4.3 dependency-free retirement probe extracts this method onto
+        # a legacy fixture that predates the cache-owned ledger. Keep that
+        # probe compatible without making the product path consult globals.
+        legacy_mode = False
+        if not hasattr(self, "_t38c_residency_lock"):
+            detached = globals().get("_T38C_DURABLE_DETACHED")
+            completed = globals().get("_T38C_DURABLE_COMPLETED")
+            barriers = globals().get("_T38C_DURABLE_BARRIERS")
+            if (
+                detached is not None
+                and completed is not None
+                and barriers is not None
+            ):
+                if not session_id:
+                    return
+                session_id = str(session_id)
+                retired_tokens = {
+                    key[-1]
+                    for keys in detached.values()
+                    for key in keys
+                    if len(key) == 5 and key[-1][1] == session_id
+                }
+                retired_tokens.update(
+                    entry[-1]
+                    for entry in completed
+                    if len(entry) == 4
+                    and isinstance(entry[-1], tuple)
+                    and len(entry[-1]) > 1
+                    and entry[-1][1] == session_id
+                )
+                for node_id in list(detached):
+                    kept = {
+                        key
+                        for key in detached[node_id]
+                        if key[-1] not in retired_tokens
+                    }
+                    if kept:
+                        detached[node_id] = kept
+                    else:
+                        detached.pop(node_id, None)
+                completed.difference_update(
+                    {
+                        entry
+                        for entry in completed
+                        if len(entry) == 4
+                        and isinstance(entry[-1], tuple)
+                        and len(entry[-1]) > 1
+                        and entry[-1][1] == session_id
+                    }
+                )
+                barriers.difference_update(
+                    {
+                        barrier
+                        for barrier in barriers
+                        if any(
+                            len(key) == 5 and key[-1] in retired_tokens
+                            for key in barrier[1]
+                        )
+                    }
+                )
+                self._t38c_session_builds = {
+                    key: build
+                    for key, build in self._t38c_session_builds.items()
+                    if key[0] != session_id
+                }
+                self._t38c_session_contexts = {
+                    key: context
+                    for key, context in self._t38c_session_contexts.items()
+                    if key[0] != session_id
+                }
+                self._t38c_node_contexts = {
+                    key: context
+                    for key, context in self._t38c_node_contexts.items()
+                    if context.get("session_id") != session_id
+                }
+                self._t38c_node_context_index = {
+                    node_id: key
+                    for node_id, key in self._t38c_node_context_index.items()
+                    if key in self._t38c_node_contexts
+                }
+                self._t38c_request_contexts = {
+                    key: context
+                    for key, context in self._t38c_request_contexts.items()
+                    if context.get("session_id") != session_id
+                }
+                self._t38c_build_identities = {
+                    identity
+                    for identity in getattr(
+                        self, "_t38c_build_identities", set()
+                    )
+                    if len(identity) < 6 or identity[1] != session_id
+                }
+                self._t38c_durability_ready = {
+                    identity
+                    for identity in getattr(
+                        self, "_t38c_durability_ready", set()
+                    )
+                    if len(identity) < 6 or identity[1] != session_id
+                }
+                mamba_boundaries = getattr(self, "_t38c_mamba_boundaries", {})
+                self._t38c_mamba_boundaries = {
+                    key: boundaries
+                    for key, boundaries in mamba_boundaries.items()
+                    if key[0] != session_id
+                }
+
+                def _candidate_belongs_to_session(candidate):
+                    if not isinstance(candidate, dict):
+                        return False
+                    context = candidate.get("trace_context")
+                    return (
+                        isinstance(context, dict)
+                        and context.get("session_id") == session_id
+                    )
+
+                for node_id, candidates in list(
+                    self._t38c_durability_evidence.items()
+                ):
+                    if not isinstance(candidates, dict):
+                        if _candidate_belongs_to_session(candidates):
+                            self._t38c_durability_evidence.pop(node_id, None)
+                        continue
+                    kept_candidates = {
+                        attempt_key: candidate
+                        for attempt_key, candidate in candidates.items()
+                        if not _candidate_belongs_to_session(candidate)
+                    }
+                    if kept_candidates:
+                        self._t38c_durability_evidence[node_id] = kept_candidates
+                    else:
+                        self._t38c_durability_evidence.pop(node_id, None)
+                if self.cache_controller is not None:
+                    retire_tokens = getattr(
+                        self.cache_controller,
+                        "_t38c_retire_host_mem_release_tokens",
+                        None,
+                    )
+                    if retire_tokens is not None:
+                        retire_tokens(session_id)
+                retire_slot_contexts(session_id)
+                return
+        with self._t38c_residency_lock:
+            self._t38c_retire_session_trace_locked(
+                session_id, legacy_mode=legacy_mode
+            )
+
+    def _t38c_retire_session_trace_locked(
+        self, session_id, *, legacy_mode: bool = False
+    ) -> None:
+        if not session_id:
+            return
+        session_id = str(session_id)
+        self._t38c_session_builds = {
+            key: build
+            for key, build in self._t38c_session_builds.items()
+            if key[0] != session_id
+        }
+        self._t38c_session_contexts = {
+            key: context
+            for key, context in self._t38c_session_contexts.items()
+            if key[0] != session_id
+        }
+        self._t38c_node_contexts = {
+            key: context
+            for key, context in self._t38c_node_contexts.items()
+            if context.get("session_id") != session_id
+        }
+        self._t38c_node_context_index = {
+            node_id: key
+            for node_id, key in self._t38c_node_context_index.items()
+            if key in self._t38c_node_contexts
+        }
+        self._t38c_request_contexts = {
+            key: context
+            for key, context in self._t38c_request_contexts.items()
+            if context.get("session_id") != session_id
+        }
+        self._t38c_build_identities = {
+            identity
+            for identity in getattr(self, "_t38c_build_identities", set())
+            if len(identity) < 6 or identity[1] != session_id
+        }
+        self._t38c_durability_ready = {
+            identity
+            for identity in getattr(self, "_t38c_durability_ready", set())
+            if len(identity) < 6 or identity[1] != session_id
+        }
+        mamba_boundaries = getattr(self, "_t38c_mamba_boundaries", {})
+        self._t38c_mamba_boundaries = {
+            key: boundaries
+            for key, boundaries in mamba_boundaries.items()
+            if key[0] != session_id
+        }
+
+        # Contextless marker-off ACKs have no authoritative session identity;
+        # keep them until a full reset and retire only explicitly identified
+        # evidence for the session being released.
+        def _candidate_belongs_to_session(candidate):
+            if not isinstance(candidate, dict):
+                return False
+            context = candidate.get("trace_context")
+            return (
+                isinstance(context, dict)
+                and context.get("session_id") == session_id
+            )
+
+        for node_id, candidates in list(
+            self._t38c_durability_evidence.items()
+        ):
+            if not isinstance(candidates, dict):
+                if _candidate_belongs_to_session(candidates):
+                    self._t38c_durability_evidence.pop(node_id, None)
+                continue
+            kept_candidates = {
+                attempt_key: candidate
+                for attempt_key, candidate in candidates.items()
+                if not _candidate_belongs_to_session(candidate)
+            }
+            if kept_candidates:
+                self._t38c_durability_evidence[node_id] = kept_candidates
+            else:
+                self._t38c_durability_evidence.pop(node_id, None)
+        if not legacy_mode:
+            retired_identities = {
+                identity
+                for identity in self._t38c_residency_detached
+                if len(identity) >= 6 and identity[1] == session_id
+            }
+            for identity in retired_identities:
+                self._t38c_residency_retired.add(identity)
+                _t38c_residency_retire(
+                    self,
+                    identity,
+                    "identity_retired",
+                    trigger="session_retired",
+                )
+            retired_tokens = {
+                entry[-1]
+                for identity in retired_identities
+                for entry in self._t38c_residency_detached.get(identity, ())
+            }
+            self._t38c_residency_detached = {
+                identity: expected
+                for identity, expected in self._t38c_residency_detached.items()
+                if len(identity) < 6 or identity[1] != session_id
+            }
+            self._t38c_residency_completed = {
+                entry
+                for entry in self._t38c_residency_completed
+                if len(entry[0]) < 6 or entry[0][1] != session_id
+            }
+            self._t38c_residency_barriers = {
+                identity
+                for identity in self._t38c_residency_barriers
+                if len(identity) < 6 or identity[1] != session_id
+            }
+            for token in retired_tokens:
+                retire_slot_token(token)
+        if self.cache_controller is not None:
+            retire_tokens = getattr(
+                self.cache_controller,
+                "_t38c_retire_host_mem_release_tokens",
+                None,
+            )
+            if retire_tokens is not None:
+                retire_tokens(session_id)
+        if legacy_mode:
+            retire_slot_contexts(session_id)
+
+    def _t38c_select_promoted_candidate(self, node_id, final_kv_hash):
+        """Select one node-bound attempt, or fail closed on ambiguity."""
+        candidates = self._t38c_durability_evidence.get(str(node_id), {})
+        matches = [
+            (attempt_key, candidate)
+            for attempt_key, candidate in candidates.items()
+            if candidate.get("node_id") == str(node_id)
+            and candidate.get("final_kv_hash") == final_kv_hash
+        ]
+        # There is no tree-owned generation in this path. Same-hash attempts
+        # are therefore unambiguous only when exactly one remains.
+        return matches[0] if len(matches) == 1 else (None, None)
+
+    def _t38c_record_node_context(self, req, node_id) -> None:
+        context = self._t38c_trace_context_for_req(req)
+        if context is None or not durable_trace_enabled():
+            return
+        session_id = context["session_id"]
+        session_generation = context["session_generation"]
+        build_rid = context["build_rid"]
+        session_key = (session_id, session_generation)
+        context_key = (session_id, session_generation, build_rid)
+        self._t38c_session_builds.setdefault(session_key, build_rid)
+        self._t38c_session_contexts.setdefault(context_key, dict(context))
+        node = self.tree_core.node_by_id(node_id)
+        while node is not None and node is not self.tree_core.root_node:
+            node_id = str(node.id)
+            try:
+                final_kv_hash = node.get_last_hash_value()
+            except (AttributeError, TypeError):
+                return
+            if not isinstance(final_kv_hash, str) or not final_kv_hash:
+                return
+            node_context = dict(context)
+            node_context["node_id"] = node_id
+            node_context["final_kv_hash"] = final_kv_hash
+            key = (session_id, session_generation, build_rid, node_id)
+            candidate_keys = [
+                candidate_key
+                for candidate_key in self._t38c_node_contexts
+                if len(candidate_key) == 4 and candidate_key[-1] == node_id
+            ]
+            conflicting = any(
+                self._t38c_node_contexts[candidate_key] != node_context
+                for candidate_key in candidate_keys
+            )
+            ambiguous = conflicting or (
+                node_id in self._t38c_node_context_index
+                and self._t38c_node_context_index[node_id] is None
+            )
+            if ambiguous:
+                # Preserve ambiguity permanently for this live node. A node
+                # sidecar must never be last-write-wins across build contexts.
+                self._t38c_node_context_index[node_id] = None
+            elif candidate_keys:
+                self._t38c_node_context_index[node_id] = candidate_keys[0]
+            existing = self._t38c_node_contexts.get(key)
+            if existing is not None:
+                break
+            self._t38c_node_contexts[key] = node_context
+            if not ambiguous:
+                self._t38c_node_context_index[node_id] = key
+            node = node.parent
+
+    @staticmethod
+    def _t38c_has_live_value(value) -> bool:
+        if value is None:
+            return False
+        try:
+            return len(value) > 0
+        except TypeError:
+            return True
+
+    def _t38c_record_mamba_boundary(
+        self, req, node_id, effective_cache_len, insert_params, result
+    ) -> None:
+        """Remember only a real nonzero KV+Mamba checkpoint for this request."""
+        if (
+            effective_cache_len <= 0
+            or ComponentType.MAMBA not in self.tree_components
+            or insert_params is None
+            or insert_params.mamba_value is None
+            or result is None
+            or result.mamba_exist
+        ):
+            return
+        context = self._t38c_trace_context_for_req(req)
+        request_rid = getattr(req, "rid", None)
+        if not isinstance(context, dict) or not request_rid or any(
+            (
+                context.get("schema_version") != "p0_durable.v3",
+                not context.get("session_id"),
+                context.get("session_generation") is None,
+                not context.get("build_rid"),
+                context.get("warm_rid") is not None,
+                str(request_rid) != context.get("build_rid"),
+            )
+        ):
+            return
+        try:
+            node = self.tree_core.node_by_id(node_id)
+        except (AttributeError, IndexError, KeyError, TypeError):
+            return
+        if node is self.tree_core.root_node or getattr(
+            node, "forced_miss_tombstone", False
+        ):
+            return
+        if any(
+            not any(
+                self._t38c_has_live_value(getattr(node.component_data[ct], field))
+                for field in ("value", "host_value")
+            )
+            for ct in (ComponentType.FULL, ComponentType.MAMBA)
+        ):
+            return
+        try:
+            final_kv_hash = node.get_last_hash_value()
+        except (AttributeError, TypeError):
+            return
+        if not final_kv_hash:
+            return
+        key = (
+            str(context["session_id"]),
+            context["session_generation"],
+            str(context["build_rid"]),
+        )
+        boundary = {
+            "node_id": node.id,
+            "request_rid": str(request_rid),
+            "effective_cache_len": int(effective_cache_len),
+            "final_kv_hash": final_kv_hash,
+            "trace_context": dict(context),
+        }
+        boundaries = self._t38c_mamba_boundaries.setdefault(key, [])
+        if boundary not in boundaries:
+            boundaries.append(boundary)
+
+    def _t38c_finished_boundary_result(self, req, *, is_abort: bool):
+        """Return a validated prior boundary, never a synthetic root result."""
+        if is_abort or getattr(req, "finished_reason", None) is None:
+            return None
+        context = self._t38c_trace_context_for_req(req)
+        request_rid = getattr(req, "rid", None)
+        if not isinstance(context, dict) or not request_rid or any(
+            (
+                context.get("schema_version") != "p0_durable.v3",
+                not context.get("session_id"),
+                context.get("session_generation") is None,
+                not context.get("build_rid"),
+                context.get("warm_rid") is not None,
+                str(request_rid) != context.get("build_rid"),
+            )
+        ):
+            return None
+        candidate_id = getattr(getattr(req, "last_node", None), "id", None)
+        if candidate_id is None:
+            candidate_id = getattr(req, "last_node", None)
+        key = (
+            str(context["session_id"]),
+            context["session_generation"],
+            str(context["build_rid"]),
+        )
+        matches = [
+            boundary
+            for boundary in self._t38c_mamba_boundaries.get(key, ())
+            if boundary["node_id"] == candidate_id
+            and boundary["request_rid"] == str(request_rid)
+            and boundary["trace_context"] == context
+        ]
+        if len(matches) != 1:
+            return None
+        try:
+            node = self.tree_core.node_by_id(candidate_id)
+        except (AttributeError, IndexError, KeyError, TypeError):
+            return None
+        if node is self.tree_core.root_node or getattr(
+            node, "forced_miss_tombstone", False
+        ):
+            return None
+        if any(
+            not any(
+                self._t38c_has_live_value(getattr(node.component_data[ct], field))
+                for field in ("value", "host_value")
+            )
+            for ct in (ComponentType.FULL, ComponentType.MAMBA)
+        ):
+            return None
+        try:
+            final_kv_hash = node.get_last_hash_value()
+        except (AttributeError, TypeError):
+            return None
+        node_id = str(getattr(node, "id", ""))
+        # The old _t38c_trace_context_for_node(node_id) != context check is
+        # now a stable-field comparison because sidecars carry node identity.
+        node_context = self._t38c_trace_context_for_node(node_id)
+        if (
+            not node_id
+            or not isinstance(final_kv_hash, str)
+            or not final_kv_hash
+            or final_kv_hash != matches[0]["final_kv_hash"]
+            or node_context is None
+            or any(
+                node_context.get(field) != context.get(field)
+                for field in (
+                    "schema_version",
+                    "run_id",
+                    "session_id",
+                    "session_generation",
+                    "build_rid",
+                    "warm_rid",
+                )
+            )
+        ):
+            return None
+        return InsertResult(
+            prefix_len=matches[0]["effective_cache_len"],
+            last_device_node=node.id,
+        )
+
+    def _t38c_is_tp_group_leader(self) -> bool:
+        """Return true only for the canonical initialized TP-group leader."""
+        tp_world_size = getattr(self, "tp_world_size", None)
+        if tp_world_size == 1:
+            return True
+        if tp_world_size is None or self.tp_group is None:
+            return False
+        try:
+            if not torch.distributed.is_available():
+                return False
+            if not torch.distributed.is_initialized():
+                return False
+            return torch.distributed.get_rank(group=self.tp_group) == 0
+        except Exception:
+            return False
+
+    def _t38c_emit_build_complete(
+        self, req, result, *, is_insert: bool, is_abort: bool
+    ) -> None:
+        """Emit the product-owned V3 build identity after a final insert."""
+        if not durable_trace_enabled():
+            _t38c_build_complete_debug("durable_trace_disabled")
+            return
+        if not is_insert:
+            _t38c_build_complete_debug("not_insert")
+            return
+        if is_abort:
+            _t38c_build_complete_debug("abort")
+            return
+        if result is None:
+            _t38c_build_complete_debug("missing_result")
+            return
+        if getattr(req, "finished_reason", None) is None:
+            _t38c_build_complete_debug("unfinished_request")
+            return
+        if not self._t38c_is_tp_group_leader():
+            _t38c_build_complete_debug("not_tp_group_leader")
+            return
+
+        context = self._t38c_trace_context_for_req(req)
+        if not isinstance(context, dict) or any(
+            (
+                context.get("schema_version") != "p0_durable.v3",
+                not context.get("session_id"),
+                context.get("session_generation") is None,
+                not context.get("build_rid"),
+                context.get("warm_rid") is not None,
+            )
+        ):
+            _t38c_build_complete_debug("invalid_request_context")
+            return
+
+        request_rid = getattr(req, "rid", None)
+        if not request_rid or str(request_rid) != context["build_rid"]:
+            _t38c_build_complete_debug("request_build_rid_mismatch")
+            return
+
+        node = getattr(result, "last_device_node", None)
+        if node is None:
+            _t38c_build_complete_debug("missing_node")
+            return
+        if node is self.tree_core.root_node:
+            _t38c_build_complete_debug("root_node")
+            return
+        if not hasattr(node, "get_last_hash_value"):
+            try:
+                node = self.tree_core.node_by_id(node)
+            except (AttributeError, IndexError, KeyError, TypeError):
+                _t38c_build_complete_debug("node_lookup_failed")
+                return
+        if node is None:
+            _t38c_build_complete_debug("missing_node")
+            return
+        if node is self.tree_core.root_node:
+            _t38c_build_complete_debug("root_node")
+            return
+        node_id = str(getattr(node, "id", ""))
+        try:
+            final_kv_hash = node.get_last_hash_value()
+        except (AttributeError, TypeError):
+            _t38c_build_complete_debug("node_hash_lookup_failed")
+            return
+        if not node_id or not isinstance(final_kv_hash, str) or not final_kv_hash:
+            _t38c_build_complete_debug("invalid_node_identity")
+            return
+
+        node_context = self._t38c_trace_context_for_node(node_id)
+        if node_context is None or any(
+            node_context.get(field) != context.get(field)
+            for field in (
+                "schema_version",
+                "run_id",
+                "session_id",
+                "session_generation",
+                "build_rid",
+                "warm_rid",
+            )
+        ):
+            _t38c_build_complete_debug("node_context_mismatch")
+            return
+
+        event_id = _t38c_durable_log(
+            {
+                "evt": "build_complete",
+                "trace_context": context,
+                "session_id": context["session_id"],
+                "session_generation": context["session_generation"],
+                "build_rid": context["build_rid"],
+                "warm_rid": None,
+                "node_id": node_id,
+                "final_kv_hash": final_kv_hash,
+                "operation_id": None,
+                "attempt_id": None,
+                "result": True,
+            }
+        )
+        if event_id is not None:
+            identity = _t38c_residency_identity(
+                node_context, node_id, final_kv_hash
+            )
+            if identity is not None:
+                if not hasattr(self, "_t38c_residency_lock"):
+                    self._t38c_build_identities.add(identity)
+                else:
+                    with self._t38c_residency_lock:
+                        self._t38c_build_identities.add(identity)
+                        lifecycle = self._t38c_residency_lifecycle.setdefault(
+                            identity,
+                            {
+                                "state": "BUILD_CREATED",
+                                "build_event_id": None,
+                                "durability_event_id": None,
+                                "component_snapshot": None,
+                                "queue_snapshot": None,
+                                "publication_event_id": None,
+                                "retirement_reason": None,
+                                "reconcile_attempt_count": 0,
+                                "reason_attempt_counts": {},
+                                "diagnostic_reason_set": set(),
+                                "suppressed_diagnostic_count": 0,
+                                "first_failure_reason": None,
+                                "first_failure_event_id": None,
+                                "first_attempt_ts_mono_ns": None,
+                                "last_attempt_ts_mono_ns": None,
+                                "first_attempt_event_id": None,
+                                "last_attempt_event_id": None,
+                                "terminal_event_id": None,
+                                "detach_expectations_registered": False,
+                                "detach_manifest": set(),
+                            },
+                        )
+                        lifecycle["build_event_id"] = event_id
+                    _t38c_residency_reconcile(self, identity, "build_registered")
+
+    def _t38c_trace_context_for_node(self, node_id):
+        if not durable_trace_enabled():
+            return None
+        key = self._t38c_node_context_index.get(str(node_id))
+        context = self._t38c_node_contexts.get(key) if key is not None else None
+        return dict(context) if context else None
+
+    def _t38c_trace_context_for_prefetch(self, req_id, node_id):
+        context = self._t38c_trace_context_for_node(node_id)
+        if context is None:
+            context = next(
+                (
+                    value
+                    for key, value in self._t38c_request_contexts.items()
+                    if key[2] == str(req_id)
+                ),
+                None,
+            )
+        if context is None:
+            return None
+        context = dict(context)
+        if context.get("build_rid") != req_id:
+            context["warm_rid"] = str(req_id)
+        return context
+
+    def _t38c_mamba_rank_proof(
+        self,
+        operation,
+        *,
+        node_id,
+        final_kv_hash,
+        key_set_digest,
+        key_count,
+        local_mamba_durable,
+        aggregate_rank_acks,
+    ):
+        expected_rank_set = getattr(operation, "_t38c_expected_rank_set", None)
+        if expected_rank_set is None and self.cache_controller is not None:
+            expected_rank_set = getattr(
+                self.cache_controller, "_t38c_expected_rank_set", None
+            )
+        expected_rank_set = (
+            sorted(str(rank) for rank in expected_rank_set)
+            if expected_rank_set
+            else []
+        )
+        local_rank = str(
+            torch.distributed.get_rank(group=self.tp_group)
+            if torch.distributed.is_available()
+            and torch.distributed.is_initialized()
+            else os.environ.get("RANK", "0")
+        )
+        attempt_id = getattr(operation, "trace_id", f"storage-{operation.id}")
+        local_ack = {
+            "operation_id": operation.id,
+            "attempt_id": attempt_id,
+            "node_id": str(node_id),
+            "final_kv_hash": final_kv_hash,
+            "mamba_key_set_digest": key_set_digest,
+            "mamba_key_count": key_count,
+            "rank": local_rank,
+            "mamba_durable": bool(local_mamba_durable),
+        }
+        if self.tp_world_size == 1:
+            observed = [local_rank] if local_mamba_durable else []
+            return expected_rank_set, observed, not expected_rank_set, bool(
+                expected_rank_set
+                and set(observed) >= set(expected_rank_set)
+                and local_mamba_durable
+            )
+        if not aggregate_rank_acks or not expected_rank_set:
+            return expected_rank_set, (
+                [local_rank] if local_mamba_durable else []
+            ), not expected_rank_set, False
+
+        gathered = [None] * self.tp_world_size
+        torch.distributed.all_gather_object(
+            gathered, local_ack, group=self.tp_group
+        )
+        matching = [
+            ack
+            for ack in gathered
+            if isinstance(ack, dict)
+            and (
+                ack.get("operation_id"),
+                ack.get("attempt_id"),
+                ack.get("node_id"),
+                ack.get("final_kv_hash"),
+            )
+            == (
+                operation.id,
+                attempt_id,
+                str(node_id),
+                final_kv_hash,
+            )
+            and ack.get("mamba_durable")
+        ]
+        observed = sorted({str(ack["rank"]) for ack in matching})
+        all_rank_durable = set(observed) >= set(expected_rank_set)
+        return expected_rank_set, observed, False, all_rank_durable
 
     def _all_reduce_attn_groups(self, tensor: torch.Tensor, op):
         reduced = False
@@ -471,8 +2643,52 @@ class UnifiedRadixCache(BasePrefixCache):
 
     def _reset_full(self) -> None:
         """Full reset: destroy entire tree and all state."""
+        self._host_allocability_instance_id += 1
+        self._host_allocability_generations = {PoolName.KV.value: 0}
+        self._host_allocability_telemetry_seq = 0
+        self._host_allocability_telemetry_mutations = {}
+        self._host_allocability_telemetry_emitted = {}
+        self._host_allocability_telemetry_last_emitted = {}
+        self._host_allocability_telemetry_total_emitted = 0
+        getattr(self, "_storage_prefetch_terminal", {}).clear()
+        getattr(self, "_storage_prefetch_completion", {}).clear()
         self.tree_core.reset()
         self.session_refs.reset()
+
+        self._t38c_node_contexts.clear()
+        self._t38c_node_context_index.clear()
+        self._t38c_session_contexts.clear()
+        self._t38c_session_builds.clear()
+        self._t38c_request_contexts.clear()
+        self._t38c_durability_evidence.clear()
+        self._t38c_mamba_boundaries.clear()
+        self._t38c_build_identities.clear()
+        self._t38c_durability_ready.clear()
+        with self._t38c_residency_lock:
+            # Legacy AST fixture contract: retire_slot_contexts() remains
+            # marker-off vocabulary; the product path retires owned tokens.
+            owned_tokens = {
+                entry[-1]
+                for expected in self._t38c_residency_detached.values()
+                for entry in expected
+            }
+            self._t38c_residency_detached.clear()
+            self._t38c_residency_completed.clear()
+            self._t38c_residency_barriers.clear()
+            self._t38c_residency_outcomes.clear()
+            self._t38c_residency_retry_epoch = 0
+            self._t38c_residency_lifecycle.clear()
+            self._t38c_residency_retired.clear()
+            self._t38c_residency_reconcile_ready.clear()
+            self._t38c_residency_queue_blocked.clear()
+            for token in owned_tokens:
+                retire_slot_token(token)
+        if self.cache_controller is not None:
+            reset_handoff = getattr(
+                self.cache_controller, "_t38c_reset_release_handoff", None
+            )
+            if reset_handoff is not None:
+                reset_handoff()
 
         # Reset Controller.
         self.session.slots.clear()
@@ -483,8 +2699,23 @@ class UnifiedRadixCache(BasePrefixCache):
         # Deferred persists skipped because their node was deleted before
         # the flush consumed it (observability for the stale-ref family).
         self._storage_persist_skip_count = 0
+        # P0 (phase2-backupassert): storage-gap nodes that were not host-backed
+        # up but whose device value was already released (host-only unbacked
+        # ancestors). These legally skip the device->host backup and fall
+        # through to the storage-write path (host->L3). Observability counter.
+        self._storage_gap_skipped_d2h_count = 0
+        # P0 (phase2-backupassert): storage-gap nodes with neither a device
+        # value nor a host copy (forced-miss tombstone / hollow with no KV in
+        # any tier). They have nothing to persist and are skipped as the
+        # explicit invalid / un-backupable state. Observability counter.
+        self._storage_gap_skipped_nokv_count = 0
         # Re-entry guard for _drain_write_through_acks (see its entry check).
         self._drain_write_through_depth = 0
+        # P3 (phase2-p3-fix): deferred-ACK reconciliation re-entrancy guard
+        # (see _reconcile_deferred_acked) -- write_backup_storage re-enters
+        # _flush_pending_storage_writes, so the scan must run at most once
+        # per outermost flush.
+        self._reconcile_depth = 0
         self.ongoing_load_back: dict[int, _OngoingLoadBack] = {}
         # P2-1c promotion admission: net reservation counter (device token
         # level, "reserved counts only the not-yet-locked part"), its peak,
@@ -522,7 +2753,12 @@ class UnifiedRadixCache(BasePrefixCache):
         # "revoked_miss" / "revoked_terminated"), recorded by the drain and
         # consumed by the scheduler's restore-state reconciliation on the
         # same (scheduler) thread.
-        self._storage_prefetch_terminal: dict[str, str] = {}
+        self._storage_prefetch_terminal: dict[str, object] = {}
+        # One-shot finalizer-owned material proof for the scheduler's
+        # ready_host join. This is observational and does not participate in
+        # restore or allocation decisions.
+        self._storage_prefetch_completion: dict[str, object] = {}
+        self._storage_prefetch_failures: dict[str, HostAllocFailure] = {}
         self.ongoing_backup: dict[int, tuple[NodeId, DecLockRefParams]] = {}
         # One-shot marker for the storage-failure degradation (see
         # _handle_storage_failure); cleared together with the controller's
@@ -692,6 +2928,24 @@ class UnifiedRadixCache(BasePrefixCache):
         same_results=["result.full_kv_hit_length", "result.swa_host_hit_length"],
     )
     def match_prefix(self, params: MatchPrefixParams) -> MatchResult:
+        if durable_trace_enabled() and params.req is not None:
+            session_id = self._t38c_req_session_id(params.req)
+            session_generation = getattr(params.req, "session_generation", None)
+            warm = (
+                session_id is not None
+                and session_generation is not None
+                and (str(session_id), session_generation)
+                in self._t38c_session_builds
+            )
+            context = self._t38c_trace_context_for_req(params.req, warm=warm)
+            if context is not None:
+                self._t38c_request_contexts[
+                    (
+                        context["session_id"],
+                        context["session_generation"],
+                        str(params.req.rid),
+                    )
+                ] = dict(context)
         result = self.session.try_match_prefix(params)
         if result is not None:
             return result
@@ -851,14 +3105,18 @@ class UnifiedRadixCache(BasePrefixCache):
         """Evict one device leaf, consuming its step result; returns the
         deferred write-back BackupKV when one must run before the demote."""
         result = self.tree_core.evict_device_leaf(node_id, self.is_write_back)
+        _t38c_residency_log(self, node_id, result, "device_leaf")
         self._free_values(result.device_frees, result.host_frees)
+        _t38c_residency_barrier(self, node_id)
         self._accumulate_tracker(tracker, result.tracker)
         return result.backup_kv
 
     def _demote(self, node_id: NodeId, tracker: dict[ComponentType, int]) -> None:
         """Demote a backed-up node, consuming its step result."""
         result = self.tree_core.demote(node_id)
+        _t38c_residency_log(self, node_id, result, "demote")
         self._free_values(result.device_frees, result.host_frees)
+        _t38c_residency_barrier(self, node_id)
         self._accumulate_tracker(tracker, result.tracker)
 
     def _drop_subtree_no_host(
@@ -878,7 +3136,9 @@ class UnifiedRadixCache(BasePrefixCache):
         keep the node and host subtree. The L3 copy is the durable backup --
         written+acked or restored (P2-1 e14)."""
         result = self.tree_core.evict_device_leaf_storage_backed(node_id)
+        _t38c_residency_log(self, node_id, result, "storage_backed_hollow")
         self._free_values(result.device_frees, result.host_frees)
+        _t38c_residency_barrier(self, node_id)
         self._accumulate_tracker(tracker, result.tracker)
         _log_evict_durable(
             "hollow_evict",
@@ -904,7 +3164,9 @@ class UnifiedRadixCache(BasePrefixCache):
         # is_l3_durable must be read before the detach unregisters the node.
         was_l3_durable = self.tree_core.is_l3_durable(node_id)
         result = self.tree_core.drop_device_leaf_to_miss(node_id)
+        _t38c_residency_log(self, node_id, result, "forced_miss")
         self._free_values(result.device_frees, result.host_frees)
+        _t38c_residency_barrier(self, node_id)
         self._accumulate_tracker(tracker, result.tracker)
         # P2-1 e16/e17: the node is now a forced-miss plain miss (device layers
         # gone, no hollow/restore expectation). Detach it AND its host-only
@@ -1066,10 +3328,12 @@ class UnifiedRadixCache(BasePrefixCache):
     ) -> None:
         if self.disable:
             return
+        before = self._host_allocability_signatures()
         result = self.tree_core.dec_swa_lock_only(
             node_id, swa_uuid_for_lock, skip_lock_node_ids
         )
         self._free_values(result.device_frees, result.host_frees)
+        self._bump_changed_host_allocability(before, "lock_release_evictable")
 
     def inc_host_lock_ref(self, node_id: NodeId) -> IncLockRefResult:
         if self.disable:
@@ -1081,7 +3345,10 @@ class UnifiedRadixCache(BasePrefixCache):
     ) -> DecLockRefResult:
         if self.disable:
             return DecLockRefResult()
-        return self.tree_core.dec_host_lock_ref(node_id, params)
+        before = self._host_allocability_signatures()
+        result = self.tree_core.dec_host_lock_ref(node_id, params)
+        self._bump_changed_host_allocability(before, "lock_release_evictable")
+        return result
 
     def cache_finished_req(
         self, req: Req, is_insert: bool = True, *, kv_len_to_handle: int, **kwargs
@@ -1104,7 +3371,11 @@ class UnifiedRadixCache(BasePrefixCache):
         ]
 
         result = None
+        event_result = None
         insert_params = None
+        from sglang.srt.managers.schedule_batch import FINISH_ABORT
+
+        is_abort = isinstance(req.finished_reason, FINISH_ABORT)
 
         if is_insert:
             insert_params = InsertParams(
@@ -1124,33 +3395,51 @@ class UnifiedRadixCache(BasePrefixCache):
                 if cl is not None:
                     effective_cache_len = min(effective_cache_len, cl)
 
-            # Truncate if needed; the tail free is deferred and batched with
-            # the unaligned tail below so a shared boundary page is emitted once.
-            kv_indices_full = kv_indices
-            tail_free_start = None
-            if effective_cache_len < len(token_ids):
-                tail_free_start = max(effective_cache_len, req.cache_protected_len)
-                token_ids = token_ids[:effective_cache_len]
-                kv_indices = kv_indices[:effective_cache_len]
+            if effective_cache_len <= 0:
+                # Match the unfinished no-insert contract. In particular, do
+                # not turn a missing Mamba boundary into an empty radix key.
+                self.token_to_kv_pool_allocator.free_segment(
+                    kv_indices[req.cache_protected_len :],
+                    start_pos=req.cache_protected_len,
+                )
+                event_result = self._t38c_finished_boundary_result(
+                    req, is_abort=is_abort
+                )
+            else:
+                # Truncate if needed; the tail free is deferred and batched with
+                # the unaligned tail below so a shared boundary page is emitted once.
+                kv_indices_full = kv_indices
+                tail_free_start = None
+                if effective_cache_len < len(token_ids):
+                    tail_free_start = max(
+                        effective_cache_len, req.cache_protected_len
+                    )
+                    token_ids = token_ids[:effective_cache_len]
+                    kv_indices = kv_indices[:effective_cache_len]
 
-            radix_key = RadixKey(
-                token_ids,
-                req.extra_key,
-                is_bigram=self.tree_core.is_eagle,
-                cache_salt=req.cache_salt,
-            ).page_aligned(self.page_size)
-            page_aligned_len = len(radix_key)
-            values = kv_indices[:page_aligned_len].to(dtype=torch.int64, copy=True)
+                radix_key = RadixKey(
+                    token_ids,
+                    req.extra_key,
+                    is_bigram=self.tree_core.is_eagle,
+                    cache_salt=req.cache_salt,
+                ).page_aligned(self.page_size)
+                page_aligned_len = len(radix_key)
+                values = kv_indices[:page_aligned_len].to(
+                    dtype=torch.int64, copy=True
+                )
 
-            insert_params.key = radix_key
-            insert_params.value = values
-            result = self.insert(insert_params)
+                insert_params.key = radix_key
+                insert_params.value = values
+                result = self.insert(insert_params)
+                event_result = result
 
-            # Free unaligned tail (+ deferred truncation tail)
-            segments = [(kv_indices[page_aligned_len:], page_aligned_len)]
-            if tail_free_start is not None:
-                segments.append((kv_indices_full[tail_free_start:], tail_free_start))
-            self.token_to_kv_pool_allocator.free_segments(segments)
+                # Free unaligned tail (+ deferred truncation tail)
+                segments = [(kv_indices[page_aligned_len:], page_aligned_len)]
+                if tail_free_start is not None:
+                    segments.append(
+                        (kv_indices_full[tail_free_start:], tail_free_start)
+                    )
+                self.token_to_kv_pool_allocator.free_segments(segments)
         else:
             self.token_to_kv_pool_allocator.free_segment(
                 kv_indices[req.cache_protected_len :],
@@ -1161,6 +3450,15 @@ class UnifiedRadixCache(BasePrefixCache):
 
         if is_insert and result is not None and result.last_device_node is not None:
             req.last_node = result.last_device_node
+            self._t38c_record_node_context(req, result.last_device_node)
+
+        if is_insert and event_result is not None:
+            self._t38c_emit_build_complete(
+                req,
+                event_result,
+                is_insert=True,
+                is_abort=is_abort,
+            )
 
         # cleanup
         for comp in self._components_tuple:
@@ -1168,12 +3466,8 @@ class UnifiedRadixCache(BasePrefixCache):
                 req, is_finished=True, insert_result=result, insert_params=insert_params
             )
 
-        if self.enable_session_radix_cache and result is not None:
-            from sglang.srt.managers.schedule_batch import FINISH_ABORT
-
-            if req.finished_reason is not None and not isinstance(
-                req.finished_reason, FINISH_ABORT
-            ):
+        if self.enable_session_radix_cache and event_result is not None:
+            if req.finished_reason is not None and not is_abort:
                 self.session_refs.register_session_ref(req)
 
     def cache_unfinished_req(self, req: Req, chunked: bool = False, **kwargs) -> None:
@@ -1286,6 +3580,14 @@ class UnifiedRadixCache(BasePrefixCache):
             req.prefix_indices = new_indices
         req.cache_protected_len = len(new_indices)
         req.last_node = new_last_node
+        self._t38c_record_node_context(req, new_last_node)
+        self._t38c_record_mamba_boundary(
+            req,
+            new_last_node,
+            effective_cache_len,
+            insert_params,
+            result,
+        )
         req.swa_uuid_for_lock = lock_result.swa_uuid_for_lock
         # carry the skip set so this node's dec releases only what we locked
         req.skip_lock_node_ids = lock_result.skip_lock_node_ids
@@ -1342,16 +3644,332 @@ class UnifiedRadixCache(BasePrefixCache):
     ) -> None:
         # Free per component device slots, consuming each entry as it frees.
         for ct in list(device_frees):
+            values = device_frees.pop(ct)
+            tracing = _t38c_durable_enabled()
+            pool = _t38c_pool_name(ct) if tracing else None
+            digest = _t38c_slot_digest(pool, values) if tracing else None
             self._apply_cache_action(
-                FreeComponentDeviceSlot(device_frees.pop(ct), component_type=ct)
+                FreeComponentDeviceSlot(values, component_type=ct)
             )
+            if tracing:
+                trace_context = slot_context(pool, "device", digest)
+                _t38c_note_completion(
+                    self,
+                    pool,
+                    "device",
+                    digest,
+                    token=slot_token(pool, "device", digest),
+                )
+                _t38c_durable_log(
+                    {
+                        "evt": "residency_free_complete",
+                        "trace_context": trace_context,
+                        "pool": pool,
+                        "tier": "device",
+                        "slot_count": _t38c_free_slots({ct: values}),
+                        "slot_digest": digest,
+                        "result": True,
+                        "reason": "allocator_free_returned",
+                    }
+                )
+
+    @staticmethod
+    def _host_allocability_pool_for_component(component_type: ComponentType) -> str:
+        return _COMPONENT_POOL_LABEL.get(component_type, str(component_type))
+
+    def _host_evictable_signature(self, pool: str) -> tuple[int, frozenset[int]]:
+        """Return the tree-owned evictable summary for one host pool."""
+        component_type = {
+            PoolName.KV.value: BASE_COMPONENT_TYPE,
+            PoolName.SWA.value: ComponentType.SWA,
+            PoolName.MAMBA.value: ComponentType.MAMBA,
+        }.get(pool)
+        components = getattr(self, "components", {})
+        if component_type is None or component_type not in components:
+            return 0, frozenset()
+        if pool == PoolName.KV.value:
+            leaves = getattr(self.tree_core, "evictable_host_leaves", ())
+            return (
+                sum(
+                    len(node.component_data[component_type].host_value)
+                    for node in leaves
+                    if node.component_data[component_type].host_value is not None
+                ),
+                frozenset(node.id for node in leaves),
+            )
+        host_lru = self.tree_core.host_lru_lists.get(component_type)
+        if host_lru is None:
+            return 0, frozenset()
+        eligible = frozenset(
+            node.id
+            for node in host_lru.cache.values()
+            if node.component_data[component_type].host_lock_ref == 0
+            and node.component_data[component_type].host_value is not None
+        )
+        return (
+            sum(
+                len(host_lru.cache[node_id].component_data[component_type].host_value)
+                for node_id in eligible
+            ),
+            eligible,
+        )
+
+    def _host_allocability_signatures(self) -> dict[str, tuple[int, frozenset[int]]]:
+        pools = [PoolName.KV.value]
+        pools.extend(
+            self._host_allocability_pool_for_component(ct)
+            for ct in self.components
+            if ct != BASE_COMPONENT_TYPE
+        )
+        return {pool: self._host_evictable_signature(pool) for pool in pools}
+
+    def _bump_host_allocability(
+        self,
+        pool: str,
+        cause: str,
+        returned_units: int = 0,
+        *,
+        evictable_before: Optional[int] = None,
+        evictable_after: Optional[int] = None,
+        causal_rid: Optional[str] = None,
+        trace_context=None,
+    ) -> None:
+        """Advance one pool generation after a completed causal mutation.
+
+        The generation and telemetry sequence advance for every mutation.
+        Mutation records are observational samples keyed by pool, cause,
+        request, and trace context: the first 16 per key are emitted, then
+        every 128th mutation, with a 64-record per-key and 256-record
+        per-cache-instance hard cap.  This preserves request/cause joins and
+        sequence gaps while bounding log volume; it never changes wake or
+        allocation behavior.
+        """
+        import json as _json
+
+        returned_units = int(returned_units or 0)
+        if returned_units <= 0 and cause != "lock_release_evictable":
+            return
+        pool = getattr(pool, "value", pool)
+        generations = getattr(self, "_host_allocability_generations", None)
+        if generations is None:
+            generations = {}
+            self._host_allocability_generations = generations
+        before = generations.get(pool, 0)
+        generations[pool] = before + 1
+        if evictable_after is None:
+            evictable_after = self._host_evictable_signature(pool)[0]
+        if evictable_before is None:
+            evictable_before = evictable_after
+        self._host_allocability_telemetry_seq += 1
+
+        trace_key = _json.dumps(trace_context, sort_keys=True, default=str)
+        telemetry_key = (str(pool), str(cause), causal_rid, trace_key)
+        mutations = getattr(self, "_host_allocability_telemetry_mutations", None)
+        emitted = getattr(self, "_host_allocability_telemetry_emitted", None)
+        last_emitted = getattr(
+            self, "_host_allocability_telemetry_last_emitted", None
+        )
+        if mutations is None or emitted is None or last_emitted is None:
+            mutations = {}
+            emitted = {}
+            last_emitted = {}
+            self._host_allocability_telemetry_mutations = mutations
+            self._host_allocability_telemetry_emitted = emitted
+            self._host_allocability_telemetry_last_emitted = last_emitted
+        if telemetry_key not in mutations and len(mutations) >= _HOST_ALLOC_MUTATION_TELEMETRY_MAX_KEYS:
+            mutations.clear()
+            emitted.clear()
+            last_emitted.clear()
+        mutation_count = mutations.get(telemetry_key, 0) + 1
+        mutations[telemetry_key] = mutation_count
+        key_emitted = emitted.get(telemetry_key, 0)
+        total_emitted = getattr(
+            self, "_host_allocability_telemetry_total_emitted", 0
+        )
+        should_emit = key_emitted < _HOST_ALLOC_MUTATION_TELEMETRY_HEAD or (
+            mutation_count % _HOST_ALLOC_MUTATION_TELEMETRY_STRIDE == 0
+            and key_emitted < _HOST_ALLOC_MUTATION_TELEMETRY_MAX_PER_KEY
+        )
+        if (
+            not should_emit
+            or key_emitted >= _HOST_ALLOC_MUTATION_TELEMETRY_MAX_PER_KEY
+            or total_emitted >= _HOST_ALLOC_MUTATION_TELEMETRY_MAX_TOTAL
+        ):
+            return
+        emitted[telemetry_key] = key_emitted + 1
+        self._host_allocability_telemetry_total_emitted = total_emitted + 1
+        previous_emitted_mutation = last_emitted.get(telemetry_key, 0)
+        last_emitted[telemetry_key] = mutation_count
+        _log_host_alloc_telemetry(
+            "host_allocability_change",
+            cache_instance_id=getattr(self, "_host_allocability_instance_id", 0),
+            pool=pool,
+            generation_before=before,
+            generation_after=before + 1,
+            cause=cause,
+            returned_units=int(returned_units),
+            evictable_before=int(evictable_before),
+            evictable_after=int(evictable_after),
+            causal_rid=causal_rid,
+            trace_context=trace_context,
+            telemetry_seq=self._host_allocability_telemetry_seq,
+            telemetry_mutation_count=mutation_count,
+            telemetry_sample_index=key_emitted + 1,
+            telemetry_coalesced_mutations=max(
+                0, mutation_count - previous_emitted_mutation - 1
+            ),
+            lifecycle_key=None,
+            wait_id=None,
+            blocked_pool_generations=dict(
+                getattr(self, "_host_allocability_generations", {})
+            ),
+        )
+
+    def _bump_changed_host_allocability(
+        self,
+        before: dict[str, tuple[int, frozenset[int]]],
+        cause: str,
+    ) -> None:
+        for pool, previous in before.items():
+            current = self._host_evictable_signature(pool)
+            if current != previous:
+                self._bump_host_allocability(
+                    pool,
+                    cause,
+                    evictable_before=previous[0],
+                    evictable_after=current[0],
+                )
+
+    def host_allocability_snapshot(
+        self, required_pools: Optional[Sequence[PoolName | str]] = None
+    ) -> HostAllocabilitySnapshot:
+        """Return a cache-owned per-pool allocability snapshot."""
+        if required_pools is None:
+            pools = [PoolName.KV.value]
+            group = self.host_pool_group
+            if group is not None:
+                pools.extend(
+                    getattr(entry.name, "value", entry.name)
+                    for entry in group.entries
+                )
+        else:
+            pools = [getattr(pool, "value", pool) for pool in required_pools]
+            if PoolName.KV.value not in pools:
+                pools.insert(0, PoolName.KV.value)
+        pools = list(dict.fromkeys(str(pool) for pool in pools))
+
+        generation_state = getattr(self, "_host_allocability_generations", {})
+        generations = {pool: generation_state.get(pool, 0) for pool in pools}
+        free_units = {}
+        evictable_units = {}
+        for pool in pools:
+            evictable_units[pool] = self._host_evictable_signature(pool)[0]
+            controller = self.cache_controller
+            host_group = getattr(controller, "mem_pool_host", None)
+            try:
+                free_units[pool] = int(
+                    host_group.available_size(pool=PoolName(pool))
+                )
+            except (AttributeError, KeyError, TypeError, ValueError):
+                try:
+                    free_units[pool] = (
+                        int(host_group.available_size())
+                        if pool == PoolName.KV.value
+                        else 0
+                    )
+                except (AttributeError, TypeError, ValueError):
+                    free_units[pool] = 0
+        return HostAllocabilitySnapshot(
+            cache_instance_id=getattr(self, "_host_allocability_instance_id", 0),
+            generation_by_pool=generations,
+            free_units_by_pool=free_units,
+            evictable_units_by_pool=evictable_units,
+        )
+
+    def _release_aux_transfers_before_host_alloc_snapshot(
+        self,
+        comp_xfers: dict[ComponentType, list[PoolTransfer]],
+        *,
+        causal_rid: Optional[str] = None,
+        trace_context=None,
+    ) -> None:
+        """Complete failed-prefetch auxiliary cleanup before taking its cursor."""
+        transfers = [transfer for xfers in comp_xfers.values() for transfer in xfers]
+        if not transfers:
+            return
+        group = getattr(self, "host_pool_group", None)
+        if group is not None:
+            callback = getattr(group, "host_allocability_change_fn", None)
+            group.release_transfers(transfers)
+            if callback is None:
+                for transfer in transfers:
+                    if transfer.indices_from_pool is None and transfer.host_indices is not None:
+                        self._bump_host_allocability(
+                            getattr(transfer.name, "value", transfer.name),
+                            "direct_free",
+                            len(transfer.host_indices),
+                            causal_rid=causal_rid,
+                            trace_context=trace_context,
+                        )
+                    transfer.host_indices = None
+            else:
+                for transfer in transfers:
+                    if transfer.indices_from_pool is None:
+                        transfer.host_indices = None
+            return
+        host_pool = getattr(getattr(self, "cache_controller", None), "mem_pool_host", None)
+        for transfer in transfers:
+            if transfer.indices_from_pool is not None or transfer.host_indices is None:
+                continue
+            released = host_pool.free(
+                transfer.host_indices,
+                pool=transfer.name,
+            )
+            self._bump_host_allocability(
+                getattr(transfer.name, "value", transfer.name),
+                "direct_free",
+                int(released or len(transfer.host_indices)),
+                causal_rid=causal_rid,
+                trace_context=trace_context,
+            )
+            transfer.host_indices = None
 
     def _drain_host_frees(
         self, host_frees: dict[ComponentType, list[torch.Tensor]]
     ) -> None:
         # Free per component host-pool slots, consuming each entry as it frees.
         for ct in list(host_frees):
-            self.components[ct].free_host_values(host_frees.pop(ct))
+            values = host_frees.pop(ct)
+            tracing = _t38c_durable_enabled()
+            pool = _t38c_pool_name(ct) if tracing else None
+            digest = _t38c_slot_digest(pool, values) if tracing else None
+            self.components[ct].free_host_values(values)
+            self._bump_host_allocability(
+                self._host_allocability_pool_for_component(ct),
+                "direct_free",
+                _t38c_free_slots({ct: values}),
+            )
+            if tracing:
+                trace_context = slot_context(pool, "host", digest)
+                _t38c_note_completion(
+                    self,
+                    pool,
+                    "host",
+                    digest,
+                    token=slot_token(pool, "host", digest),
+                )
+                _t38c_durable_log(
+                    {
+                        "evt": "residency_free_complete",
+                        "trace_context": trace_context,
+                        "pool": pool,
+                        "tier": "host",
+                        "slot_count": _t38c_free_slots({ct: values}),
+                        "slot_digest": digest,
+                        "result": True,
+                        "reason": "allocator_free_returned",
+                    }
+                )
 
     def evict_host(
         self, num_tokens: int, component_type: ComponentType = BASE_COMPONENT_TYPE
@@ -1495,7 +4113,10 @@ class UnifiedRadixCache(BasePrefixCache):
             writeback=True,
         )
         if resolved is None and extra_transfers:
-            self.host_pool_group.free(host_indices)
+            released = self.host_pool_group.free(host_indices)
+            self._bump_host_allocability(
+                PoolName.KV.value, "direct_free", int(released or len(host_indices))
+            )
             return None
 
         backup = RetractionBackup(
@@ -1572,7 +4193,10 @@ class UnifiedRadixCache(BasePrefixCache):
         self.retraction_discard(backup)
 
     def retraction_discard(self, backup: RetractionBackup) -> None:
-        self.host_pool_group.free(backup.host_indices)
+        released = self.host_pool_group.free(backup.host_indices)
+        self._bump_host_allocability(
+            PoolName.KV.value, "direct_free", int(released or len(backup.host_indices))
+        )
         self.host_pool_group.release_transfers(backup.pool_transfers)
 
     # ---- HiCache: Backup / LoadBack ----
@@ -1605,6 +4229,23 @@ class UnifiedRadixCache(BasePrefixCache):
             if host_indices is None:
                 return 0
             self.tree_core.commit_backup(node_id, host_indices, comp_xfers)
+            _t38c_durable_log(
+                {
+                    "evt": "backup_host_commit",
+                    "trace_context": self._t38c_trace_context_for_node(node_id),
+                    "node_id": str(node_id),
+                    "final_kv_hash": (
+                        self.tree_core.node_by_id(node_id).get_last_hash_value() or ""
+                    ),
+                    "kv_transfer": bool(host_indices.numel()),
+                    "mamba_transfer": any(
+                        transfer.name == PoolName.MAMBA
+                        for xfers in comp_xfers.values()
+                        for transfer in xfers
+                    ),
+                    "host_tokens": int(host_indices.numel()),
+                }
+            )
             lock_params = None
             if not write_back:
                 lock_params = self.inc_lock_ref(node_id).to_dec_params()
@@ -2111,6 +4752,79 @@ class UnifiedRadixCache(BasePrefixCache):
                 # Backstop: the node or a gap ancestor died between the
                 # existence check and the arena lookups; nothing to persist.
                 self._skip_stale_storage_persist(node_id)
+        # P3 (phase2-p3-fix): deferred-ACK reconciliation. A node whose L3
+        # write acked while its parent chain was not persisted is left
+        # deferred (storage_acked && !storage_persisted) by
+        # advance_storage_persisted. If its parent chain is later cleared
+        # (revoke-miss clear_storage_durable) or physically deleted
+        # (eviction/tombstone), nothing re-promotes it without a fresh IO
+        # -- the permanent frontier HOL (T13 60s timeout). This pass
+        # rescans deferred_acked_nodes each drain and re-fills each
+        # surviving node's chain from the nearest persisted ancestor / root
+        # (collect_storage_gap), then re-promotes through a real write ack.
+        # Idempotent: collect_storage_gap skips already-written nodes,
+        # write_backup_storage skips is_storage_written / dead nodes, and
+        # advance_storage_persisted returns early for persisted nodes; a
+        # single pass re-fills each broken chain once. Reconciliation never
+        # sets storage_persisted itself -- promotion stays a real-ack /
+        # real-restore fact.
+        self._reconcile_deferred_acked()
+
+    def _reconcile_deferred_acked(self) -> None:
+        """P3 A3: re-fill and re-promote every deferred-ACK node (acked but
+        not persisted) whose chain is broken by a cleared / deleted parent.
+        One ancestors-first sweep per outermost _flush_pending_storage_writes;
+        per-node gap fill is idempotent (see _flush_pending_storage_writes).
+        Re-entrancy guarded: write_backup_storage itself calls
+        _flush_pending_storage_writes at its tail, so without a depth guard a
+        deferred node that is not resolved in one fill (ack in flight, or an
+        unfillable chain) would re-enter this scan from inside itself,
+        unboundedly."""
+        if getattr(self, "_reconcile_depth", 0) > 0:
+            return
+        self._reconcile_depth = getattr(self, "_reconcile_depth", 0) + 1
+        try:
+            self._reconcile_deferred_acked_inner()
+        finally:
+            self._reconcile_depth -= 1
+
+    def _reconcile_deferred_acked_inner(self) -> None:
+        if not self.enable_storage or self.cache_controller is None:
+            return
+        deferred = self.tree_core.deferred_acked_nodes()
+        if not deferred:
+            return
+        for node_id in deferred:
+            if not self.tree_core.node_exists(node_id):
+                self._skip_stale_storage_persist(node_id)
+                continue
+            try:
+                # 1) Fill any broken parent gap: re-write the nodes whose
+                #    parent chain was physically deleted (tombstone / host
+                #    eviction) from the nearest persisted ancestor / root.
+                #    collect_storage_gap skips already-written nodes, so this
+                #    is a no-op for a node whose write is already complete.
+                self.write_backup_storage(node_id)
+            except KeyError:
+                # A gap ancestor died between the scan and the arena lookups.
+                self._skip_stale_storage_persist(node_id)
+                continue
+            # 2) Re-run promotion on the already-acked node. Its write is
+            #    real and acked; it was only deferred because the parent
+            #    chain was not contiguous when the ack arrived. Now that the
+            #    chain is contiguous (parent persisted, or the node re-anchored
+            #    to root after its parent was deleted), re-invoking the same
+            #    promotion entry the ack drain uses promotes the node and its
+            #    acked descendants. This is the reverse-path repair -- it does
+            #    not fabricate durability (advance_storage_persisted only
+            #    promotes when the parent chain is contiguous), and it is
+            #    idempotent (advance returns early for an already-persisted
+            #    node). Waking frontier waiters mirrors the ack drain: a
+            #    freshly promoted anchor can serve its waiters, closing the
+            #    loop that the T13 timeout path used to cut short.
+            promoted = self.tree_core.advance_storage_persisted(node_id)
+            for promoted_id in promoted:
+                self._wake_frontier_waiters(promoted_id)
 
     def _skip_stale_storage_persist(self, node_id: NodeId) -> None:
         """Count and log a deferred L3 persist whose node is no longer alive."""
@@ -2141,6 +4855,20 @@ class UnifiedRadixCache(BasePrefixCache):
                 self._skip_stale_storage_persist(nid)
                 continue
             if not self.tree_core.is_backuped(nid):
+                # P0 (phase2-backupassert): a gap node may be unbacked AND
+                # host-only (device value already released by an eviction /
+                # hollow / forced-miss, or inserted host-only). `is_backuped`
+                # alone cannot distinguish "unbacked with a device value"
+                # (needs a D->H backup) from "unbacked host-only" (device
+                # value gone; host copy is the only KV). Do not run the D->H
+                # backup when there is no device value to copy -- the
+                # _build_backup_spec assert would fire. Skip and let the
+                # storage-write loop below persist the host copy to L3.
+                if self.tree_core.get_component_device_value(
+                    nid, BASE_COMPONENT_TYPE
+                ) is None:
+                    self._storage_gap_skipped_d2h_count += 1
+                    continue
                 self._execute_and_commit_kv_backup(BackupKV([nid]), write_back=False)
         # The D->H backups above evict_host when host space is tight; host
         # eviction deletes host-only leaves, which may be gap nodes. Re-filter
@@ -2155,6 +4883,15 @@ class UnifiedRadixCache(BasePrefixCache):
         for nid in gap:
             if not self.tree_core.node_exists(nid):
                 self._skip_stale_storage_persist(nid)
+                continue
+            if not self.tree_core.is_backuped(nid):
+                # P0 (phase2-backupassert): a gap node with neither a device
+                # value nor a host copy (a forced-miss tombstone / hollow with
+                # no KV in any tier) has nothing to persist. It must not be
+                # written to L3 as if it carried content (would fabricate a
+                # durable chain for a node that holds no KV) -- skip it as the
+                # explicit invalid / un-backupable state and record the reason.
+                self._storage_gap_skipped_nokv_count += 1
                 continue
             if not self.tree_core.is_storage_written(nid):
                 self._write_backup_storage_node(nid)
@@ -2187,6 +4924,18 @@ class UnifiedRadixCache(BasePrefixCache):
         )
         aux_xfers = [x for xfers in spec.comp_xfers.values() for x in xfers]
         aux_xfers.extend(sidecar_xfers)
+        mamba_transfers = [
+            transfer for transfer in aux_xfers if transfer.name == PoolName.MAMBA
+        ]
+        trace_context = self._t38c_trace_context_for_node(node_id)
+        # Carry write-side identity only for the gated diagnostic.  The
+        # storage backend emits the eventual batch_set_v2 result, while this
+        # submission record distinguishes an omitted BACKUP_STORAGE transfer.
+        for transfer in mamba_transfers:
+            transfer._t38c_node_id = str(node_id)
+            transfer._t38c_final_kv_hash = (
+                spec.hash_value[-1] if spec.hash_value else ""
+            )
 
         # T38C-PROBE (L3 write-chain observation; log-only, gated on
         # /tmp/t38c-on). Records the write chain's full-64-hex seed and first
@@ -2208,6 +4957,13 @@ class UnifiedRadixCache(BasePrefixCache):
                 "page0_hash": spec.hash_value[0] if spec.hash_value else "",
                 "page1_hash": spec.hash_value[1] if len(spec.hash_value or []) > 1 else "",
                 "n_pages": len(spec.hash_value or []),
+                "final_kv_hash": spec.hash_value[-1] if spec.hash_value else "",
+                "mamba_transfer_exists": bool(mamba_transfers),
+                "mamba_key": (
+                    mamba_transfers[0].keys[-1]
+                    if mamba_transfers and mamba_transfers[0].keys
+                    else ""
+                ),
             })
         except Exception:
             pass
@@ -2219,6 +4975,28 @@ class UnifiedRadixCache(BasePrefixCache):
             spec.prefix_keys,
             extra_pools=aux_xfers or None,
             node_id=node_id,
+            trace_context=trace_context,
+        )
+        _t38c_durable_log(
+            {
+                "evt": "backup_submit",
+                "trace_context": trace_context,
+                "operation_id": operation_id,
+                "attempt_id": f"storage-{operation_id}",
+                "node_id": str(node_id),
+                "final_kv_hash": spec.hash_value[-1] if spec.hash_value else "",
+                "kv_transfer": bool(spec.host_value is not None and spec.hash_value),
+                "kv_pages": len(spec.hash_value or []),
+                "mamba_transfer": bool(mamba_transfers),
+                "mamba_pages": len(mamba_transfers[0].keys or [])
+                if mamba_transfers
+                else 0,
+                "mamba_key": (
+                    mamba_transfers[0].keys[-1]
+                    if mamba_transfers and mamba_transfers[0].keys
+                    else ""
+                ),
+            }
         )
         self.ongoing_backup[operation_id] = (
             node_id,
@@ -2270,10 +5048,66 @@ class UnifiedRadixCache(BasePrefixCache):
     def l3_publish_epoch(self) -> int:
         """The current monotonic L3 durable/publish epoch (P3 M3): bumped
         on every durability advance (write ack promotion / restore
-        read-back). The scheduler's l3_publish causal-epoch signal; a
-        value that never moved means the L3 coverage a NO_L3-parked rid
-        missed on is unchanged, so the park does not clear."""
+        read-back). phase2-peranchor: this global counter is retained for
+        DIAGNOSTIC STATISTICS ONLY -- the P1 miss re-arm gate and the NO_L3
+        cursor read the per-anchor storage_version, not this global count."""
         return self.tree_core.l3_publish_epoch()
+
+    def anchor_storage_version(self, node_id: NodeId) -> int:
+        """The per-anchor durability version of node_id (phase2-peranchor):
+        bumped only on a durability event local to THIS node's chain (write
+        ack promotion / restore read-back / durable-belief clear). The P1
+        miss re-arm gate and the NO_L3 cursor compare the version recorded at
+        the miss against this; an advance means THIS anchor's L3 coverage
+        genuinely changed. A dead/absent anchor reads 0 (self-heal to a
+        re-match from root, a new candidate)."""
+        return self.tree_core.anchor_storage_version(node_id)
+
+    def is_storage_written(self, node_id: NodeId) -> bool:
+        """Whether the node's KV was already submitted to L3 (dedupe guard /
+        a submitted write whose ack could still promote it durable)."""
+        return self.tree_core.is_storage_written(node_id)
+
+    def has_acked_descendant(self, node_id: NodeId) -> bool:
+        """Whether node_id's subtree contains a storage_acked &&
+        !storage_persisted descendant (a deferred-ACK node). The no-material
+        fast-forward judgment's deferred-durable-dependency fact: such a
+        descendant is a P3 reconcile promotion source that could make the
+        anchor durable, so the anchor is not a no-material dead-end."""
+        if not self.tree_core.node_exists(node_id):
+            return False
+        return self.tree_core.has_acked_descendant(node_id)
+
+    def deepest_durable_ancestor(self, node_id: NodeId) -> Optional[NodeId]:
+        """The most-rootward ancestor of `node_id` that is L3-durable, or
+        None when no ancestor (including the anchor itself and the root, whose
+        storage_persisted defaults False) is durable.
+
+        phase2-p0fix Q1: the anchor-resolution step for the no-material
+        fast-forward judgment. A request's suffix is served from a page range
+        under `node_id`; when the host prefix was split by an L3 write ack
+        (D->H commit), the shallow anchor can be non-durable while a deeper
+        ancestor's pages ARE durable. Judging no-material on the shallow
+        node's missing flags would mis-forward a request that could restore
+        from the deeper durable pages. Walking the parent chain to the most
+        rootward durable ancestor aligns the judgment with the restore
+        coverage. Returns the ORIGINAL anchor when it is itself durable; None
+        (a pure device chain with no L3 content, or a dead anchor) means
+        no-material holds. O(depth) per call -- never O(subtree)."""
+        if not self.tree_core.node_exists(node_id):
+            return None
+        cur = node_id
+        while cur is not None and self.tree_core.node_exists(cur):
+            if self.tree_core.is_l3_durable(cur):
+                return cur
+            cur_node = self.tree_core.node_by_id(cur)
+            if cur_node is None:
+                break
+            parent = cur_node.parent
+            if parent is None:
+                break
+            cur = parent.id
+        return None
 
     def chain_backup_frontiers(
         self,
@@ -2375,6 +5209,7 @@ class UnifiedRadixCache(BasePrefixCache):
             cc.inflight_speculative_tokens = max(
                 0, cc.inflight_speculative_tokens - reservation.tokens
             )
+            cc.speculative_release_epoch += 1
 
     def frontier_anchor_ready(self, node_id: NodeId) -> bool:
         """P2-1 M2 T11: whether a FRONTIER waiter's anchor can serve a
@@ -2468,6 +5303,8 @@ class UnifiedRadixCache(BasePrefixCache):
         prefix_keys: Optional[list[str]] = None,
         matched_prefix_tokens: Optional[list[int]] = None,
         demand_restore: bool = False,
+        host_alloc_attempt_id: Optional[str] = None,
+        prefetch_attempt_id: Optional[str] = None,
     ) -> Optional[str]:
         """Returns an outcome code for the P2-1 M1b state machine:
         "issued" / "declined_rate_limited" / "declined_too_short" /
@@ -2605,14 +5442,83 @@ class UnifiedRadixCache(BasePrefixCache):
                 self.storage_metrics_collector.log_prefetch_aux_alloc_failed_tokens(
                     len(prefetch_key)
                 )
-            self.cache_controller.append_host_mem_release(
-                extra_pools=[x for xfers in comp_xfers.values() for x in xfers],
+            failed_pool = self._host_allocability_pool_for_component(ct)
+            required_aux_units = {
+                getattr(transfer.name, "value", transfer.name): len(transfer.host_indices)
+                for transfers in comp_xfers.values()
+                for transfer in transfers
+                if transfer.host_indices is not None
+            }
+            required_aux_units.setdefault(failed_pool, len(prefetch_key))
+            self._release_aux_transfers_before_host_alloc_snapshot(
+                comp_xfers, causal_rid=req_id
             )
             if anchor_lock_params is not None:
                 self.dec_host_lock_ref(last_host_node_id, anchor_lock_params)
+            snapshot = self.host_allocability_snapshot(
+                [PoolName.KV.value, *required_aux_units]
+            )
+            telemetry_pools = {
+                PoolName.KV.value: len(prefetch_key),
+                **required_aux_units,
+            }
+            _log_host_alloc_telemetry(
+                "restore_host_alloc_retry_result",
+                rid=req_id,
+                attempt_id=host_alloc_attempt_id,
+                cache_instance_id=snapshot.cache_instance_id,
+                trace_context=None,
+                generation_vector_id=snapshot.generation_vector(),
+                captured_generations=dict(snapshot.generation_by_pool),
+                current_generations=dict(snapshot.generation_by_pool),
+                full_frontier_tokens=int(len(prefetch_key)),
+                crop_attempted=False,
+                lower_checkpoint_queried=False,
+                per_pool={
+                    pool: {
+                        "required": int(required),
+                        "free_before": int(snapshot.free_units_by_pool.get(pool, 0)),
+                        "evictable_before": int(
+                            snapshot.evictable_units_by_pool.get(pool, 0)
+                        ),
+                        "alloc1": None,
+                        "reclaimed": 0,
+                        "alloc2": None,
+                        "free_after": int(snapshot.free_units_by_pool.get(pool, 0)),
+                        "evictable_after": int(
+                            snapshot.evictable_units_by_pool.get(pool, 0)
+                        ),
+                    }
+                    for pool, required in telemetry_pools.items()
+                },
+                failed_domains=[str(failed_pool)],
+                retry_grant=host_alloc_attempt_id is not None,
+                retry_skip=False,
+                retry_outcome="forfeited_alloc_failed",
+                terminal="forfeited_alloc_failed",
+                genuine_miss=False,
+                captured_generations_after=dict(snapshot.generation_by_pool),
+                reservation_released=True,
+                **_host_alloc_join_fields(req_id),
+                attempt_number=1 if host_alloc_attempt_id is not None else 0,
+                attempt_origin=(
+                    "HOST_ALLOC_WAKE" if host_alloc_attempt_id is not None else "HOST_ALLOC_WAIT"
+                ),
+            )
+            self.record_host_alloc_failure(
+                req_id,
+                HostAllocFailure(
+                    requested_primary_tokens=len(prefetch_key),
+                    required_aux_units=required_aux_units,
+                    failed_domains=frozenset({failed_pool}),
+                    positive_hit_tokens=0,
+                    sidecar_hit_pages={},
+                    allocability_snapshot=snapshot,
+                ),
+            )
             # Forfeited over transient staging pressure; retryable (T3
             # parks the rid in WAIT[HOST_ALLOC], woken by T11).
-            self._storage_prefetch_missed_rids.add(req_id)
+            self._storage_prefetch_missed_rids.discard(req_id)
             _log_restore_disposition(req_id, "WAIT", prefetch_length, 0, "aux_alloc_failed")
             try:
                 _t38c_log({"evt": "pc_outcome", "phase": "issue", "rid": req_id,
@@ -2625,15 +5531,38 @@ class UnifiedRadixCache(BasePrefixCache):
 
         aux_xfers = [x for xfers in comp_xfers.values() for x in xfers]
         aux_xfers.extend(sidecar_xfers)
+        trace_context = self._t38c_trace_context_for_prefetch(
+            req_id, last_host_node_id
+        )
         operation = self.cache_controller.prefetch(
             req_id,
             prefetch_key,
             last_hash,
             prefix_keys,
             extra_pools=aux_xfers or None,
+            trace_context=trace_context,
         )
+        operation.host_alloc_attempt_id = host_alloc_attempt_id
+        operation.prefetch_attempt_id = prefetch_attempt_id
         stats["issued"] += 1
-        logger.info("[P2A] ts_ms=%d evt=prefetch_issued rid=%s prefetch_length=%d", int(time.time() * 1000), req_id, prefetch_length)
+        if _p2a_enabled():
+            _p2a_block_start = time.monotonic_ns()
+            _p2a_identity = _p2a_probe_identity(operation, trace_context)
+            if _p2a_identity.get("node_id") is None:
+                _p2a_identity["node_id"] = last_host_node_id
+            _p2a_probe_ns = time.monotonic_ns() - _p2a_block_start
+            _p2a_emit(
+                _p2a_block_start,
+                "prefetch_issued",
+                _p2a_probe_ns,
+                rid=req_id,
+                prefetch_length=prefetch_length,
+                prefetch_issue_mono_ns=_p2a_block_start,
+                attempt_id=prefetch_attempt_id,
+                **_p2a_identity,
+            )
+        else:
+            logger.info("[P2A] ts_ms=%d evt=prefetch_issued rid=%s prefetch_length=%d", int(time.time() * 1000), req_id, prefetch_length)
         try:
             _t38c_log({"evt": "pc_outcome", "phase": "issue", "rid": req_id,
                        "outcome": "issued",
@@ -2749,6 +5678,7 @@ class UnifiedRadixCache(BasePrefixCache):
         req_id = operation.request_id
         completed_tokens = operation.completed_tokens
         hash_value = operation.hash_value
+        sidecar_counts = self._host_alloc_hybrid_sidecar_counts(operation)
 
         (
             last_host_node_id,
@@ -2771,6 +5701,31 @@ class UnifiedRadixCache(BasePrefixCache):
             anchor_lock_params,
             prefetch_key,
         ):
+            _log_host_alloc_telemetry(
+                "restore_hybrid_finalize",
+                rid=req_id,
+                attempt_id=getattr(operation, "host_alloc_attempt_id", None),
+                cache_instance_id=getattr(self, "_host_allocability_instance_id", 0),
+                trace_context=getattr(operation, "trace_context", None),
+                kv_expected=int(len(hash_value) * self.page_size),
+                kv_fetched=int(completed_tokens),
+                sidecars=sidecar_counts,
+                per_sidecar=sidecar_counts,
+                all_or_nothing=self._host_alloc_hybrid_is_all_or_nothing(operation),
+                result="discarded",
+                # The terminal handoff remains "finalized" so the scheduler
+                # can consume the authoritative discarded completion and
+                # release the request to recompute without entering READY.
+                restore_state_after="NONE",
+                **_host_alloc_join_fields(req_id),
+            )
+            self.record_storage_prefetch_completion(
+                req_id,
+                self._host_alloc_hybrid_completion(
+                    operation, completed_tokens, "discarded", sidecar_counts
+                ),
+                getattr(operation, "prefetch_attempt_id", None),
+            )
             # Hybrid all-or-nothing check failed; result already discarded.
             _log_restore_disposition(
                 req_id,
@@ -2780,6 +5735,35 @@ class UnifiedRadixCache(BasePrefixCache):
                 "hybrid_discard",
             )
             return
+
+        _log_host_alloc_telemetry(
+            "restore_hybrid_finalize",
+            rid=req_id,
+            attempt_id=getattr(operation, "host_alloc_attempt_id", None),
+            cache_instance_id=getattr(self, "_host_allocability_instance_id", 0),
+            trace_context=getattr(operation, "trace_context", None),
+            kv_expected=int(len(hash_value) * self.page_size),
+            kv_fetched=int(completed_tokens),
+            sidecars=sidecar_counts,
+            per_sidecar=sidecar_counts,
+            all_or_nothing=self._host_alloc_hybrid_is_all_or_nothing(operation),
+            result="accepted",
+            restore_state_after="READY",
+            **_host_alloc_join_fields(req_id),
+            attempt_number=1 if getattr(operation, "host_alloc_attempt_id", None) else 0,
+            attempt_origin=(
+                "HOST_ALLOC_WAKE"
+                if getattr(operation, "host_alloc_attempt_id", None)
+                else "HOST_ALLOC_INITIAL"
+            ),
+        )
+        self.record_storage_prefetch_completion(
+            req_id,
+            self._host_alloc_hybrid_completion(
+                operation, completed_tokens, "accepted", sidecar_counts
+            ),
+            getattr(operation, "prefetch_attempt_id", None),
+        )
 
         requested = operation.stats_requested_tokens or 0
         if completed_tokens <= 0:
@@ -2795,7 +5779,9 @@ class UnifiedRadixCache(BasePrefixCache):
         if self.buffer_pipeline is not None:
             # No graft: release the rank-local tail beyond the synced usable
             # length, then park the bounce for admission-time consumption.
-            self.record_storage_prefetch_terminal(req_id, "finalized")
+            self.record_storage_prefetch_terminal(
+                req_id, "finalized", getattr(operation, "prefetch_attempt_id", None)
+            )
             return self.buffer_pipeline.stage_completed_prefetch(
                 req_id, completed_tokens, hash_value
             )
@@ -2843,8 +5829,15 @@ class UnifiedRadixCache(BasePrefixCache):
                     insert_result.inserted_host_node
                 )
 
-            self.cache_controller.mem_pool_host.free(
+            released = self.cache_controller.mem_pool_host.free(
                 host_indices[: insert_result.prefix_len]
+            )
+            self._bump_host_allocability(
+                PoolName.KV.value,
+                "direct_free",
+                int(released or insert_result.prefix_len),
+                causal_rid=req_id,
+                trace_context=getattr(operation, "trace_context", None),
             )
             loaded_from_storage = completed_tokens - insert_result.prefix_len
 
@@ -2853,7 +5846,9 @@ class UnifiedRadixCache(BasePrefixCache):
         del self.ongoing_prefetch[req_id]
         self._demand_restore_rids.discard(req_id)
         self.cache_controller.prefetch_tokens_occupied -= len(prefetch_key)
-        self.record_storage_prefetch_terminal(req_id, "finalized")
+        self.record_storage_prefetch_terminal(
+            req_id, "finalized", getattr(operation, "prefetch_attempt_id", None)
+        )
 
         self.prefetch_loaded_tokens_by_reqid[req_id] = loaded_from_storage
         logger.info(
@@ -2868,6 +5863,70 @@ class UnifiedRadixCache(BasePrefixCache):
         if self.enable_storage_metrics and self.storage_metrics_collector is not None:
             self.storage_metrics_collector.log_prefetched_tokens(loaded_from_storage)
         return
+
+    @staticmethod
+    def _host_alloc_hybrid_is_all_or_nothing(operation: PrefetchOperation) -> bool:
+        transfers = getattr(operation, "pool_transfers", None) or []
+        trailing_pages = getattr(PoolHitPolicy, "TRAILING_PAGES", None)
+        return any(
+            trailing_pages is not None
+            and getattr(transfer, "hit_policy", None) == trailing_pages
+            for transfer in transfers
+        )
+
+    def _host_alloc_hybrid_sidecar_counts(self, operation: PrefetchOperation) -> dict:
+        hit_pages = getattr(
+            getattr(operation, "pool_storage_result", None),
+            "extra_pool_hit_pages",
+            {},
+        ) or {}
+        sidecars = {}
+        for transfer in getattr(operation, "pool_transfers", None) or []:
+            if getattr(transfer, "indices_from_pool", None) == PoolName.KV:
+                continue
+            name = getattr(transfer, "name", None)
+            pool = getattr(name, "value", name) or "unknown"
+            keys = getattr(transfer, "keys", None)
+            try:
+                expected = len(keys or ())
+            except TypeError:
+                expected = 0
+            try:
+                fetched = hit_pages.get(name, hit_pages.get(pool, 0))
+            except (AttributeError, TypeError):
+                fetched = 0
+            try:
+                fetched = int(fetched or 0)
+            except (TypeError, ValueError):
+                fetched = 0
+            sidecars[str(pool)] = {
+                "expected": int(expected),
+                "fetched": fetched,
+            }
+        return sidecars
+
+    def _host_alloc_hybrid_completion(
+        self,
+        operation: PrefetchOperation,
+        completed_tokens: int,
+        finalize_result: str,
+        sidecar_counts: Optional[dict] = None,
+    ) -> dict:
+        """Return finalizer-owned material fields for the ready_host join."""
+        sidecar_counts = (
+            sidecar_counts
+            if sidecar_counts is not None
+            else self._host_alloc_hybrid_sidecar_counts(operation)
+        )
+        return {
+            "completed_kv_tokens": int(completed_tokens),
+            "required_aux_pools": sorted(sidecar_counts),
+            "completed_aux_units": {
+                pool: int(details["fetched"])
+                for pool, details in sidecar_counts.items()
+            },
+            "finalize_result": finalize_result,
+        }
 
     def _check_hybrid_prefetch_result(
         self,
@@ -2902,20 +5961,33 @@ class UnifiedRadixCache(BasePrefixCache):
         # Their hit lengths are stored in completed_tokens.
         pool_transfers = [
             transfer
-            for transfer in operation.pool_transfers or []
-            if transfer.indices_from_pool != PoolName.KV
+            for transfer in getattr(operation, "pool_transfers", None) or []
+            if getattr(transfer, "indices_from_pool", None) != PoolName.KV
         ]
         hit_pages = (
-            operation.pool_storage_result.extra_pool_hit_pages if pool_transfers else {}
+            getattr(
+                getattr(operation, "pool_storage_result", None),
+                "extra_pool_hit_pages",
+                {},
+            )
+            if pool_transfers
+            else {}
         )
-        pool_hit_pages = [hit_pages.get(t.name, 0) for t in pool_transfers]
+        try:
+            pool_hit_pages = [
+                hit_pages.get(getattr(t, "name", None), 0)
+                for t in pool_transfers
+            ]
+        except (AttributeError, TypeError):
+            pool_hit_pages = [0 for _ in pool_transfers]
         completed_tokens = operation.completed_tokens
         # Hybrid cache state is all-or-nothing: every extra pool (SWA / Mamba / ...)
         # must cover the same fetched prefix. If any pool falls short the whole
         # prefetch result is unusable, so discard it and release everything.
         expected_tokens = len(hash_value) * self.page_size
         all_succeeded = completed_tokens == expected_tokens and all(
-            transfer.keys is not None and count == len(transfer.keys)
+            getattr(transfer, "keys", None) is not None
+            and count == len(getattr(transfer, "keys"))
             for transfer, count in zip(pool_transfers, pool_hit_pages)
         )
         if pool_transfers and not all_succeeded:
@@ -2924,12 +5996,13 @@ class UnifiedRadixCache(BasePrefixCache):
             # restoring the missing aux pages.
             keep_pages = completed_tokens // self.page_size
             for transfer, count in zip(pool_transfers, pool_hit_pages):
-                if transfer.keys is None:
+                keys = getattr(transfer, "keys", None)
+                if keys is None:
                     keep_pages = 0
-                elif count < len(transfer.keys):
+                elif count < len(keys):
                     # Aux transfers key the chain's trailing pages.
                     keep_pages = min(
-                        keep_pages, max(0, len(hash_value) - len(transfer.keys))
+                        keep_pages, max(0, len(hash_value) - len(keys))
                     )
             self.storage_existence_cache.invalidate_beyond(
                 PoolName.KV, hash_value, keep_pages=keep_pages
@@ -2938,7 +6011,11 @@ class UnifiedRadixCache(BasePrefixCache):
             # tail (host_indices[completed_tokens:])
             self.cache_controller.append_host_mem_release(
                 host_indices=host_indices[:completed_tokens],
-                extra_pools=pool_transfers if operation.pool_transfers_done else None,
+                extra_pools=(
+                    pool_transfers
+                    if getattr(operation, "pool_transfers_done", False)
+                    else None
+                ),
             )
             if anchor_lock_params is not None:
                 self.dec_host_lock_ref(last_host_node_id, anchor_lock_params)
@@ -2952,7 +6029,9 @@ class UnifiedRadixCache(BasePrefixCache):
                 self._prefetch_occupied_span(prefetch_key, host_indices)
             )
             self.prefetch_loaded_tokens_by_reqid[req_id] = 0
-            self.record_storage_prefetch_terminal(req_id, "finalized")
+            self.record_storage_prefetch_terminal(
+                req_id, "finalized", getattr(operation, "prefetch_attempt_id", None)
+            )
             logger.warning(
                 "HiCache hybrid prefetch discarded req=%s completed=%d requested=%d "
                 "kv_beliefs_kept_pages=%d",
@@ -2978,6 +6057,7 @@ class UnifiedRadixCache(BasePrefixCache):
         # pending terminal outcome, and any frontier wait are moot now.
         self._storage_prefetch_missed_rids.discard(req_id)
         self._storage_prefetch_terminal.pop(req_id, None)
+        getattr(self, "_storage_prefetch_failures", {}).pop(req_id, None)
         self.discard_frontier_waiter(req_id)
         return self.prefetch_loaded_tokens_by_reqid.pop(req_id, 0)
 
@@ -3088,28 +6168,80 @@ class UnifiedRadixCache(BasePrefixCache):
         restore material (design §2.5-1): host material, an in-flight or
         registered restore intent, or an L3-queryable anchor chain. A prompt
         too short to ever qualify for a storage prefetch has no restore
-        intent (declined_too_short is terminal for it)."""
-        if host_hit_length > 0:
-            return True
+        intent (declined_too_short is terminal for it).
+
+        too_short churn (independent P): the never-case gate applies even
+        when host material is present. When BOTH the current restore suffix
+        and the theoretical-max suffix are below the prefetch threshold (a
+        can-never-qualify prompt), no storage prefetch can ever be granted,
+        so parking WAIT[DEVICE_QUOTA] would only re-issue an inevitably
+        declined_too_short prefetch on every capacity wake (the tight
+        wake -> re-issue -> declined -> re-WAIT loop). Host material alone
+        no longer wins there -- the request recomputes its tail directly.
+        The device-match-decay REVALIDATE bet is preserved: a prompt whose
+        max suffix still reaches the threshold (prompt_can_qualify True)
+        keeps its restore potential, because its current sub-threshold
+        suffix may grow back above threshold once the device match decays."""
         if prompt_len is not None and not self.prompt_can_qualify_for_prefetch(
             prompt_len, host_hit_length
         ):
             return False
+        if host_hit_length > 0:
+            return True
         if req_id in self.ongoing_prefetch or req_id in self._storage_prefetch_missed_rids:
             return True
         if not self.tree_core.node_exists(anchor_node_id):
             return False
-        return self.tree_core.is_backuped(anchor_node_id) or self.tree_core.is_root(
-            anchor_node_id
+        return (
+            self.tree_core.is_backuped(anchor_node_id)
+            or self.tree_core.is_root(anchor_node_id)
+            or self.tree_core.is_l3_durable(anchor_node_id)
         )
 
     # ---- P2-1 M1b: terminal prefetch outcomes (drain -> scheduler) ----
 
-    def record_storage_prefetch_terminal(self, req_id: str, outcome: str) -> None:
+    def record_host_alloc_failure(
+        self, req_id: str, failure: HostAllocFailure
+    ) -> None:
+        if not hasattr(self, "_storage_prefetch_failures"):
+            self._storage_prefetch_failures = {}
+        self._storage_prefetch_failures[req_id] = failure
+
+    def pop_host_alloc_failure(self, req_id: str) -> Optional[HostAllocFailure]:
+        return getattr(self, "_storage_prefetch_failures", {}).pop(req_id, None)
+
+    def record_storage_prefetch_terminal(
+        self,
+        req_id: str,
+        outcome: str,
+        attempt_id: Optional[str] = None,
+    ) -> None:
         """Record a terminal prefetch outcome for the scheduler's
         restore-state reconciliation (same thread: the drain runs inside the
         scheduler's event pass)."""
-        self._storage_prefetch_terminal[req_id] = outcome
+        self._storage_prefetch_terminal[req_id] = (
+            (attempt_id, outcome) if attempt_id is not None else outcome
+        )
+
+    def record_storage_prefetch_completion(
+        self,
+        req_id: str,
+        completion: dict,
+        attempt_id: Optional[str] = None,
+    ) -> None:
+        if not hasattr(self, "_storage_prefetch_completion"):
+            self._storage_prefetch_completion = {}
+        self._storage_prefetch_completion[req_id] = (
+            (attempt_id, completion) if attempt_id is not None else completion
+        )
+
+    def pop_storage_prefetch_completion(self, req_id: str) -> Optional[dict]:
+        completion = getattr(self, "_storage_prefetch_completion", {}).pop(
+            req_id, None
+        )
+        if isinstance(completion, tuple):
+            return completion[1]
+        return completion
 
     def pop_storage_prefetch_terminal(self, req_id: str) -> Optional[str]:
         """Consume the recorded terminal outcome once (None when absent)."""
@@ -3134,6 +6266,8 @@ class UnifiedRadixCache(BasePrefixCache):
         self.prefetch_loaded_tokens_by_reqid.pop(rid, None)
         self._storage_prefetch_missed_rids.discard(rid)
         self._storage_prefetch_terminal.pop(rid, None)
+        getattr(self, "_storage_prefetch_completion", {}).pop(rid, None)
+        getattr(self, "_storage_prefetch_failures", {}).pop(rid, None)
         self.discard_frontier_waiter(rid)
         if (
             self.buffer_pipeline is not None
@@ -3171,7 +6305,11 @@ class UnifiedRadixCache(BasePrefixCache):
         pool_transfers = [x for xfers in comp_xfers.values() for x in xfers]
         self.cache_controller.append_host_mem_release(
             host_indices=host_indices[:completed_tokens],
-            extra_pools=pool_transfers if operation.pool_transfers_done else None,
+            extra_pools=(
+                pool_transfers
+                if getattr(operation, "pool_transfers_done", False)
+                else None
+            ),
         )
         # Buffer mode granted occupancy at hit-alloc, sized to the bounce;
         # cache mode reserved the requested span at enqueue.
@@ -3261,7 +6399,15 @@ class UnifiedRadixCache(BasePrefixCache):
             return len(host_indices) if host_indices is not None else 0
         return len(prefetch_key)
 
-    def revoke_pending_prefetch(self, req_id: str) -> None:
+    def revoke_pending_prefetch(self, req_id: str, *, alloc_failed: bool = False) -> None:
+        """Release a pending prefetch and classify its terminal outcome.
+
+        ``alloc_failed`` is supplied only by the hit allocator after a
+        positive storage query could not stage the complete validated span.
+        Keeping this explicit preserves ordinary partial-hit/mid-backup
+        revoke semantics while preventing a positive hybrid hit from becoming
+        a genuine storage miss.
+        """
         # M5: released before the pop -- a revoke for a prefetch whose
         # entry is already gone must still consume its reservation.
         self.release_prefetch(req_id, "revoke")
@@ -3299,8 +6445,10 @@ class UnifiedRadixCache(BasePrefixCache):
             revoke_reason = "miss"
         elif operation.storage_hit_count < self.prefetch_threshold:
             revoke_reason = "insufficient"
-        else:
+        elif alloc_failed:
             revoke_reason = "alloc_failed"
+        else:
+            revoke_reason = "miss"
         logger.info(
             "[P2A] ts_ms=%d evt=prefetch_revoke rid=%s terminated=%s "
             "storage_hit=%d requested=%d miss_reason=%s storage_generation=%d",
@@ -3321,7 +6469,9 @@ class UnifiedRadixCache(BasePrefixCache):
             self.tree_core.clear_storage_durable(last_host_node_id)
         _log_restore_disposition(
             req_id,
-            "WAIT" if revoke_reason == "backup_pending" else "RECOMPUTE",
+            "WAIT"
+            if revoke_reason in ("backup_pending", "alloc_failed")
+            else "RECOMPUTE",
             operation.stats_requested_tokens or 0,
             operation.storage_hit_count,
             f"revoked:{revoke_reason}",
@@ -3335,19 +6485,152 @@ class UnifiedRadixCache(BasePrefixCache):
             if revoke_reason == "terminated"
             else "revoked_backup_pending"
             if revoke_reason == "backup_pending"
+            else "revoked_alloc_failed"
+            if revoke_reason == "alloc_failed"
             else "revoked_miss"
         )
-        self.record_storage_prefetch_terminal(req_id, terminal)
+        self.record_storage_prefetch_terminal(
+            req_id, terminal, getattr(operation, "prefetch_attempt_id", None)
+        )
         self._invalidate_absent_from_hit_query(operation)
         if self.buffer_pipeline is not None:
             self.buffer_pipeline.pop_prefix_ctx(req_id)
             self.buffer_pipeline.release_anchor_lock(req_id)
         cc = self.cache_controller
-        cc.append_host_mem_release(
-            extra_pools=[x for xfers in comp_xfers.values() for x in xfers]
-        )
+        required_aux_units_before_cleanup = {}
+        if revoke_reason == "alloc_failed":
+            for transfer in getattr(operation, "pool_transfers", None) or []:
+                pool = getattr(transfer.name, "value", transfer.name)
+                if pool == PoolName.KV.value or transfer.indices_from_pool is not None:
+                    continue
+                required_aux_units_before_cleanup[pool] = (
+                    len(transfer.host_indices)
+                    if transfer.host_indices is not None
+                    else len(transfer.keys or ())
+                )
+        if revoke_reason == "alloc_failed":
+            self._release_aux_transfers_before_host_alloc_snapshot(
+                comp_xfers,
+                causal_rid=req_id,
+                trace_context=getattr(operation, "trace_context", None),
+            )
+        else:
+            cc.append_host_mem_release(
+                extra_pools=[x for xfers in comp_xfers.values() for x in xfers]
+            )
         if anchor_lock_params is not None:
             self.dec_host_lock_ref(last_host_node_id, anchor_lock_params)
+        if revoke_reason == "alloc_failed":
+            required_aux_units = dict(required_aux_units_before_cleanup)
+            blocked_domains = {PoolName.KV.value}
+            sidecar_hit_pages = {PoolName.KV.value: operation.storage_hit_count}
+            pool_storage_result = getattr(operation, "pool_storage_result", None)
+            hit_pages_by_pool = getattr(
+                pool_storage_result, "extra_pool_hit_pages", {}
+            )
+            for transfer in getattr(operation, "pool_transfers", None) or []:
+                pool = getattr(transfer.name, "value", transfer.name)
+                if pool == PoolName.KV.value or transfer.indices_from_pool is not None:
+                    continue
+                hit_pages = hit_pages_by_pool.get(
+                    transfer.name,
+                    hit_pages_by_pool.get(pool, 0),
+                )
+                sidecar_hit_pages[pool] = int(hit_pages)
+                if transfer.keys is None or hit_pages < len(transfer.keys):
+                    blocked_domains.add(pool)
+            snapshot = self.host_allocability_snapshot(
+                [PoolName.KV.value, *required_aux_units]
+            )
+            attempt_details = getattr(operation, "_host_alloc_retry_details", {})
+            before_snapshot = attempt_details.get("snapshot")
+            kv_details = {
+                "required": int(
+                    attempt_details.get("required", operation.storage_hit_count)
+                ),
+                "free_before": int(
+                    (before_snapshot.free_units_by_pool if before_snapshot else {}).get(
+                        PoolName.KV.value, 0
+                    )
+                ),
+                "evictable_before": int(
+                    (
+                        before_snapshot.evictable_units_by_pool
+                        if before_snapshot
+                        else {}
+                    ).get(PoolName.KV.value, 0)
+                ),
+                "alloc1": bool(attempt_details.get("alloc1", False)),
+                "reclaimed": int(attempt_details.get("reclaimed", 0)),
+                "alloc2": bool(attempt_details.get("alloc2", False)),
+                "free_after": int(
+                    snapshot.free_units_by_pool.get(PoolName.KV.value, 0)
+                ),
+                "evictable_after": int(
+                    snapshot.evictable_units_by_pool.get(PoolName.KV.value, 0)
+                ),
+            }
+            per_pool = {PoolName.KV.value: kv_details}
+            for pool, required in required_aux_units.items():
+                per_pool[pool] = {
+                    "required": int(required),
+                    "free_before": int(
+                        (before_snapshot.free_units_by_pool if before_snapshot else {}).get(
+                            pool, 0
+                        )
+                    ),
+                    "evictable_before": int(
+                        (
+                            before_snapshot.evictable_units_by_pool
+                            if before_snapshot
+                            else {}
+                        ).get(pool, 0)
+                    ),
+                    "alloc1": None,
+                    "reclaimed": 0,
+                    "alloc2": None,
+                    "free_after": int(snapshot.free_units_by_pool.get(pool, 0)),
+                    "evictable_after": int(
+                        snapshot.evictable_units_by_pool.get(pool, 0)
+                    ),
+                }
+            _log_host_alloc_telemetry(
+                "restore_host_alloc_retry_result",
+                rid=req_id,
+                attempt_id=getattr(operation, "host_alloc_attempt_id", None),
+                cache_instance_id=snapshot.cache_instance_id,
+                trace_context=getattr(operation, "trace_context", None),
+                generation_vector_id=snapshot.generation_vector(),
+                captured_generations=dict(snapshot.generation_by_pool),
+                current_generations=dict(snapshot.generation_by_pool),
+                full_frontier_tokens=int(operation.storage_hit_count),
+                crop_attempted=False,
+                lower_checkpoint_queried=False,
+                per_pool=per_pool,
+                required_aux_units=dict(required_aux_units),
+                failed_domains=sorted(map(str, blocked_domains)),
+                retry_grant=getattr(operation, "host_alloc_attempt_id", None) is not None,
+                retry_skip=False,
+                retry_outcome="revoked_alloc_failed",
+                terminal="revoked_alloc_failed",
+                genuine_miss=False,
+                captured_generations_after=dict(snapshot.generation_by_pool),
+                reservation_released=True,
+                **_host_alloc_join_fields(req_id),
+            )
+            self.record_host_alloc_failure(
+                req_id,
+                HostAllocFailure(
+                    requested_primary_tokens=operation.storage_hit_count,
+                    required_aux_units=required_aux_units,
+                    failed_domains=frozenset(blocked_domains),
+                    positive_hit_tokens=operation.storage_hit_count,
+                    sidecar_hit_pages=sidecar_hit_pages,
+                    allocability_snapshot=snapshot,
+                ),
+            )
+            # Allocation pressure must not arm the legacy paced-miss retry.
+            self._storage_prefetch_missed_rids.discard(req_id)
         # Every revoke path runs before the bounce alloc, so buffer mode
         # holds no occupancy here; post-alloc aborts go through
         # release_aborted_request instead.
@@ -3366,6 +6649,7 @@ class UnifiedRadixCache(BasePrefixCache):
         n_release: Optional[int],
         extra_release_counts: Optional[dict[PoolName, int]],
         log_metrics: bool,
+        aggregate_rank_acks: bool = True,
     ) -> None:
         cc = self.cache_controller
 
@@ -3409,7 +6693,20 @@ class UnifiedRadixCache(BasePrefixCache):
                 # ongoing_prefetch, so wait_complete keeps gating admission.
                 return False
             alloc_len = operation.storage_hit_count
+            telemetry_snapshot = None
+            snapshot_fn = getattr(self, "host_allocability_snapshot", None)
+            if snapshot_fn is not None:
+                pool_names = [PoolName.KV.value]
+                pool_names.extend(
+                    getattr(transfer.name, "value", transfer.name)
+                    for transfer in getattr(operation, "pool_transfers", None) or []
+                    if transfer.indices_from_pool is None
+                )
+                telemetry_snapshot = snapshot_fn(pool_names)
             host_indices = cc.mem_pool_host.alloc(alloc_len)
+            alloc1_succeeded = host_indices is not None
+            reclaimed_units = 0
+            alloc2_succeeded = False
             if host_indices is None:
                 # P3 M2: speculative staging eats free/soft-reserved host
                 # headroom only -- an alloc failure declines it silently,
@@ -3418,22 +6715,20 @@ class UnifiedRadixCache(BasePrefixCache):
                 # Ready-Horizon-off baseline (no reservation), still evict.
                 reservation = self._prefetch_reservations.get(req_id)
                 if reservation is None or reservation.kind is PrefetchKind.DEMAND:
-                    self.evict_host(alloc_len)
+                    reclaimed_units = int(self.evict_host(alloc_len) or 0)
                     host_indices = cc.mem_pool_host.alloc(alloc_len)
-            if host_indices is None and not buffer_mode:
-                # Memory-pressure fallback: a shorter page-aligned prefix.
-                # (Cache mode only — buffer mode parks for the full hit.)
-                available_size = cc.mem_pool_host.available_size()
-                alloc_len = min(
-                    operation.storage_hit_count,
-                    available_size - (available_size % self.page_size),
-                )
-                if alloc_len >= self.prefetch_threshold:
-                    host_indices = cc.mem_pool_host.alloc(alloc_len)
+                    alloc2_succeeded = host_indices is not None
+            operation._host_alloc_retry_details = {
+                "snapshot": telemetry_snapshot,
+                "required": alloc_len,
+                "alloc1": alloc1_succeeded,
+                "reclaimed": reclaimed_units,
+                "alloc2": alloc2_succeeded,
+            }
             if host_indices is None:
                 if buffer_mode:
                     return False
-                self.revoke_pending_prefetch(req_id)
+                self.revoke_pending_prefetch(req_id, alloc_failed=True)
                 return True
 
             operation.storage_hit_count = alloc_len
@@ -3540,16 +6835,111 @@ class UnifiedRadixCache(BasePrefixCache):
                     cc.append_host_mem_release(
                         operation.host_indices[operation.completed_tokens :],
                         (
-                            operation.pool_transfers
-                            if not operation.pool_transfers_done
+                            getattr(operation, "pool_transfers", None)
+                            if not getattr(operation, "pool_transfers_done", False)
                             else None
                         ),
+                        trace_context=getattr(operation, "trace_context", None),
                     )
 
         def _drain_backup():
             drained = 0
             for operation in _drain_queue(cc.ack_backup_queue, n_backup):
                 drained += 1
+                _ack_node_id = getattr(operation, "node_id", None)
+                _ack_transfers = getattr(operation, "pool_transfers", None) or []
+                _ack_mamba_transfers = [
+                    transfer
+                    for transfer in _ack_transfers
+                    if transfer.name == PoolName.MAMBA
+                ]
+                _ack_mamba_keys = [
+                    key
+                    for transfer in _ack_mamba_transfers
+                    for key in (transfer.keys or [])
+                ]
+                _ack_mamba_key_set_digest, _ack_mamba_key_count = (
+                    ordered_key_set_digest(_ack_mamba_keys)
+                )
+                _ack_mamba_expected_pages = _ack_mamba_key_count
+                _ack_mamba_succeeded_pages = (
+                    operation.pool_storage_result.extra_pool_hit_pages.get(
+                        PoolName.MAMBA,
+                        operation.pool_storage_result.extra_pool_hit_pages.get(
+                            PoolName.MAMBA.value, 0
+                        ),
+                    )
+                )
+                _ack_mamba_local_durable = (
+                    _ack_mamba_key_count > 0
+                    and _ack_mamba_succeeded_pages == _ack_mamba_expected_pages
+                )
+                _ack_final_kv_hash = (
+                    operation.hash_value[-1] if operation.hash_value else ""
+                )
+                (
+                    _ack_expected_rank_set,
+                    _ack_observed_rank_set,
+                    _ack_rank_set_unavailable,
+                    _ack_mamba_all_rank_durable,
+                ) = self._t38c_mamba_rank_proof(
+                    operation,
+                    node_id=_ack_node_id,
+                    final_kv_hash=_ack_final_kv_hash,
+                    key_set_digest=_ack_mamba_key_set_digest,
+                    key_count=_ack_mamba_key_count,
+                    local_mamba_durable=_ack_mamba_local_durable,
+                    aggregate_rank_acks=aggregate_rank_acks,
+                )
+                _t38c_durable_log(
+                    {
+                        "evt": "backup_ack_drain",
+                        "trace_context": getattr(
+                            operation, "trace_context", None
+                        ),
+                        "operation_id": operation.id,
+                        "attempt_id": f"storage-{operation.id}",
+                        "node_id": str(_ack_node_id)
+                        if _ack_node_id is not None
+                        else "",
+                        "final_kv_hash": (
+                            operation.hash_value[-1]
+                            if operation.hash_value
+                            else ""
+                        ),
+                        "kv_transfer": bool(operation.hash_value),
+                        "mamba_transfer": any(
+                            transfer.name == PoolName.MAMBA
+                            for transfer in _ack_transfers
+                        ),
+                        "kv_durable": operation.completed_tokens
+                        >= len(operation.host_indices),
+                        "mamba_durable": _ack_mamba_local_durable,
+                        "mamba_all_rank_durable": _ack_mamba_all_rank_durable,
+                        "mamba_expected_pages": _ack_mamba_expected_pages,
+                        "mamba_succeeded_pages": _ack_mamba_succeeded_pages,
+                        "mamba_key_count": _ack_mamba_key_count,
+                        "mamba_key_set_digest": _ack_mamba_key_set_digest,
+                        "expected_rank_set": _ack_expected_rank_set,
+                        "observed_ack_rank_set": _ack_observed_rank_set,
+                        "observed_ack_rank_count": len(_ack_observed_rank_set),
+                        "rank_set_unavailable": _ack_rank_set_unavailable,
+                        "operation": operation.id,
+                        "attempt": getattr(
+                            operation, "trace_id", f"storage-{operation.id}"
+                        ),
+                        "completed_tokens": int(operation.completed_tokens),
+                        "requested_tokens": int(
+                            len(operation.host_indices)
+                            if operation.host_indices is not None
+                            else 0
+                        ),
+                        "result": "complete"
+                        if operation.host_indices is not None
+                        and operation.completed_tokens >= len(operation.host_indices)
+                        else "partial",
+                    }
+                )
                 if buffer_mode:
                     # Storage write acked: free the staging.
                     self.buffer_pipeline.finish_storage_write_ack(operation.id)
@@ -3578,6 +6968,71 @@ class UnifiedRadixCache(BasePrefixCache):
                         if operation.completed_tokens >= len(
                             operation.host_indices
                         ):
+                            mamba_transfers = _ack_mamba_transfers
+                            mamba_expected_pages = _ack_mamba_expected_pages
+                            mamba_succeeded_pages = _ack_mamba_succeeded_pages
+                            mamba_key_set_digest = _ack_mamba_key_set_digest
+                            mamba_key_count = _ack_mamba_key_count
+                            expected_rank_set = _ack_expected_rank_set
+                            attempt_id = getattr(
+                                operation, "trace_id", f"storage-{operation.id}"
+                            )
+                            operation_context = getattr(
+                                operation, "trace_context", None
+                            )
+                            final_kv_hash = (
+                                operation.hash_value[-1]
+                                if operation.hash_value
+                                else ""
+                            )
+                            candidate_context = (
+                                dict(operation_context) if operation_context else None
+                            )
+                            if candidate_context is not None:
+                                candidate_context.setdefault("node_id", str(node_id))
+                                candidate_context.setdefault(
+                                    "final_kv_hash", final_kv_hash
+                                )
+                            attempt_key = (
+                                str(node_id),
+                                str(operation.id),
+                                str(attempt_id),
+                            )
+                            candidate = {
+                                "operation_id": operation.id,
+                                "attempt_id": attempt_id,
+                                "trace_context": candidate_context,
+                                "node_id": str(node_id),
+                                "final_kv_hash": final_kv_hash,
+                                "kv_durable": True,
+                                "kv_completed_tokens": int(
+                                    operation.completed_tokens
+                                ),
+                                "kv_requested_tokens": int(
+                                    len(operation.host_indices)
+                                ),
+                                "mamba_durable": _ack_mamba_all_rank_durable,
+                                "mamba_expected_pages": mamba_expected_pages,
+                                "mamba_succeeded_pages": mamba_succeeded_pages,
+                                "mamba_key_count": mamba_key_count,
+                                "mamba_key_set_digest": mamba_key_set_digest,
+                                "expected_rank_set": expected_rank_set,
+                                "observed_ack_rank_set": _ack_observed_rank_set,
+                                "observed_ack_rank_count": len(
+                                    _ack_observed_rank_set
+                                ),
+                                "rank_set_unavailable": _ack_rank_set_unavailable,
+                                "tree_write_generation": getattr(
+                                    operation, "_t38c_tree_write_generation", None
+                                ),
+                            }
+                            # Keep every outstanding attempt. Promotion must
+                            # select from this node-owned set, never a mutable
+                            # per-node "current" pointer.
+                            node_evidence = self._t38c_durability_evidence.setdefault(
+                                str(node_id), {}
+                            )
+                            node_evidence[attempt_key] = candidate
                             # The write is durable: promote the node to a
                             # persisted anchor when its parent chain is.
                             # Promoted is every node that became persisted
@@ -3586,6 +7041,194 @@ class UnifiedRadixCache(BasePrefixCache):
                             promoted = self.tree_core.advance_storage_persisted(
                                 node_id
                             )
+                            for promoted_id in promoted:
+                                promoted_node = self.tree_core.node_by_id(promoted_id)
+                                promoted_attempt_key, promoted_evidence = (
+                                    self._t38c_select_promoted_candidate(
+                                        promoted_id,
+                                        promoted_node.get_last_hash_value() or "",
+                                    )
+                                )
+                                promoted_context = (
+                                    promoted_evidence.get("trace_context")
+                                    if promoted_evidence is not None
+                                    else None
+                                )
+                                context_complete = complete_trace_context(
+                                    promoted_context,
+                                    promoted_id,
+                                    promoted_node.get_last_hash_value() or "",
+                                )
+                                _t38c_durable_log(
+                                    {
+                                        "evt": "storage_persisted",
+                                        "trace_context": promoted_context,
+                                        "operation_id": (
+                                            promoted_evidence.get("operation_id")
+                                            if promoted_evidence
+                                            else None
+                                        ),
+                                        "attempt_id": (
+                                            promoted_evidence.get("attempt_id")
+                                            if promoted_evidence
+                                            else None
+                                        ),
+                                        "node_id": str(promoted_id),
+                                        "anchor_id": str(node_id),
+                                        "final_kv_hash": (
+                                            promoted_node.get_last_hash_value() or ""
+                                        ),
+                                        "frontier_end": len(
+                                            promoted_node.hash_value or []
+                                        )
+                                        * self.page_size,
+                                        "storage_version": self.tree_core.anchor_storage_version(
+                                            promoted_id
+                                        ),
+                                        "l3_publish_epoch": self.tree_core.l3_publish_epoch(),
+                                        "kv_durable": bool(
+                                            promoted_evidence
+                                            and promoted_evidence.get("kv_durable")
+                                        ),
+                                        "mamba_durable": bool(
+                                            promoted_evidence
+                                            and promoted_evidence.get("mamba_durable")
+                                        ),
+                                        "kv_completed_tokens": (
+                                            promoted_evidence.get(
+                                                "kv_completed_tokens"
+                                            )
+                                            if promoted_evidence
+                                            else None
+                                        ),
+                                        "mamba_succeeded_pages": (
+                                            promoted_evidence.get(
+                                                "mamba_succeeded_pages"
+                                            )
+                                            if promoted_evidence
+                                            else None
+                                        ),
+                                        "result": bool(
+                                            promoted_evidence and context_complete
+                                        ),
+                                        "context_complete": context_complete,
+                                    }
+                                )
+                                if (
+                                    promoted_evidence is not None
+                                    and context_complete
+                                    and promoted_evidence.get("kv_durable")
+                                    and promoted_evidence.get("mamba_durable")
+                                ):
+                                    final_kv_hash = promoted_evidence.get(
+                                        "final_kv_hash", ""
+                                    )
+                                    durability_event_id = _t38c_durable_log(
+                                        {
+                                            "evt": "durability_barrier",
+                                            "trace_context": promoted_evidence.get(
+                                                "trace_context"
+                                            ),
+                                            "operation_id": promoted_evidence.get(
+                                                "operation_id"
+                                            ),
+                                            "attempt_id": promoted_evidence.get(
+                                                "attempt_id"
+                                            ),
+                                            "node_id": str(promoted_id),
+                                            "final_kv_hash": final_kv_hash,
+                                            "kv_durable": True,
+                                            "mamba_durable": True,
+                                            "kv_completed_tokens": promoted_evidence.get(
+                                                "kv_completed_tokens"
+                                            ),
+                                            "kv_requested_tokens": promoted_evidence.get(
+                                                "kv_requested_tokens"
+                                            ),
+                                            "mamba_expected_pages": promoted_evidence.get(
+                                                "mamba_expected_pages"
+                                            ),
+                                            "mamba_succeeded_pages": promoted_evidence.get(
+                                                "mamba_succeeded_pages"
+                                            ),
+                                            "mamba_key_count": promoted_evidence.get(
+                                                "mamba_key_count"
+                                            ),
+                                            "mamba_key_set_digest": promoted_evidence.get(
+                                                "mamba_key_set_digest"
+                                            ),
+                                            "expected_rank_set": promoted_evidence.get(
+                                                "expected_rank_set"
+                                            ),
+                                            "observed_ack_rank_set": promoted_evidence.get(
+                                                "observed_ack_rank_set"
+                                            ),
+                                            "observed_ack_rank_count": promoted_evidence.get(
+                                                "observed_ack_rank_count"
+                                            ),
+                                            "rank_set_unavailable": promoted_evidence.get(
+                                                "rank_set_unavailable", True
+                                            ),
+                                            "combined_durable": True,
+                                            "result": True,
+                                            "reason": "kv_ack_mamba_ack_frontier",
+                                        }
+                                    )
+                                    if durability_event_id is not None:
+                                        durability_identity = _t38c_residency_identity(
+                                            promoted_evidence.get("trace_context"),
+                                            promoted_id,
+                                            final_kv_hash,
+                                        )
+                                        if durability_identity is not None:
+                                            self._t38c_durability_ready.add(
+                                                durability_identity
+                                            )
+                                            lifecycle = self._t38c_residency_lifecycle.setdefault(
+                                                durability_identity,
+                                                {
+                                                    "state": "BUILD_CREATED",
+                                                    "build_event_id": None,
+                                                    "durability_event_id": None,
+                                                    "component_snapshot": None,
+                                                    "queue_snapshot": None,
+                                                    "publication_event_id": None,
+                                                    "retirement_reason": None,
+                                                    "reconcile_attempt_count": 0,
+                                                    "reason_attempt_counts": {},
+                                                    "diagnostic_reason_set": set(),
+                                                    "suppressed_diagnostic_count": 0,
+                                                    "first_failure_reason": None,
+                                                    "first_failure_event_id": None,
+                                                    "first_attempt_ts_mono_ns": None,
+                                                    "last_attempt_ts_mono_ns": None,
+                                                    "first_attempt_event_id": None,
+                                                    "last_attempt_event_id": None,
+                                                    "terminal_event_id": None,
+                                                    "detach_expectations_registered": False,
+                                                    "detach_manifest": set(),
+                                                },
+                                            )
+                                            lifecycle["durability_event_id"] = (
+                                                durability_event_id
+                                            )
+                                            _t38c_residency_reconcile(
+                                                self,
+                                                durability_identity,
+                                                "durability_ready",
+                                            )
+                                # Promotion consumes this exact attempt's
+                                # evidence even when Mamba was absent/failed;
+                                # a later write must never join against it.
+                                if promoted_attempt_key is not None:
+                                    promoted_candidates = self._t38c_durability_evidence.get(
+                                        str(promoted_id), {}
+                                    )
+                                    promoted_candidates.pop(promoted_attempt_key, None)
+                                    if not promoted_candidates:
+                                        self._t38c_durability_evidence.pop(
+                                            str(promoted_id), None
+                                        )
                             # P2-1 M2: a freshly persisted anchor can serve
                             # its frontier waiters. Set membership only --
                             # no queue consumption, no callbacks, no write
@@ -3620,13 +7263,43 @@ class UnifiedRadixCache(BasePrefixCache):
             return drained
 
         def _drain_release():
-            host_indices_list = []
+            release_pairs = []
+            while n_release is None or len(release_pairs) < n_release:
+                pair = cc._t38c_pop_host_mem_release_pair(
+                    cc.host_mem_release_queue, PoolName.KV
+                )
+                if pair is None:
+                    break
+                release_pairs.append(pair)
+            host_indices_list = [page for page, _token in release_pairs]
             released_tokens = 0
-            for host_indices in _drain_queue(cc.host_mem_release_queue, n_release):
-                host_indices_list.append(host_indices)
+            for host_indices in host_indices_list:
                 released_tokens += len(host_indices)
             if host_indices_list:
                 cc.mem_pool_host.free(torch.cat(host_indices_list, dim=0))
+                self._bump_host_allocability(
+                    PoolName.KV.value,
+                    "queued_release_drain",
+                    released_tokens,
+                )
+                for host_indices, token in release_pairs:
+                    digest = _t38c_slot_digest(PoolName.KV, [host_indices])
+                    trace_context = slot_context_for_token(token)
+                    _t38c_note_completion(
+                        self, PoolName.KV.value, "host", digest, token=token
+                    )
+                    _t38c_durable_log(
+                        {
+                            "evt": "residency_free_complete",
+                            "trace_context": trace_context,
+                            "pool": PoolName.KV.value,
+                            "tier": "host",
+                            "slot_count": int(host_indices.numel()),
+                            "slot_digest": digest,
+                            "result": True,
+                            "reason": "queued_release_drain_returned",
+                        }
+                    )
             return len(host_indices_list), released_tokens
 
         def _drain_extra_release():
@@ -3637,15 +7310,46 @@ class UnifiedRadixCache(BasePrefixCache):
                 release_queue = cc.extra_host_mem_release_queues.get(pool_name)
                 if release_queue is None:
                     continue
-                host_indices_list = []
+                release_pairs = []
+                while limit is None or len(release_pairs) < limit:
+                    pair = cc._t38c_pop_host_mem_release_pair(
+                        release_queue, pool_name
+                    )
+                    if pair is None:
+                        break
+                    release_pairs.append(pair)
+                host_indices_list = [page for page, _token in release_pairs]
                 released_tokens = 0
-                for host_indices in _drain_queue(release_queue, limit):
-                    host_indices_list.append(host_indices)
+                for host_indices in host_indices_list:
                     released_tokens += len(host_indices)
                 if host_indices_list:
                     cc.mem_pool_host.free(
                         torch.cat(host_indices_list, dim=0), pool=pool_name
                     )
+                    self._bump_host_allocability(
+                        pool_name.value,
+                        "queued_release_drain",
+                        released_tokens,
+                    )
+                    pool_label = getattr(pool_name, "value", pool_name)
+                    for host_indices, token in release_pairs:
+                        digest = _t38c_slot_digest(pool_label, [host_indices])
+                        trace_context = slot_context_for_token(token)
+                        _t38c_note_completion(
+                            self, pool_label, "host", digest, token=token
+                        )
+                        _t38c_durable_log(
+                            {
+                                "evt": "residency_free_complete",
+                                "trace_context": trace_context,
+                                "pool": pool_label,
+                                "tier": "host",
+                                "slot_count": int(host_indices.numel()),
+                                "slot_digest": digest,
+                                "result": True,
+                                "reason": "queued_release_drain_returned",
+                            }
+                        )
                 drained[pool_name] = (len(host_indices_list), released_tokens)
             return drained
 
@@ -3654,6 +7358,9 @@ class UnifiedRadixCache(BasePrefixCache):
         _drain_backup()
         _drain_release()
         _drain_extra_release()
+        # The owning drain transaction is the authoritative queue-empty
+        # trigger. Polling remains an optional watchdog, never liveness.
+        _t38c_residency_release_queues_drained(self)
 
     def drain_storage_control_queues(self) -> None:
         cc = self.cache_controller
@@ -3687,6 +7394,7 @@ class UnifiedRadixCache(BasePrefixCache):
             n_release=n_release,
             extra_release_counts=extra_release_counts,
             log_metrics=True,
+            aggregate_rank_acks=True,
         )
 
     def drain_storage_control_queues_local(self) -> None:
@@ -3711,6 +7419,7 @@ class UnifiedRadixCache(BasePrefixCache):
                 name: None for name in cc.extra_host_mem_release_queues
             },
             log_metrics=False,
+            aggregate_rank_acks=False,
         )
 
     # ---- HiCache: Storage backend lifecycle (delegated) ----
@@ -4136,6 +7845,7 @@ class UnifiedRadixCache(BasePrefixCache):
                     n_release=n_release,
                     extra_release_counts=extra_release_counts,
                     log_metrics=True,
+                    aggregate_rank_acks=True,
                 )
         if self.buffer_pipeline is not None:
             self.buffer_pipeline.flush_pending_writes()
@@ -4217,13 +7927,16 @@ class UnifiedRadixCache(BasePrefixCache):
     # ---- Session radix cache API (delegates to composed UnifiedSessionRefTracker) ----
 
     def open_radix_session(self, session_id: str) -> Optional[int]:
+        self._t38c_retire_session_trace(session_id)
         return self.session_refs.open_radix_session(session_id)
 
     def ensure_session_generation(self, session_id: str) -> int:
         return self.session_refs.ensure_session_generation(session_id)
 
     def release_radix_session(self, session_id: str) -> int:
-        return self.session_refs.release_radix_session(session_id)
+        result = self.session_refs.release_radix_session(session_id)
+        self._t38c_retire_session_trace(session_id)
+        return result
 
     # ---- Streaming session API (delegates to composed StreamingSession) ----
 
@@ -4232,6 +7945,7 @@ class UnifiedRadixCache(BasePrefixCache):
 
     def release_session(self, session_id: str) -> None:
         self.session.release_session(session_id)
+        self._t38c_retire_session_trace(session_id)
 
     def session_held_tokens(self, active_pool_idxs: Optional[set] = None) -> int:
         return self.session.session_held_tokens(active_pool_idxs)

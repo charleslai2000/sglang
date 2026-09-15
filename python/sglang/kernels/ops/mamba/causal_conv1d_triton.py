@@ -15,6 +15,34 @@ from sglang.kernels.jit.utils import is_arch_support_pdl
 PAD_SLOT_ID = -1
 
 
+def _install_gdc_shims() -> bool:
+    """Make Triton 3.2's AST resolver see safe GDC fallbacks."""
+    cuda_extra = getattr(getattr(tl, "extra", None), "cuda", None)
+    if cuda_extra is None:
+        return False
+    if all(hasattr(cuda_extra, name) for name in ("gdc_wait", "gdc_launch_dependents")):
+        return not getattr(cuda_extra, "__sglang_gdc_shimmed__", False)
+    if not getattr(cuda_extra, "__sglang_gdc_shimmed__", False):
+
+        @triton.jit
+        def _gdc_noop():
+            return
+
+        for name in ("gdc_wait", "gdc_launch_dependents"):
+            if not hasattr(cuda_extra, name):
+                setattr(cuda_extra, name, _gdc_noop)
+        setattr(cuda_extra, "__sglang_gdc_shimmed__", True)
+    return False
+
+
+_GDC_INTRINSICS_AVAILABLE = _install_gdc_shims()
+
+
+def _is_gdc_supported() -> bool:
+    """Return whether this Triton installation can emit CUDA GDC intrinsics."""
+    return is_arch_support_pdl() and _GDC_INTRINSICS_AVAILABLE
+
+
 @triton.jit()
 def _causal_conv1d_fwd_kernel(  # continuous batching
     # Pointers to matrices
@@ -1137,7 +1165,9 @@ def causal_conv1d_update(
     else:
         stride_retrieve_parent_token_seq = stride_retrieve_parent_token_token = 0
 
-    pdl_kwargs = {"USE_GDC": True, "launch_pdl": True} if is_arch_support_pdl() else {}
+    pdl_kwargs = (
+        {"USE_GDC": True, "launch_pdl": True} if _is_gdc_supported() else {}
+    )
 
     _causal_conv1d_update_kernel[grid](
         # Pointers to matrices

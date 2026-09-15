@@ -1,0 +1,17 @@
+R129 P2-A live-collection run context
+utc_start=2026-09-12T00:11:55Z
+epoch_start=1789171915
+server_log=/mnt/data/neuron/sglang-3090-r112-20260911/sglang-server-p2a.log
+server_log_start_lines=36293
+server_log_start_sha256_placeholder=recorded_after
+server_pid=616394
+scheduler_pid=617035
+detokenizer_pid=617036
+base_url=http://127.0.0.1:30000
+probe_env_SGLANG_P2A_TIMING_PROBE=1
+model=/mnt/data/models/qwen35-gptq
+driver=driver129.py
+driver_sha256=8c41aba65ab901d5558294824adbce28ff3a1b0b0d351509eda8958be769b999
+N=8 TURNS=6 N_PRESSURE=6 PRESSURE_EQ_ROUND=1
+hist_targets=6000,7200,8400,9600,10800,11800,6800,9200
+max_seconds=2100

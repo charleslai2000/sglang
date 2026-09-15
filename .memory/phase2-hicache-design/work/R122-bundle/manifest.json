@@ -1,0 +1,56 @@
+{
+  "format": "p0b.raw-bundle.v3",
+  "task_id": "P1-SPEC-BUDGET-CONTROLLED-EVICTION-20260911-R122",
+  "invocation": "ses-p1-controlled-eviction-r122-20260911",
+  "epoch": "2026-09-11",
+  "runtime": {
+    "process_id": 48806,
+    "run_id": "run-48806-4187756182262",
+    "profile_id": "profile-97ee3d5d3bfdca6237dc746e",
+    "source_build": "4f41f5bab562b99562f30c67540eb05344d13637:03750d8519fdae277a0d04938c53c73ff2d5400be8c6f9f51a3d2bc7b3338d07",
+    "deployment_manifest_digest": "262a9362e345df15d93049301d2b0e60990ba65d80c3bbc5209fb4cdab140e2d",
+    "git_head": "4f41f5bab562b99562f30c67540eb05344d13637"
+  },
+  "target": {
+    "rid": "r122-r122-R-T",
+    "session_id": "r122-s-R-r122",
+    "session_generation": 63,
+    "build_rid": "r122-r122-build-T",
+    "build_session": "r122-s-T-r122",
+    "note": "T was host/device resident and restored via L2->L1 promotion; no SPEC_BUDGET park"
+  },
+  "contract": {
+    "path": "P1-R121-CONTROLLED-EVICTION-CONTRACT.md",
+    "sha256": "2ac86b5a54264fad46d049e2c32e3cc37c125f8c778a38dfb14e840a37be3b3b",
+    "addendum": {
+      "path": "P1-R122-HEADROOM-GATE-ADDENDUM.md",
+      "sha256": "92ad1c29f4749be9fc4056a5e8d9dbb89d7800f652ccccdc2959651401faea25",
+      "binding": "additive; governs host-capacity gates"
+    }
+  },
+  "raw_files": {
+    "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/.memory/phase2-hicache-design/work/R122-bundle/raw.log": "790cabec10968d9de3bf19125492b0c0f204c8e4fd650ac20c0abbd3b41bb8c2",
+    "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/.memory/phase2-hicache-design/work/R122-bundle/probe.log": "67b5133a885c1e6b78a183998bff55cb7960b8a59095a61793035d1e2fc23614",
+    "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/.memory/phase2-hicache-design/work/R122-bundle/watch.log": "b87e903fbaba795555191ca58f784a83a23edf7d640f574e70cde4b711f64f21"
+  },
+  "request_files": {
+    "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/.memory/phase2-hicache-design/work/R122-bundle/requests.jsonl": "7b2118d673adf5dc0747629994c106a69ab07d8c8538bc2aa00c282b65d3eefd",
+    "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/.memory/phase2-hicache-design/work/R122-bundle/state.jsonl": "8f2a34203118fff7cd77a83397734d1f407a62b4a67a5183f7405f94f458764e",
+    "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/.memory/phase2-hicache-design/work/R122-bundle/gate_evidence.jsonl": "9200580edc7773760c7b118e54855b2198d61095ba44e2627674e6ba98450e53"
+  },
+  "harness": {
+    "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/.memory/phase2-hicache-design/work/R122-bundle/driver122.py": "53c87fd7284e84b8b679e458fa8e336b5b1be4b756e6ab532999c48ba2937ec5",
+    "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/.memory/phase2-hicache-design/work/R122-bundle/driver122_gate.py": "7cdc0bac30efa60358a01b66c81d292cdc80b9f85e24fa20478c74ea2465dfa7"
+  },
+  "evidence_refs": {
+    "raw_line_offset": 2583017,
+    "probe_byte_offset": 46280601,
+    "chain_json": "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/.memory/phase2-hicache-design/work/R122-bundle/chain.json",
+    "condition_evidence": "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/.memory/phase2-hicache-design/work/R122-bundle/condition-evidence.md",
+    "chain_json_sha256": "a6e8a824e3a70f8ae8358d878c5480edb0b05ad85839a8d8ea9106b942bef015",
+    "condition_evidence_sha256": "c64a2a16eebdd336b0b14408f574ee7bf67450483d2d2e016417d56824d9cb5f"
+  },
+  "baseline_offsets": "baseline-offsets.txt (server_log_start_line=2583017, probe_log_start_bytes=46280601)",
+  "verdict": "NOT_VERIFIED",
+  "finding_summary": "NOT_VERIFIED. Binding addendum gate basis (device full_free+full_evictable) is source-verified to be a different pool than the HOST_ALLOC blocking predicate (L2 host pool via mem_pool_host / host_alloc.v1); literal device-basis Gate A/B pass while host pool=2786. No read-only fresh host-evictable source. Rerun declined; decision escalated."
+}

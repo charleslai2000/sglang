@@ -17,6 +17,7 @@ the same torch-free pattern as test_drain_reentry.py.
 """
 
 import importlib.util
+import json
 import os
 import sys
 import threading
@@ -522,6 +523,16 @@ def _load_modules():
             "hicache_restore.py",
         ),
     )
+    _load_real(
+        "sglang.srt.mem_cache.trace_context",
+        os.path.join(
+            _PYTHON_DIR,
+            "sglang",
+            "srt",
+            "mem_cache",
+            "trace_context.py",
+        ),
+    )
     cc_mod = _load_real(
         "sglang.srt.managers.cache_controller",
         os.path.join(
@@ -592,6 +603,10 @@ from sglang.srt.mem_cache.unified_cache.components import (
 )
 from sglang.srt.mem_cache.unified_cache.unified_tree_core import (
     UnifiedTreeCore as _RealTreeCore,
+)
+from sglang.srt.managers.scheduler_components.hicache_restore import (
+    FrontierAnchorInfo as _frontier_anchor_info,
+    no_material_fast_forward as _no_material_fast_forward,
 )
 from sglang.srt.managers.scheduler_components.hicache_restore import (
     RestoreDecision as _restore_decision,
@@ -702,6 +717,10 @@ class _FakeTreeCore:
         self.inc_host_lock_ref = lambda node_id: SimpleNamespace(
             to_dec_params=lambda: None
         )
+        # P3 (phase2-p3-fix): deferred-ACK reconciliation scan. The registry
+        # harness has no chain model, so there is never a deferred-ACK node;
+        # the reconcile pass over an empty set is a no-op.
+        self.deferred_acked_nodes = lambda: []
 
     def dec_host_lock_ref(self, node_id, params, skip_swa=False):
         self.host_lock_decs.append((node_id, params))
@@ -737,6 +756,7 @@ def _make_cache(tree_core=None):
     cache = object.__new__(UnifiedRadixCache)
     cache.disable = False
     cache.tree_core = tree_core or _FakeTreeCore()
+    cache.components = {}
     cache.enable_storage = True
     cache.buffer_pipeline = None
     cache.sidecar_pool_specs = []
@@ -767,6 +787,8 @@ def _make_cache(tree_core=None):
     cache._storage_persist_skip_count = 0
     cache.host_memory_mode = "cache"
     cache._drain_write_through_depth = 0
+    cache._t38c_residency_lock = threading.RLock()
+    cache._reconcile_depth = 0
     cache.pp_rank = 0
     cache.pp_size = 1
     cache.pp_group = None
@@ -775,6 +797,7 @@ def _make_cache(tree_core=None):
     cache.attn_tp_group = None
     cache.prefetch_loaded_tokens_by_reqid = {}
     cache._storage_prefetch_missed_rids = set()
+    cache._host_allocability_telemetry_seq = 0
     cache._storage_frontier_waiters = {}
     cache._storage_frontier_ready = set()
     cache._storage_prefetch_terminal = {}
@@ -1527,6 +1550,33 @@ class FrontierWaiterRegistryTests(unittest.TestCase):
         self.assertTrue(cache.prompt_can_qualify_for_prefetch(300, 0))
         self.assertFalse(cache.prompt_can_qualify_for_prefetch(300, 100))
 
+    def test_prompt_can_qualify_page_aligns_suffix(self):
+        # phase2-p0fix Q2: the gate's suffix is page-aligned the same way
+        # prefetch_from_storage aligns keys. With page_size 16, a geometric
+        # suffix of e.g. 265 (>= threshold 256) would "qualify" on a raw
+        # comparison, but the aligned suffix (265 // 16 * 16 = 256) is what
+        # the outbound query actually sees. The gate must agree with the
+        # outbound aligned length -- it must NOT over-permit a suffix whose
+        # aligned length is below threshold.
+        cache = _make_cache()
+        cache.page_size = 16
+        cache.prefetch_threshold = 256
+        # Aligned suffix 256 (16 pages) exactly reaches threshold: qualifies.
+        self.assertTrue(cache.prompt_can_qualify_for_prefetch(271, 0))
+        # Geometric suffix 265 -> aligned 256 >= 256: qualifies (boundary).
+        self.assertTrue(cache.prompt_can_qualify_for_prefetch(265, 0))
+        # Geometric suffix 259 -> aligned 256 still qualifies (>= threshold).
+        self.assertTrue(cache.prompt_can_qualify_for_prefetch(259, 0))
+        # Geometric suffix 256 -> aligned 256 qualifies.
+        self.assertTrue(cache.prompt_can_qualify_for_prefetch(256, 0))
+        # Geometric suffix 255 -> aligned 240 < 256: the outbound query would
+        # be declined_too_short, so the gate must NOT qualify it -- this is
+        # the alignment the too_short 保底门 relies on (no over-permit).
+        self.assertFalse(cache.prompt_can_qualify_for_prefetch(255, 0))
+        # Host match reduces the aligned suffix the same way.
+        self.assertFalse(cache.prompt_can_qualify_for_prefetch(271, 16))
+        self.assertTrue(cache.prompt_can_qualify_for_prefetch(272, 16))
+
     def test_short_prompt_never_has_restore_potential(self):
         # Regression (tester e10): HEALTH_CHECK-class short prompts were
         # misjudged True via the root-anchor clause, entered WAIT[REVALIDATE]
@@ -1539,13 +1589,46 @@ class FrontierWaiterRegistryTests(unittest.TestCase):
         # does not override the can-never-qualify gate either.
         cache._storage_prefetch_missed_rids.add("r1")
         self.assertFalse(cache.has_restore_potential("r1", 0, 0, prompt_len=3))
-        # Host material wins even for a short prompt (load-back restore).
-        self.assertTrue(cache.has_restore_potential("r1", 0, host_hit_length=10, prompt_len=3))
+        # too_short churn (independent P): host material no longer overrides
+        # the can-never-qualify gate -- a 15-token suffix (host match ate the
+        # prompt) can never become a granted storage prefetch, so it must not
+        # park WAIT[DEVICE_QUOTA] and loop on the capacity wake.
+        self.assertFalse(cache.has_restore_potential("r1", 0, host_hit_length=10, prompt_len=3))
         # Long prompts keep the legacy clauses.
         cache._storage_prefetch_missed_rids.add("r1")
         self.assertTrue(cache.has_restore_potential("r1", 0, 0, prompt_len=300))
         # prompt_len unset = legacy behavior (existing callers unchanged).
         self.assertTrue(cache.has_restore_potential("r1", 0, 0))
+
+    def test_never_case_gate_beats_host_material_for_sub_threshold_prompt(self):
+        # too_short churn (main fix): a prompt whose BOTH current suffix and
+        # theoretical-max suffix are below prefetch_threshold (256, page_size
+        # 1 here) must NOT park WAIT[DEVICE_QUOTA] even though host material
+        # is present -- its storage prefetch can never be granted, so the
+        # capacity wake would only re-issue an inevitably declined_too_short
+        # prefetch (wake -> re-issue -> declined -> re-WAIT tight loop). It
+        # recomputes its tail directly.
+        cache = _make_cache()
+        # Current suffix (prompt_len - host_hit = 3-3 = 0) and max suffix
+        # (3-3 = 0) both sub-threshold; host material present.
+        self.assertFalse(cache.has_restore_potential("r1", 42, host_hit_length=3, prompt_len=3))
+        # Host match ate nearly the whole prompt: only a 15-token tail left.
+        self.assertFalse(cache.has_restore_potential("r1", 42, host_hit_length=300, prompt_len=315))
+
+    def test_revalidate_bet_preserved_when_decay_can_grow_suffix(self):
+        # too_short churn must NOT kill the device-match-decay REVALIDATE bet:
+        # a prompt whose current suffix is sub-threshold but whose
+        # theoretical-max suffix (prompt beyond the fixed host match) still
+        # reaches the threshold can grow its suffix back above it once the
+        # device match decays -- it keeps its restore potential.
+        cache = _make_cache()
+        # Current device match absorbs 100 tokens: suffix 300-10-100 = 190
+        # < 256, but max suffix 300-10 = 290 >= 256 qualifies.
+        self.assertTrue(cache.has_restore_potential("r1", 42, host_hit_length=10, prompt_len=300))
+        # Boundary: max suffix exactly at the threshold still qualifies.
+        self.assertTrue(cache.has_restore_potential("r1", 42, host_hit_length=100, prompt_len=356))
+        # Max suffix just below the threshold: never-case, no restore intent.
+        self.assertFalse(cache.has_restore_potential("r1", 42, host_hit_length=100, prompt_len=355))
 
 
 # ---------------------------------------------------------------------------
@@ -2012,6 +2095,358 @@ class StoragePromotionChainTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# P3: deferred-ACK reconciliation (phase2-p3-fix) -- clear_storage_durable
+# must not strand storage_acked && !storage_persisted descendants (B guard),
+# and the reconciliation pass (A3) must re-fill a broken parent chain from
+# the nearest persisted ancestor / root so every acked node is promoted
+# through a real write ack, never by reconciliation itself.
+# ---------------------------------------------------------------------------
+
+
+@unittest.skipIf(torch is None, "real UnifiedTreeCore needs torch")
+class DeferredAckReconcileTests(unittest.TestCase):
+    """The P3 durability-state-machine pins. These drive the real
+    UnifiedTreeCore storage-flag transitions directly (no radix-cache layer):
+    acked nodes deferred by a non-contiguous parent chain must be re-promoted
+    after their parent is cleared (B guard) or physically deleted (A2), the
+    reconcile scan must converge in a single pass, be idempotent, and never
+    manufacture durability by itself."""
+
+    @staticmethod
+    def _make_chain(depth):
+        """root -> n1 -> n2 -> ... -> n{`depth`}, all under the arena, page
+        size 1 (hash_value may stay None -- collect_storage_gap and the
+        promotion flags never read it)."""
+        params = SimpleNamespace(
+            page_size=1,
+            is_eagle=False,
+            enable_session_radix_cache=False,
+            eviction_policy="lru",
+            token_to_kv_pool_allocator=None,
+            enable_kv_cache_events=False,
+        )
+        tree_core = _RealTreeCore(
+            params,
+            {
+                _component_type.FULL: SimpleNamespace(tree_core=None),
+                _component_type.MAMBA: SimpleNamespace(tree_core=None),
+            },
+        )
+        tree_core.is_write_back = True
+        nodes = []
+        parent = tree_core.root_node
+        for i in range(depth):
+            n = tree_core._new_node()
+            n.parent = parent
+            parent.children[f"n{i}"] = n
+            nodes.append(n)
+            parent = n
+        return tree_core, nodes
+
+    # -- l3ack-e2 §7 item 1: child ACK first, parent durable later -----------
+    def test_child_acked_before_parent_chain_promotes_on_parent_ack(self):
+        # Baseline behavior (existing test 1): must survive the P3 changes.
+        tree_core, (a, b) = self._make_chain(2)
+        a.storage_written = True
+        b.storage_written = True
+        promoted = tree_core.advance_storage_persisted(b.id)
+        self.assertEqual(promoted, [])
+        self.assertFalse(tree_core.is_storage_persisted(b.id))
+        self.assertEqual(tree_core.deferred_acked_nodes(), [b.id])
+        promoted = tree_core.advance_storage_persisted(a.id)
+        self.assertEqual(promoted, [a.id, b.id])
+        self.assertTrue(tree_core.is_storage_persisted(a.id))
+        self.assertTrue(tree_core.is_storage_persisted(b.id))
+        self.assertEqual(tree_core.deferred_acked_nodes(), [])
+
+    # -- l3ack-e2 §7 item 2: parent clear then restore -> descendants promote
+    def test_clear_no_acked_descendants_then_parent_repromotes_descendants(self):
+        # B guard holds for the no-acked-dependency case: clear drops the
+        # parent's flags; a subsequent real write ack re-promotes the whole
+        # acked subtree (A1's re-write + ack drain re-push).
+        tree_core, (a, b, c) = self._make_chain(3)
+        promoted = tree_core.advance_storage_persisted(a.id)
+        self.assertEqual(promoted, [a.id])  # b/c not acked yet
+        tree_core.advance_storage_persisted(b.id)  # c not acked: b deferred
+        tree_core.advance_storage_persisted(c.id)  # now c's chain contiguous
+        self.assertTrue(tree_core.is_storage_persisted(a.id))
+        self.assertTrue(tree_core.is_storage_persisted(b.id))
+        self.assertTrue(tree_core.is_storage_persisted(c.id))
+        # Clear a with no acked-deferred descendant below it: allowed.
+        tree_core.clear_storage_durable(a.id)
+        self.assertFalse(tree_core.is_l3_durable(a.id))
+        # The whole subtree stays persisted -- clearing the anchor is
+        # anchor-precise and does not re-clear descendants (existing contract).
+        self.assertTrue(tree_core.is_storage_persisted(b.id))
+        self.assertTrue(tree_core.is_storage_persisted(c.id))
+        # Parent re-ack: a itself is re-promoted (it was cleared); the
+        # already-persisted subtree is not re-walked.
+        self.assertEqual(tree_core.advance_storage_persisted(a.id), [a.id])
+        self.assertTrue(tree_core.is_storage_persisted(a.id))
+
+    # -- l3ack-e2 §7 item 3: A->B->C->D out-of-order ACK convergence --------
+    def test_out_of_order_acks_converge_in_single_reconcile_pass(self):
+        # Four-level chain, acks arrive bottom-up (every node deferred on its
+        # own ack because the parent chain was not contiguous yet). Once the
+        # full chain is acked, a single promotion of the chain head (root
+        # child) re-promotes all acked descendants in one pass -- the A3
+        # single-pass convergence: one chain-head re-ack fills the whole
+        # broken chain, no per-descendant repeated triggering.
+        tree_core, (a, b, c, d) = self._make_chain(4)
+        for n in (d, c, b):
+            tree_core.advance_storage_persisted(n.id)
+        # a not acked yet: b/c/d are acked-deferred (their parents unpromoted).
+        self.assertEqual(
+            set(tree_core.deferred_acked_nodes()), {b.id, c.id, d.id}
+        )
+        # Single promotion of the root child a: all acked descendants are
+        # retroactively promoted in one pass.
+        promoted = tree_core.advance_storage_persisted(a.id)
+        self.assertEqual(promoted, [a.id, b.id, c.id, d.id])
+        self.assertTrue(tree_core.is_storage_persisted(d.id))
+        self.assertEqual(tree_core.deferred_acked_nodes(), [])
+
+    # -- l3ack-e2 §7 item 4: repeated ACK / repeated reconcile idempotency ---
+    def test_repeat_ack_and_reconcile_are_idempotent(self):
+        # a is durable via restore (not persisted), so b's ack defers under
+        # it. Repeated clear while b stays deferred is a no-op (B guard);
+        # repeated advance is a no-op once persisted.
+        tree_core, (a, b) = self._make_chain(2)
+        tree_core.mark_storage_restored(a.id)
+        tree_core.advance_storage_persisted(b.id)  # a not persisted: b deferred
+        self.assertTrue(tree_core.is_l3_durable(a.id))
+        self.assertFalse(tree_core.is_storage_persisted(b.id))
+        # Clear a: B guard holds (b is acked-deferred) -> durable belief kept.
+        tree_core.clear_storage_durable(a.id)
+        self.assertTrue(tree_core.is_l3_durable(a.id))
+        # A repeated clear while the descendant stays deferred: no-op (guard).
+        tree_core.clear_storage_durable(a.id)
+        self.assertTrue(tree_core.is_l3_durable(a.id))
+        # A3 sees the deferred node. A real chain-head re-ack promotes a then b.
+        self.assertEqual(tree_core.deferred_acked_nodes(), [b.id])
+        tree_core.advance_storage_persisted(a.id)
+        self.assertTrue(tree_core.is_storage_persisted(a.id))
+        self.assertTrue(tree_core.is_storage_persisted(b.id))
+        self.assertEqual(tree_core.deferred_acked_nodes(), [])
+        # Repeated advance after promotion: idempotent no-op.
+        self.assertEqual(tree_core.advance_storage_persisted(a.id), [])
+        self.assertEqual(tree_core.advance_storage_persisted(b.id), [])
+        # Now b is persisted, so clearing a has no acked-deferred dependency:
+        # the clear is allowed (the subtree is already fully durable).
+        tree_core.clear_storage_durable(a.id)
+        self.assertFalse(tree_core.is_l3_durable(a.id))
+
+    # -- l3ack-e2 §7 item 5: no fabricated durable promotion -----------------
+    def test_reconcile_never_promotes_by_itself(self):
+        # reconciliation only reports acked-deferred nodes; promoting requires
+        # a real write ack. With no parent durable, an acked child stays
+        # deferred even though the scan sees it.
+        tree_core, (a, b) = self._make_chain(2)
+        tree_core.advance_storage_persisted(b.id)
+        self.assertEqual(tree_core.deferred_acked_nodes(), [b.id])
+        # No ack for a: b remains deferred (scan sees it, promotes nothing).
+        self.assertFalse(tree_core.is_storage_persisted(b.id))
+        self.assertFalse(tree_core.is_l3_durable(b.id))
+        # Once a really acks, b promotes.
+        tree_core.advance_storage_persisted(a.id)
+        self.assertTrue(tree_core.is_storage_persisted(b.id))
+
+    # -- l3ack-e2 §7 B-guard extra: clear with acked-dependency is deferred ---
+    def test_clear_with_acked_descendant_is_deferred_not_cleared(self):
+        # The B guard: when a's subtree still holds an acked-deferred node,
+        # clearing a's durable belief would strand it, so the clear is
+        # deferred (the A1/A3 reconciliation re-writes a's chain instead).
+        # Here a is durable via restore (storage_restored, not persisted): its
+        # own ack never promoted it, so acked descendants stay deferred until
+        # a's chain is re-written and really acked.
+        tree_core, (a, b, c) = self._make_chain(3)
+        tree_core.mark_storage_restored(a.id)  # a durable via restore
+        tree_core.advance_storage_persisted(b.id)  # a not persisted: b deferred
+        self.assertTrue(tree_core.is_l3_durable(a.id))
+        self.assertFalse(tree_core.is_storage_persisted(a.id))
+        self.assertFalse(tree_core.is_storage_persisted(b.id))
+        self.assertEqual(tree_core.deferred_acked_nodes(), [b.id])
+        tree_core.clear_storage_durable(a.id)
+        # a's durable belief is preserved, so b's promotion path stays intact.
+        self.assertTrue(tree_core.is_l3_durable(a.id))
+        self.assertTrue(tree_core.has_acked_descendant(a.id))
+        # c acks (also deferred). A3 re-writes a's chain; a's real re-ack
+        # promotes a, then the already-acked b and c.
+        tree_core.advance_storage_persisted(c.id)
+        self.assertEqual(
+            set(tree_core.deferred_acked_nodes()), {b.id, c.id}
+        )
+        promoted = tree_core.advance_storage_persisted(a.id)
+        self.assertEqual(set(promoted), {a.id, b.id, c.id})
+        self.assertTrue(tree_core.is_storage_persisted(b.id))
+        self.assertTrue(tree_core.is_storage_persisted(c.id))
+        self.assertEqual(tree_core.deferred_acked_nodes(), [])
+
+    # -- A2: parent physically deleted -> write_backup on descendant fills ----
+    def test_physical_parent_delete_chain_rebuilt_from_root_on_descendant_write(
+        self,
+    ):
+        # Simulate a host eviction that physically deleted node a (detach /
+        # tombstone cascade) and re-anchored the surviving deferred
+        # descendant b directly under root (the detached-chain rebuild). A2/A3
+        # repair b: its write is already complete (no gap to re-fill --
+        # collect_storage_gap returns []), so the repair is re-running
+        # promotion now that b's parent is root (contiguous), promoting b.
+        tree_core, (a, b) = self._make_chain(2)
+        tree_core.mark_storage_restored(a.id)  # a durable but not persisted
+        tree_core.advance_storage_persisted(b.id)  # b deferred under a
+        self.assertEqual(tree_core.deferred_acked_nodes(), [b.id])
+        self.assertFalse(tree_core.is_storage_persisted(b.id))
+        # a is physically deleted (arena membership dropped, like
+        # _unregister_node); the surviving deferred b is re-anchored to root.
+        tree_core._node_arena.pop(a.id, None)
+        tree_core.root_node.children.pop("n0", None)
+        b.parent = tree_core.root_node
+        self.assertFalse(tree_core.node_exists(a.id))
+        # b's write is already acked (storage_written), so no gap to re-fill.
+        self.assertEqual(tree_core.collect_storage_gap(b.id), [])
+        self.assertEqual(tree_core.deferred_acked_nodes(), [b.id])
+        # Re-running promotion on b (its parent is now root = contiguous)
+        # promotes it. This is the A2 reverse-path repair.
+        promoted = tree_core.advance_storage_persisted(b.id)
+        self.assertEqual(promoted, [b.id])
+        self.assertTrue(tree_core.is_storage_persisted(b.id))
+        self.assertEqual(tree_core.deferred_acked_nodes(), [])
+
+    def test_collect_storage_gap_stops_at_nearest_persisted_ancestor(self):
+        # The A1/A3 re-fill basis: gap collection walks ancestors from the
+        # nearest persisted node (root when none) to the target, skipping
+        # already-written nodes. A chain with a persisted middle ancestor
+        # fills only the suffix above it; a cleared anchor extends the gap
+        # back to root.
+        tree_core, (a, b, c) = self._make_chain(3)
+        tree_core.advance_storage_persisted(a.id)  # a persisted; b/c unacked
+        # Gap for c: b and c (a is the persisted stop; nothing written yet).
+        self.assertEqual(tree_core.collect_storage_gap(c.id), [b.id, c.id])
+        # Gap for a: none (a itself is persisted).
+        self.assertEqual(tree_core.collect_storage_gap(a.id), [])
+        # Written dedupe: once b is written, the gap for c is [c] only.
+        b.storage_written = True
+        self.assertEqual(tree_core.collect_storage_gap(c.id), [c.id])
+        # Clear a (no acked descendants): a is no longer persisted, but its
+        # write was already submitted (storage_written), so the gap for c
+        # walks from root skipping a and the already-written b: [c] only.
+        tree_core.clear_storage_durable(a.id)
+        self.assertFalse(tree_core.is_l3_durable(a.id))
+        self.assertEqual(tree_core.collect_storage_gap(c.id), [c.id])
+        # Undo b's write: now the gap for c is [b, c] (a is skipped as
+        # already written, even though it is no longer persisted).
+        b.storage_written = False
+        self.assertEqual(tree_core.collect_storage_gap(c.id), [b.id, c.id])
+        # No persisted ancestor at all: the full chain from root.
+        tree_core2, (a2, b2, c2) = self._make_chain(3)
+        self.assertEqual(
+            tree_core2.collect_storage_gap(c2.id), [a2.id, b2.id, c2.id]
+        )
+
+
+class DeferredAckReconcileCacheTests(unittest.TestCase):
+    """P3 A3 (phase2-p3-fix): the radix-cache reconcile entry
+    (_flush_pending_storage_writes -> _reconcile_deferred_acked) re-promotes
+    a deferred-ACK node whose parent chain was cleared / deleted, and wakes
+    its frontier waiter -- the loop the T13 60s timeout used to cut short.
+    Drives the REAL UnifiedTreeCore through the REAL radix-cache flush, so
+    the write_backup_storage / advance_storage_persisted /
+    _wake_frontier_waiters code paths all run."""
+
+    @unittest.skipIf(torch is None, "real UnifiedTreeCore needs torch")
+    def test_reconcile_repromotes_deferred_and_wakes_frontier(self):
+        cache = _make_cache()
+        # A real tree core (arena + promotion flags) behind the harness.
+        params = SimpleNamespace(
+            page_size=1,
+            is_eagle=False,
+            enable_session_radix_cache=False,
+            eviction_policy="lru",
+            token_to_kv_pool_allocator=None,
+            enable_kv_cache_events=False,
+        )
+        tree_core = _RealTreeCore(
+            params,
+            {
+                _component_type.FULL: SimpleNamespace(tree_core=None),
+                _component_type.MAMBA: SimpleNamespace(tree_core=None),
+            },
+        )
+        tree_core.is_write_back = True
+        tree_core.enable_storage = True  # cache.enable_storage proxies to it
+        cache.tree_core = tree_core
+        a = tree_core._new_node()
+        a.parent = tree_core.root_node
+        tree_core.root_node.children["a"] = a
+        b = tree_core._new_node()
+        b.parent = a
+        a.children["b"] = b
+        # a was a persisted anchor, then its durable belief was cleared while
+        # no acked-deferred descendant existed yet (B guard allowed it). Now
+        # a is acked && !persisted, so it is itself deferred.
+        tree_core.advance_storage_persisted(a.id)
+        tree_core.clear_storage_durable(a.id)
+        self.assertFalse(tree_core.is_storage_persisted(a.id))
+        # b acks under the now-unpersisted a: b is deferred too.
+        tree_core.advance_storage_persisted(b.id)
+        self.assertEqual(
+            set(tree_core.deferred_acked_nodes()), {a.id, b.id}
+        )
+        # A frontier waiter is parked on b.
+        cache._storage_frontier_waiters[b.id] = {"r1"}
+        # The reconcile pass (flush) promotes the deferred ack chain -- a
+        # first (root is its anchor), then b -- and wakes the waiter.
+        cache._flush_pending_storage_writes()
+        self.assertTrue(tree_core.is_storage_persisted(a.id))
+        self.assertTrue(tree_core.is_storage_persisted(b.id))
+        self.assertEqual(tree_core.deferred_acked_nodes(), [])
+        self.assertEqual(cache._storage_frontier_ready, {"r1"})
+        self.assertEqual(cache._storage_frontier_waiters, {})
+        self.assertTrue(cache.pop_frontier_ready("r1"))
+
+    @unittest.skipIf(torch is None, "real UnifiedTreeCore needs torch")
+    def test_reconcile_is_reentrant_safe_and_never_promotes_barely(self):
+        # A deferred node whose write is in flight (not yet acked) is NOT in
+        # deferred_acked_nodes, so reconcile leaves it alone -- reconcile
+        # never promotes a node that has not really acked. Also: running the
+        # flush twice is safe (re-entrancy guard) and idempotent.
+        cache = _make_cache()
+        params = SimpleNamespace(
+            page_size=1,
+            is_eagle=False,
+            enable_session_radix_cache=False,
+            eviction_policy="lru",
+            token_to_kv_pool_allocator=None,
+            enable_kv_cache_events=False,
+        )
+        tree_core = _RealTreeCore(
+            params,
+            {
+                _component_type.FULL: SimpleNamespace(tree_core=None),
+                _component_type.MAMBA: SimpleNamespace(tree_core=None),
+            },
+        )
+        tree_core.is_write_back = True
+        cache.tree_core = tree_core
+        a = tree_core._new_node()
+        a.parent = tree_core.root_node
+        tree_core.root_node.children["a"] = a
+        tree_core.mark_storage_restored(a.id)
+        # No acked node yet: reconcile finds nothing to do.
+        cache._flush_pending_storage_writes()
+        cache._flush_pending_storage_writes()
+        self.assertEqual(tree_core.deferred_acked_nodes(), [])
+        self.assertFalse(tree_core.is_storage_persisted(a.id))
+        # A node that is only written (never acked) is not deferred/promoted.
+        a.storage_written = True
+        cache._flush_pending_storage_writes()
+        self.assertEqual(tree_core.deferred_acked_nodes(), [])
+        self.assertFalse(tree_core.is_storage_persisted(a.id))
+        self.assertFalse(a.storage_acked)
+
+
+# ---------------------------------------------------------------------------
 # P2-1 e14: L3-durability predicate covering the restore chain
 # (written+ACK or restored-successfully -- the K=32 evict deadlock)
 # ---------------------------------------------------------------------------
@@ -2051,6 +2486,10 @@ class _RestoreMarkTree(_FakeTreeCore):
 
 def _make_restore_cache(tree_core=None):
     cache = _make_cache(tree_core=tree_core)
+    cache.components = {}
+    cache._host_allocability_generations = {"kv": 0}
+    cache._host_allocability_instance_id = 1
+    cache._host_allocability_telemetry_seq = 0
     cache.page_size = 1
     cache.enable_storage_metrics = False
     cache.cache_controller.mem_pool_host = SimpleNamespace(
@@ -2087,9 +2526,19 @@ class RestoreDurabilityMarkingTests(unittest.TestCase):
         cache = _make_restore_cache(tree_core=tree)
         operation = _make_operation(4)
         operation.completed_tokens = 4
-        _drive_prefetch_result(cache, operation)
+        with self.assertLogs(level="INFO") as records:
+            _drive_prefetch_result(cache, operation)
         self.assertEqual(tree.marked, [77])
         self.assertEqual(tree.commit_calls, 1)
+        self.assertEqual(cache._storage_prefetch_terminal.get("test-rid"), "finalized")
+        finalize = next(
+            json.loads(record.getMessage().split("[HAE] ", 1)[1])
+            for record in records.records
+            if "[HAE] " in record.getMessage()
+            and '"evt": "restore_hybrid_finalize"' in record.getMessage()
+        )
+        self.assertEqual(finalize["result"], "accepted")
+        self.assertEqual(finalize["restore_state_after"], "READY")
 
     def test_shortfall_marks_only_completed_prefix(self):
         # A partial restore inserts exactly the completed prefix: the split
@@ -2121,9 +2570,71 @@ class RestoreDurabilityMarkingTests(unittest.TestCase):
             update_extra_pool_hit_pages=lambda *a, **k: None,
             extra_pool_hit_pages={},  # the sidecar served nothing
         )
-        _drive_prefetch_result(cache, operation)
+        with self.assertLogs(level="INFO") as records:
+            _drive_prefetch_result(cache, operation)
         self.assertEqual(tree.marked, [])
         self.assertEqual(tree.commit_calls, 0)  # never reached the insert
+        self.assertEqual(cache._storage_prefetch_terminal.get("test-rid"), "finalized")
+        finalize = next(
+            json.loads(record.getMessage().split("[HAE] ", 1)[1])
+            for record in records.records
+            if "[HAE] " in record.getMessage()
+            and '"evt": "restore_hybrid_finalize"' in record.getMessage()
+        )
+        self.assertEqual(finalize["result"], "discarded")
+        self.assertEqual(finalize["restore_state_after"], "NONE")
+
+    def test_hybrid_telemetry_accepts_duck_typed_transfer_gaps(self):
+        # Current source-loaded fixtures use SimpleNamespace transfers rather
+        # than PoolTransfer. Observational telemetry must tolerate omitted
+        # optional fields and an omitted hit-page map.
+        cache = _make_restore_cache()
+        operation = SimpleNamespace(
+            pool_transfers=[
+                SimpleNamespace(
+                    indices_from_pool=_PoolName.SWA,
+                    name="swa",
+                    keys=["k1", "k2"],
+                ),
+                SimpleNamespace(),
+            ],
+            pool_storage_result=SimpleNamespace(),
+        )
+        self.assertTrue(
+            UnifiedRadixCache._host_alloc_hybrid_is_all_or_nothing(operation)
+            is False
+        )
+        self.assertEqual(
+            cache._host_alloc_hybrid_sidecar_counts(operation),
+            {
+                "swa": {"expected": 2, "fetched": 0},
+                "unknown": {"expected": 0, "fetched": 0},
+            },
+        )
+
+
+class HostAllocMutationTelemetryTests(unittest.TestCase):
+    def test_cache_mutation_telemetry_is_bounded_under_repetition(self):
+        cache = _make_cache()
+        cache._host_allocability_generations = {"kv": 0}
+        cache._host_allocability_instance_id = 1
+        cache._host_allocability_telemetry_seq = 0
+        cache._host_evictable_signature = lambda _pool: (0, frozenset())
+        with self.assertLogs(level="INFO") as records:
+            for _ in range(5000):
+                cache._bump_host_allocability(
+                    "kv", "direct_free", 1, evictable_before=0, evictable_after=0
+                )
+        payloads = [
+            json.loads(record.getMessage().split("[HAE] ", 1)[1])
+            for record in records.records
+            if "[HAE] " in record.getMessage()
+        ]
+        self.assertLessEqual(len(payloads), 64)
+        self.assertEqual(cache._host_allocability_generations["kv"], 5000)
+        self.assertEqual(cache._host_allocability_telemetry_seq, 5000)
+        self.assertEqual(payloads[0]["telemetry_seq"], 1)
+        self.assertGreater(payloads[-1]["telemetry_coalesced_mutations"], 0)
 
 
 class _SplitComponent:
@@ -3475,6 +3986,252 @@ class PromotionSerializationIntegrationTests(unittest.TestCase):
         cache.loading_check(finish_count=2)
         self.assertEqual(cache.inflight_promotion_reserved, 0)
         self.assertEqual(cache.ongoing_load_back, {})
+
+
+# ---------------------------------------------------------------------------
+# phase2-peranchor: per-anchor storage version (real tree core)
+# ---------------------------------------------------------------------------
+
+
+@unittest.skipIf(torch is None, "real UnifiedTreeCore needs torch")
+class PerAnchorVersionTests(unittest.TestCase):
+    """phase2-peranchor: the per-anchor storage_version is bumped only by a
+    durability event local to a node's OWN chain (write ack promotion /
+    restore read-back / durable-belief clear), never by an unrelated chain's
+    event (which bumps only the global diagnostic epoch)."""
+
+    @staticmethod
+    def _make_chain():
+        params = SimpleNamespace(
+            page_size=1,
+            is_eagle=False,
+            enable_session_radix_cache=False,
+            eviction_policy="lru",
+            token_to_kv_pool_allocator=None,
+            enable_kv_cache_events=False,
+        )
+        tree_core = _RealTreeCore(
+            params,
+            {
+                _component_type.FULL: SimpleNamespace(tree_core=None),
+                _component_type.MAMBA: SimpleNamespace(tree_core=None),
+            },
+        )
+        tree_core.is_write_back = True
+        nodes = []
+        parent = tree_core.root_node
+        for i in range(2):
+            n = tree_core._new_node()
+            n.parent = parent
+            n.key = _RadixKey(_array("q", [1, 2]), None)
+            parent.children[f"n{i}"] = n
+            nodes.append(n)
+            parent = n
+        return tree_core, nodes
+
+    def test_promotion_bumps_only_promoted_nodes_version(self):
+        # Two sibling chains ack independently: promoting chain A bumps A's
+        # version but NOT B's (the unrelated chain's durability event must not
+        # re-arm a request parked on B).
+        tree_core, (a, b) = self._make_chain()
+        # A second sibling chain under the root.
+        c = tree_core._new_node()
+        c.parent = tree_core.root_node
+        c.key = _RadixKey(_array("q", [9]), None)
+        tree_core.root_node.children["c"] = c
+
+        self.assertEqual(tree_core.anchor_storage_version(a.id), 0)
+        self.assertEqual(tree_core.anchor_storage_version(c.id), 0)
+
+        # a ack promotes a (root is the persisted parent).
+        tree_core.advance_storage_persisted(a.id)
+        self.assertEqual(tree_core.anchor_storage_version(a.id), 1)
+        # Unrelated chain c's version untouched.
+        self.assertEqual(tree_core.anchor_storage_version(c.id), 0)
+        # b is a descendant of a (a's child): promoting b does not bump a
+        # again (a was already promoted); b bumps its own version.
+        tree_core.advance_storage_persisted(b.id)
+        self.assertEqual(tree_core.anchor_storage_version(b.id), 1)
+        # a's version still 1 (its own promotion was the only local event).
+        self.assertEqual(tree_core.anchor_storage_version(a.id), 1)
+
+        # c's own ack promotes only c.
+        tree_core.advance_storage_persisted(c.id)
+        self.assertEqual(tree_core.anchor_storage_version(c.id), 1)
+        self.assertEqual(tree_core.anchor_storage_version(a.id), 1)
+        self.assertEqual(tree_core.anchor_storage_version(b.id), 1)
+
+    def test_restore_read_back_bumps_own_anchor_only(self):
+        tree_core, (a, b) = self._make_chain()
+        c = tree_core._new_node()
+        c.parent = tree_core.root_node
+        c.key = _RadixKey(_array("q", [9]), None)
+        tree_core.root_node.children["c"] = c
+
+        tree_core.mark_storage_restored(a.id)
+        self.assertEqual(tree_core.anchor_storage_version(a.id), 1)
+        self.assertEqual(tree_core.anchor_storage_version(c.id), 0)
+
+        tree_core.mark_storage_restored(c.id)
+        self.assertEqual(tree_core.anchor_storage_version(c.id), 1)
+        # a unaffected by c's read-back.
+        self.assertEqual(tree_core.anchor_storage_version(a.id), 1)
+
+    def test_clear_bumps_version_on_actual_clear(self):
+        tree_core, (a, b) = self._make_chain()
+        tree_core.advance_storage_persisted(a.id)
+        self.assertEqual(tree_core.anchor_storage_version(a.id), 1)
+        self.assertTrue(tree_core.is_l3_durable(a.id))
+
+        # Clear with no acked-deferred descendant: the durable belief drops
+        # and the version bumps (the anchor's L3 state substantively changed).
+        tree_core.clear_storage_durable(a.id)
+        self.assertFalse(tree_core.is_l3_durable(a.id))
+        self.assertEqual(tree_core.anchor_storage_version(a.id), 2)
+
+    def test_clear_guarded_by_deferred_descendant_does_not_bump(self):
+        # P3 B guard: with an acked-deferred descendant the clear (and the
+        # bump) are suppressed -- P3 reconciliation semantics preserved.
+        tree_core, (a, b) = self._make_chain()
+        tree_core.advance_storage_persisted(a.id)  # a durable anchor
+        self.assertEqual(tree_core.anchor_storage_version(a.id), 1)
+        # b acks under a's now-clear... but first clear a so b is deferred.
+        tree_core.clear_storage_durable(a.id)
+        # b acks while a is unpersisted: b deferred (acked, not persisted).
+        tree_core.advance_storage_persisted(b.id)
+        self.assertTrue(b.storage_acked)
+        self.assertFalse(tree_core.is_storage_persisted(b.id))
+        # a's version bumped on the clear (2); a still durable-belief-cleared.
+        self.assertEqual(tree_core.anchor_storage_version(a.id), 2)
+
+        # Clearing a again with b deferred: B guard suppresses the clear, so
+        # a's version is NOT bumped again.
+        tree_core.clear_storage_durable(a.id)
+        self.assertEqual(tree_core.anchor_storage_version(a.id), 2)
+
+    def test_dead_anchor_version_reads_zero(self):
+        # A deleted anchor reads version 0 -- a self-heal to a new candidate.
+        tree_core, (a, b) = self._make_chain()
+        dead = 999999
+        self.assertEqual(tree_core.anchor_storage_version(dead), 0)
+        self.assertEqual(tree_core.anchor_storage_version(None), 0)
+
+
+class DeepestDurableAncestorTests(unittest.TestCase):
+    """phase2-p0fix Q1: the no-material fast-forward judgment resolves the
+    anchor to its deepest durable ancestor before judging the storage facts.
+    The shallow anchor can be non-durable (host prefix split by an L3 write
+    ack) while a deeper ancestor's pages ARE durable -- judging on the shallow
+    node's missing flags would mis-forward a restorable request."""
+
+    @staticmethod
+    def _make_chain():
+        params = SimpleNamespace(
+            page_size=1,
+            is_eagle=False,
+            enable_session_radix_cache=False,
+            eviction_policy="lru",
+            token_to_kv_pool_allocator=None,
+            enable_kv_cache_events=False,
+        )
+        tree_core = _RealTreeCore(
+            params,
+            {
+                _component_type.FULL: SimpleNamespace(tree_core=None),
+                _component_type.MAMBA: SimpleNamespace(tree_core=None),
+            },
+        )
+        tree_core.is_write_back = True
+        nodes = []
+        parent = tree_core.root_node
+        for i in range(3):
+            n = tree_core._new_node()
+            n.parent = parent
+            n.key = _RadixKey(_array("q", [1, 2]), None)
+            parent.children[f"n{i}"] = n
+            nodes.append(n)
+            parent = n
+        return tree_core, nodes
+
+    def _cache(self, tree_core):
+        # deepest_durable_ancestor lives on the UnifiedRadixCache facade,
+        # delegating to tree_core -- wrap the real tree in the facade harness.
+        return _make_cache(tree_core)
+
+    def test_shallow_non_durable_resolves_to_deeper_durable_ancestor(self):
+        # Chain root -> a -> b -> c. c is the shallow anchor, non-durable; a
+        # is durable (a deeper ancestor). deepest_durable_ancestor(c) must
+        # return a (the most rootward durable), not skip to root (root is not
+        # durable by default -- storage_persisted False).
+        tree_core, (a, b, c) = self._make_chain()
+        tree_core.advance_storage_persisted(a.id)
+        self.assertTrue(tree_core.is_l3_durable(a.id))
+        self.assertFalse(tree_core.is_l3_durable(b.id))
+        self.assertFalse(tree_core.is_l3_durable(c.id))
+        cache = self._cache(tree_core)
+        self.assertEqual(cache.deepest_durable_ancestor(c.id), a.id)
+
+    def test_durable_anchor_is_its_own_deepest_ancestor(self):
+        tree_core, (a, b, c) = self._make_chain()
+        # Promote the whole chain root->a->b->c so c is itself durable.
+        tree_core.advance_storage_persisted(a.id)
+        tree_core.advance_storage_persisted(b.id)
+        tree_core.advance_storage_persisted(c.id)
+        self.assertTrue(tree_core.is_l3_durable(c.id))
+        # c durable: its deepest durable ancestor is itself.
+        cache = self._cache(tree_core)
+        self.assertEqual(cache.deepest_durable_ancestor(c.id), c.id)
+
+    def test_pure_device_chain_has_no_durable_ancestor(self):
+        # No node on the chain is durable; root storage_persisted defaults
+        # False, so walking to the root returns None -> no-material holds.
+        tree_core, (a, b, c) = self._make_chain()
+        cache = self._cache(tree_core)
+        self.assertIsNone(cache.deepest_durable_ancestor(c.id))
+        self.assertIsNone(cache.deepest_durable_ancestor(a.id))
+
+    def test_root_is_not_reported_as_durable(self):
+        # The root's storage_persisted defaults False: it must never be
+        # returned as a durable ancestor (a pure device chain stays no-material
+        # even though it terminates at the root).
+        tree_core, (a, b, c) = self._make_chain()
+        cache = self._cache(tree_core)
+        self.assertIsNone(cache.deepest_durable_ancestor(b.id))
+
+    def test_dead_anchor_returns_none(self):
+        tree_core, (a, b, c) = self._make_chain()
+        cache = self._cache(tree_core)
+        self.assertIsNone(cache.deepest_durable_ancestor(999999))
+        self.assertIsNone(cache.deepest_durable_ancestor(None))
+
+
+class NoMaterialFastForwardUnitTests(unittest.TestCase):
+    """The 5-fact no-material judgment against the pure predicate (via the
+    real-tree module import): ALL facts absent -> fast-forward; ANY fact
+    present -> keep the wait. Never a bare storage_hit==0 shortcut."""
+
+    def _info(self, **kw):
+        return _frontier_anchor_info(**kw)
+
+    def test_all_absent_fast_forwards(self):
+        self.assertTrue(_no_material_fast_forward(self._info()))
+
+    def test_any_present_keeps_wait(self):
+        self.assertFalse(
+            _no_material_fast_forward(self._info(host_material=True))
+        )
+        self.assertFalse(
+            _no_material_fast_forward(self._info(storage_material=True))
+        )
+        self.assertFalse(
+            _no_material_fast_forward(self._info(pending_durable_ack=True))
+        )
+        self.assertFalse(
+            _no_material_fast_forward(self._info(deferred_durable_desc=True))
+        )
+        self.assertFalse(
+            _no_material_fast_forward(self._info(restorable_epoch_change=True))
+        )
 
 
 if __name__ == "__main__":

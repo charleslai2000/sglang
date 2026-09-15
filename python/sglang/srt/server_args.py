@@ -2995,7 +2995,7 @@ class ServerArgs:
                 "is the authoritative channel and this legacy GB knob applies "
                 "only when the token value is not set (0 disables it). Byte "
                 "reserve is a kv-pool-specific absolute floor that does not "
-                "track the hicache-size split (67% of the kv pool at 8G/1.5G)."
+                "track the hicache-size split (67%% of the kv pool at 8G/1.5G)."
             ),
         ),
         NS("memory"),

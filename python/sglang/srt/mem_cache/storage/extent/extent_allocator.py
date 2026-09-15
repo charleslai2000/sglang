@@ -20,18 +20,86 @@ the write succeeded. Reusing a slot (the circular cursor wrapping into a
 slot that cannot hold another page) or watermark GC eviction bumps the
 slot's generation, so any index entry captured before the reuse fails the
 read-side re-verification (generation mismatch = miss).
+
+The G1 split exposes the same discipline with an explicit invalidation
+step: ``plan_split`` is pure and returns ``drop_events``, ``apply_drops``
+is the only new-path generation bump, and ``commit_install`` is
+install-only. The legacy ``plan``/``commit`` pair remains byte-compatible
+for the existing backend callers.
 """
 
 from __future__ import annotations
 
 import logging
+import json
+import os
+import threading
 import time
 from collections import OrderedDict
 from typing import Callable, List, Optional, Sequence, Tuple
 
 import msgspec
 
+from sglang.srt.mem_cache.trace_context import attach_trace_context
+
 logger = logging.getLogger(__name__)
+
+_T38C_DURABLE_SEQ = {}
+_T38C_DURABLE_SEQ_LOCK = threading.Lock()
+
+
+def _t38c_durable_log(rec):
+    if not os.path.exists("/tmp/t38c-durable-trace"):
+        return
+    try:
+        thread_id = threading.get_ident()
+        with _T38C_DURABLE_SEQ_LOCK:
+            local_seq = _T38C_DURABLE_SEQ.get(thread_id, 0) + 1
+            _T38C_DURABLE_SEQ[thread_id] = local_seq
+        run_id = os.environ.get("T38C_RUN_ID") or f"pid-{os.getpid()}"
+        record = attach_trace_context(dict(rec))
+        record.setdefault("schema_version", "p0_durable.v2")
+        record.setdefault("run_id", run_id)
+        record.setdefault(
+            "event_id",
+            f"{run_id}:{os.getpid()}:{thread_id}:allocator:{local_seq}",
+        )
+        record.setdefault("process_id", os.getpid())
+        record.setdefault("rank", os.environ.get("RANK"))
+        record.setdefault("thread_id", thread_id)
+        record.setdefault("local_seq", local_seq)
+        record.setdefault("operation", record.get("operation_id"))
+        record.setdefault("attempt", record.get("attempt_id"))
+        for field in (
+            "operation_id",
+            "attempt_id",
+            "node_id",
+            "anchor_id",
+            "pool",
+            "tier",
+            "final_kv_hash",
+            "storage_key",
+            "mamba_key",
+            "slot_digest",
+            "old_generation",
+            "new_generation",
+            "requested_pages",
+            "succeeded_pages",
+            "reason",
+            "predecessor_event_id",
+            "evidence_ref",
+        ):
+            record.setdefault(field, None)
+        record.setdefault("result", None)
+        record["ts_wall_ns"] = time.time_ns()
+        record["ts_mono_ns"] = time.monotonic_ns()
+        record["trace"] = "p0_durable"
+        record["ts_ms"] = int(time.time() * 1000)
+        with open("/tmp/t38c-probe.log", "a") as trace_file:
+            trace_file.write(json.dumps(record, default=str) + "\n")
+        return record["event_id"]
+    except Exception:
+        pass
 
 
 class ExtentRef(msgspec.Struct, frozen=True):
@@ -66,6 +134,10 @@ class ExtentAllocator:
         self._slot_bytes = [0] * num_slots
         self._index: dict = {}
         self._recency: OrderedDict = OrderedDict()
+        # All-or-nothing guard for the split install path (NEW-4).  The
+        # backend still serializes logical calls under its own index lock;
+        # this lock only makes apply_drops/commit_install internally atomic.
+        self._lock = threading.RLock()
 
     # ---- read side ----
 
@@ -108,22 +180,81 @@ class ExtentAllocator:
     # ---- write side ----
 
     def plan(
-        self, key_lengths: Sequence[Tuple[str, int]]
+        self,
+        key_lengths: Sequence[Tuple[str, int]],
+        pending_drops: Optional[Sequence[int]] = None,
     ) -> Tuple[List[Optional[ExtentRef]], List[int]]:
-        """Compute placement for a batch of (key, byte length) without mutating.
+        """Backward-compatible 2-tuple wrapper around :meth:`plan_split`.
 
         Returns ``(refs, passed)`` where ``passed`` lists the slots the pack
         cursor enters that cannot fit the batch and are therefore dropped
         and reset (circular reuse; their old data is the oldest in the
         file); ``commit`` applies those drops plus the new index entries.
-        A key longer than ``extent_size`` yields None (cannot be stored),
-        as does a batch larger than the whole file.
+
+        The optional ``pending_drops`` set carries the GC-victim slots known
+        to this plan.  Generation numbers use the unified NEW-1 form, which
+        is identical to the legacy ``_generations[slot] + passed.count(slot)``
+        whenever ``pending_drops`` is empty (the existing backend callers).
         """
+        refs, passed, _drop_events = self._plan_pure(key_lengths, pending_drops)
+        return refs, passed
+
+    def plan_split(
+        self,
+        key_lengths: Sequence[Tuple[str, int]],
+        pending_drops: Optional[Sequence[int]] = None,
+    ) -> Tuple[
+        List[Optional[ExtentRef]], List[int], List[Tuple[int, int]]
+    ]:
+        """Pure plan returning ``(refs, passed, drop_events)`` (NEW-1/NEW-4).
+
+        ``pending_drops`` is the set of GC-victim slots selected purely for
+        this plan; it may be None or empty.  The unified generation form
+        bumps any slot in ``passed``, ``pending_drops``, or both exactly
+        once::
+
+            pending_gen[s] = _generations[s] + max(
+                passed.count(s), 1 if s in pending_drops else 0
+            )
+            ref.gen = pending_gen[slot]
+
+        ``drop_events`` lists ``(slot, pending_gen[slot])`` for
+        ``passed`` U ``pending_drops`` exactly once per slot.  No state is
+        mutated; ``apply_drops`` later consumes ``drop_events``.
+        """
+        return self._plan_pure(key_lengths, pending_drops)
+
+    def _pending_generation(
+        self,
+        slot: int,
+        passed: Sequence[int],
+        pending_drops_slots: set,
+    ) -> int:
+        return self._generations[slot] + max(
+            passed.count(slot), 1 if slot in pending_drops_slots else 0
+        )
+
+    def _plan_pure(
+        self,
+        key_lengths: Sequence[Tuple[str, int]],
+        pending_drops: Optional[Sequence[int]] = None,
+    ) -> Tuple[
+        List[Optional[ExtentRef]], List[int], List[Tuple[int, int]]
+    ]:
+        """Shared pure planner (see :meth:`plan_split` for the contract).
+
+        Placement is computed exactly as if ``_drop_slot`` had been applied
+        once per ``pending_drops`` slot (cursor reset to 0, slot empty): a
+        pending-drop slot is never treated as its pre-drop live cursor, and
+        because it is empty it never contributes a ``passed`` entry -- it is
+        already a drop_event, so overlap stays a single event / single bump.
+        """
+        pending_drops_slots = set(pending_drops) if pending_drops else set()
         refs: List[Optional[ExtentRef]] = []
         passed: List[int] = []
         packed: set = set()
         slot = self._next_slot
-        cursor = self._cursors[slot]
+        cursor = 0 if slot in pending_drops_slots else self._cursors[slot]
         for _key, length in key_lengths:
             if length > self.extent_size:
                 refs.append(None)
@@ -133,27 +264,52 @@ class ExtentAllocator:
                 if slot in packed:
                     # Batch larger than the whole file: placement would
                     # overwrite this plan's own pages; refuse the batch.
-                    return [None] * len(key_lengths), []
-                cursor = self._cursors[slot]
-                if cursor + length > self.extent_size:
-                    passed.append(slot)
+                    return [None] * len(key_lengths), [], []
+                if slot in pending_drops_slots:
+                    # Victim dropped in this plan: empty with cursor 0, so
+                    # place from the start of the slot and do NOT append it
+                    # to ``passed`` (it is already a drop_event).
                     cursor = 0
+                else:
+                    cursor = self._cursors[slot]
+                    if cursor + length > self.extent_size:
+                        passed.append(slot)
+                        cursor = 0
             packed.add(slot)
             refs.append(
                 ExtentRef(
                     slot,
                     cursor,
                     length,
-                    self._generations[slot] + passed.count(slot),
+                    self._pending_generation(slot, passed, pending_drops_slots),
                 )
             )
             cursor += length
-        return refs, passed
+        drop_slots = list(dict.fromkeys(passed))
+        for dropped in sorted(pending_drops_slots):
+            if dropped not in drop_slots:
+                drop_slots.append(dropped)
+        drop_events = [
+            (
+                dropped,
+                self._pending_generation(dropped, passed, pending_drops_slots),
+            )
+            for dropped in drop_slots
+        ]
+        return refs, passed, drop_events
 
-    def commit(self, keys: Sequence[str], refs: Sequence[ExtentRef], passed: List[int]) -> None:
+    def commit(
+        self,
+        keys: Sequence[str],
+        refs: Sequence[ExtentRef],
+        passed: List[int],
+        trace_context: Optional[dict] = None,
+    ) -> None:
         """Apply a plan after its pwrite succeeded (the backend's ACK point)."""
         for slot in passed:
-            self._drop_slot(slot)
+            self._drop_slot(
+                slot, reason="commit_reuse", trace_context=trace_context
+            )
         for key, ref in zip(keys, refs):
             if ref is None:
                 continue
@@ -169,9 +325,113 @@ class ExtentAllocator:
             self._recency[key] = None
             self._next_slot = ref.extent_id
 
+    def apply_drops(
+        self,
+        drop_events: Sequence[Tuple[int, int]],
+        trace_context: Optional[dict] = None,
+    ) -> None:
+        """Apply ``(slot, new_generation)`` drops (NEW-4).
+
+        This is the only new-path method that removes keys, resets
+        ``_cursors``/``_slot_bytes``, and bumps generations.  It is
+        idempotent per ``(slot, new_generation)``: a slot already at
+        ``new_generation`` is a no-op, and a request that would decrease a
+        generation fails closed (NM-INV-06).
+        """
+        with self._lock:
+            for slot, new_generation in drop_events:
+                old_generation = self._generations[slot]
+                if old_generation == new_generation:
+                    continue
+                if old_generation > new_generation:
+                    raise ValueError(
+                        "ExtentAllocator: generation decrease for slot "
+                        f"{slot}: {old_generation} -> {new_generation}"
+                    )
+                freed = self._slot_bytes[slot]
+                removed_keys = sorted(self._slot_keys[slot])
+                for key in removed_keys:
+                    self._index.pop(key, None)
+                    self._recency.pop(key, None)
+                self._slot_keys[slot].clear()
+                self._slot_bytes[slot] = 0
+                self._cursors[slot] = 0
+                self._generations[slot] = new_generation
+                for key in removed_keys:
+                    _t38c_durable_log(
+                        {
+                            "evt": "storage_invalidate",
+                            "trace_context": trace_context,
+                            "operation": "allocator_apply_drops",
+                            "pool": "storage",
+                            "storage_key": key,
+                            "extent_id": slot,
+                            "extent_generation": new_generation,
+                            "old_generation": old_generation,
+                            "new_generation": new_generation,
+                            "index_removed": True,
+                            "reason": "apply_drops",
+                            "result": True,
+                        }
+                    )
+                if freed > 0:
+                    logger.info(
+                        "[P3] ts_ms=%d evt=extent_recycle slot=%d "
+                        "generation=%d freed=%d",
+                        int(time.time() * 1000),
+                        slot,
+                        new_generation,
+                        freed,
+                    )
+
+    def commit_install(
+        self,
+        keys: Sequence[str],
+        refs: Sequence[Optional[ExtentRef]],
+    ) -> bool:
+        """Install-only commit: never drops and never re-reads ``passed``.
+
+        All-or-nothing under the allocator lock: every non-None ref is
+        validated first (slot range, geometry, and ``ref.generation`` equal
+        to the slot's current generation -- the value applied by
+        :meth:`apply_drops`).  On any validation failure nothing is
+        installed and ``False`` is returned.
+        """
+        with self._lock:
+            if len(keys) != len(refs):
+                return False
+            for ref in refs:
+                if ref is None:
+                    continue
+                if not 0 <= ref.extent_id < self.num_slots:
+                    return False
+                if (
+                    ref.offset < 0
+                    or ref.length < 0
+                    or ref.offset + ref.length > self.extent_size
+                ):
+                    return False
+                if ref.generation != self._generations[ref.extent_id]:
+                    return False
+            for key, ref in zip(keys, refs):
+                if ref is None:
+                    continue
+                old = self._index.get(key)
+                if old is not None:
+                    self._slot_keys[old.extent_id].discard(key)
+                    self._slot_bytes[old.extent_id] -= old.length
+                self._index[key] = ref
+                self._slot_keys[ref.extent_id].add(key)
+                self._slot_bytes[ref.extent_id] += ref.length
+                self._cursors[ref.extent_id] = ref.offset + ref.length
+                self._recency.pop(key, None)
+                self._recency[key] = None
+                self._next_slot = ref.extent_id
+            return True
+
     # ---- GC ----
 
-    def evict_slot_lru(self) -> int:
+    def evict_slot_lru(self, trace_context: Optional[dict] = None) -> int:
         """Drop the slot holding the least-recently-used key; returns the
         number of live bytes freed (0 when there is nothing to evict)."""
         if not self._recency:
@@ -181,9 +441,30 @@ class ExtentAllocator:
         if oldest is None:
             self._recency.pop(oldest_key, None)
             return 0
-        return self._drop_slot(oldest.extent_id)
+        return self._drop_slot(
+            oldest.extent_id, reason="lru_gc", trace_context=trace_context
+        )
 
-    def clear(self) -> None:
+    def clear(self, trace_context: Optional[dict] = None) -> None:
+        for slot, keys in enumerate(self._slot_keys):
+            old_generation = self._generations[slot]
+            for key in sorted(keys):
+                _t38c_durable_log(
+                    {
+                        "evt": "storage_invalidate",
+                        "trace_context": trace_context,
+                        "operation": "allocator_clear",
+                        "pool": "storage",
+                        "storage_key": key,
+                        "extent_id": slot,
+                        "extent_generation": old_generation,
+                        "old_generation": old_generation,
+                        "new_generation": old_generation,
+                        "index_removed": True,
+                        "reason": "backend_clear",
+                        "result": True,
+                    }
+                )
         self._index.clear()
         self._recency.clear()
         for slot in range(self.num_slots):
@@ -194,15 +475,39 @@ class ExtentAllocator:
 
     # ---- internals ----
 
-    def _drop_slot(self, slot: int) -> int:
+    def _drop_slot(
+        self,
+        slot: int,
+        reason: str = "unknown",
+        trace_context: Optional[dict] = None,
+    ) -> int:
+        old_generation = self._generations[slot]
         freed = self._slot_bytes[slot]
-        for key in self._slot_keys[slot]:
+        removed_keys = sorted(self._slot_keys[slot])
+        for key in removed_keys:
             self._index.pop(key, None)
             self._recency.pop(key, None)
         self._slot_keys[slot].clear()
         self._slot_bytes[slot] = 0
         self._cursors[slot] = 0
         self._generations[slot] += 1
+        for key in removed_keys:
+            _t38c_durable_log(
+                {
+                    "evt": "storage_invalidate",
+                    "trace_context": trace_context,
+                    "operation": "allocator_drop_slot",
+                    "pool": "storage",
+                    "storage_key": key,
+                    "extent_id": slot,
+                    "extent_generation": self._generations[slot],
+                    "old_generation": old_generation,
+                    "new_generation": self._generations[slot],
+                    "index_removed": True,
+                    "reason": reason,
+                    "result": True,
+                }
+            )
         if freed > 0:
             # [P3] extent_recycle: a slot's generation bumped (the index
             # entries captured before the reuse now fail the read-side

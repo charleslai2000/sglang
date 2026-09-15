@@ -9,11 +9,231 @@ touched here.
 Invariant the transitions encode: a capacity denial (quota / budget / host
 staging / frontier wait) is transient and retryable (WAIT_CAPACITY), while a
 true L3 miss is terminal (ADMIT_RECOMPUTE) -- miss decisions and capacity
-decisions are separate (design §0.1).
+decisions are separate (design §0.1). P1 (restore re-arm churn): a definitive
+miss parks the request in the sticky MISS_RECOMPUTE state (instead of
+collapsing back to NONE) so the negative evidence -- "this prefix was just
+proven L3-missing at this episode's L3 publish epoch" -- survives, and the
+admission re-arm refuses to re-enter WAIT until that epoch advances or the
+identity (generation) changes.
 """
 
+from collections import deque
+from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Optional, Tuple
+from typing import Deque, Hashable, Mapping, Optional, Tuple
+
+
+HOST_ALLOC_TELEMETRY_SCHEMA_VERSION = "host_alloc.v1"
+
+
+@dataclass(frozen=True)
+class HostAllocabilitySnapshot:
+    """Read-only, cache-owned host allocability state.
+
+    Generation values are invalidation signals only.  Allocation and eviction
+    remain authoritative in the cache allocator path.
+    """
+
+    cache_instance_id: int
+    generation_by_pool: Mapping[Hashable, int]
+    free_units_by_pool: Mapping[Hashable, int]
+    evictable_units_by_pool: Mapping[Hashable, int]
+
+    def generation_vector(self) -> tuple[int, tuple[tuple[str, int], ...]]:
+        return (
+            self.cache_instance_id,
+            tuple(
+                sorted(
+                    (str(pool), int(generation))
+                    for pool, generation in self.generation_by_pool.items()
+                )
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class HostAllocFailure:
+    """Typed allocation-pressure facts transferred to restore reconciliation."""
+
+    requested_primary_tokens: int
+    required_aux_units: Mapping[Hashable, int]
+    failed_domains: frozenset[Hashable]
+    positive_hit_tokens: int
+    sidecar_hit_pages: Mapping[Hashable, int]
+    allocability_snapshot: HostAllocabilitySnapshot
+    full_span_only: bool = True
+
+
+@dataclass(frozen=True)
+class HostAllocWaitCursor:
+    snapshot: HostAllocabilitySnapshot
+    blocked_domains: frozenset[Hashable]
+    requested_primary_tokens: int
+    required_aux_units: Mapping[Hashable, int]
+    fifo_sequence: int
+
+
+@dataclass(frozen=True)
+class HostAllocWaiterTerminal:
+    """Producer-owned terminal record for one released HOST_ALLOC waiter.
+
+    Telemetry only: the arbiter keeps a bounded history of the released
+    waiters so a later grant can name the immediately preceding waiter in the
+    same blocked-domain FIFO and its terminal event.  The values are written
+    by the scheduler from producer state (never from a request payload).
+    """
+
+    rid: str
+    sequence: int
+    wait_id: Optional[str]
+    terminal_event_id: Optional[str]
+    terminal_state: Optional[str]
+    blocked_domains: frozenset
+
+
+class HostAllocWakeArbiter:
+    """Scheduler-owned FIFO admission for bounded HOST_ALLOC retries."""
+
+    def __init__(self) -> None:
+        self._queue: Deque[str] = deque()
+        self._sequence_by_rid: dict[str, int] = {}
+        self._next_sequence = 0
+        self._last_granted_vector = None
+        # Bounded, append-only terminal history.  Released waiters are removed
+        # from the admission queue (``remove``) but their terminal facts stay
+        # here so the next grant can name its FIFO predecessor without
+        # trusting the verification harness.  This history is read-only
+        # telemetry: it never changes ``choose``/``enqueue``/``remove`` policy.
+        self._terminal_history: Deque[HostAllocWaiterTerminal] = deque(maxlen=4096)
+
+    def enqueue(self, rid: str) -> int:
+        sequence = self._sequence_by_rid.get(rid)
+        if sequence is not None:
+            return sequence
+        sequence = self._next_sequence
+        self._next_sequence += 1
+        self._sequence_by_rid[rid] = sequence
+        self._queue.append(rid)
+        return sequence
+
+    def remove(self, rid: str) -> None:
+        self._sequence_by_rid.pop(rid, None)
+        self._queue = deque(item for item in self._queue if item != rid)
+
+    def rotate(self, rid: str) -> int:
+        self.remove(rid)
+        return self.enqueue(rid)
+
+    def sequence(self, rid: str) -> Optional[int]:
+        return self._sequence_by_rid.get(rid)
+
+    def ordered_rids(self) -> tuple[str, ...]:
+        return tuple(
+            rid for rid in self._queue if rid in self._sequence_by_rid
+        )
+
+    def record_terminal(
+        self,
+        rid: str,
+        *,
+        sequence: Optional[int],
+        wait_id: Optional[str],
+        terminal_event_id: Optional[str],
+        terminal_state: Optional[str],
+        blocked_domains=(),
+    ) -> None:
+        """Append a released waiter's terminal facts to the FIFO history."""
+        if sequence is None:
+            sequence = self._sequence_by_rid.get(rid)
+        self._terminal_history.append(
+            HostAllocWaiterTerminal(
+                rid=str(rid),
+                sequence=int(sequence) if sequence is not None else -1,
+                wait_id=wait_id,
+                terminal_event_id=terminal_event_id,
+                terminal_state=terminal_state,
+                blocked_domains=frozenset(str(pool) for pool in blocked_domains),
+            )
+        )
+
+    def predecessor_for(
+        self,
+        rid: str,
+        *,
+        sequence: Optional[int],
+        blocked_domains,
+        released_states,
+    ) -> tuple[Optional[HostAllocWaiterTerminal], Optional[str]]:
+        """Return the immediately preceding released waiter for one grant.
+
+        The predecessor is the most recently history-recorded terminal in the
+        same blocked-domain FIFO whose FIFO sequence strictly precedes this
+        waiter.  The same rid may be its own predecessor across a re-park: a
+        request that is woken and then re-parks has its earlier release as the
+        immediately preceding FIFO entry.
+
+        The second return value is a fail-closed reason:
+          - ``None`` when a complete predecessor was resolved;
+          - ``"no_released_predecessor"`` when no earlier release exists;
+          - ``"predecessor_terminal_incomplete"`` when the immediate
+            predecessor carries a contradictory (half-set) terminal;
+          - ``"predecessor_terminal_state_unrecognized"`` when its terminal
+            state is not an accepted release state.
+        A reason always accompanies ``None``, so the caller never fabricates
+        predecessor lineage.
+        """
+        target = frozenset(str(pool) for pool in blocked_domains)
+        target_sequence = int(sequence) if sequence is not None else None
+        for entry in reversed(self._terminal_history):
+            if entry.blocked_domains != target:
+                continue
+            if target_sequence is not None and entry.sequence >= target_sequence:
+                continue
+            if entry.terminal_state is None or entry.terminal_event_id is None:
+                return None, "predecessor_terminal_incomplete"
+            if entry.terminal_state not in released_states:
+                return None, "predecessor_terminal_state_unrecognized"
+            return entry, None
+        return None, "no_released_predecessor"
+
+    def choose(self, eligible, vector_for) -> Optional[str]:
+        """Choose the first eligible waiter for a new generation vector."""
+        for rid in tuple(self._queue):
+            if rid not in self._sequence_by_rid:
+                continue
+            if not eligible(rid):
+                continue
+            vector = vector_for(rid)
+            if vector == self._last_granted_vector:
+                continue
+            self._last_granted_vector = vector
+            return rid
+        return None
+
+    def record_attempt_result(
+        self,
+        rid: str,
+        snapshot: HostAllocabilitySnapshot,
+        blocked_domains=None,
+    ) -> int:
+        """Suppress the retry's post-cleanup vector, then rotate its waiter."""
+        if blocked_domains is None:
+            self._last_granted_vector = snapshot.generation_vector()
+        else:
+            self._last_granted_vector = (
+                snapshot.cache_instance_id,
+                tuple(
+                    sorted(
+                        (str(pool), snapshot.generation_by_pool.get(pool, 0))
+                        for pool in blocked_domains
+                    )
+                ),
+            )
+        return self.rotate(rid)
+
+    @property
+    def last_granted_vector(self):
+        return self._last_granted_vector
 
 
 class RestoreState(Enum):
@@ -23,6 +243,48 @@ class RestoreState(Enum):
     WAIT_CAPACITY = auto()  # denied for capacity; woken by T11/T12, bounded by T13
     RESTORING = auto()  # prefetch issued (or re-issued), in flight
     READY = auto()  # prefetch finalized; admission consumes the loaded tokens
+    MISS_RECOMPUTE = auto()  # P1 sticky-miss: proven L3-missing this episode;
+    # NOT re-armed until the L3 publish epoch advances or the identity
+    # (generation) changes -- the request recomputes forward meanwhile
+
+
+class HiCachePrefetchOrigin(Enum):
+    """Owner of a HiCache prefetch issue."""
+
+    EAGER_RH_OFF = auto()
+    READY_HORIZON = auto()
+    DEMAND_RETRY = auto()
+    EAGER_DISAGG_PREFILL = auto()
+
+
+class HiCachePrefetchIssueStatus(Enum):
+    """Status of one scheduler-owned prefetch issue attempt."""
+
+    ISSUED = auto()
+    HELD = auto()
+    SKIPPED_ACTIVE = auto()
+    SKIPPED_STATE = auto()
+    FAILED_BEFORE_ISSUE = auto()
+
+
+@dataclass(frozen=True)
+class PrefetchIssueResult:
+    """Typed result crossing the scheduler/restore issue boundary."""
+
+    status: HiCachePrefetchIssueStatus
+    attempt_id: Optional[str]
+    origin: HiCachePrefetchOrigin
+    reason: str
+    state_before: str
+    state_after: str
+
+
+# Compatibility names for the existing scheduler fixtures. New code should
+# inspect ``result.status`` and use HiCachePrefetchIssueStatus directly.
+PrefetchIssueResult.ISSUED = HiCachePrefetchIssueStatus.ISSUED
+PrefetchIssueResult.DECLINED = HiCachePrefetchIssueStatus.HELD
+PrefetchIssueResult.ACTIVE = HiCachePrefetchIssueStatus.SKIPPED_ACTIVE
+PrefetchIssueResult.SKIPPED = HiCachePrefetchIssueStatus.SKIPPED_STATE
 
 
 class RestoreWaitReason(Enum):
@@ -72,6 +334,8 @@ def next_restore(
     *,
     capacity_fits: bool = False,
     genuine_miss: bool = False,
+    rearm_allowed: bool = True,
+    short_tail_recompute: bool = False,
 ) -> Tuple[RestoreState, RestoreDecision]:
     """Pure transition-table lookup for the design §2.2 state machine.
 
@@ -81,14 +345,21 @@ def next_restore(
       T15 is the backup-completion wait (P2-IO): the lookup found the
       chain mid-backup, so the request waits for the ack drain instead of
       restoring the partial span and re-issuing the lookup per pass.
-    - T4 too-short declines only start a WAIT[REVALIDATE] from a fresh
-      NONE (the device-match-decay bet, re-issuable by the paced retry);
-      on a re-issue leg (T11/T12 wake) the too-short re-judgment is
-      definitive and clears the state with ADMIT_RECOMPUTE, exactly like a
-      genuine miss -- re-waiting would only idle out the old T13 clock.
+    - T4 too-short declines start a WAIT[REVALIDATE] from a fresh NONE only
+      when the caller has not proven that the current resident device prefix
+      can safely admit its small tail.  The explicit short_tail_recompute
+      judgment clears any restore state with ADMIT_RECOMPUTE; otherwise a
+      re-issue leg (T11/T12 wake) is definitive and clears the state, while a
+      fresh/retry decline keeps the device-match-decay bet.
     - T8 finalize lands RESTORING in READY.
-    - T9 genuine miss and T13 timeout clear it to NONE with the
-      ADMIT_RECOMPUTE decision (degrade to recompute; never wait).
+    - T9 genuine miss parks the request in MISS_RECOMPUTE (P1 sticky miss:
+      the negative evidence survives), with the ADMIT_RECOMPUTE decision
+      (degrade to recompute; never wait). It leaves MISS_RECOMPUTE only when
+      the L3 publish epoch advances or the identity/generation changes (the
+      re-arm epoch gate) or a later restore_success (T8) lands -- never by
+      re-arm alone, so the same-probe churn cannot recur.
+    - T13 timeout clears WAIT_CAPACITY to NONE with the ADMIT_RECOMPUTE
+      decision (degrade to recompute; never wait).
     - T14 abort is a no-op here: the request object is destroyed by the
       scheduler and the tree-side registries are cleared by
       release_aborted_request.
@@ -106,6 +377,8 @@ def next_restore(
     if event is RestoreEvent.DENIED_ALLOC:  # T3
         return RestoreState.WAIT_CAPACITY, RestoreDecision.WAIT
     if event is RestoreEvent.DENIED_SHORT:  # T4
+        if short_tail_recompute:
+            return RestoreState.NONE, RestoreDecision.ADMIT_RECOMPUTE
         if state is RestoreState.RESTORING:
             # A too-short decline on a re-issue leg (T11/T12 wake) is the
             # definitive judgment: the wake condition is resolved, so
@@ -117,6 +390,16 @@ def next_restore(
     if event is RestoreEvent.GATE_SKIP_FRONTIER:  # T5
         return RestoreState.WAIT_CAPACITY, RestoreDecision.WAIT
     if event is RestoreEvent.ADMISSION_DENY:  # T6
+        if state is RestoreState.MISS_RECOMPUTE and not rearm_allowed:
+            # P1 sticky miss: a definitive miss proves this prefix
+            # L3-missing at the episode's L3 publish epoch; re-arming into
+            # WAIT[DEVICE_QUOTA] would re-probe the same missing prefix and
+            # miss again (the ~13ms churn). The scheduler passes
+            # rearm_allowed=False while the epoch is unchanged and the
+            # generation matches -- the request stays sticky and recomputes
+            # forward instead of re-arming. An epoch/generation advance
+            # (rearm_allowed=True) lets it leave MISS and re-arm.
+            return state, RestoreDecision.NONE
         return RestoreState.WAIT_CAPACITY, RestoreDecision.WAIT
     if event is RestoreEvent.LOAD_BACK_FAIL:  # T7
         return RestoreState.WAIT_CAPACITY, RestoreDecision.WAIT
@@ -130,9 +413,13 @@ def next_restore(
 
     if event is RestoreEvent.REVOKED_MISS:  # T9
         if genuine_miss:
-            # True miss / below-threshold hit: restore has no benefit, so
-            # degrade to recompute and do not wait (miss != capacity).
-            return RestoreState.NONE, RestoreDecision.ADMIT_RECOMPUTE
+            # P1 sticky miss: park in MISS_RECOMPUTE (degrade to recompute,
+            # never wait). Unlike the pre-P1 collapse to NONE, the sticky
+            # state carries the negative evidence so the admission re-arm
+            # cannot re-enter WAIT at the same L3 publish epoch (the churn).
+            # It leaves only on an epoch/generation advance (the re-arm
+            # gate) or a later restore_success (T8 -> READY).
+            return RestoreState.MISS_RECOMPUTE, RestoreDecision.ADMIT_RECOMPUTE
         # Capacity-type revoke (e.g. host staging shortfall): retryable.
         return RestoreState.WAIT_CAPACITY, RestoreDecision.WAIT
 
@@ -170,6 +457,73 @@ def next_restore(
     return state, RestoreDecision.NONE
 
 
+@dataclass(frozen=True)
+class FrontierAnchorInfo:
+    """The frozen, caller-supplied facts a no-material fast-forward judgment
+    reads about the FRONTIER waiter's anchor (phase2-peranchor). It is the
+    no-material state's `anchor_binding` snapshot for the unified restore
+    eligibility contract (phase2-re-unified-architect-e1 §3) -- the bridge to
+    the future state machine without restructuring it.
+
+    Fields (the 5 no-material facts, each precomputed by the caller so the
+    predicate stays pure / testable):
+      host_material  -- host copy / host hit present for the candidate
+      storage_material -- anchor is L3-durable (written+acked / restored) or
+                          the root (a root anchor is always prefetch-issuable)
+      pending_durable_ack -- an L3 write for this anchor's chain is in flight
+                          (its ACK could promote the anchor to durable)
+      deferred_durable_desc -- the anchor still anchors a storage_acked &&
+                          !storage_persisted descendant (a P3 reconcile
+                          promotion source that could make the anchor durable)
+      restorable_epoch_change -- a per-anchor durability event since this
+                          candidate was judged no-material (write ack /
+                          restore read-back / durable-belief clear) that could
+                          grant a currently-unredeemable restore
+    """
+
+    host_material: bool = False
+    storage_material: bool = False
+    pending_durable_ack: bool = False
+    deferred_durable_desc: bool = False
+    restorable_epoch_change: bool = False
+
+
+def no_material_fast_forward(info: FrontierAnchorInfo) -> bool:
+    """phase2-peranchor: whether a FRONTIER waiter's anchor has NO recoverable
+    material at all AND nothing in flight can ever make it durable, so the
+    wait is zero-expectation and the request should ADMIT_RECOMPUTE
+    immediately instead of idling out the full 60s T13.
+
+    The 5-fact judgment (user adjudication -- ALL must hold to fast-forward;
+    the negative is never implied by storage_hit=0 alone):
+      1. no host material (host_hit_length == 0 / no host copy),
+      2. no storage material (anchor is not L3-durable and not the root),
+      3. no pending durable ACK (no L3 write in flight for this anchor's
+         chain whose ack could promote it durable),
+      4. no deferred durable descendant (the anchor does not anchor a
+         storage_acked && !storage_persisted node -- no P3 reconcile
+         promotion source),
+      5. no restorable epoch change since the no-material judgment (no write
+         ack / restore read-back / durable-belief clear that could make a
+         currently-unredeemable restore redeemable).
+    When ANY fact is present (host material, storage material, an in-flight
+    writer, a deferred descendant, or a relevant per-anchor change) the
+    request must keep the normal frontier wait / P3 reconcile path -- never a
+    bare storage_hit==0 shortcut.
+    """
+    if info.host_material:
+        return False
+    if info.storage_material:
+        return False
+    if info.pending_durable_ack:
+        return False
+    if info.deferred_durable_desc:
+        return False
+    if info.restorable_epoch_change:
+        return False
+    return True
+
+
 def wait_reason_for(
     event: RestoreEvent, *, genuine_miss: bool = False
 ) -> Optional[RestoreWaitReason]:
@@ -193,6 +547,49 @@ def wait_reason_for(
     if event is RestoreEvent.BACKUP_PENDING:
         return RestoreWaitReason.BACKUP_PENDING
     return None
+
+
+def miss_rearm_allowed(
+    miss_version: Optional[int],
+    current_version: int,
+    miss_generation: Optional[int],
+    current_generation: Optional[int],
+    miss_anchor: Optional[int] = None,
+    current_anchor: Optional[int] = None,
+) -> bool:
+    """P1 (phase2-peranchor): whether a request parked in MISS_RECOMPUTE may
+    be re-armed at admission (the restore re-arm churn gate).
+
+    A definitive miss proves the request's prefix L3-missing at the ANCHOR's
+    per-anchor storage version it was probed; re-probing the same prefix at
+    the same anchor version is guaranteed to miss again (the ~13ms churn).
+    Re-arm is therefore allowed only when THIS anchor's storage version has
+    advanced (its own chain's durability genuinely changed -- a write ack
+    promotion / restore read-back / durable-belief clear on that anchor), the
+    request re-anchored to a DIFFERENT anchor node (a new candidate -- the
+    old miss evidence does not apply), or the identity (session generation)
+    changed -- any of these invalidates the old miss evidence. The GLOBAL
+    l3_publish epoch is diagnostic only and never re-arms a miss: an
+    unrelated chain's durability event must not re-arm this request.
+
+    A request with no recorded miss version (defensive; the state should not
+    be MISS then) is treated as re-armable.
+    """
+    if miss_version is None:
+        return True
+    # Re-anchored to a different node: a new candidate, old evidence void.
+    if (
+        miss_anchor is not None
+        and current_anchor is not None
+        and current_anchor != miss_anchor
+    ):
+        return True
+    # The SAME anchor's per-anchor durability version advanced.
+    if current_version > miss_version:
+        return True
+    if current_generation is not None and current_generation != miss_generation:
+        return True
+    return False
 
 
 def wait_clock_next(
@@ -235,6 +632,33 @@ def too_short_wait_armed(poll_interval: int) -> bool:
     this; an unarmed first decline is terminal (recompute immediately).
     """
     return poll_interval > 0
+
+
+def short_tail_recompute_allowed(
+    *,
+    device_prefix_tokens: int,
+    host_hit_tokens: int,
+    suffix_tokens: int,
+    page_size: int,
+    prefetch_threshold: int,
+) -> bool:
+    """Whether a below-threshold suffix can be admitted immediately.
+
+    A non-empty device-resident prefix with no host restore material already
+    owns the historical match.  A short suffix is ordinary tail work; no L3
+    capacity event can make that current match longer, and waiting on
+    REVALIDATE would only retry the same below-threshold query.  The caller
+    preserves ``prefix_indices`` and therefore recomputes only this suffix.
+    """
+    if page_size <= 0 or prefetch_threshold <= 0:
+        return False
+    aligned_suffix = max(0, suffix_tokens) // page_size * page_size
+    return (
+        device_prefix_tokens > 0
+        and host_hit_tokens == 0
+        and aligned_suffix > 0
+        and aligned_suffix < prefetch_threshold
+    )
 
 
 def promotion_budget_fits(
@@ -344,19 +768,18 @@ def capacity_wake_applies(reason: Optional[RestoreWaitReason]) -> bool:
     reason (design §2.3 predicates: device charge, host prefetch budget,
     frontier anchor fallback).
 
-    DEVICE_QUOTA / PREFETCH_BUDGET / FRONTIER / BACKUP_PENDING are
+    DEVICE_QUOTA / PREFETCH_BUDGET / HOST_ALLOC / FRONTIER / BACKUP_PENDING are
     testable: the predicate re-checks the exact denial cause (for
     BACKUP_PENDING: whether the chain's durable frontier has crossed the
     request end and a DEMAND_RESTORE ticket is grantable -- the ack drain
     flips the frontier, so the wake is ACK-driven, not a poll). REVALIDATE
-    (the suffix is still below the prefetch threshold) and HOST_ALLOC (the
-    host staging alloc is still failing) are not: waking them re-issues a
-    prefetch that is declined identically every pass. Those waits leave
-    only via the paced retry (poll interval > 0) or the T13 timeout.
+    (the suffix is still below the prefetch threshold) is not testable by a
+    capacity predicate and leaves only via the paced retry or T13 timeout.
     """
     return reason in (
         RestoreWaitReason.DEVICE_QUOTA,
         RestoreWaitReason.PREFETCH_BUDGET,
+        RestoreWaitReason.HOST_ALLOC,
         RestoreWaitReason.FRONTIER,
         RestoreWaitReason.BACKUP_PENDING,
     )

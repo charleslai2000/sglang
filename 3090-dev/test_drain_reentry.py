@@ -17,8 +17,10 @@ the sglang import tree (torch-less dev boxes).
 import importlib.util
 import os
 import sys
+import threading
 import types
 import unittest
+from contextlib import nullcontext
 from enum import Enum
 from queue import Queue
 from types import SimpleNamespace
@@ -62,6 +64,7 @@ def _identity_decorator(*args, **kwargs):
 def _install_stubenv():
     fake_torch = types.ModuleType("torch")
     fake_torch.distributed = types.ModuleType("torch.distributed")
+    fake_torch.distributed.is_available = lambda: False
     sys.modules["torch"] = fake_torch
 
     _fake_package("sglang")
@@ -102,6 +105,9 @@ def _install_stubenv():
     _fake_package("sglang.srt.mem_cache.common", RetractionBackup=object)
     _fake_package("sglang.srt.mem_cache.hicache_storage", **{
         "PoolName": Enum("PoolName", {"KV": "kv", "SWA": "swa", "MAMBA": "mamba"}),
+        "PoolHitPolicy": Enum(
+            "PoolHitPolicy", {"ALL_PAGES": "all_pages", "TRAILING_PAGES": "trailing_pages"}
+        ),
         "PoolTransfer": type("PoolTransfer", (), {"__init__": lambda self, **kw: None}),
         "SidecarPoolSpec": object,
     })
@@ -113,6 +119,21 @@ def _install_stubenv():
     _fake_package("sglang.srt.mem_cache.memory_pool", MHATokenToKVPool=object)
     _fake_package("sglang.srt.mem_cache.radix_cache", RadixKey=object)
     _fake_package("sglang.srt.mem_cache.swa_memory_pool", SWAKVPool=object)
+    _fake_package(
+        "sglang.srt.mem_cache.trace_context",
+        attach_trace_context=lambda *a, **k: None,
+        complete_trace_context=lambda *a, **k: True,
+        complete_slot_context=lambda *a, **k: None,
+        durable_trace_enabled=lambda: False,
+        is_inert_release_token=lambda *a, **k: False,
+        make_trace_context=lambda *a, **k: {},
+        ordered_key_set_digest=lambda values, *a, **k: ("", len(values)),
+        remember_slot_context=lambda *a, **k: None,
+        retire_slot_token=lambda *a, **k: None,
+        slot_context=lambda *a, **k: nullcontext(),
+        slot_context_for_token=lambda *a, **k: None,
+        slot_token=lambda *a, **k: None,
+    )
     _fake_package("sglang.srt.mem_cache.unified_cache")
 
     class _BackupKV:
@@ -254,7 +275,13 @@ def _backup_ack(op_id, completed_tokens, total_tokens):
     """An ack as queued by backup_thread_func: the operation object itself
     (full write: completed_tokens == len(host_indices); partial: less)."""
     return SimpleNamespace(
-        id=op_id, completed_tokens=completed_tokens, host_indices=[0] * total_tokens
+        id=op_id,
+        completed_tokens=completed_tokens,
+        host_indices=[0] * total_tokens,
+        hash_value=[],
+        pool_transfers=[],
+        pool_storage_result=SimpleNamespace(extra_pool_hit_pages={}),
+        trace_context=None,
     )
 
 
@@ -286,11 +313,17 @@ class _FakeTreeCore:
         self.deleted = set()
         self.enable_storage = False  # mirrored by the cache's property
         self._publish_epoch = 0
+        # P3 (phase2-p3-fix): deferred-ACK reconciliation scans this set each
+        # flush. The harness never models a deferred-ACK node, so it is empty.
+        self.deferred_acked_nodes = lambda: []
 
     def l3_publish_epoch(self):
         # P3 prefetch_revoke instrumentation reads the publish epoch for the
         # storage_generation field.
         return self._publish_epoch
+
+    def anchor_storage_version(self, node_id):
+        return 0
         # P2-IO T15: per-node page hashes (empty for nodes not on any
         # modeled request chain) and the modeled request's page hashes.
         self.node_hashes: dict[int, list[str]] = {}
@@ -331,6 +364,15 @@ class _FakeTreeCore:
 
     def node_exists(self, node_id):
         return node_id not in self.deleted
+
+    def node_by_id(self, node_id):
+        if node_id in self.deleted:
+            raise KeyError(node_id)
+        return SimpleNamespace(
+            parent=None,
+            hash_value=["h"],
+            get_last_hash_value=lambda: "",
+        )
 
     def collect_storage_gap(self, node_id):
         if node_id in self.deleted:
@@ -464,12 +506,16 @@ class _FakeTreeCore:
         # storage_restored; this fake has no restore source.
         return node_id in self.persisted
 
+    def get_component_device_value(self, node_id, component_type):
+        return _DeviceValue()
+
 
 class _FakeController:
     """Stub for HybridCacheController: D->H writes complete immediately."""
 
     write_policy = "write_back"
     storage_failure_reason = None
+    speculative_release_epoch = 0
 
     def __init__(self):
         self.ack_write_queue = []
@@ -493,7 +539,7 @@ class _FakeController:
 
     def write(self, device_indices, node_id=-1, extra_pools=None):
         self.ack_write_queue.append(_FakeAck([node_id]))
-        return [0] * len(device_indices)
+        return _DeviceValue()
 
     def write_storage(
         self,
@@ -503,6 +549,7 @@ class _FakeController:
         prefix_keys,
         extra_pools=None,
         node_id=None,
+        **kwargs,
     ):
         self.storage_ops.append(len(self.storage_ops))
         return len(self.storage_ops) - 1
@@ -516,6 +563,7 @@ def _make_cache(tree_core, *, backup_park=True):
     cache.disable = False
     # tree_core must exist before enable_storage: the property proxies onto it.
     cache.tree_core = tree_core
+    cache.components = {}
     cache.enable_storage = True
     cache.buffer_pipeline = None
     cache.sidecar_pool_specs = []
@@ -529,10 +577,17 @@ def _make_cache(tree_core, *, backup_park=True):
     cache.ongoing_backup = {}
     cache._pending_storage_writes = []
     cache._storage_persist_skip_count = 0
+    cache._t38c_durability_evidence = {}
+    cache._storage_gap_skipped_d2h_count = 0
+    cache._storage_gap_skipped_nokv_count = 0
     cache._storage_frontier_waiters = {}
     cache._storage_frontier_ready = set()
     cache._storage_prefetch_terminal = {}
+    cache._storage_prefetch_failures = {}
     cache._storage_prefetch_missed_rids = set()
+    cache._t38c_residency_queue_blocked = set()
+    cache.tp_world_size = 1
+    cache.tp_group = None
     cache._prefetch_outcome_stats = {
         "attempts": 0,
         "issued": 0,
@@ -552,6 +607,9 @@ def _make_cache(tree_core, *, backup_park=True):
     cache.page_size = 1  # tokens == pages in these tests
     cache.prefetch_loaded_tokens_by_reqid = {}
     cache._drain_write_through_depth = 0
+    cache._t38c_residency_lock = threading.RLock()
+    cache._t38c_node_context_index = {}
+    cache._host_allocability_telemetry_seq = 0
     cache._backup_wait_spans = {}
     cache._demand_restore_rids = set()
     # T15 bypass gate (P2-IO Phase 1): the park-mechanism tests run with
@@ -909,7 +967,9 @@ class DrainReentryRegressionTest(unittest.TestCase):
         tree_core = _FakeTreeCore([[10, 20, 30]])
         cache = _make_cache(tree_core)
         cache._pending_storage_writes.append(30)
-        cache.cache_controller.mem_pool_host.available_size = lambda: 8
+        cache.cache_controller.mem_pool_host.available_size = (
+            lambda: 8 if tree_core.host_evict_deletes else 1 << 30
+        )
         tree_core.host_evict_deletes = [30]
         components_mod = sys.modules["sglang.srt.mem_cache.unified_cache.components"]
 
@@ -995,6 +1055,44 @@ class BackupPendingRevokeTests(unittest.TestCase):
         # unchanged (no park; the backup is never coming).
         terminal = self._revoke([10, 20], {}, hit_count=64)
         self.assertEqual(terminal, "revoked_miss")
+
+    def test_positive_alloc_failure_is_retryable_and_releases_reservation(self):
+        # A positive full hit that cannot stage its validated span is a
+        # capacity wait, not L3-miss evidence. The revoke still releases the
+        # speculative reservation before removing the operation, so the
+        # host-capacity wake cannot be blocked by its own request.
+        cache = _make_cache(_FakeTreeCore([[10]]))
+        cache.ongoing_prefetch = {}
+        cache.cache_controller.inflight_speculative_tokens = 54976
+        cache_mod = sys.modules[UnifiedRadixCache.__module__]
+        cache._prefetch_reservations["r1"] = cache_mod.PrefetchReservation(
+            54976, cache_mod.PrefetchKind.SPECULATIVE
+        )
+        operation = SimpleNamespace(
+            request_id="r1",
+            is_terminated=lambda: False,
+            storage_hit_count=54976,
+            stats_requested_tokens=55000,
+            all_hash_values=None,
+            completed_tokens=0,
+        )
+        cache.ongoing_prefetch["r1"] = _OngoingPrefetch(
+            anchor_node_id=10,
+            prefetch_key=[0] * 54976,
+            host_indices=None,
+            operation=operation,
+            anchor_lock_params=None,
+            comp_xfers={},
+        )
+
+        cache.revoke_pending_prefetch("r1", alloc_failed=True)
+
+        self.assertEqual(
+            cache._storage_prefetch_terminal.get("r1"), "revoked_alloc_failed"
+        )
+        self.assertNotIn("r1", cache._storage_prefetch_missed_rids)
+        self.assertNotIn("r1", cache._prefetch_reservations)
+        self.assertEqual(cache.cache_controller.inflight_speculative_tokens, 0)
 
     def test_pipeline_stops_short_of_request_end_never_parks(self):
         # The counter-example at the revoke level: the in-flight write

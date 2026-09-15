@@ -43,11 +43,13 @@ TORCH_LIBRARY_FRAGMENT(sgl_kernel, m) {
    */
   m.def("merge_state_v2(Tensor v_a, Tensor s_a, Tensor v_b, Tensor s_b, Tensor! v_merged, Tensor! s_merged) -> ()");
   m.impl("merge_state_v2", torch::kCUDA, &merge_state_v2);
+#ifndef SGL_KERNEL_MINIMAL_SM86
   m.def(
       "cutlass_mla_decode(Tensor! out, Tensor q_nope, Tensor q_pe, Tensor kv_c_and_k_pe_cache, Tensor seq_lens, Tensor "
       "page_table, Tensor! workspace, float sm_scale, int num_kv_splits) -> ()");
   m.impl("cutlass_mla_decode", torch::kCUDA, &cutlass_mla_decode);
   m.def("cutlass_mla_get_workspace_size", &cutlass_mla_get_workspace_size);
+#endif
 
   /*
    * From csrc/infllm_v2
@@ -90,11 +92,13 @@ TORCH_LIBRARY_FRAGMENT(sgl_kernel, m) {
 
   m.def("copy_to_gpu_no_ce(Tensor input, Tensor! output) -> ()");
   m.impl("copy_to_gpu_no_ce", torch::kCUDA, &copy_to_gpu_no_ce);
+#ifndef SGL_KERNEL_MINIMAL_SM86
   m.def("concat_mla_k(Tensor! k, Tensor k_nope, Tensor k_rope) -> ()");
   m.impl("concat_mla_k", torch::kCUDA, &concat_mla_k);
 
   m.def("concat_mla_absorb_q(Tensor a, Tensor b, Tensor! out) -> ()");
   m.impl("concat_mla_absorb_q", torch::kCUDA, &concat_mla_absorb_q);
+#endif
 
   m.def("fast_topk(Tensor score, Tensor indices, Tensor lengths, Tensor? row_starts) -> ()");
   m.impl("fast_topk", torch::kCUDA, &fast_topk_interface);
@@ -152,6 +156,7 @@ TORCH_LIBRARY_FRAGMENT(sgl_kernel, m) {
   /*
    * From csrc/moe
    */
+#ifndef SGL_KERNEL_MINIMAL_SM86
   m.def(
       "moe_align_block_size(Tensor topk_ids, int num_experts, int block_size, Tensor! sorted_token_ids, Tensor! "
       "experts_ids, Tensor! num_tokens_post_pad, Tensor! cumsum_buffer, bool "
@@ -190,12 +195,15 @@ TORCH_LIBRARY_FRAGMENT(sgl_kernel, m) {
       " Tensor problem_sizes2, Tensor input_permutation, Tensor output_permutation, int num_experts, int n, int k) -> "
       "()");
   m.impl("prepare_moe_input", torch::kCUDA, &prepare_moe_input);
+#endif
 
+#ifndef SGL_KERNEL_MINIMAL_SM86
   m.def("shuffle_rows(Tensor input, Tensor dst2src_map, Tensor output) -> ()");
   m.impl("shuffle_rows", torch::kCUDA, &shuffle_rows);
 
   m.def("apply_shuffle_mul_sum(Tensor input, Tensor output, Tensor permutation, Tensor? factors) -> ()");
   m.impl("apply_shuffle_mul_sum", torch::kCUDA, &apply_shuffle_mul_sum);
+#endif
 
   // DeepSeek-V4 fused norm + rope
   m.def(
@@ -212,6 +220,7 @@ TORCH_LIBRARY_FRAGMENT(sgl_kernel, m) {
       "Tensor! weights_out, float weight_scale, Tensor freqs_cis, Tensor positions) -> ()");
   m.impl("dsv4_fused_q_indexer_rope_hadamard_quant", torch::kCUDA, &dsv4_fused_q_indexer_rope_hadamard_quant);
 
+#ifndef SGL_KERNEL_MINIMAL_SM86
   m.def(
       "fused_qk_norm_rope(Tensor! qkv, int num_heads_q, "
       "int num_heads_k, int num_heads_v, int head_dim, float eps, "
@@ -219,10 +228,12 @@ TORCH_LIBRARY_FRAGMENT(sgl_kernel, m) {
       "bool is_neox, Tensor position_ids, float factor, float low, float high, float attention_factor, int rotary_dim) "
       "-> ()");
   m.impl("fused_qk_norm_rope", torch::kCUDA, &fused_qk_norm_rope);
+#endif
 
   /*
    * From csrc/moe/cutlass_moe/w4a8
    */
+#ifndef SGL_KERNEL_MINIMAL_SM86
   m.def(
       "get_cutlass_w4a8_moe_mm_data(Tensor topk_ids, Tensor! expert_offsets, "
       "                        Tensor! problem_sizes1, Tensor! problem_sizes2, "
@@ -238,6 +249,7 @@ TORCH_LIBRARY_FRAGMENT(sgl_kernel, m) {
       "               Tensor b_strides, Tensor d_strides, Tensor s_strides,"
       "               int chunk_size, int topk) -> ()");
   m.impl("cutlass_w4a8_moe_mm", torch::kCUDA, &cutlass_w4a8_moe_mm);
+#endif
 
   /*
    * From csrc/speculative
@@ -376,6 +388,7 @@ TORCH_LIBRARY_FRAGMENT(sgl_kernel, m) {
   m.impl("varlen_fwd_sparse", torch::kCUDA, &flash::mha_varlen_fwd_sparse);
 
   // Sparse Attention utils
+#ifndef SGL_KERNEL_MINIMAL_SM86
   m.def(
       "convert_vertical_slash_indexes("
       "   Tensor! block_count, Tensor! block_offset, "
@@ -396,6 +409,7 @@ TORCH_LIBRARY_FRAGMENT(sgl_kernel, m) {
       "   int context_size, int block_size_M, int block_size_N, "
       "   bool causal) -> ()");
   m.impl("convert_vertical_slash_indexes_mergehead", torch::kCUDA, &convert_vertical_slash_indexes_mergehead);
+#endif
 
   /*
    * From csrc/grammar
@@ -465,6 +479,7 @@ TORCH_LIBRARY_FRAGMENT(sgl_kernel, m) {
   /*
    * From csrc/expert_sepcialization
    */
+#ifndef SGL_KERNEL_MINIMAL_SM86
   m.def(
       "es_fp8_blockwise_scaled_grouped_mm(Tensor output, Tensor a, Tensor b, Tensor scales_a, Tensor scales_b, Tensor "
       "stride_a, Tensor stride_b, Tensor stride_d, Tensor problem_sizes, Tensor expert_offsets, Tensor workspace) -> "
@@ -478,6 +493,7 @@ TORCH_LIBRARY_FRAGMENT(sgl_kernel, m) {
       "es_sm100_mxfp8_blockscaled_grouped_quant(Tensor input, Tensor problem_sizes, Tensor expert_offsets, Tensor "
       "blockscale_offsets, Tensor quant_output, Tensor scale_factor) -> () ");
   m.impl("es_sm100_mxfp8_blockscaled_grouped_quant", &es_sm100_mxfp8_blockscaled_grouped_quant);
+#endif
 }
 
 REGISTER_EXTENSION(common_ops)

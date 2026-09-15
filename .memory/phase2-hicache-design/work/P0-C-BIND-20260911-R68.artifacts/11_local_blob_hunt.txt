@@ -1,0 +1,21 @@
+## R68 supplementary: locate the 2 divergent remote contents in local repos (read-only)
+## targets: scheduler.py sha256=18c39a18aa7f8c672ce5a2373f9bcdd68058933ae8c2ec16a6b14e0b47488a0a
+##          unified_radix_cache.py sha256=35fae989ddfca0d457009f810e16d0e8a56f05416a5bfb1ec3a99e9a9937ffe4
+## method: find worktree files, sha256; plus git blob scan per repo
+=== repo=sglang-3090-24g-hicache HEAD=0a725c6385 ===
+worktree: ae3bfac5dd96538e3cad4982503ed008122816dc93ded7bd1400a885405bf0f2  sglang-3090-24g-hicache/python/sglang/srt/managers/scheduler.py
+worktree: b162b1289043441dbffbe1d4dc8f6317766039a0a320d71209eb7fd3766d207b  sglang-3090-24g-hicache/python/sglang/srt/mem_cache/unified_radix_cache.py
+[sglang-3090-24g-opt] no .git
+=== repo=sglang-2060-6g-hicache HEAD=fb2c68a48e ===
+worktree: 968a507c1919cb5293cc72a7dc033f2415cb27430c79cb00f0a3893a3b8e011c  sglang-2060-6g-hicache/python/sglang/srt/managers/scheduler.py
+worktree: 4a395a6b652135753f9b92f0b01de63e497adbcdd44401f844e552b12346f57c  sglang-2060-6g-hicache/python/sglang/srt/mem_cache/unified_radix_cache.py
+=== repo=sglang-5090-32-hicache HEAD=54c394a2e1 ===
+worktree: 20bd90c3585f0909d3edaea7cefc852370e688a2198119e32e68d86da368f135  sglang-5090-32-hicache/python/sglang/srt/managers/scheduler.py
+worktree: 282fa5f6ab4993e855fbfd3522439679c63d54c5018fc442fe46c945eba91f97  sglang-5090-32-hicache/python/sglang/srt/mem_cache/unified_radix_cache.py
+=== repo=sglang-qwen3-27b-iq3s HEAD=5c5f5e3b25 ===
+worktree: ae3bfac5dd96538e3cad4982503ed008122816dc93ded7bd1400a885405bf0f2  sglang-qwen3-27b-iq3s/python/sglang/srt/managers/scheduler.py
+worktree: b162b1289043441dbffbe1d4dc8f6317766039a0a320d71209eb7fd3766d207b  sglang-qwen3-27b-iq3s/python/sglang/srt/mem_cache/unified_radix_cache.py
+=== all refs containing each target? scan every commit blob for the 2 paths (3090-24g-hicache) ===
+--- path=python/sglang/srt/managers/scheduler.py ---
+--- path=python/sglang/srt/mem_cache/unified_radix_cache.py ---
+scan_done

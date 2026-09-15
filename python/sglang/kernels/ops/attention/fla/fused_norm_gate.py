@@ -19,6 +19,35 @@ from sglang.srt.utils import (
 _is_npu = is_npu()
 _use_cpu = is_cpu() and cpu_has_amx_support()
 
+
+def _install_gdc_shims() -> bool:
+    """Make Triton 3.2's AST resolver see safe GDC fallbacks."""
+    cuda_extra = getattr(getattr(tl, "extra", None), "cuda", None)
+    if cuda_extra is None:
+        return False
+    if all(hasattr(cuda_extra, name) for name in ("gdc_wait", "gdc_launch_dependents")):
+        return not getattr(cuda_extra, "__sglang_gdc_shimmed__", False)
+    if not getattr(cuda_extra, "__sglang_gdc_shimmed__", False):
+
+        @triton.jit
+        def _gdc_noop():
+            return
+
+        for name in ("gdc_wait", "gdc_launch_dependents"):
+            if not hasattr(cuda_extra, name):
+                setattr(cuda_extra, name, _gdc_noop)
+        setattr(cuda_extra, "__sglang_gdc_shimmed__", True)
+    return False
+
+
+_GDC_INTRINSICS_AVAILABLE = _install_gdc_shims()
+
+
+def _is_gdc_supported() -> bool:
+    """Return whether this Triton installation can emit CUDA GDC intrinsics."""
+    return is_arch_support_pdl() and _GDC_INTRINSICS_AVAILABLE
+
+
 # Maximum rows per Triton block for layernorm gated kernel
 MAX_ROWS_PER_BLOCK = 4
 
@@ -225,7 +254,9 @@ def layer_norm_gated_fwd(
     if D <= 512:
         BT = 32
         pdl_kwargs = (
-            {"USE_GDC": True, "launch_pdl": True} if is_arch_support_pdl() else {}
+            {"USE_GDC": True, "launch_pdl": True}
+            if _is_gdc_supported()
+            else {}
         )
         layer_norm_gated_fwd_kernel[(cdiv(T, BT),)](
             x=x,

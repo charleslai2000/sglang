@@ -21,15 +21,23 @@ epoch_sig + cooldown patch.
   evicts.
 - M3 event-driven refill: a check may run only on a causal-epoch event
   plus a low-frequency periodic safety reconciliation (seconds), never a
-  per-pass poll. The events are the four causal epochs:
+  per-pass poll. The events are the five causal epochs:
     l3_publish       -- L3 durable/publish advance (monotonic),
-    host_headroom    -- host available pages (release = up),
+    host_headroom    -- host available pages (level signal; up = release),
+    host_release     -- MONOTONIC host-capacity release counter (genuine
+                        releasing events: host residency freed, ready
+                        eviction, working-state release) -- Fix A: the
+                        NO_HEADROOM waiter subscribes to THIS, not the
+                        transient available level, which flips on every
+                        alloc/free and can never sustain past the decline
+                        cursor under a full working set (the B-run
+                        permanent freeze),
     spec_budget      -- speculative budget in flight (release = down),
     waiting_frontier -- the frontier composition (a candidate entered/left).
   Each decline reason subscribes to exactly the epoch that can change its
   outcome:
     NO_L3       -> l3_publish
-    NO_HEADROOM -> host_headroom
+    NO_HEADROOM -> host_release
     SPEC_BUDGET -> spec_budget
   Identity events (request prefix changed, request generation changed) are
   causal for every park: they change what the rid is asking for, so the
@@ -80,7 +88,13 @@ SAFETY_RECONCILE_INTERVAL_S = 5.0
 #: for anomalous retry storms only. The correct-path retry cadence is
 #: causal (the subscribed epoch advanced), never time -- a deterministic
 #: L3 miss stays a miss no matter how long you wait. The fuse bounds only
-#: a pathological repeat-fail loop.
+#: a pathological repeat-fail loop. It is ALSO the no-headroom re-probe
+#: debounce (Fix A requirement: repeated wakeup must be debounced): a
+#: NO_HEADROOM park that clears on a release epoch still holds for the
+#: fuse window after the decline, so a structurally-exhausted headroom
+#: (working set at full, release after release) re-probes at most once per
+#: fuse window instead of on every tiny release (one probe per release
+#: epoch, at most one per fuse window).
 SAFETY_FUSE_S = 1.0
 
 
@@ -100,13 +114,25 @@ class NegativeCacheEntry(msgspec.Struct):
     """The per-rid causal park: the subscribed epoch's cursor at the
     decline, the request identity fingerprint (a prefix/generation change
     is causal for every park), and the safety-fuse expiry bounding an
-    anomalous repeat-fail loop."""
+    anomalous repeat-fail loop.
+
+    phase2-peranchor: for a NO_L3 park the cursor is the ANCHOR's
+    per-anchor storage_version at the decline (not the global l3_publish
+    epoch), and `anchor` records the anchor node the miss was proven on.
+    Re-eligibility clears only when THAT anchor's version advances (its own
+    chain's durability genuinely changed), or the request re-anchored to a
+    different anchor / changed identity / the fuse expired -- never on an
+    unrelated chain's durability event."""
 
     reason: DeclineReason
     epoch_cursor: int
     fuse_expiry: float
     prefix_len: int
     generation: Optional[int] = None
+    anchor: Optional[int] = None
+    # Monotonic SPEC_BUDGET release events catch a full level ABA cycle that
+    # can occur between scheduler snapshots; `epoch_cursor` remains the level.
+    release_epoch_cursor: int = 0
 
 
 class ReadyHorizonView(msgspec.Struct):
@@ -145,16 +171,25 @@ class RefillPlan(msgspec.Struct):
 
 
 class CausalEpochs(msgspec.Struct):
-    """The four causal-epoch snapshot values the policy subscribes to.
+    """The five causal-epoch snapshot values the policy subscribes to.
     Built each pass by the scheduler; epoch_event compares it
     directionally against the previous pass's snapshot. Only the
     subscribed-epoch deltas are events; the refill's own traffic (issues
     raise inflight, consume headroom) is not."""
 
     l3_publish: int  # monotonic L3 durable/publish counter (up = event)
-    host_headroom: int  # host available pages (up = event)
+    host_headroom: int  # host available pages (up = event; level signal)
+    host_release: int  # monotonic host-capacity release counter (up = event;
+    # genuine capacity-releasing events -- host residency freed, ready
+    # eviction, working-state release -- NOT the available level, which
+    # flips on every alloc/free and can never sustain past the decline
+    # cursor under a full working set (Fix A: the NO_HEADROOM waiter
+    # subscribes to the release epoch, not the transient level).)
     spec_budget: int  # speculative inflight tokens (down = event)
     waiting_frontier: tuple  # frontier rids, any change = event
+    # Monotonic reservation-release event count; catches a complete level ABA
+    # cycle that occurs between scheduler snapshots.
+    spec_budget_release_epoch: int = 0
 
 
 class ReadyHorizonPolicy:
@@ -260,12 +295,17 @@ class ReadyHorizonPolicy:
     def subscribed_epoch(reason: DeclineReason) -> str:
         """The single causal epoch whose advance can change this decline
         reason's outcome (user adjudication subscription table):
-        NO_L3 -> l3_publish, NO_HEADROOM -> host_headroom,
+        NO_L3 -> l3_publish, NO_HEADROOM -> host_release (the MONOTONIC
+        release counter -- Fix A: a park that is declined because host
+        headroom could not fit the stage clears only on a genuine
+        capacity-releasing event, not on the transient available level,
+        which flips on every alloc/free and can never sustain past the
+        decline cursor under a full working set),
         SPEC_BUDGET -> spec_budget."""
         if reason is DeclineReason.NO_L3:
             return "l3_publish"
         if reason is DeclineReason.NO_HEADROOM:
-            return "host_headroom"
+            return "host_release"
         return "spec_budget"
 
     @staticmethod
@@ -278,29 +318,74 @@ class ReadyHorizonPolicy:
         view: ReadyHorizonView,
         epochs: CausalEpochs,
         now: float,
+        *,
+        anchor_version: Optional[int] = None,
+        anchor: Optional[int] = None,
     ) -> bool:
         """Whether a parked rid may be re-considered: the subscribed
         causal epoch advanced past the decline cursor, OR the request
         identity changed (prefix/generation -- a new question deserves a
         new probe), OR the safety fuse expired (the anomalous repeat-fail
         bound). A deterministic L3 miss is not transient: it stays parked
-        until exactly one of these causal events occurs."""
+        until exactly one of these causal events occurs.
+
+        phase2-peranchor: `anchor_version` is the CURRENT per-anchor
+        storage_version of the request's anchor (None when the caller does
+        not anchor it / the anchor is gone), and `anchor` is the current
+        anchor node id. For a NO_L3 park the comparison is per-anchor: the
+        park clears only when the SAME anchor's version advanced (its own
+        chain's durability genuinely changed), OR the request re-anchored to
+        a different anchor node (a new candidate -- the old miss evidence
+        does not apply), OR the identity / fuse cleared. An unrelated
+        chain's write ack advances only the global diagnostic epoch and does
+        NOT clear this park."""
         if now < entry.fuse_expiry:
             return False
         name = ReadyHorizonPolicy.subscribed_epoch(entry.reason)
-        cur = ReadyHorizonPolicy._epoch_value(epochs, name)
-        if name == "spec_budget":
-            # Budget released: inflight dropped below the decline cursor.
-            if cur < entry.epoch_cursor:
+        if name == "l3_publish":
+            # Per-anchor L3 coverage (phase2-peranchor): the miss was proven
+            # at the declined anchor's version; re-eligibility requires that
+            # either the SAME anchor's version advanced or the request now
+            # anchors a DIFFERENT node.
+            if entry.anchor is not None and anchor is None:
+                # The declined anchor was physically deleted / evicted:
+                # self-heal to a re-match from root -- a new candidate, so the
+                # old miss evidence no longer binds (mirrors frontier_anchor_ready
+                # node_exists -> True).
                 return True
-        elif name == "l3_publish":
-            # L3 durable/publish advanced past the decline cursor.
-            if cur > entry.epoch_cursor:
-                return True
-        else:  # host_headroom
-            # Host pages released: available grew past the decline cursor.
-            if cur > entry.epoch_cursor:
-                return True
+            if entry.anchor is not None and anchor != entry.anchor:
+                return True  # re-anchored to a different node: new candidate
+            if entry.anchor is not None:
+                # Same anchor: its own per-anchor version must have advanced.
+                cur = 0 if anchor_version is None else anchor_version
+                if cur > entry.epoch_cursor:
+                    return True
+            # entry.anchor is None (miss recorded without anchor context):
+            # no anchor binding to verify, so NO version signal -- hold
+            # (identity / fuse still apply). Never re-probed by the global
+            # diagnostic epoch (the phase2-peranchor contract).
+        else:
+            cur = ReadyHorizonPolicy._epoch_value(epochs, name)
+            if name == "spec_budget":
+                # A level drop is the normal release signal. The monotonic
+                # release epoch also catches a complete level ABA cycle that
+                # occurred between scheduler snapshots.
+                if (
+                    cur < entry.epoch_cursor
+                    or epochs.spec_budget_release_epoch
+                    > entry.release_epoch_cursor
+                ):
+                    return True
+            else:  # host_release (Fix A)
+                # A genuine host-capacity-releasing event advanced the release
+                # counter past the decline cursor. The counter is MONOTONIC --
+                # it never recedes when the working set re-consumes the freed
+                # pages (unlike the available level, which flips 0->100->0 and
+                # can never sustain past the cursor under a full working set).
+                # A park therefore clears exactly once per release-epoch
+                # advance; the headroom debounce fuse bounds the re-probe rate.
+                if cur > entry.epoch_cursor:
+                    return True
         # Identity events are causal for every park.
         if view.prefix_len != entry.prefix_len:
             return True
@@ -314,15 +399,24 @@ class ReadyHorizonPolicy:
         view: ReadyHorizonView,
         epochs: CausalEpochs,
         now: float,
+        *,
+        anchor_version: Optional[int] = None,
+        anchor: Optional[int] = None,
     ) -> bool:
         """Whether a candidate whose last attempt declined (parked) may be
         staged now. No entry = never attempted = eligible for its one
         fresh probe. The park clears only on its subscribed epoch's
         advance or an identity change; the READY pool / running batch /
-        plain scheduler pass never clears it."""
+        plain scheduler pass never clears it.
+
+        phase2-peranchor: `anchor_version` / `anchor` are the candidate's
+        current per-anchor version and anchor node (None when not anchored),
+        forwarded to entry_cleared for the NO_L3 per-anchor comparison."""
         if entry is None:
             return True
-        return ReadyHorizonPolicy.entry_cleared(entry, view, epochs, now)
+        return ReadyHorizonPolicy.entry_cleared(
+            entry, view, epochs, now, anchor_version=anchor_version, anchor=anchor
+        )
 
     def _state_funnel(self, view) -> bool:
         """The WAIT/NONE state funnel: NONE with restore potential, or
@@ -332,8 +426,15 @@ class ReadyHorizonPolicy:
         FRONTIER / BACKUP_PENDING are ACK-event-driven wakes (re-issuing
         them duplicates the T11/T12 wake re-issue) and REVALIDATE /
         HOST_ALLOC are not testable by the horizon; the paced retry and
-        T13 own them."""
-        if view.state is RestoreState.NONE:
+        T13 own them.
+
+        P1: a MISS_RECOMPUTE request (proven L3-missing) is treated like
+        NONE here -- the ready horizon's OWN NO_L3 negative cache (keyed on
+        the l3_publish cursor) is the authoritative retry gate, clearing
+        only on an l3_publish advance / identity change / fuse expiry. That
+        cleared re-probe is the legitimate re-arm, so the sticky miss state
+        alone must not block the horizon's staging once its park clears."""
+        if view.state in (RestoreState.NONE, RestoreState.MISS_RECOMPUTE):
             return bool(view.staging_eligible)
         if view.state is not RestoreState.WAIT_CAPACITY:
             return False
@@ -362,7 +463,16 @@ class ReadyHorizonPolicy:
             if view.rid in tree.ongoing_prefetch:
                 continue
             entry = negatives.get(view.rid)
-            if not self.subscribe_decline(entry, view, epochs, now):
+            # phase2-peranchor: derive the candidate's current anchor version
+            # + anchor node for the NO_L3 per-anchor re-eligibility comparison.
+            anchor = getattr(getattr(view, "req", None), "last_host_node", None)
+            anchor_version = None
+            if anchor is not None:
+                av = getattr(tree, "anchor_storage_version", None)
+                anchor_version = av(anchor) if callable(av) else None
+            if not self.subscribe_decline(
+                entry, view, epochs, now, anchor_version=anchor_version, anchor=anchor
+            ):
                 continue
             if self._state_funnel(view):
                 out.append(view)
@@ -449,16 +559,20 @@ class ReadyHorizonPolicy:
         """M3 event gate: whether a causal-epoch change since the last
         pass warrants reconsidering the pool. Only availability-improving
         deltas fire it -- L3 published (counter up), host pages released
-        (available up), budget released (inflight down), a new request
-        entered the frontier (composition changed). The refill's own
-        traffic (issues raise inflight and lower free pages) never fires
-        it (the e7 spin root cause)."""
+        (available up OR the monotonic release counter advanced: genuine
+        capacity-releasing events -- host residency freed, ready eviction,
+        working-state release -- Fix A), budget released (inflight down), a
+        new request entered the frontier (composition changed). The
+        refill's own traffic (issues raise inflight and lower free pages)
+        never fires it (the e7 spin root cause)."""
         if prev is None:
             return True
         return (
             cur.l3_publish > prev.l3_publish
             or cur.host_headroom > prev.host_headroom
+            or cur.host_release > prev.host_release
             or cur.spec_budget < prev.spec_budget
+            or cur.spec_budget_release_epoch > prev.spec_budget_release_epoch
             or cur.waiting_frontier != prev.waiting_frontier
         )
 

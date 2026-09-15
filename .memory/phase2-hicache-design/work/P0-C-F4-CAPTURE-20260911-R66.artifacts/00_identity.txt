@@ -1,0 +1,21 @@
+### date
+2026-09-11T13:46:46+08:00
+### hostname
+I2aff9805ac001019d1
+### gpu
+NVIDIA GeForce RTX 3060, 12288 MiB, 8.6, 550.144.03
+### ss_port_30000
+LISTEN 0      2048       127.0.0.1:30000      0.0.0.0:*    users:(("python",pid=218072,fd=59))         
+### health
+200
+### resolved_pid
+218072
+### ps_for_pid
+    PID    PPID                  STARTED     ELAPSED CMD
+ 218072  218071 Thu Sep 10 06:34:32 2026  1-07:12:14 python -m sglang.launch_server --model-path /hy-tmp/models/Qwen3.5-4B-AWQ --tokenizer-path /hy-tmp/models/Qwen3.5-4B-AWQ --host 127.0.0.1 --port 30000 --tp-size 1 --mem-fraction-static 0.82 --max-running-requests 1 --max-total-tokens 65536 --chunked-prefill-size 2048 --max-prefill-tokens 16384 --kv-cache-dtype fp8_e4m3 --enable-hierarchical-cache --hicache-host-memory-mode cache --hicache-ratio 2.0 --hicache-write-policy write_through --hicache-io-backend kernel --hicache-mem-layout page_first --hicache-storage-backend file --hicache-storage-prefetch-policy wait_complete --hicache-storage-backend-extra-config {"hicache_storage_pass_prefix_keys":true} --hicache-prefetch-speculative-fraction 0.6 --cuda-graph-backend-decode full --cuda-graph-backend-prefill breakable --cuda-graph-bs-decode 1 --cuda-graph-bs-prefill 4 8 16 32 --enable-ready-horizon --ready-horizon-frontier-n 8 --ready-host-watermark-low 55000 --ready-host-watermark-high 110000
+### proc_exe
+/usr/bin/python3.11
+### proc_cwd
+/root/sglang-3060-12g-hicache
+### deployed_revision_file
+9213ee01d90ba3925e7fe928e80cc41354ee4fff
