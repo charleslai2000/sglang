@@ -419,8 +419,12 @@ class TestRecoveryPersistence(CustomTestCase):
     @staticmethod
     def _group_records(*, include_group_commit=True, group_member_count=2):
         records = []
-        for seq, (batch_id, key, _member_index) in enumerate(
-            ((10, b"group-kv", 0), (11, b"group-sidecar", 1)), 1
+        for seq, (batch_id, key, member_index, component) in enumerate(
+            (
+                (10, b"group-kv", 0, component_from_pool_name(PoolName.KV)),
+                (11, b"group-mamba", 1, component_from_pool_name(PoolName.MAMBA)),
+            ),
+            1,
         ):
             records.extend(
                 [
@@ -438,10 +442,10 @@ class TestRecoveryPersistence(CustomTestCase):
                                     SetEntry(
                                         key,
                                         0,
-                                        (_member_index + 1) * 10,
+                                        (member_index + 1) * 10,
                                         10,
                                         1,
-                                        component_from_pool_name(PoolName.KV),
+                                        component,
                                     )
                                 ],
                             )
@@ -600,7 +604,7 @@ class TestRecoveryPersistence(CustomTestCase):
         result = replay_records(self._group_records(), num_slots=1)
         self.assertEqual(
             [entry.storage_key for entry in result.entries],
-            [b"group-kv", b"group-sidecar"],
+            [b"group-kv", b"group-mamba"],
         )
         self.assertEqual(result.complete_groups, ((_EPOCH, 7),))
 
@@ -616,6 +620,30 @@ class TestRecoveryPersistence(CustomTestCase):
             num_slots=1,
         )
         self.assertEqual(result.entries, [])
+        self.assertEqual(result.complete_groups, ())
+
+    def test_group_commit_reordered_before_batch_commits_fails_closed(self):
+        records = self._group_records(include_group_commit=False)
+        reordered_payloads = [
+            records[0],
+            records[2],
+            (
+                FRAME_GROUP_COMMIT,
+                0,
+                encode_group_commit_payload(GroupCommitPayload(_EPOCH, 7, 2)),
+            ),
+            records[1],
+            records[3],
+        ]
+        reordered = [
+            (frame_type, seq, payload)
+            for seq, (frame_type, _old_seq, payload) in enumerate(
+                reordered_payloads, 1
+            )
+        ]
+        result = replay_records(reordered, num_slots=1)
+        self.assertEqual(result.entries, [])
+        self.assertEqual(result.complete_batches, (10, 11))
         self.assertEqual(result.complete_groups, ())
 
     def test_group_commit_missing_batch_commit_fails_closed(self):
@@ -666,13 +694,26 @@ class TestRecoveryPersistence(CustomTestCase):
         self.assertEqual(result.complete_batches, (10, 11))
         self.assertEqual(result.complete_groups, ())
 
+    def test_crash_before_group_commit_does_not_recover_kv_or_mamba(self):
+        result = replay_records(
+            self._group_records(include_group_commit=False), num_slots=1
+        )
+        self.assertEqual(result.entries, [])
+        self.assertEqual(result.expected_fold_count, 0)
+        self.assertEqual(result.complete_groups, ())
+
     def test_durable_group_commit_recovers_all_members(self):
         result = replay_records(self._group_records(), num_slots=1)
         self.assertEqual(result.expected_fold_count, 2)
-        self.assertEqual({entry.storage_key for entry in result.entries}, {
-            b"group-kv",
-            b"group-sidecar",
-        })
+        self.assertEqual(
+            {
+                (entry.storage_key, entry.component) for entry in result.entries
+            },
+            {
+                (b"group-kv", component_from_pool_name(PoolName.KV)),
+                (b"group-mamba", component_from_pool_name(PoolName.MAMBA)),
+            },
+        )
 
     def test_wal_range_and_manifest_absence_rules(self):
         self.assertEqual(
