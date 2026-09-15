@@ -16,6 +16,7 @@
 
 import logging
 import os
+from contextlib import nullcontext
 from functools import lru_cache
 from typing import Iterable, Optional, Set, Tuple, Union
 
@@ -1529,9 +1530,13 @@ class Qwen3_5ForCausalLM(nn.Module):
         # Pass through decoder layers
         for layer_idx in range(self.start_layer, self.end_layer):
             layer = self.layers[layer_idx]
-            with get_global_expert_distribution_recorder().with_current_layer(
-                layer_idx
-            ):
+            recorder = get_global_expert_distribution_recorder()
+            layer_context = (
+                recorder.with_current_layer(layer_idx)
+                if recorder.recording
+                else nullcontext()
+            )
+            with layer_context:
                 hidden_states, residual = layer(
                     positions=positions,
                     hidden_states=hidden_states,

@@ -1,0 +1,297 @@
+{
+  "task_id": "P1-SPEC-BUDGET-CONTROLLED-EVICTION-20260911-R121",
+  "invocation": "ses-p1-controlled-eviction-r121-20260911",
+  "contract": {
+    "path": "P1-R121-CONTROLLED-EVICTION-CONTRACT.md",
+    "sha256": "2ac86b5a54264fad46d049e2c32e3cc37c125f8c778a38dfb14e840a37be3b3b"
+  },
+  "target_identity": {
+    "rid": "r121-p3-R-T",
+    "session_id": "r121-s-R-p3",
+    "session_generation": 60,
+    "build_session": "r121-s-T-p3",
+    "build_rid": "r121-p3-build-T",
+    "note": "T parked as r121-p3-R-T; build session r121-s-T-p3"
+  },
+  "measurement_window": {
+    "server_start_line": 2416575,
+    "raw_start_line": 103819
+  },
+  "hard_precondition": {
+    "FULL_DURABLE": {
+      "verdict": "PASS",
+      "evidence": {
+        "target_storage_query": {
+          "ref": "probe.log:3264",
+          "query_suffix_len": 27339,
+          "kv_hit_pages": 27328,
+          "storage_hit_count": 27328,
+          "sidecar_hits": {
+            "kv": 27328,
+            "mamba": 27328
+          }
+        },
+        "build_barriers": {
+          "F1": 21,
+          "F2": 21,
+          "T": 14,
+          "source": "run driver BUILD_DURABILITY; probe durability_barrier records for r121-s-F1-p3 / r121-s-F2-p3 / r121-s-T-p3"
+        }
+      }
+    },
+    "NOT_DEVICE_RESIDENT": {
+      "verdict": "PASS",
+      "evidence": {
+        "target_match": {
+          "ref": "raw.log:103819 (server 2416575)",
+          "device_hit_tokens": 0,
+          "host_hit_tokens": 0,
+          "fill_len": 27340
+        },
+        "note": "T device_hit=0 and host_hit=0 at window start after controlled eviction+full drain; F1 also device_hit=0/host_hit=0"
+      }
+    },
+    "HOST_HEADROOM_SUFFICIENT": {
+      "verdict": "FAIL",
+      "evidence": {
+        "host_kv_pool_tokens": 131073,
+        "F1_required": 42944,
+        "F2_required": 43002,
+        "T_required": 27328,
+        "f1_first_wait": {
+          "ref": "raw.log:103892 (server 2416648)",
+          "free_units": {
+            "kv": 162,
+            "mamba": 43
+          },
+          "evictable_units": {
+            "kv": 8000,
+            "mamba": 54
+          }
+        },
+        "t_first_wait": {
+          "ref": "raw.log:125841 (server 2438597)",
+          "free_units": {
+            "kv": 98,
+            "mamba": 42
+          },
+          "evictable_units": {
+            "kv": 6080,
+            "mamba": 33
+          }
+        },
+        "t_second_retry": {
+          "ref": "raw.log:224763 (server 2537519)",
+          "per_pool_kv": {
+            "alloc1": false,
+            "alloc2": false,
+            "evictable_after": 0,
+            "evictable_before": 4094,
+            "free_after": 24670,
+            "free_before": 2144,
+            "reclaimed": 22526,
+            "required": 27328
+          }
+        },
+        "t_recompute": {
+          "ref": "raw.log:270213 (server 2582969)",
+          "cause": "timeout",
+          "survivability": "host"
+        }
+      }
+    }
+  },
+  "C1_full_durable": {
+    "verdict": "PASS",
+    "evidence": {
+      "pc_storage_query": {
+        "ref": "probe.log:3264",
+        "kv_hit_pages": 27328,
+        "storage_hit_count": 27328,
+        "query_suffix_len": 27339,
+        "sidecar_hits": {
+          "kv": 27328,
+          "mamba": 27328
+        }
+      },
+      "D_req": 27328,
+      "requested_primary_tokens": 27339,
+      "external_tail_tokens": 11,
+      "mamba_sidecar_durable": true,
+      "identity_caveat": "park/query identity is the replay rid r121-p3-R-T (session r121-s-R-p3 gen 60); the durable producer is build session r121-s-T-p3 (build_rid r121-p3-build-T). The pc_storage_query record itself has session_id=null, session_generation=null, build_rid=null (only rid=r121-p3-R-T). No T finalize exists (restore failed), so the build_rid triple-join across park/query/finalize cannot be shown; coverage (kv_hit_pages=storage_hit_count=27328) and mamba sidecar (27328) are fully shown."
+    }
+  },
+  "C2_park_spec_budget": {
+    "verdict": "PASS",
+    "evidence": {
+      "park": {
+        "ref": "raw.log:103830 (server 2416586)",
+        "decision": "exclude",
+        "reason": "negative_cache",
+        "spec_used": "42958",
+        "limit": "39321",
+        "spec_budget": "42958",
+        "rel_epoch": "96",
+        "neg_blocked": "True",
+        "neg_cursor": "42958",
+        "staging_eligible": "True",
+        "restore_potential": "True",
+        "headroom_tokens": "162",
+        "restore_state_before": "NONE",
+        "wait_reason_before": "null"
+      },
+      "note": "reason=negative_cache (SPEC_BUDGET cursor), spec_used 42958 > limit 39321; restore_state_before=NONE/wait_reason_before=null so HOST_ALLOC was not the limiter at park; staging_eligible=True restore_potential=True"
+    }
+  },
+  "C3_release_wake": {
+    "verdict": "PASS",
+    "evidence": {
+      "F1_issue": {
+        "ref": "raw.log:103821 (server 2416577)",
+        "prefetch_length": 42958
+      },
+      "T_park": {
+        "ref": "raw.log:103830 (server 2416586)",
+        "rel_epoch": "96"
+      },
+      "F1_release": {
+        "ref": "raw.log:103888 (server 2416644)",
+        "reason": "alloc_failed",
+        "requested": "42958",
+        "storage_hit": "42944",
+        "storage_generation": "1037"
+      },
+      "T_wake_prefetch": {
+        "ref": "raw.log:103899 (server 2416655)"
+      },
+      "T_wake_decision": {
+        "ref": "raw.log:103901 (server 2416657)",
+        "spec_budget_release_epoch": "97"
+      },
+      "epoch_advance": "96 -> 97 (+1, exactly once)",
+      "events_between_release_and_wake": [
+        {
+          "ref": "raw.log:103891 (server 2416647)",
+          "evt": "restore_state rid=r121-p3-R-F1 state=WAIT_CAPACITY reason=HOST_ALLOC",
+          "epoch_advancing": false
+        },
+        {
+          "ref": "raw.log:103892 (server 2416648)",
+          "evt": "restore_host_alloc_wait rid=r121-p3-R-F1",
+          "epoch_advancing": false
+        }
+      ],
+      "note": "F1 prefetch_revoke at raw.log:103888 advanced spec_budget_release_epoch 96->97 exactly once; the only events before T wake are F1 host-alloc WAIT/state (non epoch-advancing). T wake decision at raw.log:103901 names spec_budget_release_epoch=97.",
+      "post_wake_epoch_note": "After T wake at epoch 97, a SECOND, independent release advanced 97->98 at raw.log:25845 (server 2438601, CausalEpochs 98) caused by T's own prefetch_revoke reason=alloc_failed (raw.log:25837/server 2438593). This is NOT between C3 step (3) and (4); it belongs to the C4 restore failure (host revocation). F1 release->T wake remains exactly-once 96->97."
+    }
+  },
+  "C4_full_restore_gate": {
+    "verdict": "FAIL",
+    "evidence": {
+      "t_disposition_1": {
+        "ref": "raw.log:125841 (server 2438597)",
+        "requested": 27339,
+        "granted": 27328,
+        "reason": "revoked:alloc_failed"
+      },
+      "t_retry_results": [
+        {
+          "ref": "raw.log:125839 (server 2438595)",
+          "retry_outcome": "revoked_alloc_failed",
+          "per_pool_kv": {
+            "alloc1": false,
+            "alloc2": false,
+            "evictable_after": 6080,
+            "evictable_before": 6080,
+            "free_after": 98,
+            "free_before": 98,
+            "reclaimed": 0,
+            "required": 27328
+          }
+        },
+        {
+          "ref": "raw.log:224763 (server 2537519)",
+          "retry_outcome": "revoked_alloc_failed",
+          "per_pool_kv": {
+            "alloc1": false,
+            "alloc2": false,
+            "evictable_after": 0,
+            "evictable_before": 4094,
+            "free_after": 24670,
+            "free_before": 2144,
+            "reclaimed": 22526,
+            "required": 27328
+          }
+        }
+      ],
+      "t_recompute": {
+        "ref": "raw.log:270213 (server 2582969)",
+        "cause": "timeout",
+        "survivability": "host"
+      },
+      "t_restore_success_present": false,
+      "t_hybrid_finalize_present": false,
+      "required": "disposition==FULL, granted==D_req(27328), storage_hit==D_req, kv_fetched==D_req, mamba fetched==expected, restore_success.n_tokens==D_req",
+      "failure_class": "alloc_failed host revocation truncated the restore below D_req => per contract this is a HOST_HEADROOM precondition failure",
+      "t_disposition_2": {
+        "ref": "raw.log:224762 (server 2537518)",
+        "requested": 27339,
+        "granted": 27328,
+        "reason": "revoked:alloc_failed"
+      }
+    }
+  },
+  "C5_host_headroom": {
+    "verdict": "FAIL",
+    "evidence": {
+      "host_kv_pool_tokens": 131073,
+      "F1_required": 42944,
+      "T_required": 27328,
+      "sum_required": 70272,
+      "window_start_allocable": {
+        "ref": "raw.log:103892 (server 2416648)",
+        "free": 162,
+        "evictable": 8000,
+        "allocable": 8162
+      },
+      "t_stage_allocable": {
+        "ref": "raw.log:125841 (server 2438597)",
+        "free": 98,
+        "evictable": 6080,
+        "allocable": 6178
+      },
+      "after_reclaim_allocable": 24670,
+      "basis": "host_allocable := free_units.kv + evictable_units.kv from host_alloc.v1",
+      "margin": 0
+    }
+  },
+  "unmet_conditions": [
+    "HOST_HEADROOM_SUFFICIENT (top-level precondition)",
+    "C4_full_restore_gate",
+    "C5_host_headroom"
+  ],
+  "D_req_derivation": {
+    "D_req": 27328,
+    "source": "pc_storage_query.kv_hit_pages at T restore (== storage_hit_count)",
+    "raw_requested_primary_tokens": 27339,
+    "external_tail": 11,
+    "justification": "requested suffix (query_suffix_len=27339, disposition requested=27339) exceeds D_req (durable coverage=27328) by an 11-token durable-boundary-external tail (chunk alignment/generated token). The durable prefix D_req is fully present in L3 (kv_hit_pages=storage_hit_count=27328, mamba sidecar 27328); the tail is ordinary prefill strictly beyond D_req (allowed)."
+  },
+  "pressure_drain_evidence": {
+    "pressure_requests": [
+      "r121-p3-q1",
+      "r121-p3-q2",
+      "r121-p3-q3",
+      "r121-p3-q4",
+      "r121-p3-q5"
+    ],
+    "all_pressure_http_200": true,
+    "driver_drain_event": "state.jsonl evt=drain drained=true settle_s=90 (idle confirmed 234.8s after last pressure admission)",
+    "no_pressure_in_window": true,
+    "note": "controlled pressure is preprocessing only, fully drained before window; not part of the chain"
+  },
+  "missing_legs": [
+    "l2_to_l1_restore_generation (T)"
+  ],
+  "verdict": "NOT_VERIFIED"
+}

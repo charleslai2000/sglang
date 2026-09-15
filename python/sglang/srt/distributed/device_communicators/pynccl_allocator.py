@@ -6,12 +6,15 @@ import traceback
 from contextlib import nullcontext
 
 import torch
-from torch.cuda.memory import (
-    CUDAPluggableAllocator,
-    _cuda_beginAllocateCurrentThreadToPool,
-    _cuda_endAllocateToPool,
-    _cuda_releasePool,
+from torch.cuda.memory import CUDAPluggableAllocator
+
+_cuda_beginAllocateCurrentThreadToPool = getattr(
+    torch.cuda.memory, "_cuda_beginAllocateCurrentThreadToPool", None
 )
+_cuda_endAllocateToPool = getattr(
+    torch.cuda.memory, "_cuda_endAllocateToPool", None
+)
+_cuda_releasePool = getattr(torch.cuda.memory, "_cuda_releasePool", None)
 
 from sglang.srt.distributed.parallel_state import GroupCoordinator
 from sglang.srt.environ import envs
@@ -156,6 +159,26 @@ _active_symmetric_memory_context = None
 # Reference to the C registration function (with arg types set)
 _register_func = None
 
+_CURRENT_THREAD_MEMPOOL_CONTROL_NAMES = (
+    "_cuda_beginAllocateCurrentThreadToPool",
+    "_cuda_endAllocateToPool",
+    "_cuda_releasePool",
+)
+
+
+def _require_current_thread_mempool_api():
+    missing_controls = [
+        name
+        for name in _CURRENT_THREAD_MEMPOOL_CONTROL_NAMES
+        if not callable(globals()[name])
+    ]
+    if missing_controls:
+        raise RuntimeError(
+            "NCCL symmetric memory requires Torch's current-thread MemPool API; "
+            f"Torch {torch.__version__} is missing controls: "
+            f"{', '.join(missing_controls)}"
+        )
+
 
 def is_symmetric_memory_enabled():
     try:
@@ -253,6 +276,7 @@ class SymmetricMemoryContext:
         self,
         group_coordinator: GroupCoordinator,
     ):
+        _require_current_thread_mempool_api()
         self.group_coordinator = group_coordinator
         self._pool_id = get_nccl_mem_pool().id
         self._device_index = torch.cuda.current_device()
@@ -263,6 +287,7 @@ class SymmetricMemoryContext:
         self._comm_ptr = self.group_coordinator.pynccl_comm.comm.value
 
     def __enter__(self):
+        _require_current_thread_mempool_api()
         assert (
             self.group_coordinator.pynccl_comm is not None
         ), f"Symmetric memory requires pynccl to be enabled in group '{self.group_coordinator.unique_name}'"
@@ -287,6 +312,7 @@ class SymmetricMemoryContext:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        _require_current_thread_mempool_api()
         _cuda_endAllocateToPool(self._device_index, self._pool_id)
         _cuda_releasePool(self._device_index, self._pool_id)
         # Register all unregistered segments

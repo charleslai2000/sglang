@@ -219,6 +219,14 @@ from sglang.srt.managers.scheduler_components.batch_result_processor import (
     SchedulerBatchResultProcessor,
 )
 from sglang.srt.managers.scheduler_components.hicache_restore import (
+    FrontierAnchorInfo,
+    HostAllocFailure,
+    HostAllocWaitCursor,
+    HostAllocWakeArbiter,
+    HOST_ALLOC_TELEMETRY_SCHEMA_VERSION,
+    HiCachePrefetchOrigin,
+    HiCachePrefetchIssueStatus,
+    PrefetchIssueResult,
     RestoreDecision,
     RestoreEvent,
     RestoreState,
@@ -226,8 +234,10 @@ from sglang.srt.managers.scheduler_components.hicache_restore import (
     capacity_wake_applies,
     demand_restore_available,
     next_restore,
+    no_material_fast_forward,
     promotion_budget_fits,
     promotion_wait_blocked,
+    short_tail_recompute_allowed,
     too_short_wait_armed,
     wait_clock_next,
     wait_reason_for,
@@ -299,6 +309,17 @@ from sglang.srt.managers.utils import (
     validate_input_length,
 )
 from sglang.srt.mem_cache import kv_cache_builder
+from sglang.srt.mem_cache.telemetry_context import (
+    configure_producer_context,
+    host_alloc_lineage,
+    lifecycle_key as host_alloc_lifecycle_key,
+    next_event_id,
+    producer_context,
+    record_host_alloc_lineage,
+)
+from sglang.srt.mem_cache.p2a_timing_probe import (
+    mark_enqueue as _p2a_mark_enqueue,
+)
 from sglang.srt.mem_cache.common import (
     maybe_cache_unfinished_req,
     release_kv_cache,
@@ -386,6 +407,127 @@ def _p2a_trace(fmt, *args):
         logger.info(fmt, *args)
 
 
+def _log_host_alloc_telemetry(
+    event: str,
+    *,
+    worker: str,
+    rank,
+    rid: Optional[str] = None,
+    attempt_id: Optional[str] = None,
+    cache_instance_id=None,
+    trace_context=None,
+    producer_context_override=None,
+    **fields,
+) -> Optional[str]:
+    """Emit bounded, request-correlated HOST_ALLOC observability records."""
+    import json as _json
+
+    if event == "restore_host_alloc_wake_decision":
+        decision = fields.get("decision")
+        key = (rid, attempt_id)
+        current_generations = fields.get("current_generations") or {}
+        signature = (
+            decision,
+            fields.get("wait_id"),
+            fields.get("generation_vector_id"),
+            tuple(sorted(current_generations.items()))
+            if isinstance(current_generations, dict)
+            else (),
+        )
+        # A grant is the single authoritative wake record that later
+        # retry/finalize/READY events reference, and a release is the single
+        # terminal record a successor grant references.  Neither may be
+        # coalesced away (which would return None and produce a null
+        # wake_event_id / terminal_event_id).  Only hold records are bounded.
+        if decision not in ("grant", "release"):
+            last = _HOST_ALLOC_WAKE_TELEMETRY_LAST.get(key)
+            if signature == last:
+                return None
+            _HOST_ALLOC_WAKE_TELEMETRY_LAST[key] = signature
+            count = _HOST_ALLOC_WAKE_TELEMETRY_HOLDS.get(key, 0) + 1
+            _HOST_ALLOC_WAKE_TELEMETRY_HOLDS[key] = count
+            if count > 64:
+                return None
+            if len(_HOST_ALLOC_WAKE_TELEMETRY_LAST) > 4096:
+                _HOST_ALLOC_WAKE_TELEMETRY_LAST.clear()
+                _HOST_ALLOC_WAKE_TELEMETRY_HOLDS.clear()
+
+    record = {
+        "schema": HOST_ALLOC_TELEMETRY_SCHEMA_VERSION,
+        "evt": event,
+        "ts_mono_ns": time.monotonic_ns(),
+        "ts_wall_ms": int(time.time() * 1000),
+        "worker": worker,
+        "rank": rank,
+        "rid": rid,
+        "attempt_id": attempt_id,
+        "cache_instance_id": cache_instance_id,
+        "trace_context": trace_context,
+    }
+    record.update(
+        producer_context_override
+        or producer_context(component="scheduler")
+    )
+    record["event_id"] = fields.pop("event_id", None) or next_event_id("host-alloc")
+    record.setdefault("lifecycle_key", fields.get("lifecycle_key"))
+    record.setdefault("wait_id", fields.get("wait_id"))
+    record.setdefault("predecessor_wait_id", fields.get("predecessor_wait_id"))
+    record.setdefault("predecessor_terminal_event_id", fields.get("predecessor_terminal_event_id"))
+    record.setdefault("predecessor_terminal_state", fields.get("predecessor_terminal_state"))
+    record.setdefault(
+        "predecessor_lineage_reason", fields.get("predecessor_lineage_reason")
+    )
+    record.setdefault("wake_event_id", fields.get("wake_event_id"))
+    record.setdefault("attempt_number", fields.get("attempt_number"))
+    record.setdefault("attempt_origin", fields.get("attempt_origin"))
+    record.setdefault("parent_wait_id", fields.get("parent_wait_id"))
+    record.setdefault("deadline_mono_ns", fields.get("deadline_mono_ns"))
+    record.setdefault("terminal_event_id", fields.get("terminal_event_id"))
+    record.setdefault("terminal_state", fields.get("terminal_state"))
+    record.setdefault("terminal_reason", fields.get("terminal_reason"))
+    record.update(fields)
+    logger.info("[HAE] %s", _json.dumps(record, sort_keys=True, default=str))
+    return record["event_id"]
+
+
+_HOST_ALLOC_WAKE_TELEMETRY_LAST = {}
+_HOST_ALLOC_WAKE_TELEMETRY_HOLDS = {}
+_ACTIVE_PRODUCER_CONTEXT = None
+
+# Producer-owned terminal states that count as a released FIFO waiter, so a
+# later grant may name that waiter as its predecessor.  These are the states a
+# WAIT_CAPACITY/HOST_ALLOC waiter can leave through in the scheduler.
+_HOST_ALLOC_RELEASED_TERMINAL_STATES = frozenset(
+    {"RELEASED", "TIMEOUT", "RESTORED", "MISS", "ABORTED", "RECOMPUTE", "ABANDONED"}
+)
+
+
+@dataclasses.dataclass(frozen=True)
+class _ReadyHorizonPreparedMatch:
+    """One-pass proof that RH observed the request's current prefix match."""
+
+    req: Req
+    rid: str
+    pass_seq: int
+    enqueue_seq: Optional[int]
+    session_generation: Optional[int]
+    retraction_count: int
+    fill_object_id: int
+    fill_len: int
+    output_len: int
+    extra_key: object
+    cache_salt: object
+    last_device_node: object
+    last_host_node: object
+    restore_state_before: str
+    match_duration_us: int
+    mamba_pool_idx_changed: bool
+    mamba_cow_src_changed: bool
+    mamba_needs_clear_changed: bool
+    mamba_alloc_calls_delta: int
+    mamba_evict_calls_delta: int
+
+
 # B1.5-PROBE (T31 rebase of T23; read-only instrumentation, appends JSON lines to
 # /tmp/b15-probe.log only, zero numeric-path change; removed after experiment)
 def _b15_log(rec):
@@ -421,7 +563,7 @@ def _t38c_log(rec):
 def policy_epoch_value(policy, epochs, reason) -> int:
     """The cursor of the causal epoch a decline reason subscribes to
     (M3, user adjudication subscription table: NO_L3 -> l3_publish,
-    NO_HEADROOM -> host_headroom, SPEC_BUDGET -> spec_budget). The negative
+    NO_HEADROOM -> host_release, SPEC_BUDGET -> spec_budget). The negative
     cache records this value at the decline; re-eligibility compares the
     current value against it."""
     return getattr(epochs, policy.subscribed_epoch(reason))
@@ -509,6 +651,26 @@ class Scheduler(
 
         # Parse args
         self.server_args = server_args
+        self._producer_telemetry_context = configure_producer_context(
+            profile_values={
+                key: getattr(server_args, key, None)
+                for key in (
+                    "model_path",
+                    "tp_size",
+                    "pp_size",
+                    "dp_size",
+                    "max_total_num_tokens",
+                    "kv_cache_dtype",
+                    "hicache_host_memory_mode",
+                    "hicache_ratio",
+                    "ready_horizon_frontier_n",
+                    "ready_host_watermark_low",
+                    "ready_host_watermark_high",
+                )
+            },
+        )
+        global _ACTIVE_PRODUCER_CONTEXT
+        _ACTIVE_PRODUCER_CONTEXT = self._producer_telemetry_context
         self.nccl_port = port_args.nccl_port
         self.schedule_policy = get_schedule().schedule_policy
         self.enable_priority_scheduling = get_schedule().enable_priority_scheduling
@@ -660,6 +822,9 @@ class Scheduler(
         self.token_to_kv_pool_allocator = result.token_to_kv_pool_allocator
         self.disable_radix_cache = result.disable_radix_cache
         self.tree_cache = result.tree_cache
+        self.tree_cache._producer_telemetry_context = dict(
+            self._producer_telemetry_context
+        )
         self.emit_metrics_constants()
         self.maybe_init_hccl_dp_prewarm()
 
@@ -1261,6 +1426,8 @@ class Scheduler(
         # Set by the ShutdownReq handler to break the event loop for graceful shutdown.
         self.gracefully_exit = False
         self.waiting_queue: List[Req] = []
+        self._host_alloc_wake_arbiter = HostAllocWakeArbiter()
+        self._host_alloc_attempt_seq = 0
         # The running decoding batch for continuous batching
         self.running_batch: ScheduleBatch = ScheduleBatch(reqs=[], batch_is_full=False)
         # The current forward batch
@@ -1396,6 +1563,27 @@ class Scheduler(
         self._ready_horizon_epoch_prev: Optional[CausalEpochs] = None
         self._ready_horizon_last_refill_ts = 0.0
         self._ready_horizon_last_log: Optional[tuple] = None
+        # Fix A (P1): monotonic host-capacity release counter for the
+        # NO_HEADROOM subscription. Bumped on every ~pool.available_size()
+        # growth observed by the epoch snapshot (genuine host-capacity
+        # releasing event: host residency freed, ready eviction, working-
+        # state release). The counter never recedes when the working set
+        # re-consumes the freed pages, so a NO_HEADROOM park clears exactly
+        # once per release -- the transient-level subscription (available
+        # flips 0->100->0 and can never sustain past the decline cursor
+        # under a full working set) is the B-run permanent-freeze root
+        # cause.
+        self._ready_host_release_epoch = 0
+        # Ground truth for the growth test: the last observed available
+        # level. A level that INCREASED since the last snapshot is by
+        # construction a release (only free() raises the free count); the
+        # refill's own traffic only ever lowers it, so it can never
+        # self-trigger.
+        self._ready_host_release_last_level: Optional[int] = None
+        # Last observed speculative reservation-release epoch. The controller
+        # increments this at each SPECULATIVE release, including releases that
+        # complete between two scheduler snapshots.
+        self._ready_spec_budget_release_epoch = 0
         # P3 M3 (user adjudication): per-rid causal negative-cache
         # (rid -> NegativeCacheEntry). A staged request that declined
         # parks here with its subscribed epoch's cursor; it is not re-
@@ -1404,6 +1592,8 @@ class Scheduler(
         # are not transient -- the revoke frees the budget and would
         # re-arm the next pass without the park.
         self._ready_horizon_negatives: dict = {}
+        self._rh_request_enqueue_seq = 0
+        self._rh_pass_seq = 0
 
     def init_schedule_policy(self):
         # Init schedule policy and new token estimation
@@ -2940,15 +3130,234 @@ class Scheduler(
         for tokenized_req in recv_req:
             self.handle_generate_request(tokenized_req)
 
-    def _prefetch_kvcache(self, req: Req, *, demand_restore: bool = False):
+    def _claim_prefetch(self, req: Req, origin: HiCachePrefetchOrigin):
+        active_attempt_id = getattr(req, "hicache_prefetch_active_attempt_id", None)
+        if active_attempt_id is not None:
+            return None
+        sequence = getattr(req, "hicache_prefetch_attempt_seq", 0) + 1
+        attempt_id = f"{req.rid}:prefetch:{sequence}"
+        req.hicache_prefetch_attempt_seq = sequence
+        req.hicache_prefetch_active_attempt_id = attempt_id
+        req.hicache_prefetch_active_origin = origin
+        return attempt_id
+
+    def _release_prefetch_claim(
+        self, req: Req, attempt_id: Optional[str], terminal_reason: str
+    ) -> bool:
+        active_attempt_id = getattr(req, "hicache_prefetch_active_attempt_id", None)
+        if active_attempt_id != attempt_id:
+            logger.info(
+                "[P3] evt=prefetch_claim_release_stale rid=%s expected=%s active=%s reason=%s",
+                req.rid,
+                attempt_id,
+                active_attempt_id,
+                terminal_reason,
+            )
+            return False
+        if active_attempt_id is None:
+            return False
+        req.hicache_prefetch_last_attempt_id = active_attempt_id
+        req.hicache_prefetch_last_origin = getattr(
+            req, "hicache_prefetch_active_origin", None
+        )
+        req.hicache_prefetch_active_attempt_id = None
+        req.hicache_prefetch_active_origin = None
+        return True
+
+    @staticmethod
+    def _prefetch_state_name(state) -> str:
+        return state.name if state is not None else "null"
+
+    def _prefetch_result(
+        self,
+        req: Req,
+        status: HiCachePrefetchIssueStatus,
+        origin: HiCachePrefetchOrigin,
+        reason: str,
+        state_before: str,
+        attempt_id: Optional[str] = None,
+    ) -> PrefetchIssueResult:
+        return PrefetchIssueResult(
+            status=status,
+            attempt_id=(
+                attempt_id
+                if attempt_id is not None
+                else getattr(req, "hicache_prefetch_active_attempt_id", None)
+            ),
+            origin=origin,
+            reason=reason,
+            state_before=state_before,
+            state_after=self._prefetch_state_name(
+                getattr(req, "hicache_restore_state", None)
+            ),
+        )
+
+    def _prefetch_kvcache(
+        self,
+        req: Req,
+        *,
+        origin: HiCachePrefetchOrigin,
+        demand_restore: bool = False,
+        prepared_match: Optional[_ReadyHorizonPreparedMatch] = None,
+    ) -> PrefetchIssueResult:
+        attempt_id = self._claim_prefetch(req, origin)
+        if attempt_id is None:
+            active_origin = getattr(
+                req, "hicache_prefetch_active_origin", None
+            ) or origin
+            state = self._prefetch_state_name(
+                getattr(req, "hicache_restore_state", None)
+            )
+            return PrefetchIssueResult(
+                HiCachePrefetchIssueStatus.SKIPPED_ACTIVE,
+                getattr(req, "hicache_prefetch_active_attempt_id", None),
+                active_origin,
+                "active_attempt",
+                state,
+                state,
+            )
+        try:
+            impl_kwargs = {
+                "origin": origin,
+                "demand_restore": demand_restore,
+            }
+            if prepared_match is not None:
+                impl_kwargs["prepared_match"] = prepared_match
+            result = self._prefetch_kvcache_impl(req, **impl_kwargs)
+        except Exception:
+            self._release_prefetch_claim(req, attempt_id, "exception")
+            raise
+        result_status = (
+            result.status
+            if isinstance(result, PrefetchIssueResult)
+            else result
+        )
+        if result_status is HiCachePrefetchIssueStatus.ISSUED:
+            return result
+        self._release_prefetch_claim(
+            req,
+            attempt_id,
+            result.reason if isinstance(result, PrefetchIssueResult) else "declined",
+        )
+        return result
+
+    def _prefetch_kvcache_impl(
+        self,
+        req: Req,
+        *,
+        origin: HiCachePrefetchOrigin,
+        demand_restore: bool = False,
+        prepared_match: Optional[_ReadyHorizonPreparedMatch] = None,
+    ) -> PrefetchIssueResult:
+        state_before_value = getattr(req, "hicache_restore_state", None)
+        state_before = (
+            state_before_value.name if state_before_value is not None else "null"
+        )
+
+        def result(status, reason):
+            state_after_value = getattr(req, "hicache_restore_state", None)
+            return PrefetchIssueResult(
+                status=status,
+                attempt_id=getattr(
+                    req, "hicache_prefetch_active_attempt_id", None
+                ),
+                origin=origin,
+                reason=reason,
+                state_before=state_before,
+                state_after=(
+                    state_after_value.name
+                    if state_after_value is not None
+                    else "null"
+                ),
+            )
+
         try:
             _t38c_log({"evt": "pc_prefetch_enter", "phase": "entry",
                        "rid": req.rid,
+                       "attempt_id": req.hicache_prefetch_active_attempt_id,
+                       "origin": origin.name,
                        "l3_enabled": bool(self.enable_hicache_storage)})
         except Exception:
             pass
         if self.enable_hicache_storage:
-            req.init_next_round_input(self.tree_cache, cow_mamba=False)
+            if origin is HiCachePrefetchOrigin.READY_HORIZON:
+                pass_seq = getattr(self, "_rh_pass_seq", 0)
+                prepared_valid = (
+                    prepared_match is not None
+                    and self._rh_prepared_match_valid(
+                        req, prepared_match, pass_seq
+                    )
+                )
+                if not prepared_valid:
+                    self._emit_rh_match_prepare(
+                        req,
+                        pass_seq=pass_seq,
+                        result="invalidated",
+                        reason=(
+                            "ticket_missing"
+                            if prepared_match is None
+                            else "ticket_stale"
+                        ),
+                        prepared=prepared_match,
+                        fallback_rematch=True,
+                        match_count_for_pass=1,
+                    )
+                    mamba_before = self._rh_mamba_snapshot(req)
+                    match_started_ns = time.monotonic_ns()
+                    try:
+                        req.init_next_round_input(
+                            self.tree_cache, cow_mamba=False
+                        )
+                    except Exception:
+                        match_duration_us, mamba_delta = (
+                            self._rh_match_observation(
+                                req, mamba_before, match_started_ns
+                            )
+                        )
+                        self._emit_rh_match_prepare(
+                            req,
+                            pass_seq=pass_seq,
+                            result="failed",
+                            reason="fallback_rematch_failed",
+                            match_duration_us=match_duration_us,
+                            mamba_delta=mamba_delta,
+                            fallback_rematch=True,
+                            match_count_for_pass=2,
+                        )
+                        return result(
+                            HiCachePrefetchIssueStatus.FAILED_BEFORE_ISSUE,
+                            "match_prepare_failed",
+                        )
+                    match_duration_us, mamba_delta = self._rh_match_observation(
+                        req, mamba_before, match_started_ns
+                    )
+                    if not self._rh_current_match_anchors_valid(req):
+                        self._emit_rh_match_prepare(
+                            req,
+                            pass_seq=pass_seq,
+                            result="failed",
+                            reason="fallback_anchor_unknown",
+                            match_duration_us=match_duration_us,
+                            mamba_delta=mamba_delta,
+                            fallback_rematch=True,
+                            match_count_for_pass=2,
+                        )
+                        return result(
+                            HiCachePrefetchIssueStatus.FAILED_BEFORE_ISSUE,
+                            "match_prepare_failed",
+                        )
+                    self._emit_rh_match_prepare(
+                        req,
+                        pass_seq=pass_seq,
+                        result="prepared",
+                        reason="fallback_rematch",
+                        match_duration_us=match_duration_us,
+                        mamba_delta=mamba_delta,
+                        fallback_rematch=True,
+                        match_count_for_pass=2,
+                    )
+            else:
+                req.init_next_round_input(self.tree_cache, cow_mamba=False)
             tree_cache = self.tree_cache
             buffer_mode = self.server_args.hicache_host_memory_mode == "buffer_only"
             last_host_node = req.last_host_node
@@ -3001,6 +3410,11 @@ class Scheduler(
                     if tree_cache.hicache_storage_pass_prefix_keys
                     else None
                 )
+                # Publish the producer-owned lifecycle_key before the
+                # cache-side forfeit/finalize producers can read it back, so
+                # every cache HOST_ALLOC event carries the scheduler's
+                # authoritative key even on the very first issue.
+                self._record_host_alloc_lineage(req)
                 outcome = tree_cache.prefetch_from_storage(
                     req.rid,
                     last_host_node,
@@ -3009,6 +3423,12 @@ class Scheduler(
                     prefix_keys,
                     matched_prefix_tokens=req.full_untruncated_fill_ids[:matched_len],
                     demand_restore=demand_restore,
+                    host_alloc_attempt_id=getattr(
+                        req, "hicache_host_alloc_attempt_id", None
+                    ),
+                    prefetch_attempt_id=getattr(
+                        req, "hicache_prefetch_active_attempt_id", None
+                    ),
                 )
                 # P2-1 M1b: feed the issue outcome into the restore state
                 # machine (T1 issued / T2-T4 declines). declined_too_short
@@ -3018,9 +3438,13 @@ class Scheduler(
                 # per pass is the capacity loop.
                 if outcome == "issued":
                     self._apply_restore_event(req, RestoreEvent.PREFETCH_ISSUED)
+                    return result(HiCachePrefetchIssueStatus.ISSUED, "issued")
                 elif outcome == "declined_rate_limited":
                     self._apply_restore_event(req, RestoreEvent.DENIED_RATE)
                 elif outcome == "forfeited_alloc_failed":
+                    self._apply_restore_event(req, RestoreEvent.DENIED_ALLOC)
+                    self._capture_host_alloc_wait(req)
+                elif outcome == "revoked_alloc_failed":
                     self._apply_restore_event(req, RestoreEvent.DENIED_ALLOC)
                 elif outcome == "declined_too_short":
                     # WAIT[REVALIDATE] is the device-match-decay bet, whose
@@ -3030,7 +3454,28 @@ class Scheduler(
                     # out the full T13 clock (e13 K=1 t5 60s): the first
                     # decline is then terminal, and the request recomputes
                     # immediately (no restore intent is armed).
-                    if self._restore_potential_for(req) and too_short_wait_armed(
+                    short_tail = short_tail_recompute_allowed(
+                        device_prefix_tokens=len(req.prefix_indices),
+                        host_hit_tokens=req.host_hit_length,
+                        suffix_tokens=max(0, match_end - matched_len),
+                        page_size=self.page_size,
+                        prefetch_threshold=tree_cache.prefetch_threshold,
+                    )
+                    if short_tail:
+                        # The L1/L2 prefix is already resident; no storage
+                        # event can make the current match longer. Consume
+                        # the marker set by prefetch_from_storage so the
+                        # paced retry cannot re-enter REVALIDATE, then use
+                        # the state machine's immediate tail-admit path.
+                        tree_cache.pop_storage_prefetch_miss(req.rid)
+                        decision = self._apply_restore_event(
+                            req,
+                            RestoreEvent.DENIED_SHORT,
+                            short_tail_recompute=True,
+                        )
+                        if decision is RestoreDecision.ADMIT_RECOMPUTE:
+                            self._log_restore_recompute(req, "too_short_resident_tail")
+                    elif self._restore_potential_for(req) and too_short_wait_armed(
                         get_memory().hicache_storage_prefetch_retry_poll_interval
                     ):
                         self._apply_restore_event(req, RestoreEvent.DENIED_SHORT)
@@ -3046,6 +3491,24 @@ class Scheduler(
                 if not buffer_mode and self.tree_cache.prompt_can_qualify_for_prefetch(
                     len(req.full_untruncated_fill_ids), req.host_hit_length
                 ):
+                    # phase2-peranchor no-material fast-forward: the anchor is
+                    # not gate-ok (not root / not L3-durable / not backuped).
+                    # If it has NO recoverable material at all AND nothing in
+                    # flight can ever make it durable (no pending write ack, no
+                    # deferred-ACK descendant for the P3 reconcile, no in-flight
+                    # restore), the frontier wait is zero-expectation and would
+                    # only idle out the full 60s T13 (the 9d8b5428 shape).
+                    # Recompute forward immediately. This is distinct from
+                    # prompt_can_qualify_for_prefetch (suffix-geometry): a
+                    # candidate can qualify yet still have no material to wait
+                    # on. Any in-flight producer / deferred descendant keeps the
+                    # normal P3 reconcile + frontier wait path.
+                    if self._no_material_fast_forward_for(req, last_host_node):
+                        self._log_restore_recompute(req, "no_material")
+                        return result(
+                            HiCachePrefetchIssueStatus.SKIPPED_STATE,
+                            "no_material",
+                        )
                     self._apply_restore_event(req, RestoreEvent.GATE_SKIP_FRONTIER)
                     tree_cache.register_frontier_waiter(req.rid, last_host_node)
                     logger.info(
@@ -3054,6 +3517,582 @@ class Scheduler(
                         req.rid,
                         last_host_node,
                     )
+                return result(HiCachePrefetchIssueStatus.HELD, "frontier")
+            return result(HiCachePrefetchIssueStatus.HELD, outcome)
+        return result(HiCachePrefetchIssueStatus.SKIPPED_STATE, "storage_disabled")
+
+    def _host_alloc_snapshot_for_req(self, req):
+        cursor = getattr(req, "hicache_host_alloc_wait_cursor", None)
+        pools = {"kv"}
+        if cursor is not None:
+            pools.update(str(pool) for pool in cursor.blocked_domains)
+            pools.update(str(pool) for pool in cursor.required_aux_units)
+        snapshot_fn = getattr(self.tree_cache, "host_allocability_snapshot", None)
+        if snapshot_fn is None:
+            return cursor.snapshot if cursor is not None else None
+        return snapshot_fn(sorted(pools))
+
+    def _host_alloc_telemetry_identity(self):
+        parallel_state = getattr(self, "ps", None)
+        return (
+            f"scheduler-pid-{os.getpid()}",
+            getattr(parallel_state, "tp_rank", os.environ.get("RANK")),
+        )
+
+    @staticmethod
+    def _host_alloc_trace_context(req):
+        context = getattr(req, "trace_context", None)
+        if context is None:
+            context = getattr(getattr(req, "time_stats", None), "trace_ctx", None)
+        if context is None or isinstance(context, (str, int, float, bool, dict, list)):
+            return context
+        return str(context)
+
+    @staticmethod
+    def _host_alloc_generation_vector_id(vector) -> Optional[str]:
+        if vector is None:
+            return None
+        instance_id, generations = vector
+        return f"{instance_id}:" + ",".join(
+            f"{pool}={generation}" for pool, generation in generations
+        )
+
+    def _host_alloc_lifecycle_key(self, req) -> str:
+        """The scheduler-authoritative lifecycle key for one request.
+
+        Both the HOST_ALLOC family and the cache/READY producers must publish
+        this exact value; the cache side reads it back from the producer-owned
+        registry instead of deriving a divergent ``rid:run_id`` form.
+        """
+        return host_alloc_lifecycle_key(
+            req.rid, getattr(req, "session_generation", None)
+        )
+
+    def _host_alloc_lineage_fields(self, req, *, attempt_number=None, origin=None):
+        wait_id = getattr(req, "hicache_host_alloc_wait_id", None)
+        return {
+            "lifecycle_key": self._host_alloc_lifecycle_key(req),
+            "wait_id": wait_id,
+            "wake_event_id": getattr(req, "hicache_host_alloc_wake_event_id", None),
+            "attempt_number": (
+                getattr(req, "hicache_host_alloc_attempt_number", 0)
+                if attempt_number is None
+                else attempt_number
+            ),
+            "attempt_origin": origin,
+            "parent_wait_id": wait_id,
+        }
+
+    def _record_host_alloc_lineage(
+        self, req, *, attempt_number=None, origin=None, replace_missing=False, **extra
+    ) -> None:
+        """Publish this producer's lineage snapshot to the shared registry."""
+        fields = self._host_alloc_lineage_fields(
+            req, attempt_number=attempt_number, origin=origin
+        )
+        fields.update(extra)
+        attempt_id = getattr(req, "hicache_host_alloc_last_attempt_id", None)
+        if attempt_id is None:
+            attempt_id = getattr(req, "hicache_host_alloc_attempt_id", None)
+        record_host_alloc_lineage(
+            req.rid,
+            attempt_id=attempt_id,
+            replace_missing=replace_missing,
+            **fields,
+        )
+
+    def _host_alloc_predecessor_lineage(self, req):
+        """Resolve the predecessor terminal from the producer-owned FIFO.
+
+        Returns ``(wait_id, terminal_event_id, terminal_state, reason)``.  A
+        resolved predecessor carries ``reason=None``; otherwise the identity
+        fields are explicit ``None`` and ``reason`` names the fail-closed
+        cause.  No predecessor fact is ever inferred from the request payload.
+        """
+        cursor = getattr(req, "hicache_host_alloc_wait_cursor", None)
+        arbiter = getattr(self, "_host_alloc_wake_arbiter", None)
+        if cursor is None or arbiter is None:
+            return None, None, None, "no_wait_cursor"
+        predecessor, reason = arbiter.predecessor_for(
+            req.rid,
+            sequence=cursor.fifo_sequence,
+            blocked_domains=cursor.blocked_domains,
+            released_states=_HOST_ALLOC_RELEASED_TERMINAL_STATES,
+        )
+        if predecessor is None:
+            return None, None, None, reason
+        return (
+            predecessor.wait_id,
+            predecessor.terminal_event_id,
+            predecessor.terminal_state,
+            None,
+        )
+
+    @staticmethod
+    def _host_alloc_terminal_state_for(event, next_state) -> str:
+        if event is RestoreEvent.TIMEOUT:
+            return "TIMEOUT"
+        if event is RestoreEvent.ABORT:
+            return "ABORTED"
+        if next_state is RestoreState.READY:
+            return "RESTORED"
+        if next_state is RestoreState.MISS_RECOMPUTE:
+            return "MISS"
+        if next_state is RestoreState.NONE:
+            return "RECOMPUTE"
+        return "RELEASED"
+
+    def _record_host_alloc_terminal(
+        self, rid, terminal_state, reason, req=None
+    ) -> Optional[str]:
+        """Emit and register the terminal fact for one released waiter.
+
+        The terminal record reuses the real ``restore_host_alloc_wake_decision``
+        event name (``decision="release"``); no new event taxonomy is
+        introduced.  Its ``event_id`` is also its ``terminal_event_id``, so a
+        successor grant's ``predecessor_terminal_event_id`` names a real,
+        non-forgeable producer record.
+        """
+        records = getattr(self, "_host_alloc_wait_records", None)
+        if not records:
+            return None
+        record = records.get(str(rid))
+        if record is None or record.get("terminal_state") is not None:
+            return None
+        terminal_event_id = next_event_id("host-alloc")
+        worker, rank = self._host_alloc_telemetry_identity()
+        _log_host_alloc_telemetry(
+            "restore_host_alloc_wake_decision",
+            worker=worker,
+            rank=rank,
+            rid=str(rid),
+            attempt_id=record.get("attempt_id"),
+            cache_instance_id=record.get("cache_instance_id"),
+            trace_context=(
+                self._host_alloc_trace_context(req) if req is not None else None
+            ),
+            decision="release",
+            event_id=terminal_event_id,
+            terminal_event_id=terminal_event_id,
+            terminal_state=terminal_state,
+            terminal_reason=reason,
+            lifecycle_key=record.get("lifecycle_key"),
+            wait_id=record.get("wait_id"),
+            wake_event_id=record.get("wake_event_id"),
+            predecessor_wait_id=record.get("predecessor_wait_id"),
+            predecessor_terminal_event_id=record.get("predecessor_terminal_event_id"),
+            predecessor_terminal_state=record.get("predecessor_terminal_state"),
+            predecessor_lineage_reason=record.get("predecessor_lineage_reason"),
+            attempt_number=record.get("attempt_number"),
+            attempt_origin="HOST_ALLOC_RELEASE",
+            parent_wait_id=record.get("wait_id"),
+            fifo_sequence=record.get("fifo_sequence"),
+            blocked_pool_generations=record.get("blocked_pool_generations"),
+            retry_grant=False,
+            retry_skip=True,
+            retry_outcome="released",
+        )
+        record["terminal_event_id"] = terminal_event_id
+        record["terminal_state"] = terminal_state
+        record["terminal_reason"] = reason
+        # Publish to the shared registry so cache/READY producers can read the
+        # terminal fact back without trusting the verification harness.
+        record_host_alloc_lineage(
+            rid,
+            attempt_id=record.get("attempt_id"),
+            terminal_event_id=terminal_event_id,
+            terminal_state=terminal_state,
+            terminal_reason=reason,
+        )
+        arbiter = getattr(self, "_host_alloc_wake_arbiter", None)
+        if arbiter is not None:
+            arbiter.record_terminal(
+                str(rid),
+                sequence=record.get("fifo_sequence"),
+                wait_id=record.get("wait_id"),
+                terminal_event_id=terminal_event_id,
+                terminal_state=terminal_state,
+                blocked_domains=record.get("blocked_domains") or (),
+            )
+        return terminal_event_id
+
+    def _host_alloc_wait_eligible(self, req) -> bool:
+        cursor = getattr(req, "hicache_host_alloc_wait_cursor", None)
+        if cursor is None:
+            return False
+        current = self._host_alloc_snapshot_for_req(req)
+        if current is None or current.cache_instance_id != cursor.snapshot.cache_instance_id:
+            return False
+        # Per-domain eligibility.  A blocked domain stops blocking as soon as
+        # EITHER signal says it is no longer a constraint:
+        #   (a) its generation advanced since the park (the original
+        #       invalidation signal), OR
+        #   (b) it is already capacity-satisfiable right now.
+        # (b) is required for liveness: a domain can be admitted into
+        # ``blocked_domains`` even though its requirement was already met
+        # (e.g. mamba ``free 75 >= required 1``).  Its host EVICTABLE set then
+        # never changes, so its generation never advances -- demanding one
+        # starves the waiter even after the material domain (kv) becomes
+        # satisfiable.  Generation is an invalidation signal only; the cache
+        # allocator remains authoritative, so admitting a retry when
+        # ``free + evictable`` already covers the requirement is safe.
+        for pool in cursor.blocked_domains:
+            if current.generation_by_pool.get(
+                pool, 0
+            ) > cursor.snapshot.generation_by_pool.get(pool, 0):
+                continue
+            # KV is the primary domain: its requirement is the request's
+            # durable token span.  Aux domains use their per-pool units.
+            if str(pool) == "kv":
+                required = int(cursor.requested_primary_tokens)
+            else:
+                required = int(cursor.required_aux_units.get(str(pool), 0))
+            # A blocked domain with no positive requirement is not a real
+            # constraint: treat it as satisfied rather than starve.
+            if required <= 0:
+                continue
+            free = int(current.free_units_by_pool.get(str(pool), 0))
+            evictable = int(current.evictable_units_by_pool.get(str(pool), 0))
+            if free + evictable < required:
+                return False
+        return True
+
+    def _host_alloc_generation_vector_for_req(self, req):
+        cursor = req.hicache_host_alloc_wait_cursor
+        current = self._host_alloc_snapshot_for_req(req)
+        return (
+            current.cache_instance_id,
+            tuple(
+                sorted(
+                    (str(pool), current.generation_by_pool.get(pool, 0))
+                    for pool in cursor.blocked_domains
+                )
+            ),
+        )
+
+    def _host_alloc_global_generation_vector(self):
+        snapshot_fn = getattr(self.tree_cache, "host_allocability_snapshot", None)
+        if snapshot_fn is None:
+            return None
+        return snapshot_fn().generation_vector()
+
+    def _host_alloc_global_snapshot(self):
+        snapshot_fn = getattr(self.tree_cache, "host_allocability_snapshot", None)
+        return snapshot_fn() if snapshot_fn is not None else None
+
+    def _capture_host_alloc_wait(
+        self, req, failure: Optional[HostAllocFailure] = None
+    ) -> None:
+        if failure is None:
+            pop_failure = getattr(self.tree_cache, "pop_host_alloc_failure", None)
+            failure = pop_failure(req.rid) if pop_failure is not None else None
+        if failure is None:
+            snapshot = self._host_alloc_snapshot_for_req(req)
+            if snapshot is None:
+                return
+            failure = HostAllocFailure(
+                requested_primary_tokens=0,
+                required_aux_units={},
+                failed_domains=frozenset({"kv"}),
+                positive_hit_tokens=0,
+                sidecar_hit_pages={},
+                allocability_snapshot=snapshot,
+            )
+        if not hasattr(self, "_host_alloc_wake_arbiter"):
+            self._host_alloc_wake_arbiter = HostAllocWakeArbiter()
+        arbiter = self._host_alloc_wake_arbiter
+        wait_records = getattr(self, "_host_alloc_wait_records", None)
+        if wait_records is None:
+            wait_records = self._host_alloc_wait_records = {}
+        if getattr(req, "hicache_host_alloc_attempt_id", None) is not None:
+            req.hicache_host_alloc_last_attempt_id = req.hicache_host_alloc_attempt_id
+            attempt_snapshot = self._host_alloc_global_snapshot()
+            sequence = arbiter.record_attempt_result(
+                req.rid,
+                attempt_snapshot or failure.allocability_snapshot,
+            )
+            req.hicache_host_alloc_attempt_id = None
+        else:
+            sequence = arbiter.enqueue(req.rid)
+        # Each (re-)park is a distinct producer-owned wait keyed to its own
+        # FIFO sequence.  Reusing the previous park's wait_id would make the
+        # request's own earlier release indistinguishable from its current
+        # wait (the predecessor_wait_id would equal wait_id), so the identity
+        # is refreshed on every park.
+        req.hicache_host_alloc_wait_id = f"{req.rid}:wait:{sequence}"
+        lifecycle_key = self._host_alloc_lifecycle_key(req)
+        wait_record = wait_records.setdefault(
+            req.rid,
+            {
+                "wait_id": req.hicache_host_alloc_wait_id,
+                "terminal_event_id": None,
+                "terminal_state": None,
+            },
+        )
+        # A (re-)park opens a fresh producer-owned wait: refresh the terminal
+        # and predecessor slots so a release from an earlier wait can never be
+        # joined to this one.
+        wait_record["wait_id"] = req.hicache_host_alloc_wait_id
+        wait_record["rid"] = req.rid
+        wait_record["fifo_sequence"] = sequence
+        wait_record["blocked_domains"] = sorted(
+            str(pool) for pool in (failure.failed_domains or frozenset({"kv"}))
+        )
+        wait_record["cache_instance_id"] = (
+            failure.allocability_snapshot.cache_instance_id
+        )
+        wait_record["lifecycle_key"] = lifecycle_key
+        wait_record["terminal_event_id"] = None
+        wait_record["terminal_state"] = None
+        wait_record["terminal_reason"] = None
+        wait_record["predecessor_wait_id"] = None
+        wait_record["predecessor_terminal_event_id"] = None
+        wait_record["predecessor_terminal_state"] = None
+        wait_record["predecessor_lineage_reason"] = None
+        wait_record["attempt_id"] = getattr(
+            req, "hicache_host_alloc_last_attempt_id", None
+        )
+        wait_record["wake_event_id"] = None
+        req.hicache_host_alloc_wait_cursor = HostAllocWaitCursor(
+            snapshot=failure.allocability_snapshot,
+            blocked_domains=failure.failed_domains or frozenset({"kv"}),
+            requested_primary_tokens=failure.requested_primary_tokens,
+            required_aux_units=failure.required_aux_units,
+            fifo_sequence=sequence,
+        )
+        worker, rank = self._host_alloc_telemetry_identity()
+        wait_started_mono_ns = int(
+            getattr(req, "hicache_restore_state_ts", time.perf_counter()) * 1e9
+        )
+        timeout_s = getattr(
+            getattr(self, "server_args", None),
+            "hicache_restore_wait_timeout_s",
+            0,
+        )
+        deadline_mono_ns = (
+            wait_started_mono_ns + int(timeout_s * 1e9) if timeout_s > 0 else None
+        )
+        req.hicache_host_alloc_wait_event_id = _log_host_alloc_telemetry(
+            "restore_host_alloc_wait",
+            worker=worker,
+            rank=rank,
+            rid=req.rid,
+            attempt_id=getattr(req, "hicache_host_alloc_last_attempt_id", None),
+            cache_instance_id=failure.allocability_snapshot.cache_instance_id,
+            trace_context=self._host_alloc_trace_context(req),
+            state="WAIT_CAPACITY",
+            reason="HOST_ALLOC",
+            positive_hit_tokens=int(failure.positive_hit_tokens),
+            sidecar_hit_pages=dict(failure.sidecar_hit_pages),
+            requested_primary_tokens=int(failure.requested_primary_tokens),
+            required_aux_units=dict(failure.required_aux_units),
+            blocked_domains=sorted(map(str, failure.failed_domains)),
+            captured_generations=dict(failure.allocability_snapshot.generation_by_pool),
+            current_generations=dict(failure.allocability_snapshot.generation_by_pool),
+            free_units=dict(failure.allocability_snapshot.free_units_by_pool),
+            evictable_units=dict(failure.allocability_snapshot.evictable_units_by_pool),
+            prefetch_reservation_held=False,
+            fifo_sequence=sequence,
+            wait_started_mono_ns=wait_started_mono_ns,
+            deadline_mono_ns=deadline_mono_ns,
+            retry_grant=False,
+            retry_skip=False,
+            retry_outcome="parked",
+            lifecycle_key=lifecycle_key,
+            wait_id=wait_record["wait_id"],
+            predecessor_wait_id=None,
+            predecessor_terminal_event_id=None,
+            predecessor_terminal_state=None,
+            predecessor_lineage_reason=None,
+            attempt_number=0,
+            attempt_origin="HOST_ALLOC_WAIT",
+            parent_wait_id=None,
+            terminal_event_id=None,
+            terminal_state=None,
+            terminal_reason=None,
+            wake_event_id=None,
+        )
+        self._record_host_alloc_lineage(
+            req,
+            attempt_number=0,
+            origin="HOST_ALLOC_WAIT",
+            replace_missing=True,
+            wake_event_id=None,
+            terminal_event_id=None,
+            terminal_state=None,
+            terminal_reason=None,
+            predecessor_wait_id=None,
+            predecessor_terminal_event_id=None,
+            predecessor_terminal_state=None,
+            predecessor_lineage_reason=None,
+            fifo_sequence=sequence,
+            cache_instance_id=failure.allocability_snapshot.cache_instance_id,
+            blocked_pool_generations=dict(
+                failure.allocability_snapshot.generation_by_pool
+            ),
+            current_generations=dict(failure.allocability_snapshot.generation_by_pool),
+            deadline_mono_ns=deadline_mono_ns,
+            wait_started_mono_ns=wait_started_mono_ns,
+        )
+
+    def _remove_host_alloc_waiter(
+        self, rid: str, *, terminal_state=None, reason=None, req=None
+    ) -> None:
+        if terminal_state is not None:
+            self._record_host_alloc_terminal(rid, terminal_state, reason, req)
+        arbiter = getattr(self, "_host_alloc_wake_arbiter", None)
+        if arbiter is not None:
+            arbiter.remove(rid)
+
+    def _select_host_alloc_waiter(self) -> Optional[str]:
+        if not hasattr(self, "_host_alloc_wake_arbiter"):
+            self._host_alloc_wake_arbiter = HostAllocWakeArbiter()
+        arbiter = self._host_alloc_wake_arbiter
+        requests = {req.rid: req for req in self.waiting_queue}
+        for rid in arbiter.ordered_rids():
+            req = requests.get(rid)
+            if req is None or req.hicache_restore_state is not RestoreState.WAIT_CAPACITY:
+                self._remove_host_alloc_waiter(
+                    rid,
+                    terminal_state="ABANDONED",
+                    reason="stale_fifo_entry",
+                    req=req,
+                )
+        if not requests:
+            return None
+        controller = getattr(self.tree_cache, "cache_controller", None)
+        if controller is None or controller.prefetch_rate_limited():
+            return None
+        timeout_s = self.server_args.hicache_restore_wait_timeout_s
+        now = time.perf_counter()
+        return arbiter.choose(
+            lambda rid: (
+                requests[rid].hicache_restore_wait_reason is RestoreWaitReason.HOST_ALLOC
+                and self._host_alloc_wait_eligible(requests[rid])
+                and (
+                    timeout_s <= 0
+                    or now
+                    - getattr(requests[rid], "hicache_restore_state_ts", now)
+                    <= timeout_s
+                )
+            ),
+            lambda rid: self._host_alloc_global_generation_vector()
+            or self._host_alloc_generation_vector_for_req(requests[rid]),
+        )
+
+    def _host_alloc_skip_decision(self, req) -> str:
+        controller = getattr(self.tree_cache, "cache_controller", None)
+        if controller is None or controller.prefetch_rate_limited():
+            return "hold_budget"
+        if not self._host_alloc_wait_eligible(req):
+            return "hold_no_generation"
+        return "hold_global_grant_used"
+
+    def _emit_host_alloc_wake_grant(self, req) -> Optional[str]:
+        """Emit the authoritative grant record for one woken waiter.
+
+        The record carries the producer-owned predecessor lineage resolved
+        from the FIFO arbiter terminal history, and its own ``event_id`` as
+        ``wake_event_id`` so later retry/finalize/READY events join to exactly
+        this grant.  A grant is never coalesced away.
+        """
+        worker, rank = self._host_alloc_telemetry_identity()
+        cursor = getattr(req, "hicache_host_alloc_wait_cursor", None)
+        current = self._host_alloc_snapshot_for_req(req)
+        current_generations = (
+            dict(current.generation_by_pool) if current is not None else {}
+        )
+        captured_generations = (
+            dict(cursor.snapshot.generation_by_pool) if cursor else {}
+        )
+        vector = current.generation_vector() if current is not None else None
+        (
+            predecessor_wait_id,
+            predecessor_terminal_event_id,
+            predecessor_terminal_state,
+            predecessor_reason,
+        ) = self._host_alloc_predecessor_lineage(req)
+        grant_event_id = next_event_id("host-alloc")
+        event_id = _log_host_alloc_telemetry(
+            "restore_host_alloc_wake_decision",
+            worker=worker,
+            rank=rank,
+            rid=req.rid,
+            attempt_id=getattr(req, "hicache_host_alloc_attempt_id", None),
+            cache_instance_id=(
+                current.cache_instance_id if current is not None else None
+            ),
+            trace_context=self._host_alloc_trace_context(req),
+            decision="grant",
+            captured_generations=captured_generations,
+            current_generations=current_generations,
+            blocked_domains=sorted(map(str, cursor.blocked_domains))
+            if cursor
+            else [],
+            required_aux_units=(dict(cursor.required_aux_units) if cursor else {}),
+            requested_primary_tokens=(
+                int(cursor.requested_primary_tokens) if cursor else 0
+            ),
+            fifo_sequence=cursor.fifo_sequence if cursor else None,
+            generation_vector_id=self._host_alloc_generation_vector_id(vector),
+            global_grant_used=True,
+            budget_available=True,
+            free_units=(
+                dict(current.free_units_by_pool) if current is not None else {}
+            ),
+            evictable_units=(
+                dict(current.evictable_units_by_pool)
+                if current is not None
+                else {}
+            ),
+            retry_grant=True,
+            retry_skip=False,
+            retry_outcome="grant",
+            event_id=grant_event_id,
+            wake_event_id=grant_event_id,
+            lifecycle_key=self._host_alloc_lifecycle_key(req),
+            wait_id=getattr(req, "hicache_host_alloc_wait_id", None),
+            predecessor_wait_id=predecessor_wait_id,
+            predecessor_terminal_event_id=predecessor_terminal_event_id,
+            predecessor_terminal_state=predecessor_terminal_state,
+            predecessor_lineage_reason=predecessor_reason,
+            attempt_number=getattr(req, "hicache_host_alloc_attempt_number", 0),
+            attempt_origin="HOST_ALLOC_WAKE",
+            parent_wait_id=getattr(req, "hicache_host_alloc_wait_id", None),
+        )
+        if event_id is None:
+            # The grant is the authority for wake_event_id; never advertise a
+            # wake id that has no producer record behind it.
+            return None
+        req.hicache_host_alloc_wake_event_id = event_id
+        records = getattr(self, "_host_alloc_wait_records", None)
+        wait_record = records.get(str(req.rid)) if records else None
+        if wait_record is not None:
+            wait_record["wake_event_id"] = event_id
+            wait_record["predecessor_wait_id"] = predecessor_wait_id
+            wait_record["predecessor_terminal_event_id"] = (
+                predecessor_terminal_event_id
+            )
+            wait_record["predecessor_terminal_state"] = predecessor_terminal_state
+            wait_record["predecessor_lineage_reason"] = predecessor_reason
+        self._record_host_alloc_lineage(
+            req,
+            attempt_number=getattr(req, "hicache_host_alloc_attempt_number", 0),
+            origin="HOST_ALLOC_WAKE",
+            replace_missing=True,
+            wake_event_id=event_id,
+            predecessor_wait_id=predecessor_wait_id,
+            predecessor_terminal_event_id=predecessor_terminal_event_id,
+            predecessor_terminal_state=predecessor_terminal_state,
+            predecessor_lineage_reason=predecessor_reason,
+            fifo_sequence=cursor.fifo_sequence if cursor else None,
+            cache_instance_id=(
+                current.cache_instance_id if current is not None else None
+            ),
+            blocked_pool_generations=captured_generations,
+            current_generations=current_generations,
+        )
+        return event_id
 
     def _reconcile_restore_states(self):
         """Per-pass restore-state reconciliation (P2-1 M1b/M2; evolved from
@@ -3063,6 +4102,11 @@ class Scheduler(
         prefetches for WAIT requests whose capacity predicate now passes
         (T11), and degrades timed-out waits to recompute (T13)."""
         if not self.waiting_queue:
+            arbiter = getattr(self, "_host_alloc_wake_arbiter", None)
+            for rid in arbiter.ordered_rids() if arbiter is not None else ():
+                self._remove_host_alloc_waiter(
+                    rid, terminal_state="ABANDONED", reason="empty_waiting_queue"
+                )
             return
 
         # 1) Terminal outcomes recorded by the drain this pass (same thread).
@@ -3092,7 +4136,7 @@ class Scheduler(
                     req.rid,
                     req.storage_prefetch_retry_attempts,
                 )
-                self._prefetch_kvcache(req)
+                self._prefetch_kvcache(req, origin=HiCachePrefetchOrigin.DEMAND_RETRY)
 
         # 3) M2: frontier-ACK wakes (T12). The ack drain moved the waiter
         # into the ready set earlier in this same event pass.
@@ -3123,6 +4167,7 @@ class Scheduler(
                 )
                 self._prefetch_kvcache(
                     req,
+                    origin=HiCachePrefetchOrigin.DEMAND_RETRY,
                     demand_restore=self.enable_ready_horizon or was_backup_pending,
                 )
                 if req.hicache_restore_state is RestoreState.NONE:
@@ -3134,6 +4179,9 @@ class Scheduler(
         # 4) M1: WAIT timeout (T13) and per-pass capacity wakes (T11).
         timeout_s = self.server_args.hicache_restore_wait_timeout_s
         now = time.perf_counter()
+        if not hasattr(self, "_host_alloc_attempt_seq"):
+            self._host_alloc_attempt_seq = 0
+        host_alloc_grant = self._select_host_alloc_waiter()
         for req in self.waiting_queue:
             if req.hicache_restore_state is not RestoreState.WAIT_CAPACITY:
                 continue
@@ -3144,11 +4192,76 @@ class Scheduler(
                     self._log_restore_recompute(req, "timeout")
                 continue
             if not capacity_wake_applies(req.hicache_restore_wait_reason):
-                # REVALIDATE / HOST_ALLOC denial causes are not testable by
-                # the capacity predicate: re-issuing would be declined
-                # identically every pass (the capacity loop). They leave
-                # only via the paced retry or the T13 timeout.
+                # REVALIDATE is not testable by the capacity predicate:
+                # re-issuing would be declined identically every pass. It
+                # leaves only via the paced retry or the T13 timeout.
                 continue
+            if req.hicache_restore_wait_reason is RestoreWaitReason.HOST_ALLOC:
+                worker, rank = self._host_alloc_telemetry_identity()
+                cursor = getattr(req, "hicache_host_alloc_wait_cursor", None)
+                current = self._host_alloc_snapshot_for_req(req)
+                current_generations = (
+                    dict(current.generation_by_pool) if current is not None else {}
+                )
+                captured_generations = (
+                    dict(cursor.snapshot.generation_by_pool) if cursor else {}
+                )
+                vector = (
+                    current.generation_vector() if current is not None else None
+                )
+                if req.rid != host_alloc_grant:
+                    decision_name = self._host_alloc_skip_decision(req)
+                    _log_host_alloc_telemetry(
+                        "restore_host_alloc_wake_decision",
+                        worker=worker,
+                        rank=rank,
+                        rid=req.rid,
+                        attempt_id=getattr(
+                            req, "hicache_host_alloc_attempt_id", None
+                        ),
+                        cache_instance_id=(
+                            current.cache_instance_id if current is not None else None
+                        ),
+                        trace_context=self._host_alloc_trace_context(req),
+                        decision=decision_name,
+                        captured_generations=captured_generations,
+                        current_generations=current_generations,
+                        blocked_domains=sorted(
+                            map(str, cursor.blocked_domains)
+                        )
+                        if cursor
+                        else [],
+                        required_aux_units=(
+                            dict(cursor.required_aux_units) if cursor else {}
+                        ),
+                        requested_primary_tokens=(
+                            int(cursor.requested_primary_tokens) if cursor else 0
+                        ),
+                        fifo_sequence=cursor.fifo_sequence if cursor else None,
+                        generation_vector_id=self._host_alloc_generation_vector_id(
+                            vector
+                        ),
+                        global_grant_used=decision_name == "hold_global_grant_used",
+                        budget_available=decision_name != "hold_budget",
+                        free_units=(
+                            dict(current.free_units_by_pool) if current is not None else {}
+                        ),
+                        evictable_units=(
+                            dict(current.evictable_units_by_pool)
+                            if current is not None
+                            else {}
+                        ),
+                        retry_grant=False,
+                        retry_skip=decision_name != "grant",
+                        retry_outcome=decision_name,
+                        lifecycle_key=self._host_alloc_lifecycle_key(req),
+                        wait_id=getattr(req, "hicache_host_alloc_wait_id", None),
+                        wake_event_id=None,
+                        attempt_number=0,
+                        attempt_origin="HOST_ALLOC_WAKE_HOLD",
+                    )
+                    continue
+                self._emit_host_alloc_wake_grant(req)
             if not self._restore_wait_capacity_fits(req):
                 continue
             # Captured before _apply_restore_event clears the reason: a
@@ -3166,13 +4279,32 @@ class Scheduler(
                 req, RestoreEvent.CAPACITY_FITS, capacity_fits=True
             )
             if decision is RestoreDecision.RETRY_PREFETCH:
+                self._host_alloc_attempt_seq += 1
+                req.hicache_host_alloc_attempt_id = (
+                    f"{req.rid}:{self._host_alloc_attempt_seq}"
+                )
+                req.hicache_host_alloc_attempt_number = (
+                    getattr(req, "hicache_host_alloc_attempt_number", 0) + 1
+                )
+                req.hicache_host_alloc_attempt_snapshot = (
+                    self._host_alloc_snapshot_for_req(req)
+                )
+                # Publish the attempt identity so the cache's retry_result and
+                # the terminal READY join to the granted wake event.
+                self._record_host_alloc_lineage(
+                    req,
+                    attempt_number=req.hicache_host_alloc_attempt_number,
+                    origin="HOST_ALLOC_WAKE",
+                )
                 logger.info(
-                    "[P2A] ts_ms=%d evt=restore_retry rid=%s cause=capacity",
+                    "[P2A] ts_ms=%d evt=restore_retry rid=%s cause=capacity attempt_id=%s",
                     int(time.time() * 1000),
                     req.rid,
+                    req.hicache_host_alloc_attempt_id,
                 )
                 self._prefetch_kvcache(
                     req,
+                    origin=HiCachePrefetchOrigin.DEMAND_RETRY,
                     demand_restore=self.enable_ready_horizon or was_backup_pending,
                 )
                 if req.hicache_restore_state is RestoreState.NONE:
@@ -3184,33 +4316,195 @@ class Scheduler(
     def _feed_restore_terminal(self, req) -> None:
         """Consume a terminal prefetch outcome (finalize T8 / revoke T9/T10)
         recorded by the drain into the request's restore state machine."""
-        outcome = self.tree_cache.pop_storage_prefetch_terminal(req.rid)
-        if outcome is None:
+        terminal = self.tree_cache.pop_storage_prefetch_terminal(req.rid)
+        if terminal is None:
             return
+        if isinstance(terminal, tuple):
+            terminal_attempt_id, outcome = terminal
+        else:
+            # Legacy test doubles may still provide an uncorrelated outcome.
+            # Real cache terminals always carry the attempt ID.
+            terminal_attempt_id, outcome = None, terminal
+        active_attempt_id = getattr(req, "hicache_prefetch_active_attempt_id", None)
+        if terminal_attempt_id is not None and terminal_attempt_id != active_attempt_id:
+            logger.warning(
+                "[P3] evt=prefetch_terminal_stale rid=%s terminal_attempt_id=%s active_attempt_id=%s",
+                req.rid,
+                terminal_attempt_id,
+                active_attempt_id,
+            )
+            return
+        completion = None
+        discarded_finalization = False
         if outcome == "finalized":
-            event, genuine_miss = RestoreEvent.FINALIZED, False
+            completion = getattr(
+                self.tree_cache,
+                "pop_storage_prefetch_completion",
+                lambda _rid: None,
+            )(req.rid) or {}
+            discarded_finalization = completion.get("finalize_result") in (
+                "discarded",
+                "rejected",
+            )
+            if discarded_finalization:
+                # The finalizer rejected/discarded the all-or-nothing hybrid
+                # material. Keep the terminal handoff, but release the
+                # request to recompute instead of treating it as READY.
+                event, genuine_miss = RestoreEvent.DENIED_SHORT, False
+            else:
+                event, genuine_miss = RestoreEvent.FINALIZED, False
         elif outcome == "revoked_terminated":
             event, genuine_miss = RestoreEvent.REVOKED_TERMINATED, False
         elif outcome == "revoked_backup_pending":
             event, genuine_miss = RestoreEvent.BACKUP_PENDING, False
+        elif outcome == "revoked_alloc_failed":
+            event, genuine_miss = RestoreEvent.DENIED_ALLOC, False
         else:  # "revoked_miss"
             event, genuine_miss = RestoreEvent.REVOKED_MISS, True
-        self._apply_restore_event(req, event, genuine_miss=genuine_miss)
+        if event is RestoreEvent.REVOKED_MISS and genuine_miss:
+            # P1 sticky-miss evidence (phase2-peranchor): record the ANCHOR's
+            # per-anchor storage_version at which this request's prefix was
+            # proven L3-missing, plus the anchor node and the identity
+            # (session generation). The admission re-arm (T6) refuses to
+            # re-enter WAIT while that SAME anchor's version is unchanged and
+            # the generation matches -- the same-probe restore churn gate.
+            # Only THIS anchor's substantive durability change (or a
+            # generation/prefix/anchor change) overrides the miss: an
+            # unrelated chain's write ack bumps only the global diagnostic
+            # counter and never re-arms. `anchor` is the deepest durable
+            # ancestor the miss probe covered (the request's last_host_node /
+            # the restore target anchor it was revoked on); `anchor_version`
+            # is defensive when the anchor is gone (self-heal to re-match).
+            anchor = getattr(req, "last_host_node", None)
+            req.hicache_restore_miss_epoch = self._anchor_version_or_zero(anchor)
+            req.hicache_restore_miss_anchor = anchor
+            req.hicache_restore_miss_generation = getattr(
+                req, "session_generation", None
+            )
+        failure = (
+            self.tree_cache.pop_host_alloc_failure(req.rid)
+            if event is RestoreEvent.DENIED_ALLOC
+            else None
+        )
+        restore_state_before = self._prefetch_state_name(
+            getattr(req, "hicache_restore_state", None)
+        )
+        attempt_id = getattr(req, "hicache_prefetch_active_attempt_id", None)
+        attempt_origin = getattr(req, "hicache_prefetch_active_origin", None)
+        self._apply_restore_event(
+            req,
+            event,
+            genuine_miss=genuine_miss,
+            short_tail_recompute=discarded_finalization,
+        )
+        if event is RestoreEvent.DENIED_ALLOC:
+            self._capture_host_alloc_wait(req, failure)
+        if terminal_attempt_id is not None:
+            self._release_prefetch_claim(
+                req, terminal_attempt_id, outcome
+            )
+        if event is RestoreEvent.FINALIZED:
+            last_origin = getattr(req, "hicache_prefetch_last_origin", None)
+            staged_tokens = getattr(
+                self.tree_cache, "peek_prefetch_loaded_tokens", lambda _rid: None
+            )(req.rid)
+            completion = completion or {}
+            # READY must carry the same producer-owned identity and lineage as
+            # the HOST_ALLOC family so the live-chain oracle can join the
+            # terminal READY back to the park/wake without trusting the
+            # harness.  All values are produced here, never caller-supplied.
+            ready_context = producer_context(component="ready")
+            ready_event_id = next_event_id("ready")
+            ready_snapshot = self._host_alloc_snapshot_for_req(req)
+            # Read the scheduler-owned lineage back from the producer registry
+            # so READY joins to the exact grant record (wake_event_id) and
+            # lifecycle_key the HOST_ALLOC family published.
+            ready_lineage = host_alloc_lineage(req.rid)
+            ready_lifecycle_key = (
+                ready_lineage.get("lifecycle_key")
+                or self._host_alloc_lifecycle_key(req)
+            )
+            ready_wait_id = ready_lineage.get("wait_id") or getattr(
+                req, "hicache_host_alloc_wait_id", None
+            )
+            ready_wake_event_id = ready_lineage.get("wake_event_id") or getattr(
+                req, "hicache_host_alloc_wake_event_id", None
+            )
+            ready_predecessor_wait_id = ready_lineage.get("predecessor_wait_id")
+            ready_predecessor_terminal_event_id = ready_lineage.get(
+                "predecessor_terminal_event_id"
+            )
+            ready_predecessor_terminal_state = ready_lineage.get(
+                "predecessor_terminal_state"
+            )
+            logger.info(
+                "[P3] ts_ns=%d evt=ready_host schema=rh_ready_host.v1 rid=%s "
+                "attempt_id=%s issue_origin=%s completed_kv_tokens=%s "
+                "required_aux_pools=%s completed_aux_units=%s "
+                "restore_state_before=%s restore_state_after=%s "
+                "finalize_result=%s ready_monotonic_ns=%d "
+                "event_id=%s run_id=%s process_id=%s profile_id=%s "
+                "source_build=%s deployment_manifest_digest=%s "
+                "lifecycle_key=%s wait_id=%s wake_event_id=%s "
+                "predecessor_wait_id=%s predecessor_terminal_event_id=%s "
+                "predecessor_terminal_state=%s "
+                "cache_instance_id=%s generation_vector_id=%s",
+                time.monotonic_ns(),
+                req.rid,
+                attempt_id
+                or getattr(req, "hicache_prefetch_last_attempt_id", None),
+                (attempt_origin or last_origin).name
+                if (attempt_origin or last_origin) is not None
+                else "null",
+                completion.get("completed_kv_tokens", staged_tokens),
+                completion.get("required_aux_pools"),
+                completion.get("completed_aux_units"),
+                restore_state_before,
+                req.hicache_restore_state.name
+                if req.hicache_restore_state is not None
+                else "null",
+                completion.get("finalize_result", "null"),
+                time.monotonic_ns(),
+                ready_event_id,
+                ready_context["run_id"],
+                ready_context["process_id"],
+                ready_context["profile_id"],
+                ready_context["source_build"],
+                ready_context["deployment_manifest_digest"],
+                ready_lifecycle_key,
+                ready_wait_id,
+                ready_wake_event_id,
+                ready_predecessor_wait_id,
+                ready_predecessor_terminal_event_id,
+                ready_predecessor_terminal_state,
+                ready_snapshot.cache_instance_id
+                if ready_snapshot is not None
+                else None,
+                self._host_alloc_generation_vector_id(
+                    ready_snapshot.generation_vector()
+                    if ready_snapshot is not None
+                    else None
+                ),
+            )
         if (
             event is RestoreEvent.REVOKED_MISS
             and genuine_miss
             and self.enable_ready_horizon
         ):
-            # P3 M3 (user adjudication): a deterministic miss means the
-            # full requested prefix is not in L3. The ready horizon records
-            # the NO_L3 negative-cache park (cursor = the l3_publish epoch
-            # right now) so this NONE request is not re-probed next pass --
-            # the miss is not transient and its revoke just released the
-            # budget (the e7 spin arm). A later L3 durable/publish advance
-            # or an identity change (prefix/generation) clears it.
+            # P3 M3 (user adjudication) + phase2-peranchor: a deterministic
+            # miss means the full requested prefix is not in L3. The ready
+            # horizon records the NO_L3 negative-cache park keyed on the
+            # ANCHOR's per-anchor storage_version (not the global l3_publish
+            # diagnostic counter) so this NONE request is not re-probed next
+            # pass -- the miss is not transient and its revoke just released
+            # the budget (the e7 spin arm). Only THAT anchor's substantive
+            # durability change, an identity change (prefix/generation/anchor),
+            # or the fuse expiry clears it; an unrelated chain's write ack
+            # does not.
+            anchor = getattr(req, "last_host_node", None)
             self._ready_horizon_negatives[req.rid] = NegativeCacheEntry(
                 reason=DeclineReason.NO_L3,
-                epoch_cursor=self.tree_cache.l3_publish_epoch(),
+                epoch_cursor=self._anchor_version_or_zero(anchor),
                 fuse_expiry=time.perf_counter()
                 + self.ready_horizon.safety_fuse_s,
                 prefix_len=(
@@ -3219,6 +4513,7 @@ class Scheduler(
                     else 0
                 ),
                 generation=getattr(req, "session_generation", None),
+                anchor=anchor,
             )
         if event is RestoreEvent.BACKUP_PENDING:
             # The lookup found the chain mid-backup: park on the M2 frontier
@@ -3278,6 +4573,8 @@ class Scheduler(
         *,
         capacity_fits: bool = False,
         genuine_miss: bool = False,
+        rearm_allowed: bool = True,
+        short_tail_recompute: bool = False,
     ) -> RestoreDecision:
         """Feed a restore event into the request's state machine and apply
         the transition (Req fields only; the decision is returned for the
@@ -3290,9 +4587,30 @@ class Scheduler(
             event,
             capacity_fits=capacity_fits,
             genuine_miss=genuine_miss,
+            rearm_allowed=rearm_allowed,
+            short_tail_recompute=short_tail_recompute,
         )
         if next_state is req.hicache_restore_state and decision is RestoreDecision.NONE:
             return decision
+        if (
+            prev_state is RestoreState.WAIT_CAPACITY
+            and req.hicache_restore_wait_reason is RestoreWaitReason.HOST_ALLOC
+        ):
+            if not (
+                next_state is RestoreState.WAIT_CAPACITY
+                and wait_reason_for(event, genuine_miss=genuine_miss)
+                is RestoreWaitReason.HOST_ALLOC
+            ):
+                terminal_state = self._host_alloc_terminal_state_for(
+                    event, next_state
+                )
+                self._remove_host_alloc_waiter(
+                    req.rid,
+                    terminal_state=terminal_state,
+                    reason=f"restore_event:{event.name}",
+                    req=req,
+                )
+                req.hicache_host_alloc_wait_cursor = None
         req.hicache_restore_state = next_state
         if next_state is RestoreState.WAIT_CAPACITY:
             req.hicache_restore_wait_reason = wait_reason_for(
@@ -3300,6 +4618,13 @@ class Scheduler(
             )
         else:
             req.hicache_restore_wait_reason = None
+        if next_state is not RestoreState.MISS_RECOMPUTE:
+            # P1: leaving the sticky-miss state (a re-arm override, an
+            # abort, a forward READY, or a re-issued restore) drops the
+            # negative evidence -- the miss no longer binds the request.
+            req.hicache_restore_miss_epoch = None
+            req.hicache_restore_miss_generation = None
+            req.hicache_restore_miss_anchor = None
         # The wait clock is armed at the first WAIT entry of the episode and
         # never re-armed by a re-decline: re-arming was what let the
         # capacity loop evade the T13 timeout (state_ts reset every pass).
@@ -3316,6 +4641,502 @@ class Scheduler(
             else "none",
         )
         return decision
+
+    def _emit_rh_decision(
+        self,
+        view,
+        *,
+        rank,
+        frontier_n,
+        decision,
+        reason,
+        epochs,
+        headroom,
+        reserve_floor,
+        physical_limit,
+        physical_used,
+        speculative_limit,
+        speculative_used,
+        negative_entry,
+        issue_origin,
+        attempt_id,
+        force=False,
+    ) -> None:
+        req = view.req
+        field = lambda value: "null" if value is None else value
+        state_before = self._prefetch_state_name(view.state)
+        wait_reason = view.wait_reason.name if view.wait_reason is not None else None
+        fingerprint = (
+            rank,
+            frontier_n,
+            state_before,
+            wait_reason,
+            bool(view.staging_eligible),
+            negative_entry.reason.name if negative_entry is not None else None,
+            negative_entry.epoch_cursor if negative_entry is not None else None,
+            (
+                epochs.l3_publish,
+                epochs.host_headroom,
+                epochs.host_release,
+                epochs.spec_budget,
+                epochs.waiting_frontier,
+            ),
+            headroom,
+            reserve_floor,
+            physical_limit,
+            physical_used,
+            speculative_limit,
+            speculative_used,
+            decision,
+            reason,
+        )
+        previous = getattr(req, "hicache_last_rh_decision_fingerprint", None)
+        if not force and previous == fingerprint:
+            return
+        pass_seq = getattr(self, "_rh_pass_seq", 0)
+        decision_id = f"{req.rid}:rh:{pass_seq}"
+        req.hicache_last_rh_decision_id = decision_id
+        req.hicache_last_rh_decision_fingerprint = fingerprint
+        logger.info(
+            "[P3] ts_ns=%d evt=rh_preadmission_decision schema=rh_preadmission.v1 "
+            "rid=%s request_enqueue_seq=%s rh_pass_seq=%d decision_id=%s "
+            "fingerprint=%s frontier_rank=%d frontier_n=%d "
+            "restore_state_before=%s wait_reason_before=%s "
+            "active_prefetch_attempt_id=%s staging_eligible=%s "
+            "restore_potential=%s negative_cache_blocked=%s negative_cursor=%s "
+            "causal_epoch=%s headroom_tokens=%s reserve_floor_tokens=%s "
+            "physical_budget_limit_tokens=%s physical_budget_used_tokens=%s "
+            "speculative_budget_limit_tokens=%s speculative_budget_used_tokens=%s "
+            "decision=%s reason=%s issue_origin=%s attempt_id=%s",
+            time.monotonic_ns(),
+            req.rid,
+            field(getattr(req, "hicache_request_enqueue_seq", None)),
+            pass_seq,
+            decision_id,
+            repr(fingerprint)[:160],
+            rank,
+            frontier_n,
+            state_before,
+            wait_reason or "null",
+            field(getattr(req, "hicache_prefetch_active_attempt_id", None)),
+            bool(view.staging_eligible),
+            bool(view.staging_eligible),
+            negative_entry is not None,
+            field(negative_entry.epoch_cursor if negative_entry is not None else None),
+            repr(epochs),
+            headroom,
+            reserve_floor,
+            field(physical_limit),
+            field(physical_used),
+            field(speculative_limit),
+            field(speculative_used),
+            decision,
+            reason,
+            issue_origin.name if issue_origin is not None else "null",
+            field(attempt_id),
+        )
+
+    def _rh_match_candidate(
+        self, req: Req, *, allow_active_attempt: bool = False
+    ) -> bool:
+        """Whether RH may refresh this request's match in this pass."""
+        return self._rh_match_candidate_reason(
+            req, allow_active_attempt=allow_active_attempt
+        ) is None
+
+    def _rh_match_candidate_reason(
+        self, req: Req, *, allow_active_attempt: bool = False
+    ) -> Optional[str]:
+        """Return a stable bounded reason when RH cannot refresh a request."""
+        if getattr(self, "chunked_req", None) is req:
+            return "active_chunk"
+        if (
+            not allow_active_attempt
+            and getattr(req, "hicache_prefetch_active_attempt_id", None) is not None
+        ):
+            return "active_attempt"
+        if getattr(req, "rid", None) in getattr(
+            self.tree_cache, "ongoing_prefetch", ()
+        ):
+            return "ongoing_prefetch"
+        finished = getattr(req, "finished", None)
+        if callable(finished) and finished():
+            return "finished"
+        if getattr(req, "to_finish", None) is not None:
+            return "to_finish"
+
+        state = getattr(req, "hicache_restore_state", None)
+        # Fresh queued requests have no restore episode yet; RH treats that
+        # value as the initial NONE state without persisting a new marker.
+        if state is None or state in (RestoreState.NONE, RestoreState.MISS_RECOMPUTE):
+            return None
+        if state is not RestoreState.WAIT_CAPACITY:
+            return "state_funnel"
+        reason = getattr(req, "hicache_restore_wait_reason", None)
+        if reason is RestoreWaitReason.PREFETCH_BUDGET or (
+            reason is RestoreWaitReason.DEVICE_QUOTA
+            and getattr(req, "host_hit_length", 0) == 0
+        ):
+            return None
+        return "wait_reason"
+
+    def _rh_state_name(self, req: Req) -> str:
+        state = getattr(req, "hicache_restore_state", None)
+        return state.name if state is not None else "NONE"
+
+    def _rh_value_fingerprint(self, value):
+        if value is None or isinstance(value, (bool, int, float, str, bytes)):
+            return value
+        try:
+            return value.detach().cpu().tolist()
+        except Exception:
+            return repr(value)
+
+    def _rh_counter_value(self, owner, names) -> int:
+        for name in names:
+            value = getattr(owner, name, None)
+            if isinstance(value, int):
+                return value
+        return 0
+
+    def _rh_mamba_snapshot(self, req):
+        pool = getattr(self, "req_to_token_pool", None)
+        if pool is None:
+            pool = getattr(self.tree_cache, "req_to_token_pool", None)
+        allocator = getattr(pool, "mamba_allocator", None)
+        alloc_owners = (allocator, self.tree_cache, self)
+        alloc_calls = next(
+            (
+                self._rh_counter_value(
+                    owner, ("mamba_alloc_calls", "alloc_calls", "_alloc_calls")
+                )
+                for owner in alloc_owners
+                if owner is not None
+                and any(
+                    isinstance(getattr(owner, name, None), int)
+                    for name in ("mamba_alloc_calls", "alloc_calls", "_alloc_calls")
+                )
+            ),
+            0,
+        )
+        evict_calls = next(
+            (
+                self._rh_counter_value(
+                    owner, ("mamba_evict_calls", "evict_calls", "_evict_calls")
+                )
+                for owner in (self.tree_cache, self)
+                if owner is not None
+                and any(
+                    isinstance(getattr(owner, name, None), int)
+                    for name in ("mamba_evict_calls", "evict_calls", "_evict_calls")
+                )
+            ),
+            0,
+        )
+        return (
+            self._rh_value_fingerprint(getattr(req, "mamba_pool_idx", None)),
+            self._rh_value_fingerprint(getattr(req, "mamba_cow_src_index", None)),
+            bool(getattr(req, "mamba_needs_clear", False)),
+            alloc_calls,
+            evict_calls,
+        )
+
+    def _rh_match_observation(self, req, before, started_ns):
+        try:
+            after = self._rh_mamba_snapshot(req)
+        except Exception:
+            after = before
+        return (
+            max(0, (time.monotonic_ns() - started_ns) // 1000),
+            (
+                before[0] != after[0],
+                before[1] != after[1],
+                before[2] != after[2],
+                after[3] - before[3],
+                after[4] - before[4],
+            ),
+        )
+
+    def _emit_rh_match_prepare(
+        self,
+        req: Req,
+        *,
+        pass_seq: int,
+        result: str,
+        reason: str,
+        prepared: Optional[_ReadyHorizonPreparedMatch] = None,
+        fallback_rematch: bool = False,
+        match_duration_us: Optional[int] = None,
+        mamba_delta=(False, False, False, 0, 0),
+        match_count_for_pass: Optional[int] = None,
+    ) -> None:
+        """Emit bounded, observational preparation data; never drives policy."""
+        host_anchor = prepared.last_host_node if prepared is not None else getattr(
+            req, "last_host_node", None
+        )
+        device_anchor = (
+            prepared.last_device_node
+            if prepared is not None
+            else getattr(req, "last_node", None)
+        )
+        server_args = getattr(self, "server_args", None)
+        buffer_mode = getattr(server_args, "hicache_host_memory_mode", "cache") == "buffer_only"
+        anchor = host_anchor
+        node_exists_fn = getattr(self.tree_cache, "node_exists", None)
+        is_root = getattr(self.tree_cache, "is_root", None)
+        anchor_kind = "unknown"
+        if buffer_mode and callable(is_root):
+            try:
+                if (
+                    host_anchor is not None
+                    and device_anchor is not None
+                    and is_root(host_anchor)
+                    and not is_root(device_anchor)
+                ):
+                    anchor = device_anchor
+                    anchor_kind = "buffer_device_fallback"
+            except Exception:
+                pass
+        anchor_exists = False
+        if anchor is not None and callable(node_exists_fn):
+            try:
+                anchor_exists = bool(node_exists_fn(anchor))
+            except Exception:
+                anchor_exists = False
+        gate_ok = False
+        gate_fn = getattr(self.tree_cache, "prefetch_gate_ok", None)
+        if anchor_exists and callable(gate_fn):
+            try:
+                gate_ok = bool(
+                    gate_fn(
+                        anchor,
+                        buffer_mode,
+                    )
+                )
+            except Exception:
+                gate_ok = False
+        if anchor_kind == "unknown" and anchor_exists and callable(is_root):
+            try:
+                anchor_kind = "root" if is_root(anchor) else "node"
+            except Exception:
+                anchor_kind = "unknown"
+        field = lambda value: "null" if value is None else value
+        if match_count_for_pass is None:
+            match_count_for_pass = 2 if fallback_rematch else 1
+        safe_rid = req.rid
+        if prepared is not None:
+            restore_state_before = prepared.restore_state_before
+            fill_len = prepared.fill_len
+            match_duration_us = (
+                prepared.match_duration_us
+                if match_duration_us is None
+                else match_duration_us
+            )
+            mamba_delta = (
+                prepared.mamba_pool_idx_changed,
+                prepared.mamba_cow_src_changed,
+                prepared.mamba_needs_clear_changed,
+                prepared.mamba_alloc_calls_delta,
+                prepared.mamba_evict_calls_delta,
+            )
+        else:
+            restore_state_before = self._rh_state_name(req)
+            fill_len = len(getattr(req, "full_untruncated_fill_ids", ()) or ())
+        decision_id = f"{safe_rid}:rh:{pass_seq}" if pass_seq > 0 else None
+        attempt_id = getattr(req, "hicache_prefetch_active_attempt_id", None)
+        try:
+            prefix_indices = getattr(req, "prefix_indices", None)
+            device_hit_tokens = 0 if prefix_indices is None else len(prefix_indices)
+            logger.info(
+                f"[P3] ts_ns={time.monotonic_ns()} "
+                "evt=rh_match_prepare schema=rh_match_prepare.v1 "
+                f"rid={safe_rid} "
+                "enqueue_seq="
+                f"{field(getattr(req, 'hicache_request_enqueue_seq', None))} "
+                f"pass_seq={pass_seq} decision_id={field(decision_id)} "
+                f"attempt_id={field(attempt_id)} "
+                f"session_generation={field(getattr(req, 'session_generation', None))} "
+                f"retraction_count={getattr(req, 'retraction_count', 0) or 0} "
+                f"restore_state_before={restore_state_before} result={result} "
+                f"reason={reason} fill_len={fill_len} "
+                f"device_hit_tokens={device_hit_tokens} "
+                f"host_hit_tokens={getattr(req, 'host_hit_length', 0)} "
+                f"anchor_kind={anchor_kind} "
+                f"anchor_id={field(str(anchor) if anchor is not None else None)} "
+                f"anchor_exists={anchor_exists} anchor_gate_ok={gate_ok} "
+                f"cow_mamba=false match_duration_us={field(match_duration_us)} "
+                f"match_count_for_pass={match_count_for_pass} "
+                f"fallback_rematch={fallback_rematch} "
+                f"mamba_pool_idx_changed={mamba_delta[0]} "
+                f"mamba_cow_src_changed={mamba_delta[1]} "
+                f"mamba_needs_clear_changed={mamba_delta[2]} "
+                f"mamba_alloc_calls_delta={mamba_delta[3]} "
+                f"mamba_evict_calls_delta={mamba_delta[4]}"
+            )
+        except Exception as exc:
+            try:
+                logger.info(
+                    "[P3] evt=rh_match_prepare_emit_failed "
+                    "schema=rh_match_prepare_emit_failed.v1 "
+                    f"rid={safe_rid} exception_class={type(exc).__name__}"
+                )
+            except Exception:
+                pass
+
+    def _rh_current_match_anchors_valid(self, req: Req) -> bool:
+        fill_ids = getattr(req, "full_untruncated_fill_ids", None)
+        last_host_node = getattr(req, "last_host_node", None)
+        node_exists = getattr(self.tree_cache, "node_exists", None)
+        if (
+            fill_ids is None
+            or last_host_node is None
+            or not callable(node_exists)
+        ):
+            return False
+        try:
+            if not node_exists(last_host_node):
+                return False
+            last_device_node = getattr(req, "last_node", None)
+            return last_device_node is None or bool(node_exists(last_device_node))
+        except Exception:
+            return False
+
+    def _prepare_ready_horizon_match(
+        self, req: Req, pass_seq: int
+    ) -> Optional[_ReadyHorizonPreparedMatch]:
+        """Refresh one candidate exactly once, without Mamba COW/allocation."""
+        candidate_reason = self._rh_match_candidate_reason(req)
+        if candidate_reason is not None:
+            self._emit_rh_match_prepare(
+                req,
+                pass_seq=pass_seq,
+                result=(
+                    "skipped"
+                    if candidate_reason in ("active_attempt", "ongoing_prefetch")
+                    else "ineligible"
+                ),
+                reason=candidate_reason,
+                match_count_for_pass=0,
+            )
+            return None
+        restore_state_before = self._rh_state_name(req)
+        mamba_before = self._rh_mamba_snapshot(req)
+        match_started_ns = time.monotonic_ns()
+        try:
+            req.init_next_round_input(self.tree_cache, cow_mamba=False)
+        except Exception:
+            match_duration_us, mamba_delta = self._rh_match_observation(
+                req, mamba_before, match_started_ns
+            )
+            self._emit_rh_match_prepare(
+                req,
+                pass_seq=pass_seq,
+                result="failed",
+                reason="match_prepare_failed",
+                match_duration_us=match_duration_us,
+                mamba_delta=mamba_delta,
+            )
+            return None
+        match_duration_us, mamba_delta = self._rh_match_observation(
+            req, mamba_before, match_started_ns
+        )
+
+        fill_ids = getattr(req, "full_untruncated_fill_ids", None)
+        last_host_node = getattr(req, "last_host_node", None)
+        anchors_exist = self._rh_current_match_anchors_valid(req)
+        last_device_node = getattr(req, "last_node", None)
+        if not anchors_exist:
+            self._emit_rh_match_prepare(
+                req,
+                pass_seq=pass_seq,
+                result="failed",
+                reason="anchor_unknown",
+                match_duration_us=match_duration_us,
+                mamba_delta=mamba_delta,
+            )
+            return None
+
+        prepared = _ReadyHorizonPreparedMatch(
+            req=req,
+            rid=req.rid,
+            pass_seq=pass_seq,
+            enqueue_seq=getattr(req, "hicache_request_enqueue_seq", None),
+            session_generation=getattr(req, "session_generation", None),
+            retraction_count=getattr(req, "retraction_count", 0),
+            fill_object_id=id(fill_ids),
+            fill_len=len(fill_ids),
+            output_len=len(getattr(req, "output_ids", ()) or ()),
+            extra_key=getattr(req, "extra_key", None),
+            cache_salt=getattr(req, "cache_salt", None),
+            last_device_node=last_device_node,
+            last_host_node=last_host_node,
+            restore_state_before=restore_state_before,
+            match_duration_us=match_duration_us,
+            mamba_pool_idx_changed=mamba_delta[0],
+            mamba_cow_src_changed=mamba_delta[1],
+            mamba_needs_clear_changed=mamba_delta[2],
+            mamba_alloc_calls_delta=mamba_delta[3],
+            mamba_evict_calls_delta=mamba_delta[4],
+        )
+        self._emit_rh_match_prepare(
+            req,
+            pass_seq=pass_seq,
+            result="prepared",
+            reason="current_match",
+            prepared=prepared,
+            match_duration_us=match_duration_us,
+            mamba_delta=mamba_delta,
+        )
+        return prepared
+
+    def _rh_prepared_match_valid(
+        self,
+        req: Req,
+        prepared: _ReadyHorizonPreparedMatch,
+        pass_seq: int,
+    ) -> bool:
+        """Validate the ephemeral RH match proof immediately before issue."""
+        if prepared.req is not req or prepared.rid != req.rid:
+            return False
+        if prepared.pass_seq != pass_seq:
+            return False
+        if getattr(req, "hicache_request_enqueue_seq", None) != prepared.enqueue_seq:
+            return False
+        if getattr(req, "session_generation", None) != prepared.session_generation:
+            return False
+        if getattr(req, "retraction_count", 0) != prepared.retraction_count:
+            return False
+        fill_ids = getattr(req, "full_untruncated_fill_ids", None)
+        if (
+            fill_ids is None
+            or id(fill_ids) != prepared.fill_object_id
+            or len(fill_ids) != prepared.fill_len
+        ):
+            return False
+        if len(getattr(req, "output_ids", ()) or ()) != prepared.output_len:
+            return False
+        if getattr(req, "extra_key", None) != prepared.extra_key:
+            return False
+        if getattr(req, "cache_salt", None) != prepared.cache_salt:
+            return False
+        if getattr(req, "last_node", None) != prepared.last_device_node:
+            return False
+        if getattr(req, "last_host_node", None) != prepared.last_host_node:
+            return False
+        finished = getattr(req, "finished", None)
+        if (callable(finished) and finished()) or getattr(req, "to_finish", None) is not None:
+            return False
+        state = getattr(req, "hicache_restore_state", None)
+        if state in (RestoreState.RESTORING, RestoreState.READY):
+            return False
+        if not self._rh_match_candidate_without_active_attempt(req):
+            return False
+        if not self._rh_current_match_anchors_valid(req):
+            return False
+        return True
+
+    def _rh_match_candidate_without_active_attempt(self, req: Req) -> bool:
+        return self._rh_match_candidate(req, allow_active_attempt=True)
 
     def _ready_horizon_pass(self) -> None:
         """P3 Ready Horizon v0 (3.2): maintain the READY_HOST pool.
@@ -3334,14 +5155,14 @@ class Scheduler(
         evicts (M2): headroom or budget exhaustion declines silently."""
         if not self.enable_ready_horizon:
             return
+        self._rh_pass_seq = getattr(self, "_rh_pass_seq", 0) + 1
         cc = self.tree_cache.cache_controller
         if cc is None:
             return
         policy = self.ready_horizon
         frontier_reqs = policy.frontier(self.waiting_queue)
-        views = self._ready_horizon_views(frontier_reqs)
         now = time.perf_counter()
-        epochs = self._ready_horizon_epochs(frontier_reqs, views, cc)
+        epochs = self._ready_horizon_epochs(frontier_reqs, [], cc)
         event = policy.epoch_event(self._ready_horizon_epoch_prev, epochs)
         # The snapshot tracks the previous pass, not the last check: a
         # release that merely returns a counter to its pre-issue value
@@ -3354,6 +5175,13 @@ class Scheduler(
         ):
             return
         self._ready_horizon_last_refill_ts = now
+
+        prepared_matches = {}
+        for req in frontier_reqs:
+            prepared = self._prepare_ready_horizon_match(req, self._rh_pass_seq)
+            if prepared is not None:
+                prepared_matches[req.rid] = prepared
+        views = self._ready_horizon_views(frontier_reqs, prepared_matches)
 
         frontier_rids = {r.rid for r in frontier_reqs}
         self._ready_horizon_negatives = {
@@ -3372,6 +5200,71 @@ class Scheduler(
             now=now,
             reserve_floor=self._ready_reserve_floor_tokens(cc),
         )
+        decline_reasons = dict(plan.declines)
+        issue_rids = {view.rid for view in plan.to_issue}
+        candidate_rids = {view.rid for view in plan.candidates}
+        reserve_floor = self._ready_reserve_floor_tokens(cc)
+        physical_limit = getattr(cc, "prefetch_capacity_limit", None)
+        physical_used = getattr(cc, "prefetch_tokens_occupied", None)
+        speculative_limit = getattr(
+            cc, "prefetch_speculative_capacity_limit", None
+        )
+        speculative_used = getattr(cc, "inflight_speculative_tokens", None)
+        frontier_views = {view.rid: view for view in views}
+        for rank, req in enumerate(frontier_reqs, start=1):
+            view = frontier_views[req.rid]
+            entry = self._ready_horizon_negatives.get(view.rid)
+            if view.rid in issue_rids:
+                # The authoritative issue decision is emitted after the
+                # prefetch claim is acquired and _prefetch_kvcache returns.
+                # Until then there is no joinable attempt_id.
+                continue
+            elif view.rid in decline_reasons:
+                decision, reason = "hold", "reserve_floor"
+            elif entry is not None:
+                decision, reason = "exclude", "negative_cache"
+            elif not view.staging_eligible:
+                decision, reason = "exclude", "no_restore_potential"
+            elif view.state not in (
+                RestoreState.NONE,
+                RestoreState.MISS_RECOMPUTE,
+                RestoreState.WAIT_CAPACITY,
+            ):
+                decision, reason = "exclude", "state_funnel"
+            elif cc.prefetch_rate_limited():
+                decision, reason = "hold", "physical_budget"
+            elif cc.prefetch_speculative_rate_limited():
+                decision, reason = "hold", "speculative_budget"
+            elif view.rid not in candidate_rids:
+                decision, reason = "hold", "outside_watermark"
+            else:
+                decision, reason = "hold", "state_funnel"
+            self._emit_rh_decision(
+                view,
+                rank=rank,
+                frontier_n=len(frontier_reqs),
+                decision=decision,
+                reason=reason,
+                epochs=epochs,
+                headroom=headroom,
+                reserve_floor=reserve_floor,
+                physical_limit=physical_limit,
+                physical_used=physical_used,
+                speculative_limit=speculative_limit,
+                speculative_used=speculative_used,
+                negative_entry=entry,
+                issue_origin=(
+                    HiCachePrefetchOrigin.READY_HORIZON
+                    if decision == "issue"
+                    else None
+                ),
+                attempt_id=(
+                    getattr(view.req, "hicache_prefetch_active_attempt_id", None)
+                    if decision == "issue"
+                    else None
+                ),
+                force=decision == "issue",
+            )
         # Record the headroom-gate declines (NO_HEADROOM): none of these
         # can stage until host pages free.
         for rid, reason in plan.declines:
@@ -3380,28 +5273,135 @@ class Scheduler(
                 self._park_ready_decline(rid, view, reason, epochs, now)
         for view in plan.to_issue:
             req = view.req
-            self._prefetch_kvcache(req)
+            prepared_match = prepared_matches.pop(req.rid, None)
+            result = self._prefetch_kvcache(
+                req,
+                origin=HiCachePrefetchOrigin.READY_HORIZON,
+                prepared_match=prepared_match,
+            )
             state = req.hicache_restore_state
-            issued = state is RestoreState.RESTORING
+            result_status = (
+                result.status
+                if isinstance(result, PrefetchIssueResult)
+                else result
+            )
+            result_attempt_id = (
+                result.attempt_id
+                if isinstance(result, PrefetchIssueResult)
+                else getattr(req, "hicache_prefetch_active_attempt_id", None)
+                or getattr(req, "hicache_prefetch_last_attempt_id", None)
+            )
+            status_issued = result_status is HiCachePrefetchIssueStatus.ISSUED
+            result_reason = (
+                result.reason
+                if isinstance(result, PrefetchIssueResult)
+                else "issued" if status_issued else "declined"
+            )
+            issued = status_issued and result_attempt_id is not None
+            if status_issued and result_attempt_id is None:
+                result_reason = "missing_attempt_id"
+            post_issue_epochs = CausalEpochs(
+                l3_publish=epochs.l3_publish,
+                host_headroom=epochs.host_headroom,
+                host_release=epochs.host_release,
+                spec_budget=cc.inflight_speculative_tokens,
+                waiting_frontier=epochs.waiting_frontier,
+                spec_budget_release_epoch=epochs.spec_budget_release_epoch,
+            )
+            if issued:
+                previous_entry = self._ready_horizon_negatives.pop(req.rid, None)
+                if previous_entry is not None and state in (
+                    RestoreState.NONE,
+                    RestoreState.MISS_RECOMPUTE,
+                    RestoreState.WAIT_CAPACITY,
+                ):
+                    # A terminal/test issue path can leave the request
+                    # eligible. Refresh its park at the post-issue cursor so
+                    # the same causal event cannot re-arm it later.
+                    self._park_ready_decline(
+                        req.rid, view, previous_entry.reason, post_issue_epochs, now
+                    )
+                decision, reason = "issue", "issued"
+            elif result_status is HiCachePrefetchIssueStatus.SKIPPED_ACTIVE:
+                decision, reason = "hold", "active_attempt"
+            elif result_status is HiCachePrefetchIssueStatus.SKIPPED_STATE:
+                decision, reason = "exclude", "no_restore_potential"
+            else:
+                decision, reason = "hold", (
+                    "physical_budget"
+                    if "rate_limited" in result_reason
+                    else "state_funnel"
+                )
+            self._emit_rh_decision(
+                view,
+                rank=next(
+                    (
+                        i
+                        for i, candidate in enumerate(frontier_reqs, 1)
+                        if candidate.rid == req.rid
+                    ),
+                    0,
+                ),
+                frontier_n=len(frontier_reqs),
+                decision=decision,
+                reason=reason,
+                epochs=epochs,
+                headroom=headroom,
+                reserve_floor=reserve_floor,
+                physical_limit=physical_limit,
+                physical_used=physical_used,
+                speculative_limit=speculative_limit,
+                speculative_used=speculative_used,
+                negative_entry=self._ready_horizon_negatives.get(req.rid),
+                issue_origin=HiCachePrefetchOrigin.READY_HORIZON,
+                attempt_id=result_attempt_id,
+                force=True,
+            )
+            result_name = (
+                "failed_before_issue"
+                if status_issued and result_attempt_id is None
+                else result_status.name.lower()
+                if isinstance(result_status, HiCachePrefetchIssueStatus)
+                else "issued" if issued else "declined"
+            )
             logger.info(
-                "[P3] ts_ms=%d evt=ready_stage rid=%s result=%s state=%s "
-                "ready=%d headroom=%d",
-                int(time.time() * 1000),
+                "[P3] ts_ns=%d evt=ready_stage schema=rh_stage.v2 rid=%s "
+                "decision_id=%s attempt_id=%s issue_origin=%s demand_restore=%s "
+                "restore_state_before=%s restore_state_after=%s result=%s "
+                "reason=%s frontier_rank=%d headroom_tokens=%s "
+                "reserve_floor_tokens=%s physical_budget_used_tokens=%s "
+                "speculative_budget_used_tokens=%s",
+                time.monotonic_ns(),
                 req.rid,
-                "issued" if issued else "declined",
-                state.name if state is not None else "none",
-                plan.ready_count,
+                getattr(req, "hicache_last_rh_decision_id", None),
+                result_attempt_id,
+                HiCachePrefetchOrigin.READY_HORIZON.name,
+                False,
+                result.state_before if isinstance(result, PrefetchIssueResult) else "null",
+                result.state_after if isinstance(result, PrefetchIssueResult) else (
+                    state.name if state is not None else "null"
+                ),
+                result_name,
+                result_reason,
+                next((i for i, candidate in enumerate(frontier_reqs, 1) if candidate.rid == req.rid), 0),
                 headroom,
+                reserve_floor,
+                physical_used,
+                speculative_used,
             )
             if not issued:
                 # A synchronous decline: the horizon cannot stage this rid
                 # until the causal epoch that resolves the decline
                 # advances. The budget rate-limit is the testable one.
-                if cc.prefetch_rate_limited() or cc.prefetch_speculative_rate_limited():
+                if cc.prefetch_speculative_rate_limited():
                     self._park_ready_decline(
-                        req.rid, view, DeclineReason.SPEC_BUDGET, epochs, now
+                        req.rid,
+                        view,
+                        DeclineReason.SPEC_BUDGET,
+                        post_issue_epochs,
+                        now,
                     )
-            elif cc.prefetch_rate_limited() or cc.prefetch_speculative_rate_limited():
+            elif cc.prefetch_speculative_rate_limited():
                 # The issue just exhausted an inflight budget: every
                 # remaining candidate would decline identically (the e7
                 # attempt-only spinner class), so park the un-tried tail
@@ -3410,8 +5410,17 @@ class Scheduler(
                     if rest.rid in plan.to_issue or rest.rid == req.rid:
                         continue
                     self._park_ready_decline(
-                        rest.rid, rest, DeclineReason.SPEC_BUDGET, epochs, now
+                        rest.rid,
+                        rest,
+                        DeclineReason.SPEC_BUDGET,
+                        post_issue_epochs,
+                        now,
                     )
+                break
+            elif cc.prefetch_rate_limited():
+                # A physical-only limiter has no subscribed speculative
+                # epoch; stop this pass without assigning a speculative
+                # negative-cache cursor.
                 break
 
         if (plan.ready_count, plan.ready_tokens) != self._ready_horizon_last_log:
@@ -3432,14 +5441,26 @@ class Scheduler(
         fingerprint, and the safety-fuse expiry (the anomalous repeat-fail
         bound). The rid is not re-eligible until the subscribed epoch
         advances or the identity changes (or the fuse expires)."""
+        anchor = getattr(getattr(view, "req", None), "last_host_node", None)
+        cursor = policy_epoch_value(self.ready_horizon, epochs, reason)
+        if reason is DeclineReason.NO_L3:
+            # phase2-peranchor: the NO_L3 negative cache subscribes to the
+            # ANCHOR's per-anchor storage_version, not the global l3_publish
+            # diagnostic counter -- an unrelated chain's durability event
+            # must not clear the park.
+            cursor = self._anchor_version_or_zero(anchor)
         entry = NegativeCacheEntry(
             reason=reason,
-            epoch_cursor=policy_epoch_value(
-                self.ready_horizon, epochs, reason
-            ),
+            epoch_cursor=cursor,
             fuse_expiry=now + self.ready_horizon.safety_fuse_s,
             prefix_len=view.prefix_len,
             generation=view.generation,
+            anchor=anchor,
+            release_epoch_cursor=(
+                epochs.spec_budget_release_epoch
+                if reason is DeclineReason.SPEC_BUDGET
+                else 0
+            ),
         )
         self._ready_horizon_negatives[rid] = entry
 
@@ -3449,7 +5470,7 @@ class Scheduler(
                 return view
         return None
 
-    def _ready_horizon_views(self, frontier_reqs) -> list:
+    def _ready_horizon_views(self, frontier_reqs, prepared_matches=None) -> list:
         """Frozen per-request frontier views for the ready-pool policy
         (M6: the staged marker is the finalize-written, admission-consumed
         residency count; the full-prefix gate is resident-material-present
@@ -3457,6 +5478,12 @@ class Scheduler(
         buffer_mode = self.server_args.hicache_host_memory_mode == "buffer_only"
         views = []
         for req in frontier_reqs:
+            state = getattr(req, "hicache_restore_state", None)
+            if state is None:
+                state = RestoreState.NONE
+            match_current = (
+                prepared_matches is None or req.rid in prepared_matches
+            )
             staged = (
                 self.tree_cache.staged_prefetch_tokens(req.rid)
                 if buffer_mode
@@ -3467,13 +5494,15 @@ class Scheduler(
                 ReadyHorizonView(
                     req=req,
                     rid=req.rid,
-                    state=req.hicache_restore_state,
+                    state=state,
                     wait_reason=req.hicache_restore_wait_reason,
                     staged_tokens=staged,
                     # the finalize writes the marker (> 0) on a full restore
                     full_prefix=staged > 0,
                     host_hit_length=req.host_hit_length,
-                    staging_eligible=self._restore_potential_for(req),
+                    staging_eligible=(
+                        match_current and self._restore_potential_for(req)
+                    ),
                     prefix_len=len(req.full_untruncated_fill_ids) if req.full_untruncated_fill_ids is not None else 0,
                     generation=generation,
                 )
@@ -3481,21 +5510,40 @@ class Scheduler(
         return views
 
     def _ready_horizon_epochs(self, frontier_reqs, views, cc) -> CausalEpochs:
-        """The four causal-epoch snapshot values (M3, user adjudication).
-        The running batch size is deliberately absent: it flips every pass
-        under an 8-agent workload (the e7 gate breakdown) and a freed GPU
-        slot surfaces through the frontier or headroom epochs. Per-request
-        restore states are absent too: a candidate's denied WAIT
-        transition must not re-arm the check (the per-pass poll M3
+        """The five causal-epoch snapshot values (M3, user adjudication +
+        Fix A). The running batch size is deliberately absent: it flips
+        every pass under an 8-agent workload (the e7 gate breakdown) and a
+        freed GPU slot surfaces through the frontier or headroom epochs.
+        Per-request restore states are absent too: a candidate's denied
+        WAIT transition must not re-arm the check (the per-pass poll M3
         forbids). The l3_publish epoch comes from the tree's monotonic
         durability counter; host_headroom from the host pool's free pages;
-        spec_budget from the speculative inflight counter (released = it
-        drops); waiting_frontier from the frontier composition."""
+        host_release (Fix A) from the monotonic release counter, bumped
+        when the observed available level GREW since the last snapshot --
+        by construction a release (only free() raises the free count; the
+        refill's own traffic only ever lowers it, so it can never
+        self-trigger); spec_budget from the speculative inflight counter
+        (released = it drops); waiting_frontier from the frontier
+        composition."""
+        host_release = self._ready_host_release_epoch
+        last_level = self._ready_host_release_last_level
+        available = cc.mem_pool_host.available_size()
+        spec_budget_release_epoch = max(
+            self._ready_spec_budget_release_epoch,
+            getattr(cc, "speculative_release_epoch", 0),
+        )
+        self._ready_spec_budget_release_epoch = spec_budget_release_epoch
+        if last_level is not None and available > last_level:
+            host_release += 1
+        self._ready_host_release_epoch = host_release
+        self._ready_host_release_last_level = available
         return CausalEpochs(
             l3_publish=self.tree_cache.l3_publish_epoch(),
-            host_headroom=cc.mem_pool_host.available_size(),
+            host_headroom=available,
+            host_release=host_release,
             spec_budget=cc.inflight_speculative_tokens,
             waiting_frontier=tuple(r.rid for r in frontier_reqs),
+            spec_budget_release_epoch=spec_budget_release_epoch,
         )
 
     def _ready_host_headroom(self, cc, views) -> int:
@@ -3655,9 +5703,68 @@ class Scheduler(
             # write that never crosses the frontier leaves the request to
             # the T13 timeout (bounded).
             return self._restore_backup_wake_ready(req)
+        if req.hicache_restore_wait_reason is RestoreWaitReason.HOST_ALLOC:
+            cc = self.tree_cache.cache_controller
+            if cc is None or req.full_untruncated_fill_ids is None:
+                return False
+            if cc.prefetch_rate_limited():
+                return False
+            # Generation admission is handled by the FIFO arbiter.  Do not
+            # require the complete span to be already free: the authoritative
+            # retry must be allowed to run alloc -> evict_host -> alloc.
+            return True
         cc = self.tree_cache.cache_controller
         if cc is not None and cc.prefetch_rate_limited():
             return False
+        if req.hicache_restore_wait_reason is RestoreWaitReason.PREFETCH_BUDGET:
+            # A budget wake only re-issues the L3->host prefetch, whose
+            # capacity gate is the host prefetch limiter above. Device
+            # admission remains authoritative after the restore reaches
+            # READY; requiring its charge here strands this waiter while an
+            # unrelated running request still occupies the device.
+            return True
+        # too_short churn (independent P, defense-in-depth): a DEVICE_QUOTA
+        # waiter whose current restore suffix is already sub-threshold AND
+        # can never grow back above it (the can-never-qualify prompt -- the
+        # theoretical-max suffix is sub-threshold too) must not be woken by
+        # the capacity predicate. Waking re-issues an inevitably
+        # declined_too_short prefetch (granted=0) and re-parks on the next
+        # pass's capacity check -- the tight wake->re-issue->declined->re-WAIT
+        # loop. The request is released to recompute its tail directly
+        # instead (the admission main fix already keeps it out of this WAIT
+        # on the forward path; this predicate is the defense for any
+        # DEVICE_QUOTA waiter that entered before the fix). REVALIDATE /
+        # device-match-decay semantics are untouched: a prompt that CAN grow
+        # its suffix above the threshold keeps its capacity wake.
+        if req.hicache_restore_wait_reason is RestoreWaitReason.DEVICE_QUOTA:
+            if req.full_untruncated_fill_ids is not None:
+                if not (
+                    self.tree_cache.prompt_can_qualify_for_prefetch(
+                        len(req.full_untruncated_fill_ids), req.host_hit_length
+                    )
+                ):
+                    return False
+                # P4 gate (no-heuristic): the CURRENT actually-prefetchable
+                # suffix must also clear the threshold. The can-never-qualify
+                # gate above uses the theoretical-max suffix
+                # (prompt_len - host_hit_length, after the device match has
+                # fully decayed); a REVALIDATE-bet / never-case-residue
+                # waiter passes it (max suffix >= threshold) yet its current
+                # suffix (match_end - (prefix match + host match)) is still
+                # sub-threshold. Capacity-waking such a waiter re-issues an
+                # inevitably declined_too_short prefetch every pass (the
+                # tight wake->re-issue->declined->re-WAIT loop); capacity
+                # release does not change that result, so capacity is not a
+                # wake source for it. Its only legal re-trigger is the
+                # current suffix growing past the threshold (device match
+                # decay, observed on the fresh-geometry re-entry after the
+                # bounded T13 recompute) or the T13 fallback recompute
+                # itself. REVALIDATE-bet restore potential is untouched
+                # (has_restore_potential is not modified) -- only the
+                # capacity wake is suppressed. population A (current suffix
+                # already qualifies) is not held.
+                if self._current_prefetch_suffix_lt_threshold(req):
+                    return False
         # P2-1c promotion-budget item (design §3.4): a DEVICE_QUOTA waiter
         # whose next step is a FULL-KV promotion (host material ready) must
         # not wake while the device promotion budget cannot hold it --
@@ -3695,6 +5802,28 @@ class Scheduler(
             self.req_to_token_pool, self.tree_cache
         )
 
+    def _current_prefetch_suffix_lt_threshold(self, req) -> bool:
+        """P4 gate (no-heuristic): whether the CURRENT actually-prefetchable
+        suffix is below prefetch_threshold (page_size aligned).
+
+        Same geometry as prompt_can_qualify_for_prefetch but on the CURRENT
+        match (match_end - (len(prefix_indices) + host_hit_length)) rather
+        than the theoretical max (prompt_len - host_hit_length): the current
+        suffix is exactly the span prefetch_from_storage would re-issue
+        (new_input_tokens = fill_ids[matched_len:match_end]). A sub-threshold
+        current suffix means the re-issue is inevitably declined_too_short,
+        so capacity is not a legal wake source for this waiter (its
+        re-trigger is current-suffix growth past threshold via device match
+        decay -- observed on the fresh-geometry re-entry after the bounded
+        T13 recompute -- or the T13 fallback recompute itself)."""
+        matched_len = len(req.prefix_indices) + req.host_hit_length
+        match_end = req._compute_max_prefix_len(len(req.full_untruncated_fill_ids))
+        current_suffix = max(0, match_end - matched_len)
+        return (
+            current_suffix // self.page_size * self.page_size
+            < self.tree_cache.prefetch_threshold
+        )
+
     def _restore_potential_for(self, req) -> bool:
         """Design §2.5-1 restore potential plus the can-never-qualify prompt
         gate; the shared entry condition for T4/T5/T6 (a quota or gate
@@ -3705,6 +5834,211 @@ class Scheduler(
             req.host_hit_length,
             len(req.full_untruncated_fill_ids),
         )
+
+    def _no_material_fast_forward_for(self, req, anchor) -> bool:
+        """phase2-peranchor: whether the FRONTIER waiter's anchor has NO
+        recoverable material and nothing in flight can make it durable, so
+        the frontier wait is zero-expectation and the request should
+        ADMIT_RECOMPUTE immediately instead of idling out the full 60s T13.
+
+        Assembles the 5 no-material facts (host / storage / pending-ACK /
+        deferred-descendant / restorable-epoch-change) into a
+        FrontierAnchorInfo and delegates to the pure
+        no_material_fast_forward predicate. The judgment is deliberately NOT
+        "storage_hit == 0 => recompute": each fact is checked on its own, and
+        the presence of ANY in-flight producer or deferred descendant keeps
+        the P3 reconcile + frontier wait path (never fast-forwards).
+
+        phase2-p0fix Q1: before judging, resolve the anchor to its deepest
+        durable ancestor (the most rootward L3-durable node on the anchor's
+        parent chain). A request's suffix is served from a page range under
+        the anchor; when the host prefix was split by an L3 write ack
+        (D->H commit), the shallow anchor can be non-durable while a deeper
+        ancestor's pages ARE durable. Judging on the shallow node's missing
+        storage facts would mis-forward a request that could restore from the
+        deeper durable pages. The storage facts (2-5) are evaluated on the
+        resolved judgment anchor; host material (fact 1) is unchanged. When no
+        durable ancestor exists (a pure device chain with no L3 content, root
+        storage_persisted defaults False), no-material holds and the request
+        forwards immediately -- the fast-forward main benefit is preserved.
+        """
+        tc = self.tree_cache
+        # 1) Host material: host copy / host hit present for the candidate.
+        host_material = bool(getattr(req, "host_hit_length", 0) > 0)
+        # Q1: resolve the deepest durable ancestor before judging. Falls back
+        # to the original anchor when the proxy is absent (e.g. test stubs).
+        durable_ancestor = None
+        if anchor is not None:
+            dda = getattr(tc, "deepest_durable_ancestor", None)
+            if callable(dda):
+                try:
+                    durable_ancestor = dda(anchor)
+                except Exception:
+                    durable_ancestor = None
+        judgment_anchor = (
+            durable_ancestor if durable_ancestor is not None else anchor
+        )
+        # 2) Storage material: the resolved anchor is durable (a durable
+        #    ancestor was found), or the original anchor is the root (a root
+        #    anchor is always prefetch-issuable -- never a no-material
+        #    dead-end). A pure device chain resolves to no durable ancestor
+        #    (None) -> no-material holds -> forward (main benefit preserved).
+        storage_material = durable_ancestor is not None
+        if judgment_anchor is not None:
+            node_exists = getattr(tc, "node_exists", None)
+            if callable(node_exists) and node_exists(judgment_anchor):
+                is_l3 = getattr(tc, "is_l3_durable", None)
+                if callable(is_l3) and is_l3(judgment_anchor):
+                    storage_material = True
+                is_root = getattr(tc, "is_root", None)
+                if callable(is_root) and is_root(judgment_anchor):
+                    storage_material = True
+        # 3) Pending durable ACK: an L3 write for the resolved anchor's chain
+        #    is in flight (ongoing_backup), OR the node is already marked
+        #    storage_written (a submitted write whose ack could promote it).
+        pending_durable_ack = False
+        if judgment_anchor is not None:
+            node_exists = getattr(tc, "node_exists", None)
+            if callable(node_exists) and node_exists(judgment_anchor):
+                is_sw = getattr(tc, "is_storage_written", None)
+                if callable(is_sw):
+                    pending_durable_ack = bool(is_sw(judgment_anchor))
+        ongoing_backup = getattr(tc, "ongoing_backup", None)
+        if ongoing_backup:
+            for op_node, _lock in ongoing_backup.values():
+                if op_node == judgment_anchor:
+                    pending_durable_ack = True
+                    break
+        # 4) Deferred durable descendant: the resolved anchor still anchors a
+        #    storage_acked && !storage_persisted node (a P3 reconcile
+        #    promotion source that could make it durable).
+        deferred_durable_desc = False
+        if judgment_anchor is not None:
+            node_exists = getattr(tc, "node_exists", None)
+            if callable(node_exists) and node_exists(judgment_anchor):
+                has_desc = getattr(tc, "has_acked_descendant", None)
+                if callable(has_desc):
+                    deferred_durable_desc = bool(has_desc(judgment_anchor))
+        # 5) Restorable epoch change: a per-anchor durability event that could
+        #    make a currently-unredeemable restore redeemable -- either an
+        #    in-flight restore read-back (load_back) for this anchor node, or
+        #    the anchor's own per-anchor version has moved at all (it has L3
+        #    durability history, e.g. it was durable and just got cleared, so
+        #    a re-restore may be redeemable). Both are conservative: they keep
+        #    the frontier wait rather than fast-forward.
+        restorable_epoch_change = False
+        if judgment_anchor is not None:
+            ongoing_load_back = getattr(tc, "ongoing_load_back", None)
+            if ongoing_load_back and judgment_anchor in ongoing_load_back:
+                restorable_epoch_change = True
+            av = getattr(tc, "anchor_storage_version", None)
+            if callable(av):
+                try:
+                    if int(av(judgment_anchor)) > 0:
+                        restorable_epoch_change = True
+                except Exception:
+                    restorable_epoch_change = False
+        return no_material_fast_forward(
+            FrontierAnchorInfo(
+                host_material=host_material,
+                storage_material=storage_material,
+                pending_durable_ack=pending_durable_ack,
+                deferred_durable_desc=deferred_durable_desc,
+                restorable_epoch_change=restorable_epoch_change,
+            )
+        )
+
+    def _anchor_version_or_zero(self, anchor) -> int:
+        """The per-anchor storage_version of `anchor` (0 when absent / the
+        node is gone / no per-anchor API -- a dead anchor self-heals to a
+        re-match from root, a new candidate, so its old negative evidence no
+        longer binds). phase2-peranchor: the anchor-local causal signal for
+        the P1 miss re-arm gate and the NO_L3 cursor; never the global
+        diagnostic epoch."""
+        if anchor is None:
+            return 0
+        fn = getattr(self.tree_cache, "anchor_storage_version", None)
+        if not callable(fn):
+            return 0
+        try:
+            return int(fn(anchor))
+        except Exception:
+            return 0
+
+    def _miss_rearm_decision(self, req) -> bool:
+        """T6 admission miss re-arm decision (explicit three-branch form of
+        the P1 `miss_rearm_allowed` gate, phase2-p4-round2 点3).
+
+        - no recorded miss epoch (defensive; the state should not be
+          MISS_RECOMPUTE then) -> re-arm (preserves historical behavior).
+        - re-anchored to a different node OR the identity (session
+          generation) changed -> re-arm: the old negative evidence no longer
+          applies to the new candidate / identity.
+        - the SAME anchor's per-anchor storage version advanced -> re-arm
+          ONLY when the anchor chain now actually holds durable L3 material
+          (`_miss_rearm_durable_coverage`). A same-anchor version advance is
+          the causal signal of a durability event, but clear (durable-belief
+          removed) and evict-rebuild (chain cleared + rebuilt) both bump the
+          version WITHOUT leaving recoverable L3 material -- re-probing
+          those is a structural guaranteed miss, so they stay sticky and
+          recompute forward instead of re-churning the revoked:miss loop.
+        - same-anchor, version unchanged, generation unchanged -> sticky
+          (not re-armed): re-probing the proven-missing prefix at the same
+          anchor version must miss again.
+
+        re-anchor/generation are judged BEFORE the material-coverage gate: a
+        brand-new candidate must never be blocked by the old anchor's
+        material state. No counters/TTL/thresholds (no-heuristic); the
+        coverage check is a structural existence query (deepest durable
+        ancestor non-None)."""
+        if req.hicache_restore_miss_epoch is None:
+            return True  # defensive: no record -> re-arm
+        cur_anchor = getattr(req, "last_host_node", None)
+        miss_anchor = req.hicache_restore_miss_anchor
+        cur_gen = getattr(req, "session_generation", None)
+        miss_gen = req.hicache_restore_miss_generation
+        re_anchored = (
+            miss_anchor is not None
+            and cur_anchor is not None
+            and cur_anchor != miss_anchor
+        )
+        generation_changed = cur_gen is not None and cur_gen != miss_gen
+        if re_anchored or generation_changed:
+            return True  # new candidate / identity changed: old evidence void
+        if self._anchor_version_or_zero(cur_anchor) > req.hicache_restore_miss_epoch:
+            # Same anchor, version advanced: re-arm only when the anchor
+            # chain now actually has durable L3 material covering it
+            # (P4-round2 点3: no-material same-anchor re-probe is a
+            # structural guaranteed miss).
+            return self._miss_rearm_durable_coverage(req)
+        return False  # same anchor, version unchanged -> sticky
+
+    def _miss_rearm_durable_coverage(self, req) -> bool:
+        """P4-round2 点3 material-coverage gate: whether the request's anchor
+        chain now actually holds durable L3 material (Q1
+        `deepest_durable_ancestor(anchor)` non-None).
+
+        A same-anchor version advance is the causal signal of a durability
+        event, but it does NOT guarantee the event left recoverable material
+        behind: clear (durable-belief removed) and evict-rebuild (chain
+        cleared and rebuilt) both bump the version while leaving a pure
+        device chain with no L3 content. Re-probing a no-material chain is a
+        structural guaranteed miss (the revoked:miss churn the P1 sticky
+        gate exists to prevent), so the re-arm stays sticky until material
+        genuinely arrives -- at which point the chain re-gains a durable
+        ancestor, dda becomes non-None, and the gate re-opens (point 5
+        legitimate re-restore preserved). O(depth) existence check, no
+        counters/TTL/thresholds. Defensive fallbacks: no anchor -> True
+        (nothing to judge here; let the identity/anchor criteria decide);
+        deepest_durable_ancestor proxy missing (stub / no per-anchor API) ->
+        True (conservative release, preserves prior behavior)."""
+        anchor = getattr(req, "last_host_node", None)
+        if anchor is None:
+            return True  # no anchor to judge -> release to identity/anchor
+        dda = getattr(self.tree_cache, "deepest_durable_ancestor", None)
+        if not callable(dda):
+            return True  # stub/fallback: conservative release
+        return dda(anchor) is not None
 
     def _cleanup_not_added_req(self, req, adder) -> None:
         """Revert matched mamba idx state when add_one_req rejected the
@@ -3729,11 +6063,21 @@ class Scheduler(
         if self.disaggregation_mode == DisaggregationMode.NULL:
             if self._abort_on_queued_limit(req):
                 return
-            self._prefetch_kvcache(req)
+            self._rh_request_enqueue_seq = getattr(
+                self, "_rh_request_enqueue_seq", 0
+            ) + 1
+            req.hicache_request_enqueue_seq = self._rh_request_enqueue_seq
+            if not self.enable_ready_horizon:
+                self._prefetch_kvcache(
+                    req, origin=HiCachePrefetchOrigin.EAGER_RH_OFF
+                )
             self.waiting_queue.append(req)
+            _p2a_mark_enqueue(req)
             req.time_stats.set_wait_queue_entry_time()
         elif self.disaggregation_mode == DisaggregationMode.PREFILL:
-            self._prefetch_kvcache(req)
+            self._prefetch_kvcache(
+                req, origin=HiCachePrefetchOrigin.EAGER_DISAGG_PREFILL
+            )
             self.disagg_prefill_bootstrap_queue.add(
                 req, self.model_config.num_key_value_heads
             )
@@ -3801,6 +6145,17 @@ class Scheduler(
                 if self.enable_hicache_storage:
                     # Release prefetch events associated with the request
                     self.tree_cache.release_aborted_request(candidate_req.rid)
+                    self._release_prefetch_claim(
+                        candidate_req,
+                        getattr(candidate_req, "hicache_prefetch_active_attempt_id", None),
+                        "queued_priority_abort",
+                    )
+                self._remove_host_alloc_waiter(
+                    candidate_req.rid,
+                    terminal_state="ABORTED",
+                    reason="queued_priority_abort",
+                    req=candidate_req,
+                )
                 self.waiting_queue.pop(idx)
                 self.beam_coordinator.retire_group(candidate_req)
                 req_to_abort = candidate_req
@@ -3832,6 +6187,17 @@ class Scheduler(
                 if self.enable_hicache_storage:
                     # Release prefetch events associated with the request
                     self.tree_cache.release_aborted_request(req.rid)
+                    self._release_prefetch_claim(
+                        req,
+                        getattr(req, "hicache_prefetch_active_attempt_id", None),
+                        "queued_abort",
+                    )
+                self._remove_host_alloc_waiter(
+                    req.rid,
+                    terminal_state="ABORTED",
+                    reason="waiting_timeout_abort",
+                    req=req,
+                )
                 self.ipc_channels.send_to_tokenizer.send_output(
                     _make_abort_req(
                         req,
@@ -3969,6 +6335,11 @@ class Scheduler(
             req.pending_bootstrap = False
         if self.enable_hicache_storage:
             self.tree_cache.release_aborted_request(req.rid)
+            self._release_prefetch_claim(
+                req,
+                getattr(req, "hicache_prefetch_active_attempt_id", None),
+                "chunked_abort",
+            )
         release_kv_cache(req, self.tree_cache, is_insert=False)
 
         self.chunked_req = None
@@ -4424,7 +6795,6 @@ class Scheduler(
                         req.rid,
                         loaded_tokens,
                     )
-
             req.init_next_round_input(self.tree_cache)
             if (
                 self.enable_hicache_storage
@@ -4448,6 +6818,26 @@ class Scheduler(
                 has_chunked_req=(self.chunked_req is not None),
                 truncation_align_size=self.truncation_align_size,
             )
+            if res == AddReqResult.CONTINUE:
+                origin = getattr(req, "hicache_prefetch_last_origin", None)
+                logger.info(
+                    "[P3] ts_ns=%d evt=admission.v2 schema=rh_admission.v2 "
+                    "rid=%s rh_decision_id=%s hicache_prefetch_attempt_id=%s "
+                    "hicache_prefetch_origin=%s ready_host_observed=%s "
+                    "admission_monotonic_ns=%d can_run=%s",
+                    time.monotonic_ns(),
+                    req.rid,
+                    getattr(req, "hicache_last_rh_decision_id", None),
+                    getattr(req, "hicache_prefetch_last_attempt_id", None),
+                    origin.name if origin is not None else "null",
+                    (
+                        "true"
+                        if req.hicache_restore_state is RestoreState.READY
+                        else "null"
+                    ),
+                    time.monotonic_ns(),
+                    "true",
+                )
 
             if self.enable_lora:
                 running_loras.add(req.lora_id)
@@ -4460,7 +6850,42 @@ class Scheduler(
                         # batch_is_full -- the request is not admitted and
                         # does not stall the queue behind it; the WAIT skip
                         # above holds it until a T11 wake).
-                        self._apply_restore_event(req, RestoreEvent.ADMISSION_DENY)
+                        #
+                        # P1 restore re-arm churn gate (phase2-peranchor): a
+                        # request parked in MISS_RECOMPUTE (proven L3-missing
+                        # this episode) MUST NOT re-enter WAIT[DEVICE_QUOTA]
+                        # while the ANCHOR's per-anchor storage version is
+                        # unchanged and the generation matches -- re-arming
+                        # would re-probe the same missing prefix and miss
+                        # again (the ~13ms WAIT -> RESTORING -> revoked:miss
+                        # -> ADMISSION_DENY -> WAIT churn). Only THIS anchor's
+                        # substantive durability change (write ack promotion /
+                        # restore read-back / durable-belief clear), a change
+                        # of the anchor itself (re-anchored to a different
+                        # node / deleted-anchor self-heal to a new candidate),
+                        # or a generation change overrides the sticky miss
+                        # (re-armable -- this candidate's L3 coverage may
+                        # really cover the prefix now). An unrelated chain's
+                        # write ack advances only the global diagnostic
+                        # counter and never re-arms.
+                        #
+                        # P4-round2 (点3): same-anchor version advance is the
+                        # causal signal of a durability event, but clear
+                        # (durable-belief removed) and evict-rebuild both bump
+                        # the version WITHOUT leaving recoverable L3 material
+                        # -- re-probing those is a structural guaranteed miss
+                        # (the revoked:miss churn). The same-anchor re-arm
+                        # therefore additionally requires the anchor chain to
+                        # now actually hold durable L3 material
+                        # (_miss_rearm_durable_coverage, O(depth) structural
+                        # existence check -- no counters/TTL). Re-anchor and
+                        # generation change keep re-arming unconditionally.
+                        miss_rearm = self._miss_rearm_decision(req)
+                        self._apply_restore_event(
+                            req,
+                            RestoreEvent.ADMISSION_DENY,
+                            rearm_allowed=miss_rearm,
+                        )
                         self._cleanup_not_added_req(req, adder)
                         continue
                     _p2a_trace("[P2A] ts_ms=%d evt=no_token rid=%s res=%s can_run=%d", int(time.time() * 1000), req.rid, res, len(adder.can_run_list))
@@ -5724,10 +8149,21 @@ class Scheduler(
             # This only works for requests that have not started anything.
             # We still need to send something back to TokenizerManager to clean up the state.
             req = self.waiting_queue.pop(i)
+            self._remove_host_alloc_waiter(
+                req.rid,
+                terminal_state="ABORTED",
+                reason="abort_request",
+                req=req,
+            )
             self.beam_coordinator.retire_group(req)
             if self.enable_hicache_storage:
                 # to release prefetch events associated with the request
                 self.tree_cache.release_aborted_request(req.rid)
+                self._release_prefetch_claim(
+                    req,
+                    getattr(req, "hicache_prefetch_active_attempt_id", None),
+                    "abort",
+                )
             self.ipc_channels.send_to_tokenizer.send_output(_make_abort_req(req), req)
             # For disaggregation decode mode, the request in the waiting queue has KV cache allocated.
             if self.disaggregation_mode == DisaggregationMode.DECODE:
@@ -5760,6 +8196,11 @@ class Scheduler(
             ):
                 if self.enable_hicache_storage:
                     self.tree_cache.release_aborted_request(req.rid)
+                    self._release_prefetch_claim(
+                        req,
+                        getattr(req, "hicache_prefetch_active_attempt_id", None),
+                        "abort",
+                    )
                 self.ipc_channels.send_to_tokenizer.send_output(
                     _make_abort_req(req), req
                 )
@@ -5784,6 +8225,11 @@ class Scheduler(
                     logger.debug(f"Abort bootstrap queue request. {req.rid=}")
                     if self.enable_hicache_storage:
                         self.tree_cache.release_aborted_request(req.rid)
+                        self._release_prefetch_claim(
+                            req,
+                            getattr(req, "hicache_prefetch_active_attempt_id", None),
+                            "abort",
+                        )
 
                     if hasattr(req.disagg_kv_sender, "abort"):
                         req.disagg_kv_sender.abort()

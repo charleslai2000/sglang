@@ -13,19 +13,38 @@ import torch
 import triton
 import triton.language as tl
 
+from sglang.kernels.jit.utils import is_arch_support_pdl
 
-def _pdl_supported() -> bool:
-    """Check if Programmatic Dependent Launch is supported (NVIDIA SM >= 90)."""
-    if not torch.cuda.is_available():
+
+def _install_gdc_shims() -> bool:
+    """Make Triton 3.2's AST resolver see safe GDC fallbacks."""
+    cuda_extra = getattr(getattr(tl, "extra", None), "cuda", None)
+    if cuda_extra is None:
         return False
-    try:
-        major, _ = torch.cuda.get_device_capability()
-        return major >= 9
-    except Exception:
-        return False
+    if all(hasattr(cuda_extra, name) for name in ("gdc_wait", "gdc_launch_dependents")):
+        return not getattr(cuda_extra, "__sglang_gdc_shimmed__", False)
+    if not getattr(cuda_extra, "__sglang_gdc_shimmed__", False):
+
+        @triton.jit
+        def _gdc_noop():
+            return
+
+        for name in ("gdc_wait", "gdc_launch_dependents"):
+            if not hasattr(cuda_extra, name):
+                setattr(cuda_extra, name, _gdc_noop)
+        setattr(cuda_extra, "__sglang_gdc_shimmed__", True)
+    return False
 
 
-_ENABLE_PDL = _pdl_supported()
+_GDC_INTRINSICS_AVAILABLE = _install_gdc_shims()
+
+
+def _is_gdc_supported() -> bool:
+    """Return whether this Triton installation can emit CUDA GDC intrinsics."""
+    return is_arch_support_pdl() and _GDC_INTRINSICS_AVAILABLE
+
+
+_ENABLE_PDL = _is_gdc_supported()
 
 
 @triton.jit
@@ -64,17 +83,24 @@ def _fused_qk_rmsnorm_rope_gate_kernel(
     local_head = tl.where(is_k, head - NUM_Q_HEADS, head)
     out_dtype = tl.float16 if FP16 else tl.bfloat16
 
-    if is_k:
-        in_base = k_ptr + token * stride_k_t + local_head * HEAD_DIM
-        w_ptr = k_weight_ptr
-        out_base = k_out_ptr + token * stride_ko_t + local_head * HEAD_DIM
+    if HAS_GATE:
+        q_in_base = q_gate_ptr + token * stride_qg_t + local_head * 2 * HEAD_DIM
     else:
-        if HAS_GATE:
-            in_base = q_gate_ptr + token * stride_qg_t + local_head * 2 * HEAD_DIM
-        else:
-            in_base = q_gate_ptr + token * stride_qg_t + local_head * HEAD_DIM
-        w_ptr = q_weight_ptr
-        out_base = q_out_ptr + token * stride_qo_t + local_head * HEAD_DIM
+        q_in_base = q_gate_ptr + token * stride_qg_t + local_head * HEAD_DIM
+
+    k_in_base = k_ptr + token * stride_k_t + local_head * HEAD_DIM
+    q_out_base = q_out_ptr + token * stride_qo_t + local_head * HEAD_DIM
+    k_out_base = k_out_ptr + token * stride_ko_t + local_head * HEAD_DIM
+    ptr_dtype = tl.pointer_type(out_dtype)
+    in_base = tl.where(
+        is_k, k_in_base.to(tl.int64), q_in_base.to(tl.int64)
+    ).to(ptr_dtype)
+    w_ptr = tl.where(
+        is_k, k_weight_ptr.to(tl.int64), q_weight_ptr.to(tl.int64)
+    ).to(ptr_dtype)
+    out_base = tl.where(
+        is_k, k_out_base.to(tl.int64), q_out_base.to(tl.int64)
+    ).to(ptr_dtype)
 
     # Full load -> RMSNorm variance
     head_offs = tl.arange(0, HEAD_BLOCK)

@@ -1,0 +1,143 @@
+{
+  "format": "p0b.spec-budget-chain.v1",
+  "task_id": "P1-SPEC-BUDGET-CHAIN-20260911-R118",
+  "captured_at": "2026-09-11T23:20:37+08:00",
+  "verdict": "SPEC_BUDGET park + budget-release epoch captured reproducibly (2 independent runs); the parked tail is never re-evaluated by the ready horizon, so the downstream legs (RH wake / L3->L2 stage / host-ready / admission / L2->L1 restore+generation) are NOT reached for the parked rid under the frozen R117 profile.",
+  "profile": {
+    "profile_id": "profile-97ee3d5d3bfdca6237dc746e",
+    "run_id": "run-48806-4187756182262",
+    "scheduler_pid": 48806,
+    "max_running_requests": 1,
+    "max_total_tokens": 65536,
+    "ready_horizon_frontier_n": 8,
+    "ready_host_watermark": [55000, 110000],
+    "speculative_budget_limit_tokens": 39321
+  },
+  "runs": [
+    {
+      "run": "R118-n3",
+      "target": {
+        "rid": "r118-n3-R-T",
+        "lifecycle_key": "r118-n3-R-T:24",
+        "session_id": "r118-s-n3",
+        "session_generation": 24,
+        "enqueue_seq": 88,
+        "prompt_tokens": 27461
+      },
+      "issuer": {
+        "rid": "r118-n3-R-F2",
+        "prefetch_length_tokens": 43027,
+        "prefetch_issued_server_line": 1576552,
+        "prefetch_issued_raw_log_line": 519950
+      },
+      "captured_legs": {
+        "park": {
+          "server_log_line": 1576565,
+          "raw_log_line": 519963,
+          "ts": "2026-09-11T23:18:59+08:00",
+          "rh_pass_seq": 12733744,
+          "fingerprint": "(2, 2, 'NONE', None, True, 'SPEC_BUDGET', 43027, (336, 500, 24, 43027, ('r118-n3-R-F2', 'r118-n3-R-T')), 500, 0, 65536, 43027, 39321, 43027, 'exclude', 'negative_cache')",
+          "negative_cache_blocked": true,
+          "negative_cursor": 43027,
+          "decision": "exclude",
+          "reason": "negative_cache",
+          "restore_state_before": "NONE",
+          "staging_eligible": true,
+          "restore_potential": true,
+          "causal_epoch": "l3_publish=336 host_headroom=500 host_release=24 spec_budget=43027 spec_budget_release_epoch=51",
+          "host_headroom_tokens": 500,
+          "physical_budget_used_tokens": 43027,
+          "speculative_budget_used_tokens": 43027
+        },
+        "budget_release_epoch": {
+          "release_event_server_log_line": 1576609,
+          "release_event": "prefetch_revoke rid=r118-n3-R-F2 terminated=False storage_hit=0 requested=43027 miss_reason=miss",
+          "first_advanced_epoch_server_log_line": 1576615,
+          "raw_log_line": 520013,
+          "spec_budget_release_epoch_before": 51,
+          "spec_budget_release_epoch_after": 52,
+          "speculative_budget_used_tokens_after": 0
+        }
+      },
+      "missing_legs": {
+        "rh_wake_l3_to_l2_stage": null,
+        "host_ready": null,
+        "admission": null,
+        "l2_to_l1_restore_and_generation": null
+      },
+      "post_park_target_preadmission_decisions": 0,
+      "observed_blockers": {
+        "target_re_evaluated_after_park": false,
+        "host_headroom_after_park_tokens": 500,
+        "host_headroom_at_next_pass_with_trigger_tokens": 1652,
+        "target_stage_need_tokens": 27461,
+        "ready_pool_tokens_after_park": 0,
+        "note": "host headroom (500-1652) is far below the 27461 tokens needed to stage the parked target; host KV pool is saturated by the eviction-fill (writeback) working set and never recovers while max_running_requests=1 and the batch sub-requests are parked."
+      }
+    },
+    {
+      "run": "R118-run1",
+      "target": {
+        "rid": "r118-R-T",
+        "session_id": "r118-s",
+        "session_generation": 16,
+        "enqueue_seq": 64
+      },
+      "issuer": {
+        "rid": "r118-R-F1",
+        "prefetch_length_tokens": 42755,
+        "prefetch_issued_server_line": 1094800
+      },
+      "captured_legs": {
+        "park": {
+          "server_log_line": 1094814,
+          "raw_log_line": 38212,
+          "ts": "2026-09-11T23:08:12+08:00",
+          "rh_pass_seq": 11227643,
+          "fingerprint": "(2, 2, 'NONE', None, True, 'SPEC_BUDGET', 42755, (89, 575, 14, 42755, ('r118-R-F1', 'r118-R-T')), 575, 0, 65536, 42755, 39321, 42755, 'exclude', 'negative_cache')",
+          "negative_cache_blocked": true,
+          "negative_cursor": 42755,
+          "decision": "exclude",
+          "reason": "negative_cache",
+          "restore_state_before": "NONE",
+          "staging_eligible": true,
+          "restore_potential": true,
+          "causal_epoch": "l3_publish=89 host_headroom=575 host_release=14 spec_budget=42755 spec_budget_release_epoch=35",
+          "host_headroom_tokens": 575,
+          "physical_budget_used_tokens": 42755,
+          "speculative_budget_used_tokens": 42755
+        },
+        "budget_release_epoch": {
+          "release_event_server_log_line": 1094871,
+          "release_event": "prefetch_issued rid=r118-R-F1 prefetch_length=42755 (attempt r118-R-F1:prefetch:2)",
+          "first_advanced_epoch_server_log_line": 1094873,
+          "raw_log_line": 38271,
+          "spec_budget_release_epoch_before": 35,
+          "spec_budget_release_epoch_after": 36,
+          "speculative_budget_used_tokens_after": 0
+        }
+      },
+      "missing_legs": {
+        "rh_wake_l3_to_l2_stage": null,
+        "host_ready": null,
+        "admission": null,
+        "l2_to_l1_restore_and_generation": null
+      },
+      "post_park_target_preadmission_decisions": 0,
+      "observed_blockers": {
+        "target_re_evaluated_after_park": false,
+        "host_headroom_after_park_tokens": 575,
+        "note": "same shape as R118-n3; parked rid r118-R-T had zero preadmission decisions after the park until the client aborted at 23:09:04."
+      }
+    }
+  ],
+  "identity_consistency": {
+    "park_and_release_epoch": "same rid in both legs within each run (r118-n3-R-T / r118-R-T)",
+    "downstream_legs": "not captured; parked rid never re-enters the ready-horizon frontier"
+  },
+  "classification": {
+    "park_leg": "verified product behavior",
+    "release_epoch_leg": "verified product behavior",
+    "downstream_legs": "missing evidence; observed blocking condition reported, root cause left to owner"
+  }
+}

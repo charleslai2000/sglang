@@ -1679,6 +1679,15 @@ def _apply_stack_result(
 ) -> None:
     cache.host_pool_group = result.host_pool_group
     cache.cache_controller = result.cache_controller
+    # Keep controller-owned direct frees visible to the cache-owned
+    # allocability generation without moving wake authority into the
+    # controller or scheduler.
+    result.cache_controller.host_allocability_change_fn = (
+        cache._bump_host_allocability
+    )
+    result.host_pool_group.host_allocability_change_fn = (
+        cache._bump_host_allocability
+    )
 
     for ct, host_pool in result.component_host_pools.items():
         cache_attr, component_attr = _COMPONENT_HOST_ATTR[ct]

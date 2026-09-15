@@ -25,6 +25,7 @@ absent), the same pattern as test_drain_reentry.py / test_storage_regression.py.
 
 import os
 import sys
+import threading
 import time
 import unittest
 from array import array as _array
@@ -100,6 +101,7 @@ class _BudgetController:
         self.prefetch_speculative_capacity_limit = int(spec_fraction * capacity)
         self.prefetch_tokens_occupied = 0
         self.inflight_speculative_tokens = 0
+        self.speculative_release_epoch = 0
         self.issued = []
         self.mem_pool_host = SimpleNamespace(
             size=capacity,
@@ -132,7 +134,15 @@ class _BudgetController:
     def append_host_mem_release(self, host_indices=None, extra_pools=None):
         pass
 
-    def prefetch(self, req_id, prefetch_key, last_hash, prefix_keys, extra_pools=None):
+    def prefetch(
+        self,
+        req_id,
+        prefetch_key,
+        last_hash,
+        prefix_keys,
+        extra_pools=None,
+        trace_context=None,
+    ):
         self.issued.append(req_id)
         return SimpleNamespace(
             request_id=req_id,
@@ -161,6 +171,10 @@ def _make_budget_cache(*, ready_horizon=True, controller=None):
     cache = h._make_cache()
     cache.enable_ready_horizon = ready_horizon
     cache._prefetch_reservations = {}
+    cache._t38c_node_context_index = {}
+    cache._t38c_request_contexts = {}
+    cache._t38c_residency_lock = threading.RLock()
+    cache._t38c_residency_queue_blocked = set()
     # The storage-regression harness predates the outcome-counters schema;
     # the drain's below-threshold revoke feeds them.
     cache._prefetch_outcome_stats = {
@@ -284,29 +298,36 @@ class PrefetchReservationExactlyOnceTests(unittest.TestCase):
         cache = _make_budget_cache()
         cache.reserve_prefetch("r1", 600, _kind().SPECULATIVE)
         self.assertEqual(cache.cache_controller.inflight_speculative_tokens, 600)
+        self.assertEqual(cache.cache_controller.speculative_release_epoch, 0)
         cache.release_prefetch("r1", "finalize")
         self.assertEqual(cache.cache_controller.inflight_speculative_tokens, 0)
+        self.assertEqual(cache.cache_controller.speculative_release_epoch, 1)
         self.assertEqual(cache._prefetch_reservations, {})
 
     def test_double_release_idempotent(self):
         cache = _make_budget_cache()
         cache.reserve_prefetch("r1", 600, _kind().SPECULATIVE)
         cache.release_prefetch("r1", "abort")
+        self.assertEqual(cache.cache_controller.speculative_release_epoch, 1)
         cache.release_prefetch("r1", "revoke")  # second release: no-op
         self.assertEqual(cache.cache_controller.inflight_speculative_tokens, 0)
+        self.assertEqual(cache.cache_controller.speculative_release_epoch, 1)
         self.assertEqual(cache._prefetch_reservations, {})
 
     def test_release_without_reservation_noop(self):
         cache = _make_budget_cache()
         cache.release_prefetch("never-reserved", "detach")  # no exception
         self.assertEqual(cache.cache_controller.inflight_speculative_tokens, 0)
+        self.assertEqual(cache.cache_controller.speculative_release_epoch, 0)
 
     def test_demand_reservation_does_not_touch_spec_counter(self):
         cache = _make_budget_cache()
+        cache.cache_controller.speculative_release_epoch = 7
         cache.reserve_prefetch("r1", 600, _kind().DEMAND)
         self.assertEqual(cache.cache_controller.inflight_speculative_tokens, 0)
         cache.release_prefetch("r1", "finalize")
         self.assertEqual(cache.cache_controller.inflight_speculative_tokens, 0)
+        self.assertEqual(cache.cache_controller.speculative_release_epoch, 7)
         self.assertEqual(cache._prefetch_reservations, {})
 
     def test_revoke_path_releases_speculative_reservation(self):
@@ -608,8 +629,8 @@ class ReadyHorizonSchedulerWiringTests(unittest.TestCase):
                 tree_cache, enable_ready_horizon=enable_ready_horizon
             )
             scheduler.waiting_queue = [self._req(wait_reason)]
-            scheduler._prefetch_kvcache = (
-                lambda r, *, demand_restore=False: issued.append(demand_restore)
+            scheduler._prefetch_kvcache = lambda r, *, origin, demand_restore=False: (
+                issued.append(demand_restore)
             )
             scheduler._reconcile_restore_states()
             return issued

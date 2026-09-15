@@ -27,8 +27,9 @@ NOT an epoch_sig + cooldown patch):
     l3_publish advance (or identity/fuse) clears it (the e7 1289-issue /
     9.04s spin regression).
   * Epoch subscription: NO_L3 -> l3_publish, NO_HEADROOM ->
-    host_headroom, SPEC_BUDGET -> spec_budget. A non-subscribed epoch
-    advancing does NOT clear the park.
+    host_release (Fix A: the MONOTONIC capacity-release counter, not the
+    transient available level), SPEC_BUDGET -> spec_budget. A
+    non-subscribed epoch advancing does NOT clear the park.
   * At most one staging attempt per rid per causal epoch.
   * Causal epochs gate the refill: only L3 published / host pages
     released / budget released / frontier changed fire an event; the
@@ -45,8 +46,12 @@ from types import SimpleNamespace
 from unittest import mock
 
 import sglang.srt.managers.scheduler as scheduler_mod
+from sglang.srt.disaggregation.utils import DisaggregationMode
 from sglang.srt.managers.scheduler import Scheduler
 from sglang.srt.managers.scheduler_components.hicache_restore import (
+    HiCachePrefetchIssueStatus,
+    HiCachePrefetchOrigin,
+    PrefetchIssueResult,
     RestoreState,
     RestoreWaitReason,
 )
@@ -76,17 +81,32 @@ POOL_TOKENS = 2 * 21_392
 PREFIX_LEN = 100  # default identity fingerprint in the test views
 
 
-def _req(rid, state=None, reason=None, host_hit=0, generation=None):
-    return SimpleNamespace(
+def _req(rid, state=None, reason=None, host_hit=0, generation=None, anchor=1):
+    req = SimpleNamespace(
         rid=rid,
-        last_host_node=1,
+        last_node=anchor,
+        last_host_node=anchor,
         full_untruncated_fill_ids=[1] * PREFIX_LEN,
+        output_ids=[],
+        extra_key=None,
+        cache_salt=None,
         hicache_restore_state=state,
         hicache_restore_wait_reason=reason,
         hicache_restore_state_ts=0.0,
         host_hit_length=host_hit,
         session_generation=generation,
+        retraction_count=0,
+        hicache_prefetch_active_attempt_id=None,
+        to_finish=None,
     )
+
+    def init_next_round_input(tree_cache, cow_mamba=None):
+        req.match_calls = getattr(req, "match_calls", 0) + 1
+        req.last_node = req.last_host_node = anchor
+        req.last_match_cow_mamba = cow_mamba
+
+    req.init_next_round_input = init_next_round_input
+    return req
 
 
 def _view(
@@ -137,6 +157,8 @@ def _neg(
     fuse_expiry=0.0,
     prefix_len=PREFIX_LEN,
     generation=None,
+    anchor=None,
+    release_epoch=0,
 ):
     """A negative-cache park input; rid is cosmetic (dict key carries it)."""
     return NegativeCacheEntry(
@@ -145,6 +167,8 @@ def _neg(
         fuse_expiry=fuse_expiry,
         prefix_len=prefix_len,
         generation=generation,
+        anchor=anchor,
+        release_epoch_cursor=release_epoch,
     )
 
 
@@ -159,8 +183,10 @@ class _Cc:
         physical_limit=10**9,
         available=10**9,
         size=10**9,
+        spec_release_epoch=0,
     ):
         self.inflight_speculative_tokens = spec_inflight
+        self.speculative_release_epoch = spec_release_epoch
         self.prefetch_speculative_capacity_limit = spec_limit
         self.prefetch_tokens_occupied = physical_occupied
         self.prefetch_capacity_limit = physical_limit
@@ -179,16 +205,24 @@ class _Cc:
         )
 
 
-def _tree(ongoing=(), l3_publish=0):
+def _tree(ongoing=(), l3_publish=0, anchor_versions=None, anchor_exists=True):
     terminal: dict = {}
+    _av = anchor_versions if anchor_versions is not None else {}
+
+    def _anchor_version(node_id):
+        if not anchor_exists:
+            return 0
+        return _av.get(node_id, 0)
+
     tree = SimpleNamespace(
         ongoing_prefetch=set(ongoing),
         has_restore_potential=lambda *a, **k: True,
         l3_publish_epoch=lambda: l3_publish,
+        anchor_storage_version=_anchor_version,
         _storage_prefetch_terminal=terminal,
         # stale `_final_storage_survivability` (P3 instrumentation): the
         # recompute log reads these off the tree cache.
-        node_exists=lambda *a, **k: False,
+        node_exists=lambda *a, **k: anchor_exists,
         is_l3_durable=lambda *a, **k: False,
     )
     # Mirror the real unified_radix_cache terminal-outcome methods so the
@@ -210,12 +244,16 @@ def _epochs(
     headroom=10**9,
     spec=0,
     frontier=("r1",),
+    release=0,
+    spec_release=0,
 ):
     return CausalEpochs(
         l3_publish=l3,
         host_headroom=headroom,
         spec_budget=spec,
         waiting_frontier=tuple(frontier),
+        host_release=release,
+        spec_budget_release_epoch=spec_release,
     )
 
 
@@ -356,42 +394,122 @@ class NegativeCacheTests(unittest.TestCase):
     identity changed / fuse expired). Nothing else -- next pass, READY pool
     change, running batch change -- clears it."""
 
-    def _cleared(self, entry, view=None, epochs=None, now=10.0):
+    def _cleared(self, entry, view=None, epochs=None, now=10.0, anchor_version=None):
         view = view or _view("r1", NONE, eligible=True)
         return _policy().entry_cleared(
-            entry, view, epochs or _epochs(frontier=("r1",)), now
+            entry,
+            view,
+            epochs or _epochs(frontier=("r1",)),
+            now,
+            anchor_version=anchor_version,
+            anchor=view.req.last_host_node,
         )
 
     def test_same_cursor_not_cleared(self):
-        # Park at l3_publish=5; the cursors are unchanged (5): the miss is
-        # deterministic and the L3 coverage has not advanced.
-        entry = _neg(reason=NO_L3, cursor=5)
-        epochs = _epochs(l3=5, frontier=("r1",))
-        self.assertFalse(self._cleared(entry, epochs=epochs))
+        # Park at the anchor's per-anchor version 5; the same anchor's
+        # version is unchanged (5): the miss is deterministic and THIS
+        # anchor's L3 coverage has not advanced.
+        entry = _neg(reason=NO_L3, cursor=5, anchor=1)
+        epochs = _epochs(frontier=("r1",))
+        self.assertFalse(
+            self._cleared(entry, epochs=epochs, anchor_version=5)
+        )
 
-    def test_l3_publish_advance_clears_no_l3(self):
-        entry = _neg(reason=NO_L3, cursor=5)
-        epochs = _epochs(l3=6, frontier=("r1",))
-        self.assertTrue(self._cleared(entry, epochs=epochs))
+    def test_anchor_version_advance_clears_no_l3(self):
+        # The SAME anchor's per-anchor storage version advanced past the
+        # decline cursor: THIS anchor's L3 coverage genuinely changed (a
+        # write ack / restore read-back on its own chain), so the park
+        # clears.
+        entry = _neg(reason=NO_L3, cursor=5, anchor=1)
+        epochs = _epochs(frontier=("r1",))
+        self.assertTrue(
+            self._cleared(entry, epochs=epochs, anchor_version=6)
+        )
+
+    def test_global_l3_publish_advance_does_not_clear_no_l3(self):
+        # phase2-peranchor: the GLOBAL l3_publish diagnostic epoch advanced
+        # (an unrelated chain wrote) but this anchor's per-anchor version is
+        # unchanged -- the park must NOT clear. This is the frozen root
+        # cause regression guard: previously the global advance re-armed the
+        # park (the obsolesced-agent churn).
+        entry = _neg(reason=NO_L3, cursor=5, anchor=1)
+        epochs = _epochs(l3=99, frontier=("r1",))
+        self.assertFalse(
+            self._cleared(entry, epochs=epochs, anchor_version=5)
+        )
+
+    def test_reanchored_to_different_anchor_clears_no_l3(self):
+        # The request now anchors a DIFFERENT node (miss proven on anchor 1,
+        # now anchored on 2): a new candidate -- the old negative evidence
+        # does not apply.
+        entry = _neg(reason=NO_L3, cursor=5, anchor=1)
+        epochs = _epochs(frontier=("r1",))
+        view = _view("r1", NONE, eligible=True, req=_req("r1", anchor=2))
+        self.assertTrue(
+            self._cleared(
+                entry,
+                view=view,
+                epochs=epochs,
+                anchor_version=5,
+            )
+        )
+
+    def test_no_anchor_context_never_cleared_on_epoch(self):
+        # No anchor context on the park (an old-style entry with anchor=None)
+        # but the request has an anchor now: conservative -- it is not
+        # re-probed by the global epoch either (phase2-peranchor contract:
+        # the global diagnostic counter never clears a NO_L3 park).
+        entry = _neg(reason=NO_L3, cursor=5, anchor=None)
+        epochs = _epochs(l3=99, frontier=("r1",))
+        self.assertFalse(
+            self._cleared(entry, epochs=epochs, anchor_version=7)
+        )
 
     def test_no_l3_not_cleared_by_other_epochs(self):
         # A host-headroom or budget release is NOT causal for an L3 miss:
         # the full prefix is still not in L3.
-        entry = _neg(reason=NO_L3, cursor=5)
-        epochs = _epochs(l3=5, headroom=10**9 + 100, spec=0, frontier=("r1",))
-        self.assertFalse(self._cleared(entry, epochs=epochs))
-
-    def test_no_headroom_cleared_only_by_host_headroom(self):
-        # Parked at host_headroom=100. An L3 publish advance does not free
-        # host pages: the headroom gate still fails.
-        entry = _neg(reason=NO_HEADROOM, cursor=100)
-        self.assertFalse(self._cleared(entry, epochs=_epochs(l3=500, headroom=100)))
-        # Host pages released (150 > 100): the headroom gate can now pass.
-        self.assertTrue(self._cleared(entry, epochs=_epochs(headroom=150)))
-        # Budget release is not causal for headroom.
+        entry = _neg(reason=NO_L3, cursor=5, anchor=1)
+        epochs = _epochs(headroom=10**9 + 100, spec=0, frontier=("r1",))
         self.assertFalse(
-            self._cleared(entry, epochs=_epochs(headroom=100, spec=0))
+            self._cleared(entry, epochs=epochs, anchor_version=5)
         )
+
+    def test_no_headroom_cleared_only_by_host_release(self):
+        # Fix A: NO_HEADROOM subscribes to the MONOTONIC host_release
+        # counter, NOT the transient available level. The park is recorded
+        # at the release counter cursor observed at the decline.
+        entry = _neg(reason=NO_HEADROOM, cursor=3)
+        # An available-level rise is NOT causal: it is the transient signal
+        # that flips 0->100->0 under a full working set and can never
+        # sustain past the decline cursor (the B-run permanent freeze).
+        self.assertFalse(
+            self._cleared(entry, epochs=_epochs(l3=0, headroom=150, release=3))
+        )
+        # An L3 publish advance does not free the host pages: not causal.
+        self.assertFalse(self._cleared(entry, epochs=_epochs(l3=500, release=3)))
+        # Budget release is not causal for headroom.
+        self.assertFalse(self._cleared(entry, epochs=_epochs(release=3, spec=0)))
+        # A genuine host-capacity-releasing event advanced the release
+        # counter past the decline cursor: the park clears.
+        self.assertTrue(self._cleared(entry, epochs=_epochs(release=4)))
+        # Same level, same counter: still parked.
+        self.assertFalse(self._cleared(entry, epochs=_epochs(headroom=150, release=3)))
+
+    def test_no_headroom_not_cleared_by_level_only_when_release_stalls(self):
+        # The B-run freeze shape: headroom oscillates (0 -> 100 -> 0) with
+        # no releasing event. The available LEVEL alone must never clear the
+        # park, exactly as it never did in the OLD host_headroom-sample
+        # subscription (the transient rise to 100 recorded a cursor that
+        # the next alloc re-crossed before the refill ever ran).
+        entry = _neg(reason=NO_HEADROOM, cursor=7)
+        for level in (80, 100, 0, 100, 0):
+            self.assertFalse(
+                self._cleared(
+                    entry, epochs=_epochs(headroom=level, release=7, spec=0)
+                )
+            )
+        # The FIRST genuine release (counter 8) clears the park.
+        self.assertTrue(self._cleared(entry, epochs=_epochs(release=8)))
 
     def test_spec_budget_cleared_only_by_budget_release(self):
         # Parked when inflight was 20 (the budget was exhausted). An L3
@@ -405,6 +523,22 @@ class NegativeCacheTests(unittest.TestCase):
         self.assertTrue(self._cleared(entry, epochs=_epochs(spec=0)))
         # Inflight still high / growing is not a release.
         self.assertFalse(self._cleared(entry, epochs=_epochs(spec=25)))
+
+        # A literal zero cursor must remain strict: without a monotonic
+        # release event, 0 -> 0 is not a wake.
+        zero_entry = _neg(reason=SPEC_BUDGET, cursor=0)
+        self.assertFalse(self._cleared(zero_entry, epochs=_epochs(spec=0)))
+        self.assertTrue(
+            self._cleared(zero_entry, epochs=_epochs(spec=0, spec_release=1))
+        )
+
+    def test_spec_budget_release_event_clears_unsampled_aba(self):
+        # The level returns to its original value between scheduler snapshots;
+        # the monotonic release event is the only observable causal signal.
+        entry = _neg(reason=SPEC_BUDGET, cursor=0)
+        self.assertTrue(
+            self._cleared(entry, epochs=_epochs(spec=0, spec_release=1))
+        )
 
     def test_prefix_change_clears_any_park(self):
         # A new question deserves a new probe: the old negative judgment
@@ -422,10 +556,22 @@ class NegativeCacheTests(unittest.TestCase):
         # The fuse is NOT the retry cadence (a deterministic miss stays a
         # miss no matter how long you wait -- time alone never clears the
         # park). It only bounds a pathological repeat-fail loop once the
-        # causal condition is otherwise met.
-        entry = _neg(reason=NO_L3, cursor=5, fuse_expiry=20.0)
-        self.assertFalse(self._cleared(entry, epochs=_epochs(l3=8), now=10.0))
-        self.assertTrue(self._cleared(entry, epochs=_epochs(l3=8), now=25.0))
+        # causal condition is otherwise met. Here the causal condition is the
+        # SAME anchor's version advancing (5 -> 8), not the global epoch.
+        entry = _neg(reason=NO_L3, cursor=5, fuse_expiry=20.0, anchor=1)
+        # Fuse not expired: not cleared even with the anchor version advanced.
+        self.assertFalse(
+            self._cleared(entry, epochs=_epochs(), now=10.0, anchor_version=8)
+        )
+        # Fuse expired AND the anchor's version advanced: cleared.
+        self.assertTrue(
+            self._cleared(entry, epochs=_epochs(), now=25.0, anchor_version=8)
+        )
+        # Fuse expired but the anchor's version is UNCHANGED (5): still held
+        # -- the deterministic miss is not transient, time alone never clears.
+        self.assertFalse(
+            self._cleared(entry, epochs=_epochs(), now=25.0, anchor_version=5)
+        )
 
     def test_subscribe_decline_no_entry_eligible(self):
         # No park = never attempted = eligible for the one fresh probe.
@@ -434,16 +580,43 @@ class NegativeCacheTests(unittest.TestCase):
         )
 
     def test_staging_candidates_excludes_parked_rid(self):
+        # The rid is parked on NO_L3 at anchor 1 version 5; the tree's anchor
+        # 1 version is still 5, so it stays parked (not re-probed) -- even
+        # though the global l3_publish epoch is high.
         views = _views(("r1", NONE, None, 0, 0, True))
-        negs = {"r1": _neg(reason=NO_L3, cursor=5)}
-        epochs = _epochs(l3=5, frontier=("r1",))
+        negs = {"r1": _neg(reason=NO_L3, cursor=5, anchor=1)}
+        epochs = _epochs(l3=99, frontier=("r1",))
         got = [
             v.rid
             for v in _policy().staging_candidates(
-                views, tree=_tree(), cc=_Cc(), negatives=negs, epochs=epochs, now=0.0
+                views,
+                tree=_tree(anchor_versions={1: 5}),
+                cc=_Cc(),
+                negatives=negs,
+                epochs=epochs,
+                now=0.0,
             )
         ]
         self.assertEqual(got, [])
+
+    def test_staging_candidates_includes_rearmed_rid(self):
+        # The SAME anchor's version advanced to 6 past the decline cursor: the
+        # park clears and the rid is re-eligible for its one fresh probe.
+        views = _views(("r1", NONE, None, 0, 0, True))
+        negs = {"r1": _neg(reason=NO_L3, cursor=5, anchor=1)}
+        epochs = _epochs(frontier=("r1",))
+        got = [
+            v.rid
+            for v in _policy().staging_candidates(
+                views,
+                tree=_tree(anchor_versions={1: 6}),
+                cc=_Cc(),
+                negatives=negs,
+                epochs=epochs,
+                now=0.0,
+            )
+        ]
+        self.assertEqual(got, ["r1"])
 
 
 class WatermarkMathTests(unittest.TestCase):
@@ -590,8 +763,23 @@ class CausalEpochEventTests(unittest.TestCase):
     deltas (L3 published / host pages released / budget released / frontier
     changed) fire; the refill's own issue traffic never does."""
 
-    def _epoch(self, l3=0, headroom=1000, spec=0, frontier=("r1",)):
-        return CausalEpochs(l3_publish=l3, host_headroom=headroom, spec_budget=spec, waiting_frontier=frontier)
+    def _epoch(
+        self,
+        l3=0,
+        headroom=1000,
+        spec=0,
+        frontier=("r1",),
+        release=0,
+        spec_release=0,
+    ):
+        return CausalEpochs(
+            l3_publish=l3,
+            host_headroom=headroom,
+            spec_budget=spec,
+            waiting_frontier=frontier,
+            host_release=release,
+            spec_budget_release_epoch=spec_release,
+        )
 
     def test_first_pass_is_event(self):
         self.assertTrue(_policy().epoch_event(None, self._epoch()))
@@ -616,6 +804,33 @@ class CausalEpochEventTests(unittest.TestCase):
         prev = self._epoch(headroom=900)
         after = self._epoch(headroom=1000)
         self.assertTrue(_policy().epoch_event(prev, after))
+
+    def test_host_release_counter_advance_is_event(self):
+        # Fix A: a genuine capacity-releasing event (host residency freed,
+        # ready eviction, working-state release) -- even at a FLAT
+        # available level (the freed pages were immediately re-consumed by
+        # the working set) -- advances the release counter and must fire
+        # the refill event gate.
+        prev = self._epoch(headroom=100, release=0)
+        after = self._epoch(headroom=100, release=1)
+        self.assertTrue(_policy().epoch_event(prev, after))
+
+    def test_host_release_counter_stall_releases_only_once(self):
+        # The B-run freeze shape quantized: available bounces 0->100->0 at
+        # a STALLED release counter. The event gate may fire on a level
+        # rise (that is a legitimate refill-check trigger), but the PARK
+        # (test_no_headroom_* below) is what must not clear: it subscribes
+        # to the MONOTONIC release counter, so a release epoch advance
+        # (0 -> 1) fires exactly once -- the next identical snapshot does
+        # not fire again (no per-pass spin from a counter that never
+        # recedes).
+        prev = self._epoch(headroom=0, release=0)
+        self.assertTrue(_policy().epoch_event(prev, self._epoch(headroom=0, release=1)))
+        # Same release epoch, same level: no NEW event (the refill already
+        # ran on the 0->1 advance).
+        self.assertFalse(
+            _policy().epoch_event(self._epoch(headroom=0, release=1), self._epoch(headroom=0, release=1))
+        )
 
     def test_l3_published_is_event(self):
         prev = self._epoch(l3=0)
@@ -687,6 +902,7 @@ def _pass_scheduler(
     enable=True,
     tree_cache=None,
     l3_publish=0,
+    anchor_versions=None,
 ):
     scheduler = Scheduler.__new__(Scheduler)
     scheduler.server_args = SimpleNamespace(
@@ -705,7 +921,9 @@ def _pass_scheduler(
     scheduler.enable_ready_horizon = enable
     scheduler.init_ready_horizon()
     scheduler.waiting_queue = list(queue)
-    scheduler.tree_cache = tree_cache or _tree(l3_publish=l3_publish)
+    scheduler.tree_cache = tree_cache or _tree(
+        l3_publish=l3_publish, anchor_versions=anchor_versions
+    )
     scheduler.tree_cache.cache_controller = cc or _Cc()
     scheduler.tree_cache.staged_prefetch_tokens = lambda rid: 0
     scheduler.tree_cache.peek_prefetch_loaded_tokens = lambda rid: 0
@@ -718,13 +936,25 @@ def _pass_scheduler(
         lambda *a, **k: scheduler.evicted.append(a) or 0
     )
 
-    def _issue(req, *, demand_restore=False):
+    def _issue(req, *, origin, demand_restore=False, prepared_match=None):
         # Mirror the real T1 wiring: a successful issue transitions the
         # request to RESTORING, so it leaves the candidate set.
+        attempt_id = f"{req.rid}:prefetch:1"
+        req.hicache_prefetch_active_attempt_id = attempt_id
         req.hicache_restore_state = RESTORING
         scheduler.issued.append(req.rid)
+        scheduler.issue_origins.append(origin)
+        return PrefetchIssueResult(
+            status=PrefetchIssueResult.ISSUED,
+            attempt_id=attempt_id,
+            origin=origin,
+            reason="issued",
+            state_before=NONE.name,
+            state_after=RESTORING.name,
+        )
 
     scheduler._prefetch_kvcache = _issue
+    scheduler.issue_origins = []
     return scheduler
 
 
@@ -734,6 +964,12 @@ class ReadyHorizonPassTests(unittest.TestCase):
 
     def _run(self, scheduler):
         scheduler._ready_horizon_pass()
+
+    def _clock_patch(self):
+        clock = _FakeClock()
+        return mock.patch(
+            "sglang.srt.managers.scheduler.time.perf_counter", new=clock
+        ), clock
 
     def test_pass_issues_candidates_via_prefetch_kvcache(self):
         scheduler = _pass_scheduler(
@@ -748,6 +984,7 @@ class ReadyHorizonPassTests(unittest.TestCase):
         # staged through the real issue path (speculative).
         self.assertEqual(scheduler.issued, ["r1", "r2"])
 
+
     def test_no_event_epoch_no_refill(self):
         # A second pass with an unchanged causal epoch (and the refill just
         # run) issues nothing: M3's no-poll guarantee at the pass level. A
@@ -758,6 +995,63 @@ class ReadyHorizonPassTests(unittest.TestCase):
         self._run(scheduler)
         self.assertEqual(scheduler.issued, ["r1"])
 
+    def test_active_prefetch_claim_blocks_duplicate_and_classifies_retry(self):
+        scheduler = Scheduler.__new__(Scheduler)
+        req = SimpleNamespace(
+            rid="r1",
+            hicache_prefetch_attempt_seq=0,
+            hicache_prefetch_active_attempt_id=None,
+            hicache_prefetch_active_origin=None,
+            hicache_prefetch_last_attempt_id=None,
+            hicache_prefetch_last_origin=None,
+        )
+        impl_calls = []
+
+        def impl(req, *, origin, demand_restore=False):
+            impl_calls.append((origin, demand_restore))
+            return PrefetchIssueResult(
+                status=HiCachePrefetchIssueStatus.ISSUED,
+                attempt_id=f"{req.rid}:prefetch:1",
+                origin=origin,
+                reason="issued",
+                state_before=NONE.name,
+                state_after=NONE.name,
+            )
+
+        scheduler._prefetch_kvcache_impl = impl
+
+        first = scheduler._prefetch_kvcache(
+            req, origin=HiCachePrefetchOrigin.READY_HORIZON
+        )
+        second = scheduler._prefetch_kvcache(
+            req, origin=HiCachePrefetchOrigin.READY_HORIZON
+        )
+
+        self.assertIsInstance(first, PrefetchIssueResult)
+        self.assertIs(first.status, HiCachePrefetchIssueStatus.ISSUED)
+        self.assertIsInstance(second, PrefetchIssueResult)
+        self.assertIs(second.status, HiCachePrefetchIssueStatus.SKIPPED_ACTIVE)
+        self.assertEqual(
+            impl_calls, [(HiCachePrefetchOrigin.READY_HORIZON, False)]
+        )
+
+        scheduler._release_prefetch_claim(
+            req, req.hicache_prefetch_active_attempt_id, "test_retry"
+        )
+        retry = scheduler._prefetch_kvcache(
+            req,
+            origin=HiCachePrefetchOrigin.DEMAND_RETRY,
+            demand_restore=True,
+        )
+        self.assertIsInstance(retry, PrefetchIssueResult)
+        self.assertIs(retry.status, HiCachePrefetchIssueStatus.ISSUED)
+        self.assertEqual(
+            impl_calls,
+            [
+                (HiCachePrefetchOrigin.READY_HORIZON, False),
+                (HiCachePrefetchOrigin.DEMAND_RETRY, True),
+            ],
+        )
     def test_causal_epoch_change_triggers_new_refill(self):
         # The frontier changed (a new request entered): a causal event.
         # The next pass re-checks and issues the new candidate.
@@ -781,10 +1075,312 @@ class ReadyHorizonPassTests(unittest.TestCase):
         self.assertEqual(scheduler.issued, [])
         self.assertEqual(scheduler.evicted, [])
 
+    def test_spec_budget_park_uses_post_issue_cursor_and_wakes_on_release(self):
+        # The first issue fills the speculative budget. The un-tried tail
+        # must park at the observed post-issue counter, not the pass's
+        # pre-issue snapshot (which is zero in this shape).
+        from sglang.srt.mem_cache.unified_radix_cache import (
+            PrefetchKind,
+            UnifiedRadixCache,
+        )
+
+        patch, clock = self._clock_patch()
+        with patch:
+            cc = _Cc(spec_limit=CHAIN_TOKENS)
+            cache = object.__new__(UnifiedRadixCache)
+            cache._prefetch_reservations = {}
+            cache.cache_controller = cc
+            scheduler = _pass_scheduler(
+                queue=[_req("r1", NONE), _req("r2", NONE)], cc=cc
+            )
+
+            def issue(req, *, origin, demand_restore=False, prepared_match=None):
+                cache.reserve_prefetch(
+                    req.rid, CHAIN_TOKENS, PrefetchKind.SPECULATIVE
+                )
+                req.hicache_restore_state = RESTORING
+                scheduler.issued.append(req.rid)
+                return PrefetchIssueResult(
+                    status=PrefetchIssueResult.ISSUED,
+                    attempt_id=f"{req.rid}:prefetch:1",
+                    origin=origin,
+                    reason="issued",
+                    state_before=NONE.name,
+                    state_after=RESTORING.name,
+                )
+
+            scheduler._prefetch_kvcache = issue
+            scheduler._ready_horizon_pass()
+            self.assertEqual(scheduler.issued, ["r1"])
+            entry = scheduler._ready_horizon_negatives["r2"]
+            self.assertEqual(entry.reason, SPEC_BUDGET)
+            self.assertEqual(entry.epoch_cursor, CHAIN_TOKENS)
+            self.assertEqual(entry.release_epoch_cursor, 0)
+
+            # A budget release below the parked cursor is causal and wakes
+            # the candidate once the safety fuse has elapsed.
+            cache.release_prefetch("r1", "test_release")
+            self.assertEqual(cc.inflight_speculative_tokens, 0)
+            self.assertEqual(cc.speculative_release_epoch, 1)
+            clock.advance(10.0)
+            scheduler._ready_horizon_pass()
+            self.assertEqual(scheduler.issued, ["r1", "r2"])
+            cache.release_prefetch("r2", "test_cleanup")
+            self.assertEqual(cc.speculative_release_epoch, 2)
+            self.assertEqual(cache._prefetch_reservations, {})
+
+    def test_spec_budget_park_wakes_after_unsampled_aba_release(self):
+        # Use the production reservation/release helper so this regression
+        # observes the real monotonic release event, not a test-only counter
+        # mutation.
+        from sglang.srt.mem_cache.unified_radix_cache import (
+            PrefetchKind,
+            UnifiedRadixCache,
+        )
+
+        patch, clock = self._clock_patch()
+        with patch:
+            cc = _Cc(spec_limit=CHAIN_TOKENS)
+            cache = object.__new__(UnifiedRadixCache)
+            cache._prefetch_reservations = {}
+            cache.cache_controller = cc
+            scheduler = _pass_scheduler(
+                queue=[_req("r1", NONE), _req("r2", NONE)], cc=cc
+            )
+
+            def issue(req, *, origin, demand_restore=False, prepared_match=None):
+                if req.rid == "r1":
+                    cache.reserve_prefetch(
+                        req.rid, CHAIN_TOKENS, PrefetchKind.SPECULATIVE
+                    )
+                req.hicache_restore_state = RESTORING
+                state_after = RESTORING.name
+                scheduler.issued.append(req.rid)
+                return PrefetchIssueResult(
+                    status=PrefetchIssueResult.ISSUED,
+                    attempt_id=f"{req.rid}:prefetch:1",
+                    origin=origin,
+                    reason="issued",
+                    state_before=NONE.name,
+                    state_after=state_after,
+                )
+
+            scheduler._prefetch_kvcache = issue
+            scheduler._ready_horizon_pass()
+            self.assertEqual(scheduler.issued, ["r1"])
+            self.assertEqual(
+                scheduler._ready_horizon_negatives["r2"].epoch_cursor,
+                CHAIN_TOKENS,
+            )
+            self.assertEqual(cc.speculative_release_epoch, 0)
+
+            # Complete a 0 -> N -> 0 cycle between scheduler snapshots. Both
+            # releases use the production helper, so the scheduler sees only
+            # the monotonic event and never samples the transient levels.
+            cache.release_prefetch("r1", "test_release")
+            cache.reserve_prefetch(
+                "replacement", CHAIN_TOKENS, PrefetchKind.SPECULATIVE
+            )
+            cache.release_prefetch("replacement", "test_replacement_release")
+            self.assertEqual(cc.inflight_speculative_tokens, 0)
+            self.assertEqual(cc.speculative_release_epoch, 2)
+
+            clock.advance(10.0)
+            scheduler._ready_horizon_pass()
+            self.assertEqual(scheduler.issued, ["r1", "r2"])
+
+            # The same release event cannot trigger a second issue on the
+            # next pass. A later unrelated frontier event must also leave the
+            # already-restoring request alone.
+            self.assertEqual(
+                scheduler.waiting_queue[1].hicache_restore_state, RESTORING
+            )
+            scheduler.waiting_queue.append(_req("r3", NONE))
+            scheduler._ready_horizon_pass()
+            self.assertEqual(scheduler.issued[:2], ["r1", "r2"])
+            self.assertEqual(scheduler.issued.count("r2"), 1)
+            self.assertIn("r3", scheduler.issued)
+            self.assertEqual(cc.speculative_release_epoch, 2)
+            self.assertNotIn("r2", scheduler._ready_horizon_negatives)
+            self.assertEqual(cc.inflight_speculative_tokens, 0)
+            self.assertEqual(cache._prefetch_reservations, {})
+
+    def test_physical_only_limiter_does_not_create_spec_budget_park(self):
+        # A physical-only exhaustion is not a speculative-budget event and
+        # must not record a speculative cursor for the un-tried tail.
+        cc = _Cc(physical_limit=CHAIN_TOKENS)
+        scheduler = _pass_scheduler(
+            queue=[_req("r1", NONE), _req("r2", NONE)], cc=cc
+        )
+
+        def issue(req, *, origin, demand_restore=False, prepared_match=None):
+            cc.prefetch_tokens_occupied += CHAIN_TOKENS
+            req.hicache_restore_state = RESTORING
+            scheduler.issued.append(req.rid)
+            return PrefetchIssueResult(
+                status=PrefetchIssueResult.ISSUED,
+                attempt_id=f"{req.rid}:prefetch:1",
+                origin=origin,
+                reason="issued",
+                state_before=NONE.name,
+                state_after=RESTORING.name,
+            )
+
+        scheduler._prefetch_kvcache = issue
+        scheduler._ready_horizon_pass()
+        self.assertEqual(scheduler.issued, ["r1"])
+        self.assertNotIn("r2", scheduler._ready_horizon_negatives)
+
+    def test_no_headroom_park_wakes_on_release_epoch_not_level(self):
+        # Fix A end-to-end (the B-run permanent-freeze regression):
+        # 1) host headroom insufficient -> NO_HEADROOM park recorded at the
+        #    release counter cursor;
+        # 2) the level bounces (0 -> X -> 0) with NO release counter advance
+        #    -> the park holds even past the safety fuse: no re-probe per
+        #    pass (no busy loop), no silent release (the B-run freeze);
+        # 3) a GENUINE release (available grew since the last snapshot ->
+        #    the monotonic release counter advanced) wakes the waiter: the
+        #    rid is re-probed and staged exactly once.
+        patch, clock = self._clock_patch()
+        with patch:
+            cc = _Cc(spec_inflight=CHAIN_TOKENS, available=0)
+            scheduler = _pass_scheduler(queue=[_req("r1", NONE)], cc=cc)
+            epoch = scheduler.ready_horizon
+
+            # Step 1: headroom gate fails (0 free + CHAIN_TOKENS inflight
+            # + no READY footprint does not fit 0 headroom) -> the decline
+            # parks r1 at release cursor 0.
+            scheduler._ready_horizon_pass()
+            self.assertEqual(scheduler.issued, [])
+            entry = scheduler._ready_horizon_negatives.get("r1")
+            self.assertIsNotNone(entry, "NO_HEADROOM decline must park the rid")
+            self.assertEqual(entry.reason, NO_HEADROOM)
+            self.assertEqual(entry.epoch_cursor, 0)  # release counter cursor
+
+            # Step 2: the B-run shape quantized -- available oscillates
+            # with no release-counter advance (the snapshot never sees a
+            # sustained level rise), even past the safety fuse. The park
+            # holds: no re-probe, no issue.
+            for _ in range(3):
+                clock.advance(10.0)
+                cc.available = 0
+                scheduler._ready_horizon_pass()
+                self.assertEqual(scheduler.issued, [])
+                self.assertEqual(
+                    scheduler._ready_horizon_negatives["r1"].epoch_cursor,
+                    0,
+                    "no release epoch -> the park must not clear",
+                )
+
+            # Step 3: host residency freed / working-state released: the
+            # available level GREW since the last snapshot -> the release
+            # counter advances 0 -> 1 (a causal event). The park clears and
+            # r1 is re-probed and staged once (past the fuse).
+            clock.advance(10.0)
+            cc.available = CHAIN_TOKENS
+            scheduler._ready_horizon_pass()
+            self.assertEqual(scheduler.issued, ["r1"])
+            self.assertEqual(scheduler._ready_host_release_epoch, 1)
+
+    def test_release_counter_monotonic_survives_reconsumption(self):
+        # Fix A monotonicity at the pass level: a release (available grew
+        # since the last snapshot -> counter 0 -> 1) that is IMMEDIATELY
+        # re-consumed by the working set (available back to 0) must NOT
+        # undo the park clear. The OLD host_headroom-LEVEL cursor would
+        # re-park at the higher level and freeze (the B-run permanent
+        # freeze root: a transient rise was each time recorded as a higher
+        # cursor that the next alloc re-crossed before any re-probe).
+        # New behavior: the release epoch advances ONCE; the park that was
+        # at cursor 0 clears against cursor 1 even though the level
+        # returned to 0; at most one fresh probe per release epoch.
+        patch, clock = self._clock_patch()
+        with patch:
+            cc = _Cc(spec_inflight=CHAIN_TOKENS, available=0)
+            scheduler = _pass_scheduler(queue=[_req("r1", NONE)], cc=cc)
+            scheduler._ready_horizon_pass()
+            self.assertEqual(
+                scheduler._ready_horizon_negatives["r1"].epoch_cursor, 0
+            )
+
+            # Release observed (level rose), THEN the working set re-
+            # consumes the freed pages before the refill ever runs: the
+            # next snapshot sees available back at 0. The release epoch
+            # advanced 0 -> 1 and stays there; the level is again 0.
+            scheduler._ready_host_release_last_level = 0
+            cc.available = CHAIN_TOKENS
+            scheduler._ready_horizon_pass()  # snapshot: level rose (release)
+            cc.available = 0
+            clock.advance(10.0)  # past the safety fuse
+            scheduler._ready_horizon_pass()  # snapshot: level fell (no release)
+            self.assertEqual(scheduler._ready_host_release_epoch, 1)
+            # The release epoch advanced past the park cursor 0 -> 1; the
+            # headroom STILL fails (0 free) so the re-probe declines and
+            # re-parks at the NEW cursor 1. No issue, no busy loop.
+            self.assertEqual(scheduler.issued, [])
+            self.assertEqual(
+                scheduler._ready_horizon_negatives["r1"].epoch_cursor, 1
+            )
+            # The next identical pass (level 0, release epoch 1, fuse
+            # expired): the re-park holds -- at most one probe per release
+            # epoch, no freeze, no spin.
+            clock.advance(10.0)
+            scheduler._ready_horizon_pass()
+            self.assertEqual(scheduler.issued, [])
+            self.assertEqual(
+                scheduler._ready_horizon_negatives["r1"].epoch_cursor, 1
+            )
+
     def test_off_mode_is_a_noop(self):
         scheduler = _pass_scheduler(queue=[_req("r1", NONE)], enable=False)
         self._run(scheduler)
         self.assertEqual(scheduler.issued, [])
+
+    def test_rh_on_enqueue_is_queue_first_and_rh_owned(self):
+        scheduler = Scheduler.__new__(Scheduler)
+        scheduler.enable_priority_scheduling = False
+        scheduler.abort_on_priority_when_disabled = False
+        scheduler.disaggregation_mode = DisaggregationMode.NULL
+        scheduler.max_queued_requests = None
+        scheduler.waiting_queue = []
+        scheduler.enable_ready_horizon = True
+        scheduler.issued = []
+        scheduler._prefetch_kvcache = mock.Mock()
+        req = SimpleNamespace(
+            rid="rh-on",
+            priority=None,
+            time_stats=SimpleNamespace(set_wait_queue_entry_time=mock.Mock()),
+        )
+
+        scheduler._add_request_to_queue(req)
+
+        self.assertEqual(scheduler.waiting_queue, [req])
+        scheduler._prefetch_kvcache.assert_not_called()
+
+    def test_rh_off_enqueue_preserves_eager_order_and_origin(self):
+        scheduler = Scheduler.__new__(Scheduler)
+        scheduler.enable_priority_scheduling = False
+        scheduler.abort_on_priority_when_disabled = False
+        scheduler.disaggregation_mode = DisaggregationMode.NULL
+        scheduler.max_queued_requests = None
+        scheduler.waiting_queue = []
+        scheduler.enable_ready_horizon = False
+        calls = []
+
+        def issue(req, *, origin, demand_restore=False):
+            calls.append((origin, len(scheduler.waiting_queue)))
+            return PrefetchIssueResult.DECLINED
+
+        scheduler._prefetch_kvcache = issue
+        req = SimpleNamespace(
+            rid="rh-off",
+            priority=None,
+            time_stats=SimpleNamespace(set_wait_queue_entry_time=mock.Mock()),
+        )
+
+        scheduler._add_request_to_queue(req)
+
+        self.assertEqual(calls, [(HiCachePrefetchOrigin.EAGER_RH_OFF, 0)])
+        self.assertEqual(scheduler.waiting_queue, [req])
 
     def test_ready_pool_log_on_change(self):
         scheduler = _pass_scheduler(
@@ -813,9 +1409,52 @@ class ReadyHorizonPassTests(unittest.TestCase):
         with self.assertLogs("sglang.srt.managers.scheduler", level="INFO") as logs:
             scheduler._ready_horizon_pass()
         self.assertTrue(
-            any("evt=ready_stage rid=r1 result=issued state=RESTORING" in m for m in logs.output),
+            any(
+                "evt=ready_stage schema=rh_stage.v2 rid=r1" in m
+                and "result=issued" in m
+                for m in logs.output
+            ),
             logs.output,
         )
+
+    def test_issue_decision_precedes_stage_with_claimed_attempt_id(self):
+        scheduler = _pass_scheduler(queue=[_req("r1", NONE)])
+        with self.assertLogs("sglang.srt.managers.scheduler", level="INFO") as logs:
+            scheduler._ready_horizon_pass()
+        decision = next(
+            m for m in logs.output if "schema=rh_preadmission.v1" in m
+        )
+        stage = next(m for m in logs.output if "schema=rh_stage.v2" in m)
+        self.assertIn("decision=issue", decision)
+        self.assertIn("attempt_id=r1:prefetch:1", decision)
+        self.assertIn("attempt_id=r1:prefetch:1", stage)
+        self.assertLess(logs.output.index(decision), logs.output.index(stage))
+
+    def test_failed_issue_is_hold_and_never_false_issue(self):
+        scheduler = _pass_scheduler(queue=[_req("r1", NONE)])
+
+        def decline(req, *, origin, demand_restore=False, prepared_match=None):
+            return PrefetchIssueResult(
+                status=PrefetchIssueResult.DECLINED,
+                attempt_id="r1:prefetch:1",
+                origin=origin,
+                reason="declined_rate_limited",
+                state_before=NONE.name,
+                state_after=NONE.name,
+            )
+
+        scheduler._prefetch_kvcache = decline
+        with self.assertLogs("sglang.srt.managers.scheduler", level="INFO") as logs:
+            scheduler._ready_horizon_pass()
+        decision = next(
+            m for m in logs.output if "schema=rh_preadmission.v1" in m
+        )
+        stage = next(m for m in logs.output if "schema=rh_stage.v2" in m)
+        self.assertIn("decision=hold", decision)
+        self.assertIn("reason=physical_budget", decision)
+        self.assertNotIn("decision=issue", decision)
+        self.assertIn("result=held", stage)
+        self.assertIn("reason=declined_rate_limited", stage)
 
 
 class _FakeClock:
@@ -850,11 +1489,16 @@ class DeterministicMissParkTests(unittest.TestCase):
             "sglang.srt.managers.scheduler.time.perf_counter", new=clock
         ), clock
 
-    def _make_scheduler(self, cc=None, l3_publish=0):
+    def _make_scheduler(self, cc=None, l3_publish=0, anchor_versions=None):
         cc = cc or _Cc()
-        scheduler = _pass_scheduler(queue=[_req("r1", NONE)], cc=cc, l3_publish=l3_publish)
+        scheduler = _pass_scheduler(
+            queue=[_req("r1", NONE)],
+            cc=cc,
+            l3_publish=l3_publish,
+            anchor_versions=anchor_versions,
+        )
 
-        def charge(req, *, demand_restore=False):
+        def charge(req, *, origin, demand_restore=False, prepared_match=None):
             cc.inflight_speculative_tokens += CHAIN_TOKENS
             req.hicache_restore_state = RESTORING
             scheduler.issued.append(req.rid)
@@ -890,11 +1534,53 @@ class DeterministicMissParkTests(unittest.TestCase):
             scheduler._ready_horizon_pass()
             self.assertEqual(scheduler.issued, ["r1"])  # not re-probed
 
-    def test_l3_publish_advance_clears_and_reprobes_once(self):
+    def test_anchor_version_advance_clears_and_reprobes_once(self):
+        # phase2-peranchor: the park records the anchor's per-anchor version
+        # (0 initially); a GLOBAL l3_publish advance alone does NOT clear it
+        # (the frozen root cause -- the unrelated-chain bump), but the SAME
+        # anchor's per-anchor version advancing (its own chain's durability
+        # changed) + the expired fuse clears it and grants one fresh probe.
         patch, clock = self._clock_patch()
         with patch:
             cc = _Cc()
-            scheduler, _ = self._make_scheduler(cc=cc, l3_publish=0)
+            scheduler, _ = self._make_scheduler(
+                cc=cc, l3_publish=0, anchor_versions={1: 0}
+            )
+            scheduler._ready_horizon_pass()
+            self.assertEqual(scheduler.issued, ["r1"])
+            scheduler.waiting_queue[0].hicache_restore_state = NONE
+            scheduler.tree_cache.record_storage_prefetch_terminal("r1", "revoked_miss")
+            scheduler._feed_restore_terminal(scheduler.waiting_queue[0])
+            entry = scheduler._ready_horizon_negatives["r1"]
+            self.assertEqual(entry.reason, NO_L3)
+            self.assertEqual(entry.epoch_cursor, 0)
+            self.assertEqual(entry.anchor, 1)
+
+            # Fuse still live: even with the anchor's version advanced the
+            # park holds (the rate bound, not the retry cadence).
+            scheduler.tree_cache.anchor_storage_version = lambda n: 3
+            cc.inflight_speculative_tokens = 0
+            scheduler._ready_horizon_pass()
+            self.assertEqual(scheduler.issued, ["r1"])
+
+            # Fuse expired AND the SAME anchor's version advanced: the park
+            # clears and the rid gets its one fresh probe.
+            clock.advance(10.0)
+            scheduler._ready_horizon_pass()
+            self.assertEqual(scheduler.issued, ["r1", "r1"])
+
+    def test_unrelated_chain_global_bump_never_clears_no_l3(self):
+        # The frozen root cause regression: the global l3_publish epoch
+        # advanced to 3 (an unrelated chain's write ack / restore) while
+        # THIS anchor's per-anchor version is still 0. The NO_L3 park must
+        # hold even past the fuse -- the unrelated durability event is not
+        # causal for this candidate's miss.
+        patch, clock = self._clock_patch()
+        with patch:
+            cc = _Cc()
+            scheduler, _ = self._make_scheduler(
+                cc=cc, l3_publish=0, anchor_versions={1: 0}
+            )
             scheduler._ready_horizon_pass()
             self.assertEqual(scheduler.issued, ["r1"])
             scheduler.waiting_queue[0].hicache_restore_state = NONE
@@ -902,24 +1588,20 @@ class DeterministicMissParkTests(unittest.TestCase):
             scheduler._feed_restore_terminal(scheduler.waiting_queue[0])
             self.assertEqual(scheduler._ready_horizon_negatives["r1"].reason, NO_L3)
 
-            # Fuse still live: even with the L3 counter advanced the park
-            # holds (the rate bound, not the retry cadence).
-            scheduler.tree_cache.l3_publish_epoch = lambda: 3
+            # Unrelated-chain global bump + fuse expired.
+            scheduler.tree_cache.l3_publish_epoch = lambda: 42
             cc.inflight_speculative_tokens = 0
-            scheduler._ready_horizon_pass()
-            self.assertEqual(scheduler.issued, ["r1"])
-
-            # Fuse expired AND the L3 durable counter advanced: the park
-            # clears and the rid gets its one fresh probe.
             clock.advance(10.0)
             scheduler._ready_horizon_pass()
-            self.assertEqual(scheduler.issued, ["r1", "r1"])
+            self.assertEqual(scheduler.issued, ["r1"], "unrelated global bump must not re-arm")
 
     def test_after_reprobe_miss_reparks_at_new_cursor(self):
         patch, clock = self._clock_patch()
         with patch:
             cc = _Cc()
-            scheduler, _ = self._make_scheduler(cc=cc, l3_publish=0)
+            scheduler, _ = self._make_scheduler(
+                cc=cc, l3_publish=0, anchor_versions={1: 0}
+            )
             scheduler._ready_horizon_pass()
             self.assertEqual(scheduler.issued, ["r1"])
             scheduler.waiting_queue[0].hicache_restore_state = NONE
@@ -928,15 +1610,15 @@ class DeterministicMissParkTests(unittest.TestCase):
             entry1 = scheduler._ready_horizon_negatives["r1"]
             self.assertEqual(entry1.epoch_cursor, 0)
 
-            # L3 publishes once and the fuse expires: the rid reprobes,
-            # misses again, and re-parks at the NEW cursor.
-            scheduler.tree_cache.l3_publish_epoch = lambda: 1
+            # The SAME anchor's version advances and the fuse expires: the
+            # rid reprobes, misses again, and re-parks at the NEW cursor.
+            scheduler.tree_cache.anchor_storage_version = lambda n: 1
             cc.inflight_speculative_tokens = 0
             clock.advance(10.0)
             scheduler._ready_horizon_pass()
             self.assertEqual(scheduler.issued, ["r1", "r1"])
             # The second miss lands (the drain records the revoked_miss
-            # terminal); the re-park records the NEW l3_publish cursor.
+            # terminal); the re-park records the NEW anchor version cursor.
             scheduler.waiting_queue[0].hicache_restore_state = NONE
             scheduler.tree_cache.record_storage_prefetch_terminal("r1", "revoked_miss")
             scheduler._feed_restore_terminal(scheduler.waiting_queue[0])
@@ -944,8 +1626,9 @@ class DeterministicMissParkTests(unittest.TestCase):
             self.assertEqual(entry2.epoch_cursor, 1)
 
             # Same causal epoch (cursor still 1) even with the fuse expired
-            # again: the next event pass holds the park -- at most one
-            # staging attempt per rid per causal epoch.
+            # again and an unrelated global bump: the next event pass holds
+            # the park -- at most one staging attempt per rid per causal
+            # anchor-version.
             clock.advance(10.0)
             scheduler.waiting_queue[0].hicache_restore_state = NONE
             cc.inflight_speculative_tokens = 0

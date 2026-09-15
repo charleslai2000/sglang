@@ -33,10 +33,14 @@ aligned, so only whole-extent aligned IO could use O_DIRECT safely.
 from __future__ import annotations
 
 import ctypes
+import json
 import logging
 import os
+import secrets
 import threading
 import time
+from collections import OrderedDict
+from dataclasses import dataclass, field
 from typing import Any, List, Optional
 
 from sglang.srt.environ import envs
@@ -49,8 +53,56 @@ from sglang.srt.mem_cache.hicache_storage import (
     PoolTransfer,
     PoolTransferResult,
 )
-from sglang.srt.mem_cache.storage.extent.extent_allocator import ExtentAllocator
+from sglang.srt.mem_cache.storage.extent.extent_allocator import (
+    ExtentAllocator,
+    ExtentRef,
+)
+from sglang.srt.mem_cache.storage.extent.extent_metadata import (
+    FRAME_BATCH_COMMIT,
+    FRAME_CLEAR,
+    FRAME_DROP_SLOT,
+    FRAME_GROUP_COMMIT,
+    FRAME_SET,
+    BatchCommitPayload,
+    DropSlotPayload,
+    GroupCommitPayload,
+    ManifestEntry,
+    ManifestState,
+    RecoveryError,
+    SEGMENT_HEADER_SIZE,
+    SetEntry,
+    SetPayload,
+    acquire_meta_lock,
+    checkpoint_state_from_allocator,
+    component_from_pool_name,
+    create_segment,
+    current_path,
+    decode_batch_commit_payload,
+    decode_set_payload,
+    deserialize_segment_header,
+    encode_clear_payload,
+    encode_batch_commit_payload,
+    encode_drop_slot_payload,
+    encode_frame,
+    encode_group_commit_payload,
+    encode_set_payload,
+    iter_segment_frames,
+    lock_path,
+    manifest_path,
+    promote_pending_rotation,
+    publish_current,
+    read_current,
+    read_manifest,
+    repair_active_tail,
+    replay_records,
+    resolve_manifest_absent,
+    resolve_wal_range,
+    segment_path,
+    validate_geometry,
+    write_manifest_atomic,
+)
 from sglang.srt.mem_cache.storage.file.lru_file_evictor import _parse_size_to_bytes
+from sglang.srt.mem_cache.trace_context import attach_trace_context
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +121,117 @@ _MERGE_GAP_THRESHOLD = 4096
 # The v1 batch packs 2 blocks per page, so a 1024-page batch is 2048 iovecs
 # and the IO helpers shard at this boundary.
 _IOV_MAX = 1024
+
+_T38C_DURABLE_SEQ = {}
+_T38C_DURABLE_SEQ_LOCK = threading.Lock()
+_PROCESS_META_LOCKS = {}
+_PROCESS_META_LOCKS_LOCK = threading.Lock()
+
+
+@dataclass
+class _StagedGroup:
+    """Live-only grouped writes, kept out of the allocator until commit."""
+
+    members: list = field(default_factory=list)
+
+    @property
+    def entry_count(self) -> int:
+        return sum(len(member[0]) for member in self.members)
+
+
+# T38C paired Mamba trace.  Diagnostic-only and completely disabled unless
+# the explicit marker exists; no token text or state bytes are recorded.
+def _t38c_log(rec):
+    try:
+        import json as _json
+
+        if not os.path.exists("/tmp/t38c-on"):
+            return
+        rec["ts"] = round(time.time(), 3)
+        with open("/tmp/t38c-probe.log", "a") as _f:
+            _f.write(_json.dumps(rec, default=str) + "\n")
+    except Exception:
+        pass
+
+
+def _t38c_durable_log(rec):
+    """Marker-gated p0_durable.v2 trace; identities/counters only."""
+    try:
+        if not os.path.exists("/tmp/t38c-durable-trace"):
+            return
+        thread_id = threading.get_ident()
+        with _T38C_DURABLE_SEQ_LOCK:
+            local_seq = _T38C_DURABLE_SEQ.get(thread_id, 0) + 1
+            _T38C_DURABLE_SEQ[thread_id] = local_seq
+        run_id = os.environ.get("T38C_RUN_ID") or f"pid-{os.getpid()}"
+        record = attach_trace_context(dict(rec))
+        record.setdefault("schema_version", "p0_durable.v2")
+        record.setdefault("run_id", run_id)
+        record.setdefault(
+            "event_id",
+            f"{run_id}:{os.getpid()}:{thread_id}:extent:{local_seq}",
+        )
+        record.setdefault("process_id", os.getpid())
+        record.setdefault("rank", os.environ.get("RANK"))
+        record.setdefault("thread_id", thread_id)
+        record.setdefault("local_seq", local_seq)
+        record.setdefault("operation", record.get("operation_id"))
+        record.setdefault("attempt", record.get("attempt_id"))
+        for field in (
+            "operation_id",
+            "attempt_id",
+            "node_id",
+            "anchor_id",
+            "pool",
+            "tier",
+            "final_kv_hash",
+            "storage_key",
+            "mamba_key",
+            "extent_id",
+            "extent_generation",
+            "old_generation",
+            "new_generation",
+            "slot_digest",
+            "requested_pages",
+            "succeeded_pages",
+            "reason",
+            "predecessor_event_id",
+            "evidence_ref",
+        ):
+            record.setdefault(field, None)
+        record.setdefault("result", None)
+        record["ts_wall_ns"] = time.time_ns()
+        record["ts_mono_ns"] = time.monotonic_ns()
+        record["trace"] = "p0_durable"
+        record["ts_ms"] = int(time.time() * 1000)
+        with open("/tmp/t38c-probe.log", "a") as _f:
+            _f.write(json.dumps(record, default=str) + "\n")
+        return record["event_id"]
+    except Exception:
+        pass
+
+
+def _t38c_extent_commits(keys, refs, groups, context):
+    for extent_id, indexes in groups.items():
+        generations = sorted(
+            {
+                generation
+                for index in indexes
+                if (generation := getattr(refs[index], "generation", None))
+                is not None
+            }
+        )
+        _t38c_durable_log(
+            {
+                "evt": "extent_commit",
+                **(context or {}),
+                "extent_id": extent_id,
+                "extent_generation": generations[0]
+                if len(generations) == 1
+                else generations,
+                "pages": len(indexes),
+            }
+        )
 
 
 def _merge_requested_ranges(items):
@@ -245,7 +408,34 @@ class ExtentFileBackend(HiCacheStorage):
         self._data_path = os.path.join(
             self._storage_dir, f"hicache.data{self.config_suffix}"
         )
+        self._manifest_path = manifest_path(self._storage_dir, self.config_suffix)
+        self._wal_current_path = current_path(self._storage_dir, self.config_suffix)
+        self._meta_lock_path = lock_path(self._storage_dir, self.config_suffix)
+        # The lock is itself persistent metadata.  Capture its pre-open
+        # existence so the lock file created by this constructor cannot make a
+        # genuinely fresh namespace look like a prior initialized one.
+        self._meta_lock_existed_before_open = os.path.exists(self._meta_lock_path)
+        self._meta_lock_fd = None
+        self._meta_lock_owner = False
+        self._fd = None
+        self._wal_fd = None
+        self._wal_generation = None
+        self._wal_offset = 0
+        self._wal_next_seq = 1
+        self._next_batch_id = 1
+        self._next_group_seq = 1
+        self._staged_groups = {}
+        self._staged_reserved = {}
+        self._file_uuid = self._new_file_uuid()
+        self._namespace_epoch = self._new_nonzero_epoch()
+        self._components = {}
+        self._constructor_complete = False
+        self._closed = False
         self._lock = threading.Lock()
+        # Lock order is deliberately fixed at _write_gate -> _lock.  The gate
+        # quiesces writers while checkpoint rotates and reclaims WAL segments;
+        # reads continue to use _lock only.
+        self._write_gate = threading.RLock()
         self._stats = {
             "opens": 0,
             "preads": 0,
@@ -265,15 +455,545 @@ class ExtentFileBackend(HiCacheStorage):
             "last_batch_physical_bytes": 0,
             "last_batch_preads": 0,
         }
-        self._fd = os.open(self._data_path, os.O_CREAT | os.O_RDWR, 0o644)
-        self._stats["opens"] += 1
-        os.ftruncate(self._fd, self._file_size)
-        self._allocator = ExtentAllocator(extent_size, self._file_size // extent_size)
-        logger.info(
-            f"ExtentFileBackend: file={self._data_path} extent={extent_size} B "
-            f"slots={self._file_size // extent_size} "
-            f"max_size={self._max_size_bytes} min_free={self._min_free_bytes}"
+        try:
+            (
+                self._meta_lock_fd,
+                self._meta_lock_owner,
+                geometry_matches,
+            ) = self._acquire_backend_meta_lock()
+            self._fd = os.open(self._data_path, os.O_CREAT | os.O_RDWR, 0o644)
+            self._stats["opens"] += 1
+            os.ftruncate(self._fd, self._file_size)
+            self._allocator = ExtentAllocator(
+                extent_size, self._file_size // extent_size
+            )
+            if geometry_matches:
+                self._startup_metadata()
+            self._open_active_wal()
+            self._constructor_complete = True
+            logger.info(
+                f"ExtentFileBackend: file={self._data_path} extent={extent_size} B "
+                f"slots={self._file_size // extent_size} "
+                f"max_size={self._max_size_bytes} min_free={self._min_free_bytes}"
+            )
+        except Exception:
+            if self._wal_fd is not None:
+                os.close(self._wal_fd)
+                self._wal_fd = None
+            self._release_backend_meta_lock()
+            if self._fd is not None:
+                try:
+                    os.close(self._fd)
+                finally:
+                    self._fd = None
+            raise
+
+    @staticmethod
+    def _new_nonzero_epoch() -> bytes:
+        while True:
+            epoch = secrets.token_bytes(16)
+            if any(epoch):
+                return epoch
+
+    @staticmethod
+    def _new_file_uuid() -> bytes:
+        while True:
+            file_uuid = secrets.token_bytes(16)
+            if any(file_uuid):
+                return file_uuid
+
+    def _acquire_backend_meta_lock(self):
+        """Acquire the per-namespace fence for this backend instance."""
+        with _PROCESS_META_LOCKS_LOCK:
+            held = _PROCESS_META_LOCKS.get(self._meta_lock_path)
+            if held is not None:
+                raise RecoveryError(
+                    "metadata lock is already held by this process",
+                    path=self._meta_lock_path,
+                    failure_class="lock-busy",
+                )
+            fd = acquire_meta_lock(self._meta_lock_path)
+            _PROCESS_META_LOCKS[self._meta_lock_path] = (
+                fd,
+                1,
+                (self._extent_size, self._file_size),
+            )
+            return fd, True, True
+
+    def _release_backend_meta_lock(self) -> None:
+        fd = self._meta_lock_fd
+        if fd is None:
+            return
+        self._meta_lock_fd = None
+        with _PROCESS_META_LOCKS_LOCK:
+            owner_fd, count, geometry = _PROCESS_META_LOCKS[self._meta_lock_path]
+            count -= 1
+            if fd != owner_fd:
+                os.close(fd)
+            if count == 0:
+                _PROCESS_META_LOCKS.pop(self._meta_lock_path, None)
+                os.close(owner_fd)
+            else:
+                _PROCESS_META_LOCKS[self._meta_lock_path] = (owner_fd, count, geometry)
+
+    def _validate_segment(self, path: str, generation: int) -> None:
+        try:
+            with open(path, "rb") as stream:
+                raw = stream.read(SEGMENT_HEADER_SIZE)
+            header = deserialize_segment_header(raw)
+            if header.segment_generation != generation:
+                raise RecoveryError(
+                    "WAL segment generation does not match its name",
+                    path=path,
+                    failure_class="segment-corruption",
+                )
+        except RecoveryError:
+            raise
+        except Exception as exc:
+            raise RecoveryError(
+                "WAL segment has an invalid header",
+                path=path,
+                failure_class="segment-corruption",
+            ) from exc
+
+    def _restore_allocator(self, state: ManifestState, replay) -> None:
+        num_slots = self._file_size // self._extent_size
+        if len(replay.generations) != num_slots:
+            raise RecoveryError(
+                "replay generation geometry mismatch",
+                path=self._manifest_path,
+                failure_class="wal-replay-state",
+            )
+        refs = []
+        keys = []
+        slot_keys = [set() for _ in range(num_slots)]
+        slot_bytes = [0] * num_slots
+        cursors = [0] * num_slots
+        index = {}
+        component_map = {}
+        for entry in replay.entries:
+            try:
+                key = entry.storage_key.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise RecoveryError(
+                    "WAL storage key is not valid UTF-8",
+                    path=self._manifest_path,
+                    failure_class="wal-replay-corruption",
+                ) from exc
+            if not 0 <= entry.extent_id < num_slots:
+                raise RecoveryError(
+                    "replayed entry is outside allocator geometry",
+                    path=self._manifest_path,
+                    failure_class="wal-replay-state",
+                )
+            if (
+                entry.offset < 0
+                or entry.length < 0
+                or entry.offset + entry.length > self._extent_size
+                or entry.generation != replay.generations[entry.extent_id]
+            ):
+                raise RecoveryError(
+                    "replayed entry does not match allocator state",
+                    path=self._manifest_path,
+                    failure_class="wal-replay-state",
+                )
+            ref = ExtentRef(
+                entry.extent_id, entry.offset, entry.length, entry.generation
+            )
+            index[key] = ref
+            component_map[key] = entry.component
+
+        for key, ref in index.items():
+            slot_keys[ref.extent_id].add(key)
+            slot_bytes[ref.extent_id] += ref.length
+            cursors[ref.extent_id] = max(cursors[ref.extent_id], ref.offset + ref.length)
+
+        if slot_bytes != list(replay.slot_bytes) or cursors != list(replay.cursors):
+            raise RecoveryError(
+                "replayed allocator accounting mismatch",
+                path=self._manifest_path,
+                failure_class="wal-replay-state",
+            )
+        if not 0 <= state.next_slot < num_slots:
+            raise RecoveryError(
+                "manifest next_slot is outside allocator geometry",
+                path=self._manifest_path,
+                failure_class="manifest-corruption",
+            )
+
+        recency = []
+        seen = set()
+        for entry_index in state.recency_order:
+            if not 0 <= entry_index < len(replay.entries):
+                raise RecoveryError(
+                    "manifest recency entry is outside the entry table",
+                    path=self._manifest_path,
+                    failure_class="manifest-corruption",
+                )
+            try:
+                key = replay.entries[entry_index].storage_key.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise RecoveryError(
+                    "manifest recency key is not valid UTF-8",
+                    path=self._manifest_path,
+                    failure_class="manifest-corruption",
+                ) from exc
+            if key in index and key not in seen:
+                recency.append(key)
+                seen.add(key)
+        recency.extend(key for key in index if key not in seen)
+
+        with self._allocator._lock:
+            self._allocator._generations = list(replay.generations)
+            self._allocator._cursors = cursors
+            self._allocator._slot_bytes = slot_bytes
+            self._allocator._slot_keys = slot_keys
+            self._allocator._index = index
+            self._allocator._next_slot = state.next_slot
+            self._allocator._recency = OrderedDict((key, None) for key in recency)
+        self._components = component_map
+
+    def _startup_metadata(self) -> None:
+        data_stat = os.fstat(self._fd)
+        num_slots = self._file_size // self._extent_size
+        manifest_exists = os.path.exists(self._manifest_path)
+        current_exists = os.path.exists(self._wal_current_path)
+        wal_zero_path = segment_path(self._storage_dir, self.config_suffix, 0)
+        wal_exists_without_manifest = os.path.exists(wal_zero_path)
+
+        state = None
+        active_generation = None
+        if not manifest_exists:
+            if (
+                not current_exists
+                and not wal_exists_without_manifest
+                and not self._meta_lock_existed_before_open
+            ):
+                file_uuid = self._new_file_uuid()
+                namespace_epoch = self._new_nonzero_epoch()
+                try:
+                    create_segment(wal_zero_path, 0, 0)
+                    publish_current(self._wal_current_path, 0)
+                    state = ManifestState(
+                        checkpoint_lsn=0,
+                        wal_floor=0,
+                        wal_active_gen=0,
+                        extent_size=self._extent_size,
+                        file_size=self._file_size,
+                        num_slots=num_slots,
+                        data_dev=data_stat.st_dev,
+                        data_ino=data_stat.st_ino,
+                        file_uuid=file_uuid,
+                        namespace_epoch=namespace_epoch,
+                        next_slot=0,
+                        generations=[0] * num_slots,
+                        cursors=[0] * num_slots,
+                        slot_bytes=[0] * num_slots,
+                    )
+                    write_manifest_atomic(self._manifest_path, state)
+                except RecoveryError:
+                    raise
+                except OSError as exc:
+                    raise RecoveryError(
+                        "unable to initialize metadata",
+                        path=self._manifest_path,
+                        failure_class="metadata-io",
+                    ) from exc
+                self._restore_allocator(
+                    state,
+                    replay_records([], state, num_slots=num_slots),
+                )
+                self._file_uuid = state.file_uuid
+                self._namespace_epoch = state.namespace_epoch
+                return
+            if not current_exists:
+                resolve_manifest_absent(None, prior_metadata_exists=True)
+            active_generation = read_current(self._wal_current_path)
+            resolve_manifest_absent(active_generation, prior_metadata_exists=True)
+        else:
+            state = read_manifest(self._manifest_path)
+            try:
+                validate_geometry(
+                    state,
+                    extent_size=self._extent_size,
+                    file_size=self._file_size,
+                    num_slots=num_slots,
+                    data_dev=data_stat.st_dev,
+                    data_ino=data_stat.st_ino,
+                )
+            except Exception as exc:
+                if isinstance(exc, RecoveryError):
+                    raise
+                raise RecoveryError(
+                    str(exc),
+                    path=self._manifest_path,
+                    failure_class="manifest-corruption",
+                ) from exc
+            if not any(state.namespace_epoch):
+                raise RecoveryError(
+                    "manifest namespace_epoch is all zero",
+                    path=self._manifest_path,
+                    failure_class="manifest-corruption",
+                )
+            active_generation = read_current(self._wal_current_path)
+            wal_range = resolve_wal_range(state, active_generation)
+            if wal_range.pending_rotation:
+                active_generation = promote_pending_rotation(
+                    self._storage_dir,
+                    self.config_suffix,
+                    active_generation,
+                    state.checkpoint_lsn,
+                )
+                wal_range = resolve_wal_range(state, active_generation)
+
+        if state is None:
+            state = ManifestState(
+                extent_size=self._extent_size,
+                file_size=self._file_size,
+                num_slots=num_slots,
+                data_dev=data_stat.st_dev,
+                data_ino=data_stat.st_ino,
+                file_uuid=self._new_file_uuid(),
+                namespace_epoch=self._new_nonzero_epoch(),
+                generations=[0] * num_slots,
+                cursors=[0] * num_slots,
+                slot_bytes=[0] * num_slots,
+            )
+            wal_range = resolve_manifest_absent(active_generation, prior_metadata_exists=False)
+
+        segment_frames = []
+        for generation in wal_range.generations:
+            path = segment_path(self._storage_dir, self.config_suffix, generation)
+            self._validate_segment(path, generation)
+            frames = iter_segment_frames(
+                path,
+                active=generation == active_generation,
+            )
+            if frames.torn_tail is not None:
+                repair_active_tail(path, frames.torn_tail.last_valid_offset)
+            segment_frames.append(frames)
+        replay = replay_records(
+            segment_frames,
+            state if manifest_exists else None,
+            num_slots=num_slots,
         )
+        self._restore_allocator(state, replay)
+        self._wal_recovered_next_seq = max(
+            replay.seen_max_seq, state.checkpoint_lsn
+        ) + 1
+
+        persisted = state
+        persisted.namespace_epoch = self._new_nonzero_epoch()
+        persisted.data_dev = data_stat.st_dev
+        persisted.data_ino = data_stat.st_ino
+        self._file_uuid = persisted.file_uuid
+        self._namespace_epoch = persisted.namespace_epoch
+        try:
+            write_manifest_atomic(self._manifest_path, persisted)
+        except RecoveryError:
+            raise
+        except OSError as exc:
+            raise RecoveryError(
+                "unable to persist startup namespace epoch",
+                path=self._manifest_path,
+                failure_class="manifest-io",
+            ) from exc
+
+    def _open_active_wal(self) -> None:
+        """Open exactly the generation named by the durable current pointer."""
+        generation = read_current(self._wal_current_path)
+        path = segment_path(self._storage_dir, self.config_suffix, generation)
+        fd = os.open(path, os.O_RDWR)
+        try:
+            frames = iter_segment_frames(fd, active=True)
+            if frames.torn_tail is not None:
+                repair_active_tail(path, frames.torn_tail.last_valid_offset)
+                frames = iter_segment_frames(fd, active=True)
+            self._wal_fd = fd
+            self._wal_generation = generation
+            self._wal_offset = os.fstat(fd).st_size
+            self._wal_next_seq = max(
+                (frames[-1].seq + 1) if frames else 1,
+                getattr(self, "_wal_recovered_next_seq", 1),
+            )
+            self._wal_recovered_next_seq = self._wal_next_seq
+            max_batch_id = 0
+            for frame in frames:
+                if frame.frame_type == FRAME_SET:
+                    max_batch_id = max(max_batch_id, decode_set_payload(frame.payload).batch_id)
+                elif frame.frame_type == FRAME_BATCH_COMMIT:
+                    max_batch_id = max(
+                        max_batch_id,
+                        decode_batch_commit_payload(frame.payload).batch_id,
+                    )
+            self._next_batch_id = max_batch_id + 1
+        except Exception:
+            os.close(fd)
+            raise
+
+    def _append_wal_frame(self, frame_type: int, payload: bytes) -> None:
+        if self._wal_fd is None:
+            raise OSError("active WAL is not open")
+        frame = encode_frame(frame_type, self._wal_next_seq, payload)
+        written = 0
+        while written < len(frame):
+            count = os.pwrite(self._wal_fd, frame[written:], self._wal_offset + written)
+            if count <= 0:
+                raise OSError("short WAL append")
+            written += count
+        self._wal_offset += written
+        self._wal_next_seq += 1
+
+    def _sync_wal(self) -> None:
+        if self._wal_fd is None:
+            raise OSError("active WAL is not open")
+        os.fdatasync(self._wal_fd)
+
+    @staticmethod
+    def _validate_group_id(group_id) -> tuple:
+        if not isinstance(group_id, tuple) or len(group_id) != 2:
+            raise ValueError("group_id must be a (16-byte epoch, positive sequence) tuple")
+        epoch, seq = group_id
+        if not isinstance(epoch, bytes) or len(epoch) != 16 or not any(epoch):
+            raise ValueError("group_id epoch must be a nonzero 16-byte value")
+        if not isinstance(seq, int) or isinstance(seq, bool) or not 1 <= seq <= 0xFFFFFFFFFFFFFFFF:
+            raise ValueError("group_id sequence must be a positive u64")
+        return epoch, seq
+
+    def open_group(self) -> tuple:
+        """Mint a backend-owned group identity for one runtime incarnation."""
+        with self._write_gate:
+            group_id = (self._namespace_epoch, self._next_group_seq)
+            self._next_group_seq += 1
+            self._staged_groups[group_id] = _StagedGroup()
+            return group_id
+
+    def _plan_split_with_staged(self, key_lengths, pending_drops=None):
+        """Plan against allocator cursors plus invisible staged reservations."""
+        saved_cursors = self._allocator._cursors
+        saved_next_slot = self._allocator._next_slot
+        cursors = list(saved_cursors)
+        next_slot = saved_next_slot
+        for refs in self._staged_reserved.values():
+            for ref in refs:
+                cursors[ref.extent_id] = max(
+                    cursors[ref.extent_id], ref.offset + ref.length
+                )
+                next_slot = ref.extent_id
+        self._allocator._cursors = cursors
+        self._allocator._next_slot = next_slot
+        try:
+            return self._allocator.plan_split(key_lengths, pending_drops)
+        finally:
+            self._allocator._cursors = saved_cursors
+            self._allocator._next_slot = saved_next_slot
+
+    def _staged_slots(self):
+        return {ref.extent_id for refs in self._staged_reserved.values() for ref in refs}
+
+    def _stage_group_members(self, group_id, storage_keys, refs, component, drop_events):
+        staged = self._staged_groups.get(group_id)
+        if staged is None:
+            return False
+        if any(ref is None for ref in refs):
+            return False
+        staged.members.append((list(storage_keys), list(refs), component, list(drop_events)))
+        self._staged_reserved.setdefault(group_id, []).extend(refs)
+        return True
+
+    def _abort_group_locked(self, group_id) -> bool:
+        staged = self._staged_groups.pop(group_id, None)
+        self._staged_reserved.pop(group_id, None)
+        return staged is not None
+
+    def commit_group(self, group_id) -> bool:
+        """Durably complete and atomically install one staged group."""
+        group_id = self._validate_group_id(group_id)
+        with self._write_gate:
+            if group_id[0] != self._namespace_epoch or group_id not in self._staged_groups:
+                return False
+            staged = self._staged_groups[group_id]
+            if not staged.members or any(not member[0] for member in staged.members):
+                return False
+            member_count = staged.entry_count
+            self._append_wal_frame(
+                FRAME_GROUP_COMMIT,
+                encode_group_commit_payload(
+                    GroupCommitPayload(group_id[0], group_id[1], member_count)
+                ),
+            )
+            self._sync_wal()
+            keys = [key for member in staged.members for key in member[0]]
+            refs = [ref for member in staged.members for ref in member[1]]
+            with self._lock:
+                if not self._allocator.commit_install(keys, refs):
+                    return False
+                for member in staged.members:
+                    self._components.update(
+                        (key, member[2]) for key in member[0]
+                    )
+            self._abort_group_locked(group_id)
+            return True
+
+    def abort_group(self, group_id) -> bool:
+        group_id = self._validate_group_id(group_id)
+        with self._write_gate:
+            return self._abort_group_locked(group_id)
+
+    def _abort_all_groups_locked(self) -> None:
+        self._staged_groups.clear()
+        self._staged_reserved.clear()
+
+    def _append_drops(self, drop_events) -> None:
+        for slot, new_generation in drop_events:
+            self._append_wal_frame(
+                FRAME_DROP_SLOT,
+                encode_drop_slot_payload(DropSlotPayload(slot, new_generation)),
+            )
+        if drop_events:
+            self._sync_wal()
+
+    def _append_batch_commit(
+        self, storage_keys, refs, component: int, group_id=None
+    ) -> None:
+        if group_id is None:
+            group_epoch, group_seq = b"\x00" * 16, 0
+        else:
+            group_epoch, group_seq = self._validate_group_id(group_id)
+        batch_id = self._next_batch_id
+        self._next_batch_id += 1
+        entries = [
+            SetEntry(
+                storage_key=key.encode("utf-8"),
+                extent_id=ref.extent_id,
+                offset=ref.offset,
+                length=ref.length,
+                generation=ref.generation,
+                component=component,
+            )
+            for key, ref in zip(storage_keys, refs)
+        ]
+        self._append_wal_frame(
+            FRAME_SET,
+            encode_set_payload(
+                SetPayload(
+                    group_epoch=group_epoch,
+                    group_seq=group_seq,
+                    batch_id=batch_id,
+                    member_index=0,
+                    member_count=1,
+                    entries=entries,
+                )
+            ),
+        )
+        self._append_wal_frame(
+            FRAME_BATCH_COMMIT,
+            encode_batch_commit_payload(BatchCommitPayload(batch_id, 1)),
+        )
+        self._sync_wal()
+
+    def _append_ungrouped_commit(self, storage_keys, refs, component: int) -> None:
+        self._append_batch_commit(storage_keys, refs, component)
 
     # ---- key scoping (same semantics as HiCacheFile) ----
     # v1 and v2 share the same transform: the engine writes via v1 batch_set
@@ -319,7 +1039,18 @@ class ExtentFileBackend(HiCacheStorage):
     ) -> bool:
         if value is None:
             return False
-        return self._write_pages([self._storage_key(key)], [value])
+        storage_keys = [self._storage_key(key)]
+        ok = self._write_pages(storage_keys, [value])
+        if ok:
+            # Telemetry parity (P1 hygiene): the single-key set() must be
+            # metered exactly like batch_set / batch_set_v1 / batch_set_v2,
+            # or a future single-key write path (e.g. a mamba 51.5MB page)
+            # would silently undercount the extent_write bytes (~34% of the
+            # write volume at 90G/1341 slots in the A/B evidence). The write
+            # path ignores node identity, so None is passed (same as the
+            # batch kv path).
+            self._log_extent_write("kv", None, storage_keys, [value])
+        return ok
 
     def exists(self, key: str) -> bool:
         with self._lock:
@@ -490,6 +1221,15 @@ class ExtentFileBackend(HiCacheStorage):
         host_indices,
         extra_info: Optional[HiCacheStorageExtraInfo] = None,
     ) -> List[bool]:
+        with self._write_gate:
+            return self._batch_set_v1_locked(keys, host_indices, extra_info)
+
+    def _batch_set_v1_locked(
+        self,
+        keys: List[str],
+        host_indices,
+        extra_info: Optional[HiCacheStorageExtraInfo] = None,
+    ) -> List[bool]:
         """Zero-copy write: pwritev the host pool blocks into packed extents.
 
         The per-page blocks (k block then v block for page_first MHA) are
@@ -512,8 +1252,10 @@ class ExtentFileBackend(HiCacheStorage):
         ]
         blocks = self._v1_host_blocks(ptr_list, size_list, blocks_per_page)
         with self._lock:
-            self._gc_evict()
-            refs, passed = self._allocator.plan(list(zip(storage_keys, page_lens)))
+            pending_drops = self._select_gc_victims()
+            refs, passed, drop_events = self._allocator.plan_split(
+                list(zip(storage_keys, page_lens)), pending_drops
+            )
             if any(r is None for r in refs):
                 logger.warning(
                     "ExtentFileBackend: batch_set_v1 of %s pages refused "
@@ -521,6 +1263,20 @@ class ExtentFileBackend(HiCacheStorage):
                     len(keys),
                     self._extent_size,
                 )
+                return [False] * len(keys)
+            try:
+                self._append_drops(drop_events)
+                self._allocator.apply_drops(
+                    drop_events,
+                    trace_context=getattr(self, "_t38c_durable_context", None),
+                )
+                for slot, _generation in drop_events:
+                    for key in list(self._components):
+                        ref = self._allocator._index.get(key)
+                        if ref is None and key not in self._allocator._index:
+                            self._components.pop(key, None)
+            except Exception as exc:
+                logger.error("ExtentFileBackend: WAL invalidation failed: %s", exc)
                 return [False] * len(keys)
             groups: dict = {}
             for i, ref in enumerate(refs):
@@ -533,7 +1289,35 @@ class ExtentFileBackend(HiCacheStorage):
                     iovecs.extend(blocks[i])
                 if not self._pwritev(extent_id * self._extent_size + first, iovecs):
                     return [False] * len(keys)
-            self._allocator.commit(storage_keys, refs, passed)
+            try:
+                self._append_ungrouped_commit(
+                    storage_keys, refs, component_from_pool_name(PoolName.KV)
+                )
+            except Exception as exc:
+                logger.error("ExtentFileBackend: WAL commit failed: %s", exc)
+                return [False] * len(keys)
+            trace_context = getattr(self, "_t38c_durable_context", None) or {
+                "pool": "kv",
+                "final_kv_hash": keys[-1] if keys else "",
+            }
+            if not self._allocator.commit_install(storage_keys, refs):
+                return [False] * len(keys)
+            self._components.update(
+                zip(
+                    storage_keys,
+                    [component_from_pool_name(PoolName.KV)] * len(storage_keys),
+                )
+            )
+            _t38c_extent_commits(
+                storage_keys,
+                refs,
+                groups,
+                getattr(self, "_t38c_durable_context", None)
+                or {
+                    "pool": "kv",
+                    "final_kv_hash": keys[-1] if keys else "",
+                },
+            )
             self._log_extent_write(
                 "kv", getattr(extra_info, "node_id", None), storage_keys, page_lens
             )
@@ -623,6 +1407,30 @@ class ExtentFileBackend(HiCacheStorage):
     ) -> PoolTransferResult:
         with self._lock:
 
+            query_context = getattr(extra_info, "extra_info", None) or {}
+
+            def log_mamba_query(logical_key: str, present_result: bool) -> None:
+                if not os.path.exists("/tmp/t38c-durable-trace"):
+                    return
+                storage_key = self._component_key(PoolName.MAMBA, logical_key)
+                ref = self._allocator.lookup(storage_key)
+                _t38c_durable_log(
+                    {
+                        "evt": "storage_query",
+                        "operation": "batch_exists_v2",
+                        **query_context,
+                        "pool": PoolName.MAMBA.value,
+                        "mamba_key": logical_key,
+                        "storage_key": storage_key,
+                        "extent_id": ref.extent_id if ref is not None else None,
+                        "extent_generation": (
+                            ref.generation if ref is not None else None
+                        ),
+                        "result": bool(present_result),
+                        "reason": "query_present" if present_result else "query_miss",
+                    }
+                )
+
             def present(key: str) -> bool:
                 return self._allocator.lookup(key) is not None
 
@@ -634,8 +1442,31 @@ class ExtentFileBackend(HiCacheStorage):
             final_pages = kv_pages
             for transfer in pool_transfers or []:
                 if final_pages == 0:
+                    if transfer.name == PoolName.MAMBA:
+                        _t38c_log(
+                            {
+                                "evt": "pc_mamba_query",
+                                "raw_kv_frontier": int(kv_pages),
+                                "trailing_key": (
+                                    transfer.keys[-1]
+                                    if transfer.keys
+                                    else ""
+                                ),
+                                "trailing_key_present": False,
+                                "tested_key": "",
+                                "tested_present": False,
+                                "boundary": 0,
+                                "final_pages": 0,
+                                "removal_recycle_hook": "allocator_storage_invalidate",
+                            }
+                        )
                     break
                 name = transfer.name
+                # Each sidecar is queried against the frontier that remains
+                # usable after the preceding pools, not the original KV
+                # prefix.  In particular, appended request tokens must not
+                # participate in a trailing sidecar check.
+                frontier = final_pages
                 # A PREFETCH transfer's keys are placeholders at build time
                 # (mamba_component / swa_component write node-last checkpoints;
                 # the real trailing hashes are filled only after the hit query
@@ -652,25 +1483,85 @@ class ExtentFileBackend(HiCacheStorage):
                     boundary = next(
                         (
                             i
-                            for i in range(kv_pages)
+                            for i in range(frontier)
                             if not present(self._component_key(name, keys[i]))
                         ),
-                        kv_pages,
+                        frontier,
                     )
                 else:  # trailing_pages
-                    trailing = max(1, len(transfer.keys) if transfer.keys else 1)
+                    trailing = self._trailing_transfer_pages(transfer)
+                    trailing = min(trailing, frontier)
                     boundary = 0
-                    for prefix_len in range(kv_pages, 0, -1):
-                        if all(
+                    mamba_tested_key = ""
+                    mamba_tested_present = False
+                    mamba_match_key = ""
+                    mamba_match_present = False
+                    for prefix_len in range(frontier, 0, -1):
+                        candidate_start = max(0, prefix_len - trailing)
+                        candidate_present = all(
                             present(self._component_key(name, keys[i]))
-                            for i in range(max(0, prefix_len - trailing), prefix_len)
-                        ):
+                            for i in range(candidate_start, prefix_len)
+                        )
+                        if name == PoolName.MAMBA:
+                            candidate_key = keys[prefix_len - 1]
+                            if not mamba_tested_key:
+                                mamba_tested_key = candidate_key
+                                mamba_tested_present = candidate_present
+                                log_mamba_query(
+                                    candidate_key, candidate_present
+                                )
+                            if candidate_present:
+                                mamba_match_key = candidate_key
+                                mamba_match_present = True
+                        if candidate_present:
                             boundary = prefix_len
                             break
+                    if name == PoolName.MAMBA:
+                        _t38c_log(
+                            {
+                                "evt": "pc_mamba_query",
+                                "raw_kv_frontier": int(kv_pages),
+                                "trailing_key": (
+                                    transfer.keys[-1]
+                                    if transfer.keys
+                                    else ""
+                                ),
+                                "trailing_key_present": (
+                                    present(
+                                        self._component_key(
+                                            name, transfer.keys[-1]
+                                        )
+                                    )
+                                    if transfer.keys
+                                    else False
+                                ),
+                                "tested_key": mamba_tested_key,
+                                "tested_present": bool(mamba_tested_present),
+                                "matched_key": mamba_match_key,
+                                "matched_present": bool(mamba_match_present),
+                                "boundary": int(boundary),
+                                "final_pages": int(min(final_pages, boundary)),
+                                "removal_recycle_hook": "allocator_storage_invalidate",
+                            }
+                        )
                 if boundary:
                     hit_count[name] = boundary
                 final_pages = min(final_pages, boundary)
         return PoolTransferResult(final_pages, hit_count)
+
+    def _trailing_transfer_pages(self, transfer: PoolTransfer) -> int:
+        """Return the number of sidecar pages represented by a transfer."""
+        host_indices = transfer.host_indices
+        if host_indices is not None:
+            try:
+                slots = int(host_indices.numel())
+            except AttributeError:
+                slots = len(host_indices)
+            host_pool = getattr(self, "registered_pools", {}).get(transfer.name)
+            page_size = getattr(host_pool, "page_size", 1) or 1
+            if slots > 0 and slots % page_size == 0:
+                return max(1, slots // page_size)
+        return max(1, len(transfer.keys) if transfer.keys else 1)
 
     def batch_get_v2(
         self,
@@ -692,6 +1583,19 @@ class ExtentFileBackend(HiCacheStorage):
                     len(host_indices) if host_indices is not None else 0,
                 )
                 results[transfer.name] = [False] * len(keys)
+                if transfer.name == PoolName.MAMBA:
+                    _t38c_log(
+                        {
+                            "evt": "pc_mamba_write",
+                            "node_id": getattr(transfer, "_t38c_node_id", ""),
+                            "final_kv_hash": getattr(
+                                transfer, "_t38c_final_kv_hash", ""
+                            ),
+                            "mamba_transfer_exists": True,
+                            "mamba_key": keys[-1] if keys else "",
+                            "batch_set_v2": False,
+                        }
+                    )
                 continue
             storage_keys = [self._component_key(transfer.name, k) for k in keys]
             pages = self._read_pages(storage_keys)
@@ -717,7 +1621,13 @@ class ExtentFileBackend(HiCacheStorage):
         self,
         transfers: List[PoolTransfer],
         extra_info: Optional[HiCacheStorageExtraInfo] = None,
+        group_id=None,
     ) -> dict:
+        if group_id is not None:
+            try:
+                group_id = self._validate_group_id(group_id)
+            except ValueError:
+                return {transfer.name: [False] * len(transfer.keys or []) for transfer in transfers}
         results = {}
         for transfer in transfers:
             host_pool = self.registered_pools[transfer.name]
@@ -733,14 +1643,71 @@ class ExtentFileBackend(HiCacheStorage):
                     len(host_indices) if host_indices is not None else 0,
                 )
                 results[transfer.name] = [False] * len(keys)
+                _t38c_durable_log(
+                    {
+                        "evt": "batch_set_result",
+                        "trace_context": getattr(
+                            transfer, "_t38c_trace_context", None
+                        ),
+                        "operation_id": getattr(transfer, "_t38c_operation_id", None),
+                        "attempt_id": getattr(transfer, "_t38c_attempt_id", None),
+                        "node_id": getattr(transfer, "_t38c_node_id", ""),
+                        "final_kv_hash": getattr(
+                            transfer, "_t38c_final_kv_hash", ""
+                        ),
+                        "pool": getattr(transfer.name, "value", transfer.name),
+                        "requested_pages": len(keys),
+                        "succeeded_pages": 0,
+                        "result": False,
+                        "reason": "host_index_geometry",
+                    }
+                )
                 continue
             storage_keys = [self._component_key(transfer.name, k) for k in keys]
             values = [
                 host_pool.get_data_page(int(host_indices[i * page_size]), flat=True)
                 for i in range(len(keys))
             ]
-            ok = self._write_pages(storage_keys, values)
+            trace_context = {
+                **(
+                    getattr(transfer, "_t38c_trace_context", None) or {}
+                ),
+                "operation_id": getattr(transfer, "_t38c_operation_id", None),
+                "attempt_id": getattr(transfer, "_t38c_attempt_id", None),
+                "node_id": getattr(transfer, "_t38c_node_id", ""),
+                "final_kv_hash": getattr(transfer, "_t38c_final_kv_hash", ""),
+                "pool": getattr(transfer.name, "value", transfer.name),
+            }
+            ok = self._write_pages(
+                storage_keys,
+                values,
+                trace_context,
+                group_id=group_id,
+                component=component_from_pool_name(transfer.name),
+            )
             results[transfer.name] = [ok] * len(keys)
+            _t38c_durable_log(
+                {
+                    "evt": "batch_set_result",
+                    **trace_context,
+                    "requested_pages": len(keys),
+                    "succeeded_pages": len(keys) if ok else 0,
+                    "result": bool(ok),
+                }
+            )
+            if transfer.name == PoolName.MAMBA:
+                _t38c_log(
+                    {
+                        "evt": "pc_mamba_write",
+                        "node_id": getattr(transfer, "_t38c_node_id", ""),
+                        "final_kv_hash": getattr(
+                            transfer, "_t38c_final_kv_hash", ""
+                        ),
+                        "mamba_transfer_exists": True,
+                        "mamba_key": keys[-1] if keys else "",
+                        "batch_set_v2": bool(ok),
+                    }
+                )
             if ok:
                 self._log_extent_write(
                     transfer.name,
@@ -823,7 +1790,27 @@ class ExtentFileBackend(HiCacheStorage):
         self._stats["last_batch_preads"] = preads
         return out
 
-    def _write_pages(self, keys: List[str], values: List[Any]) -> bool:
+    def _write_pages(
+        self,
+        keys: List[str],
+        values: List[Any],
+        trace_context=None,
+        group_id=None,
+        component=None,
+    ) -> bool:
+        with self._write_gate:
+            return self._write_pages_locked(
+                keys, values, trace_context, group_id=group_id, component=component
+            )
+
+    def _write_pages_locked(
+        self,
+        keys: List[str],
+        values: List[Any],
+        trace_context=None,
+        group_id=None,
+        component=None,
+    ) -> bool:
         """Pack pages into extents and pwrite, all-or-nothing.
 
         Watermark GC runs first (under the lock); the whole plan->pwrite->
@@ -833,12 +1820,21 @@ class ExtentFileBackend(HiCacheStorage):
         """
         if len(keys) != len(values) or any(v is None for v in values):
             return False
+        if group_id is not None:
+            try:
+                group_id = self._validate_group_id(group_id)
+            except ValueError:
+                return False
+            if group_id[0] != self._namespace_epoch or group_id not in self._staged_groups:
+                return False
         with self._lock:
-            self._gc_evict()
             views = [_page_byte_view(v) for v in values]
-            refs, passed = self._allocator.plan(
-                list(zip(keys, [len(v) for v in views]))
+            pending_drops = self._select_gc_victims()
+            refs, passed, drop_events = self._plan_split_with_staged(
+                list(zip(keys, [len(v) for v in views])), pending_drops
             )
+            if any(slot in self._staged_slots() for slot, _ in drop_events):
+                return False
             if any(r is None for r in refs):
                 logger.warning(
                     "ExtentFileBackend: batch of %s pages refused (page "
@@ -846,6 +1842,12 @@ class ExtentFileBackend(HiCacheStorage):
                     len(keys),
                     self._extent_size,
                 )
+                return False
+            try:
+                self._append_drops(drop_events)
+                self._allocator.apply_drops(drop_events, trace_context=trace_context)
+            except Exception as exc:
+                logger.error("ExtentFileBackend: WAL invalidation failed: %s", exc)
                 return False
             groups: dict = {}
             for i, ref in enumerate(refs):
@@ -855,12 +1857,65 @@ class ExtentFileBackend(HiCacheStorage):
                 bufs = [views[i] for i in idxs]
                 if not self._pwritev(extent_id * self._extent_size + first, bufs):
                     return False
-            self._allocator.commit(keys, refs, passed)
+            try:
+                pool = (trace_context or {}).get("pool", PoolName.KV)
+                persisted_component = (
+                    component
+                    if component is not None
+                    else component_from_pool_name(pool)
+                )
+                self._append_batch_commit(
+                    keys, refs, persisted_component, group_id=group_id
+                )
+            except Exception as exc:
+                logger.error("ExtentFileBackend: WAL commit failed: %s", exc)
+                return False
+            if group_id is not None:
+                return self._stage_group_members(
+                    group_id,
+                    keys,
+                    refs,
+                    persisted_component,
+                    drop_events,
+                )
+            if not self._allocator.commit_install(keys, refs):
+                return False
+            self._components.update(
+                zip(keys, [persisted_component] * len(keys))
+            )
+            _t38c_extent_commits(keys, refs, groups, trace_context)
             return True
 
     # ---- GC / lifecycle ----
 
-    def _gc_evict(self) -> None:
+    def _select_gc_victims(self):
+        """Select LRU victim slots without mutating allocator state."""
+        if self._max_size_bytes <= 0 and self._min_free_bytes <= 0:
+            return []
+        victims = []
+        selected = set()
+        used = self._allocator.used_bytes
+        recency = list(self._allocator._recency)
+        while recency:
+            pressure = (
+                self._max_size_bytes > 0
+                and used > int(self._max_size_bytes * self._eviction_ratio)
+            )
+            if not pressure and self._min_free_bytes > 0:
+                st = os.statvfs(self._storage_dir)
+                pressure = st.f_bavail * st.f_frsize < self._min_free_bytes
+            if not pressure:
+                break
+            key = recency.pop(0)
+            ref = self._allocator._index.get(key)
+            if ref is None or ref.extent_id in selected:
+                continue
+            selected.add(ref.extent_id)
+            victims.append(ref.extent_id)
+            used -= self._allocator._slot_bytes[ref.extent_id]
+        return victims
+
+    def _gc_evict(self, trace_context=None) -> None:
         """Lazy watermark GC: evict LRU slots until under both watermarks.
 
         Pressure = live bytes above max_size x eviction_ratio, or free disk
@@ -881,12 +1936,103 @@ class ExtentFileBackend(HiCacheStorage):
                     pressure = True
             if not pressure:
                 return
-            if self._allocator.evict_slot_lru() == 0:
+            evicted = self._allocator.evict_slot_lru(trace_context=trace_context)
+            if evicted == 0:
                 return
 
+    def _checkpoint_state(self, wal_floor: int, wal_active_gen: int) -> ManifestState:
+        """Snapshot the ungrouped allocator state while ``_lock`` is held."""
+        allocator = self._allocator
+        entries = []
+        entry_indexes = {}
+        for key, ref in allocator._index.items():
+            entry_indexes[key] = len(entries)
+            entries.append(
+                ManifestEntry(
+                    storage_key=key.encode("utf-8"),
+                    extent_id=ref.extent_id,
+                    offset=ref.offset,
+                    length=ref.length,
+                    generation=ref.generation,
+                    component=self._components.get(
+                        key, component_from_pool_name(PoolName.KV)
+                    ),
+                )
+            )
+        return checkpoint_state_from_allocator(
+            checkpoint_lsn=self._wal_next_seq - 1,
+            wal_floor=wal_floor,
+            wal_active_gen=wal_active_gen,
+            extent_size=self._extent_size,
+            file_size=self._file_size,
+            num_slots=self._file_size // self._extent_size,
+            generations=list(allocator._generations),
+            cursors=list(allocator._cursors),
+            slot_bytes=list(allocator._slot_bytes),
+            entries=entries,
+            groups=(),
+            data_dev=os.fstat(self._fd).st_dev,
+            data_ino=os.fstat(self._fd).st_ino,
+            file_uuid=self._file_uuid,
+            namespace_epoch=self._namespace_epoch,
+            next_slot=allocator._next_slot,
+            recency_order=[entry_indexes[key] for key in allocator._recency if key in entry_indexes],
+        )
+
+    def checkpoint(self) -> bool:
+        """Publish a checkpoint, rotate WAL, then unlink covered segments.
+
+        The write gate remains held for the full manifest-publish,
+        current-pointer-publish, and exact-named unlink sequence.  No write can
+        append to the old generation after the published floor.
+        """
+        with self._write_gate:
+            self._abort_all_groups_locked()
+            with self._lock:
+                old_generation = self._wal_generation
+                new_generation = old_generation + 1
+                state = self._checkpoint_state(new_generation, old_generation)
+                write_manifest_atomic(self._manifest_path, state)
+
+            create_segment(
+                segment_path(self._storage_dir, self.config_suffix, new_generation),
+                new_generation,
+                state.checkpoint_lsn,
+            )
+            publish_current(self._wal_current_path, new_generation)
+
+            old_fd = self._wal_fd
+            self._wal_fd = None
+            if old_fd is not None:
+                os.close(old_fd)
+            self._wal_generation = new_generation
+            self._wal_offset = SEGMENT_HEADER_SIZE
+            self._wal_next_seq = state.checkpoint_lsn + 1
+            self._open_active_wal()
+
+            # Recovery intentionally does not enumerate this directory.  The
+            # checkpoint floor is the complete reclamation set.
+            for generation in range(new_generation):
+                path = segment_path(self._storage_dir, self.config_suffix, generation)
+                try:
+                    os.unlink(path)
+                except FileNotFoundError:
+                    pass
+            return True
+
     def clear(self) -> bool:
-        with self._lock:
-            self._allocator.clear()
+        # Clear is quiescent-only: the gate prevents a concurrent write from
+        # interleaving between the durable CLEAR and allocator reset.
+        with self._write_gate:
+            self._abort_all_groups_locked()
+            with self._lock:
+                self._append_wal_frame(FRAME_CLEAR, encode_clear_payload(self._wal_next_seq))
+                self._sync_wal()
+                self._allocator.clear(
+                    trace_context=getattr(self, "_t38c_durable_context", None)
+                )
+                self._components.clear()
+            self.checkpoint()
         logger.info("Cleared all entries in ExtentFileBackend storage.")
         return True
 
@@ -903,9 +2049,22 @@ class ExtentFileBackend(HiCacheStorage):
             return dict(self._stats)
 
     def close(self) -> None:
-        if self._fd is not None:
-            os.close(self._fd)
-            self._fd = None
+        if self._closed:
+            return
+        try:
+            if self._constructor_complete and os.path.isdir(self._storage_dir):
+                with self._write_gate:
+                    self._abort_all_groups_locked()
+                self.checkpoint()
+            if self._wal_fd is not None:
+                os.close(self._wal_fd)
+                self._wal_fd = None
+            if self._fd is not None:
+                os.close(self._fd)
+                self._fd = None
+        finally:
+            self._closed = True
+            self._release_backend_meta_lock()
 
     # ---- raw fd IO (explicit offsets, thread-safe on a shared fd) ----
 

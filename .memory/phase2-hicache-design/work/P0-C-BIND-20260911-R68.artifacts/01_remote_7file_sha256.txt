@@ -1,0 +1,13 @@
+## R68 item(1) remote 7-file SHA256
+## host: pc01  (i-1.gpushare.com:27460)
+## utc: 2026-09-11T05:47:31Z
+## checkout: /root/sglang-3060-12g-hicache
+## cmd: cd /root/sglang-3060-12g-hicache && sha256sum <7 paths>
+dc94b91af41786f5704901435ae4b846344717fb9399b2b16b898e6684fd30f8  python/sglang/srt/managers/schedule_batch.py
+18c39a18aa7f8c672ce5a2373f9bcdd68058933ae8c2ec16a6b14e0b47488a0a  python/sglang/srt/managers/scheduler.py
+92f4404de4935be47bddf4df3d24388a39fe3fb53b44371defa67f7564f8a5b2  python/sglang/srt/managers/scheduler_components/hicache_restore.py
+afa00fcc921ab78a46aa96fec5a1f3232eaaab3eaea9eec7bab53795b6a407d7  python/sglang/srt/mem_cache/hybrid_cache/hybrid_cache_controller.py
+bac2bd08b91897e608a9cd1df215c4b278d03d3227587eac38654d441a185633  python/sglang/srt/mem_cache/hybrid_cache/hybrid_pool_assembler.py
+beace6d3c6a92dcfb424794267e9cb33a346cea04b2918bf9588d438fb78f20f  python/sglang/srt/mem_cache/pool_host/group.py
+35fae989ddfca0d457009f810e16d0e8a56f05416a5bfb1ec3a99e9a9937ffe4  python/sglang/srt/mem_cache/unified_radix_cache.py
+## remote_ssh_exit=0
