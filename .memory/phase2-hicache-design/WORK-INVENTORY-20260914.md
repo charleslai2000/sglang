@@ -36,16 +36,34 @@
 ```
 repo            /home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt
                 （git worktree，共享 .git 在 sglang-3090-24g-hicache）
-HEAD            993ef8e5c3a6448aff2e752cf66cc45deadab59a
-git tree obj    75d8d1af8dfef5680085e67767c670554d7163af
-branch          3060-12g-qwen35-4b（历史名，不代表模型）
+branch          3090-24g-opt（working branch；后续工作在此展开）
+HEAD            34bd2ed49f2b2e6fef504019bfe3840eb30ac061（.memory 交接提交）
+prod-source     993ef8e5c3a6448aff2e752cf66cc45deadab59a（= HEAD 去掉 .memory，逐字节相同）
+git tree obj    75d8d1af8dfef5680085e67767c670554d7163af（生产源 tree，属 993ef8e5）
 tree manifest   5fe5a694a628867ee6c5a7be10a7dfa5dd854501e9c2b75e475c24b6a033f338
-                = sha256(git ls-tree -r HEAD --full-tree bytes)，≠ tree object ID
+                = sha256(git ls-tree -r 993ef8e5 --full-tree bytes)，≠ tree object ID
+superset        origin/3090-24g-hicache @ 560f9ad5256ad95b8075f474a679918340fcca47
+                （= opt + 3090-dev 的 22151 部署文档，+4 files / +278 行）
 remote origin   git@github.com:charleslai2000/sglang.git（PRIVATE）
-protected refs  refs/heads/3060-12g-qwen35-4b
-                refs/heads/checkpoint/pre-v0.5.19-20260913
+protected refs  refs/heads/checkpoint/pre-v0.5.19-20260913
                 refs/tags/checkpoint/pre-v0.5.19-20260913
 ```
+
+分支整合（2026-09-16，已核实）：
+
+- `3060-12g-qwen35-4b` 是历史命名（源于最初在 12GB RTX 3060 / sm_86 上的适配工作，
+  sm_86 同时是 3090 架构，故 kernel/loader 工作被 3090 复用）；其 tip `34bd2ed49f`
+  已快进合并入 `3090-24g-opt` 并从本地与 `origin` 删除，35 个 commit 全部保留。
+- `3090-24g-opt` 与 `3090-24g-hicache` 现为父子超集关系：
+  `3090-24g-opt` unique = 0；`3090-24g-hicache` unique = 3（2 个文档 commit + merge commit）。
+- merge 方向约定：**opt → hicache**。后续工作在 opt 上展开，需要归档时再合并入 hicache。
+- `3090-24g-hicache` 的更上游来源是 `5090-32-hicache`
+  （merge-base `54c394a2e1` = `origin/5090-32-hicache` 的 tip），再向上为
+  `upstream/main b644771e07`。
+- 合并时 hicache worktree 有 9 个未跟踪文件与 opt 的 tracked 路径重名（其中 8 个内容不同，
+  且均不在 merge-base 中），已**移动**（非删除）至
+  `/mnt/data/nerun-dev/p3/LOCAL-PROD-BASELINE-v1/hicache-worktree-collision-backup-20260916/`
+  并附 `untracked-snapshot-20260916.tar.gz`（619 entries）+ `moved-aside-manifest.txt`（逐文件 sha256）。
 
 模型：`mssfj/Qwen3.5-9B-GPTQ-INT4` rev `d44718f79ab5dd3e46ce546d25168bb7ac6a175e`，
 本地 `/mnt/data/models/local-prod-baseline-v1/qwen35-9b-gptq-int4/`，
