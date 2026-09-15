@@ -2273,6 +2273,18 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
                     meta_info["cached_tokens_details"] = recv_obj.cached_tokens_details[
                         i
                     ]
+                if (
+                    self.request_metrics_exporter_manager.exporter_enabled()
+                    and getattr(recv_obj, "hicache_telemetry", None)
+                    and recv_obj.hicache_telemetry[i] is not None
+                ):
+                    from sglang.srt.observability.hicache_telemetry import (
+                        public_hicache_telemetry,
+                    )
+
+                    meta_info["hicache_telemetry"] = public_hicache_telemetry(
+                        recv_obj.hicache_telemetry[i]
+                    )
                 if customized_info is not None:
                     self.update_request_meta_info(
                         meta_info,

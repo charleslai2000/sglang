@@ -3415,20 +3415,28 @@ class Scheduler(
                 # every cache HOST_ALLOC event carries the scheduler's
                 # authoritative key even on the very first issue.
                 self._record_host_alloc_lineage(req)
+                prefetch_kwargs = {
+                    "matched_prefix_tokens": req.full_untruncated_fill_ids[:matched_len],
+                    "demand_restore": demand_restore,
+                    "host_alloc_attempt_id": getattr(
+                        req, "hicache_host_alloc_attempt_id", None
+                    ),
+                    "prefetch_attempt_id": getattr(
+                        req, "hicache_prefetch_active_attempt_id", None
+                    ),
+                }
+                if getattr(req, "hicache_telemetry_enabled", False):
+                    prefetch_kwargs["telemetry_enabled"] = True
+                    prefetch_kwargs["session_generation"] = getattr(
+                        req, "session_generation", None
+                    )
                 outcome = tree_cache.prefetch_from_storage(
                     req.rid,
                     last_host_node,
                     new_input_tokens,
                     tree_cache.get_last_hash_value(last_host_node),
                     prefix_keys,
-                    matched_prefix_tokens=req.full_untruncated_fill_ids[:matched_len],
-                    demand_restore=demand_restore,
-                    host_alloc_attempt_id=getattr(
-                        req, "hicache_host_alloc_attempt_id", None
-                    ),
-                    prefetch_attempt_id=getattr(
-                        req, "hicache_prefetch_active_attempt_id", None
-                    ),
+                    **prefetch_kwargs,
                 )
                 # P2-1 M1b: feed the issue outcome into the restore state
                 # machine (T1 issued / T2-T4 declines). declined_too_short
@@ -4333,6 +4341,20 @@ class Scheduler(
                 terminal_attempt_id,
                 active_attempt_id,
             )
+            if getattr(req, "hicache_telemetry_enabled", False):
+                req.hicache_invalid_reason = "attempt_mismatch"
+                for field in (
+                    "hicache_prefetch_issue_mono_ns",
+                    "hicache_storage_query_start_mono_ns",
+                    "hicache_storage_query_end_mono_ns",
+                    "hicache_completed_kv_tokens",
+                    "hicache_required_aux_pools",
+                    "hicache_completed_aux_units",
+                    "hicache_hybrid_restore_complete",
+                    "hicache_durable_reusable_prefix_tokens",
+                    "hicache_ready_mono_ns",
+                ):
+                    setattr(req, field, None)
             return
         completion = None
         discarded_finalization = False
@@ -4415,6 +4437,68 @@ class Scheduler(
             # harness.  All values are produced here, never caller-supplied.
             ready_context = producer_context(component="ready")
             ready_event_id = next_event_id("ready")
+            completion_generation = completion.get("session_generation")
+            generation_valid = completion_generation == getattr(
+                req, "session_generation", None
+            )
+            if (
+                req.hicache_telemetry_enabled
+                and not discarded_finalization
+                and (
+                    terminal_attempt_id is None
+                    or terminal_attempt_id == attempt_id
+                )
+            ):
+                if generation_valid:
+                    req.hicache_telemetry_session_generation = completion_generation
+                    req.hicache_prefetch_issue_mono_ns = completion.get(
+                        "prefetch_issue_mono_ns"
+                    )
+                    req.hicache_storage_query_start_mono_ns = completion.get(
+                        "storage_query_start_mono_ns"
+                    )
+                    req.hicache_storage_query_end_mono_ns = completion.get(
+                        "storage_query_end_mono_ns"
+                    )
+                    req.hicache_completed_kv_tokens = completion.get(
+                        "completed_kv_tokens"
+                    )
+                    req.hicache_required_aux_pools = completion.get(
+                        "required_aux_pools", []
+                    )
+                    req.hicache_completed_aux_units = completion.get(
+                        "completed_aux_units"
+                    )
+                    req.hicache_hybrid_restore_complete = completion.get(
+                        "hybrid_restore_complete"
+                    )
+                    req.hicache_matched_prefix_tokens = completion.get(
+                        "matched_prefix_tokens"
+                    )
+                    req.hicache_matched_prefix_l3_proof = completion.get(
+                        "matched_prefix_l3_proof"
+                    )
+                    req.hicache_durable_reusable_prefix_tokens = completion.get(
+                        "durable_reusable_prefix_tokens"
+                    )
+                    req.hicache_ready_mono_ns = time.monotonic_ns()
+                else:
+                    req.hicache_invalid_reason = "generation_mismatch"
+                    req.hicache_telemetry_session_generation = completion_generation
+                    for field in (
+                        "hicache_prefetch_issue_mono_ns",
+                        "hicache_storage_query_start_mono_ns",
+                        "hicache_storage_query_end_mono_ns",
+                        "hicache_completed_kv_tokens",
+                        "hicache_required_aux_pools",
+                        "hicache_completed_aux_units",
+                        "hicache_hybrid_restore_complete",
+                        "hicache_matched_prefix_tokens",
+                        "hicache_matched_prefix_l3_proof",
+                        "hicache_durable_reusable_prefix_tokens",
+                        "hicache_ready_mono_ns",
+                    ):
+                        setattr(req, field, None)
             ready_snapshot = self._host_alloc_snapshot_for_req(req)
             # Read the scheduler-owned lineage back from the producer registry
             # so READY joins to the exact grant record (wake_event_id) and
@@ -6067,6 +6151,16 @@ class Scheduler(
                 self, "_rh_request_enqueue_seq", 0
             ) + 1
             req.hicache_request_enqueue_seq = self._rh_request_enqueue_seq
+            req.hicache_telemetry_enabled = bool(
+                get_observability().enable_metrics
+                or getattr(self.server_args, "export_metrics_to_file", False)
+            )
+            req.hicache_telemetry_export_enabled = bool(
+                getattr(self.server_args, "export_metrics_to_file", False)
+            )
+            req.hicache_rh_eligible = bool(self.enable_ready_horizon)
+            if req.hicache_telemetry_enabled:
+                req.hicache_enqueue_mono_ns = time.monotonic_ns()
             if not self.enable_ready_horizon:
                 self._prefetch_kvcache(
                     req, origin=HiCachePrefetchOrigin.EAGER_RH_OFF
@@ -6819,6 +6913,8 @@ class Scheduler(
                 truncation_align_size=self.truncation_align_size,
             )
             if res == AddReqResult.CONTINUE:
+                if req.hicache_telemetry_enabled:
+                    req.hicache_admission_mono_ns = time.monotonic_ns()
                 origin = getattr(req, "hicache_prefetch_last_origin", None)
                 logger.info(
                     "[P3] ts_ns=%d evt=admission.v2 schema=rh_admission.v2 "

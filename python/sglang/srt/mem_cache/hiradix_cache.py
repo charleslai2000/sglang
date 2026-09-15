@@ -1795,6 +1795,10 @@ class HiRadixCache(RadixCache):
         prefix_keys: Optional[List[str]] = None,
         # Scheduler-call parity with UnifiedRadixCache; unused in cache mode.
         matched_prefix_tokens: Optional[List[int]] = None,
+        telemetry_enabled: bool = False,
+        session_generation: Optional[int] = None,
+        prefetch_attempt_id: Optional[str] = None,
+        matched_prefix_l3_proof: Optional[dict] = None,
     ):
         prefetch_key = RadixKey(
             new_input_tokens,
@@ -1821,6 +1825,11 @@ class HiRadixCache(RadixCache):
             prefetch_key,
             last_hash,
             prefix_keys,
+            telemetry_enabled=telemetry_enabled,
+            session_generation=session_generation,
+            prefetch_attempt_id=prefetch_attempt_id,
+            matched_prefix_l3_proof=matched_prefix_l3_proof,
+            matched_prefix_tokens=len(matched_prefix_tokens or []),
             **self._get_extra_pools(),
         )
         self.ongoing_prefetch[req_id] = (

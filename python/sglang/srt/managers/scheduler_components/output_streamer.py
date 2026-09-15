@@ -32,6 +32,9 @@ from sglang.srt.managers.schedule_batch import (
     Req,
 )
 from sglang.srt.mem_cache.base_prefix_cache import BasePrefixCache
+from sglang.srt.observability.hicache_telemetry import (
+    build_and_observe_hicache_telemetry,
+)
 from sglang.srt.runtime_context import get_observability, get_serving
 from sglang.srt.server_args import ServerArgs
 from sglang.srt.speculative.spec_info import SpeculativeAlgorithm
@@ -114,6 +117,19 @@ class SchedulerOutputStreamer:
             }
 
         return None
+
+    @staticmethod
+    def get_hicache_telemetry(req: Req) -> Optional[dict]:
+        if not req.hicache_telemetry_enabled:
+            return None
+        telemetry = build_and_observe_hicache_telemetry(
+            req, getattr(req, "metrics_collector", None)
+        )
+        if telemetry is None:
+            # Keep derivation failures off the serving path.  The normal output
+            # remains valid and the optional telemetry field is simply absent.
+            return None
+        return telemetry if req.hicache_telemetry_export_enabled else None
 
     def stream_output(
         self,
@@ -246,6 +262,7 @@ class SchedulerOutputStreamer:
         prompt_tokens = []
         cached_tokens = []
         cached_tokens_details = []  # Detailed breakdown by cache source
+        hicache_telemetry = []
         time_stats = []
         retraction_counts = []
         phs_list = []
@@ -261,6 +278,7 @@ class SchedulerOutputStreamer:
 
                 # Collect detailed cache breakdown if available
                 cached_tokens_details.append(self.get_cached_tokens_details(req))
+                hicache_telemetry.append(self.get_hicache_telemetry(req))
                 time_stats.append(req.time_stats)
                 retraction_counts.append(req.retraction_count)
 
@@ -302,6 +320,7 @@ class SchedulerOutputStreamer:
                 prompt_tokens=prompt_tokens,
                 cached_tokens=cached_tokens,
                 cached_tokens_details=cached_tokens_details,
+                hicache_telemetry=(hicache_telemetry if any(hicache_telemetry) else None),
                 placeholder_tokens_idx=None,
                 placeholder_tokens_val=None,
                 retraction_counts=retraction_counts,
@@ -341,6 +360,7 @@ class _GenerationStreamAccumulator:
     cached_tokens_details: list = field(
         default_factory=list
     )  # Detailed breakdown by cache source
+    hicache_telemetry: list = field(default_factory=list)
     image_tokens: list = field(default_factory=list)
     audio_tokens: list = field(default_factory=list)
     video_tokens: list = field(default_factory=list)
@@ -496,6 +516,7 @@ class _GenerationStreamAccumulator:
 
             # Collect detailed cache breakdown if available
             self.cached_tokens_details.append(self.get_cached_tokens_details(req))
+            self.hicache_telemetry.append(self.get_hicache_telemetry(req))
 
         # Multimodal prompt token counts. In disagg decode mode the prefill node
         # already computed these and transferred them via the metadata buffer
@@ -716,6 +737,9 @@ class _GenerationStreamAccumulator:
             completion_tokens=self.completion_tokens,
             cached_tokens=self.cached_tokens,
             cached_tokens_details=self.cached_tokens_details,
+            hicache_telemetry=(
+                self.hicache_telemetry if any(self.hicache_telemetry) else None
+            ),
             image_tokens=self.image_tokens,
             audio_tokens=self.audio_tokens,
             video_tokens=self.video_tokens,

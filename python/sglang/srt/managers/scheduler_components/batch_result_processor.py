@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from typing import (
     TYPE_CHECKING,
@@ -314,6 +315,11 @@ class SchedulerBatchResultProcessor:
 
                 if req.inflight_middle_chunks <= 0:
                     req.time_stats.set_prefill_finished_time()
+                    if (
+                        req.hicache_telemetry_enabled
+                        and req.hicache_prefill_finish_mono_ns is None
+                    ):
+                        req.hicache_prefill_finish_mono_ns = time.monotonic_ns()
 
                     if req.beam_group is not None:
                         # The relay point already replaced the sampled-token

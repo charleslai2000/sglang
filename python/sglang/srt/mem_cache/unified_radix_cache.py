@@ -5305,6 +5305,8 @@ class UnifiedRadixCache(BasePrefixCache):
         demand_restore: bool = False,
         host_alloc_attempt_id: Optional[str] = None,
         prefetch_attempt_id: Optional[str] = None,
+        telemetry_enabled: bool = False,
+        session_generation: Optional[int] = None,
     ) -> Optional[str]:
         """Returns an outcome code for the P2-1 M1b state machine:
         "issued" / "declined_rate_limited" / "declined_too_short" /
@@ -5541,9 +5543,20 @@ class UnifiedRadixCache(BasePrefixCache):
             prefix_keys,
             extra_pools=aux_xfers or None,
             trace_context=trace_context,
+            telemetry_enabled=telemetry_enabled,
+            session_generation=session_generation,
+            prefetch_attempt_id=prefetch_attempt_id,
+            matched_prefix_l3_proof=self._matched_prefix_l3_proof(
+                req_id,
+                last_host_node_id,
+                len(matched_prefix_tokens or []),
+                prefetch_attempt_id,
+                session_generation,
+                last_hash,
+            ),
+            matched_prefix_tokens=len(matched_prefix_tokens or []),
         )
         operation.host_alloc_attempt_id = host_alloc_attempt_id
-        operation.prefetch_attempt_id = prefetch_attempt_id
         stats["issued"] += 1
         if _p2a_enabled():
             _p2a_block_start = time.monotonic_ns()
@@ -5926,7 +5939,90 @@ class UnifiedRadixCache(BasePrefixCache):
                 for pool, details in sidecar_counts.items()
             },
             "finalize_result": finalize_result,
+            "prefetch_issue_mono_ns": getattr(
+                operation, "prefetch_issue_mono_ns", None
+            ),
+            "session_generation": getattr(
+                operation, "telemetry_session_generation", None
+            ),
+            "storage_query_start_mono_ns": getattr(
+                operation, "storage_query_start_mono_ns", None
+            ),
+            "storage_query_end_mono_ns": getattr(
+                operation, "storage_query_end_mono_ns", None
+            ),
+            "durable_reusable_prefix_tokens": (
+                int(getattr(operation, "stats_matched_prefix_tokens", 0))
+                + int(completed_tokens)
+                if finalize_result == "accepted"
+                and getattr(operation, "matched_prefix_l3_proof", None)
+                and self._host_alloc_hybrid_restore_complete(operation)
+                else None
+            ),
+            "hybrid_restore_complete": self._host_alloc_hybrid_restore_complete(
+                operation
+            ),
+            "matched_prefix_l3_proof": getattr(
+                operation, "matched_prefix_l3_proof", None
+            ),
+            "matched_prefix_tokens": getattr(
+                operation, "stats_matched_prefix_tokens", None
+            ),
         }
+
+    def _matched_prefix_l3_proof(
+        self,
+        req_id: str,
+        anchor_id: NodeId,
+        matched_tokens: int,
+        attempt_id: Optional[str],
+        session_generation: Optional[int],
+        prompt_hash_lineage: Optional[str],
+    ) -> Optional[dict]:
+        """Return only an operation-local proof; never infer from residency."""
+        if matched_tokens == 0 and self.tree_core.is_root(anchor_id):
+            return {
+                "request_lineage": req_id,
+                "prefetch_attempt_id": attempt_id or "root-zero",
+                "session_generation": session_generation if session_generation is not None else 0,
+                "prompt_hash_lineage": prompt_hash_lineage or "root-zero",
+                "selected_anchor": "root",
+                "matched_token_boundary": 0,
+                "required_component_set": ("kv",),
+                "per_component_durable_boundary": {"kv": 0},
+                "proof_kind": "root_zero",
+                "proof_observation_point": "controller_acceptance",
+            }
+        if not (
+            attempt_id
+            and session_generation is not None
+            and prompt_hash_lineage
+            and self.tree_core.is_storage_persisted(anchor_id)
+            and len(self.tree_components) == 1
+        ):
+            return None
+        return {
+            "request_lineage": req_id,
+            "prefetch_attempt_id": attempt_id,
+            "session_generation": session_generation,
+            "prompt_hash_lineage": prompt_hash_lineage,
+            "selected_anchor": str(anchor_id),
+            "matched_token_boundary": matched_tokens,
+            "required_component_set": ("kv",),
+            "per_component_durable_boundary": {"kv": matched_tokens},
+            "proof_kind": "persisted_contiguous",
+            "proof_observation_point": "controller_acceptance",
+        }
+
+    def _host_alloc_hybrid_restore_complete(self, operation: PrefetchOperation) -> bool:
+        """Return whether accepted KV material has every required sidecar."""
+        sidecar_counts = self._host_alloc_hybrid_sidecar_counts(operation)
+        if not sidecar_counts:
+            return True
+        return all(
+            int(details.get("fetched", 0)) >= int(details.get("expected", 0))
+            for details in sidecar_counts.values()
+        )
 
     def _check_hybrid_prefetch_result(
         self,
