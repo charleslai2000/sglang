@@ -1,0 +1,32 @@
+## R68 item(4b) PID-namespace + NVML PID resolvability detail (read-only)
+=== do NVML-reported PIDs exist in this namespace? ===
+3709554 ABSENT (not in this PID namespace)
+3709747 ABSENT (not in this PID namespace)
+=== /proc/218072/status NSpid ===
+NStgid:	218072
+NSpid:	218072
+=== ns/pid for sglang tree sample ===
+218072 pid_ns=pid:[4026533899]
+218071 pid_ns=pid:[4026533899]
+218121 pid_ns=pid:[4026533899]
+218175 pid_ns=pid:[4026533899]
+218176 pid_ns=pid:[4026533899]
+=== total pids in this namespace ===
+113
+=== count of procs holding /dev/nvidia1 ===
+holders=102
+=== nvidia-smi default table process section (already captured) + explicit -q -d PIDS names blank check ===
+| Processes:                                                                              |
+|  GPU   GI   CI        PID   Type   Process name                              GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
++-----------------------------------------------------------------------------------------+
+=== which nvidia device nodes exist ===
+crw-rw-rw- 1 root root 195,   1 Jun  1 10:12 /dev/nvidia1
+crw-rw-rw- 1 root root 195, 255 Jun  1 10:12 /dev/nvidiactl
+crw-rw-rw- 1 root root 509,   0 Jun  1 10:12 /dev/nvidia-uvm
+crw-rw-rw- 1 root root 509,   1 Jun  1 10:12 /dev/nvidia-uvm-tools
+=== CUDA_VISIBLE_DEVICES for server ===
+(unset)
+=== nvidia device node major:minor for the 2 NVML pids is not resolvable (host ns) ===
+## remote_ssh_exit=0

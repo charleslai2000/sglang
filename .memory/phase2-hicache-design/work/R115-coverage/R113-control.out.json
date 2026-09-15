@@ -1,0 +1,20 @@
+{
+  "barrier_candidates": [],
+  "covered_frontier": null,
+  "failures": [
+    "no_durable_barrier: no complete durability_barrier candidate at the target identity"
+  ],
+  "linked_barrier": null,
+  "reason": "no_durable_barrier",
+  "required_frontier": 46720,
+  "rule": "durable_frontier_coverage",
+  "status": "FAIL",
+  "target": {
+    "build_rid": "f25ad7552ba440a79b47bd8a5044de5f",
+    "lifecycle_key": "040529f6a0104a8ab0406478f411438e:2",
+    "rid": "040529f6a0104a8ab0406478f411438e",
+    "session_generation": "2",
+    "session_id": "r113-p1"
+  },
+  "target_restore_node_count": 23
+}

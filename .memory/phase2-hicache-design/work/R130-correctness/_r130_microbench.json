@@ -1,0 +1,79 @@
+{
+  "meta": {
+    "files": 100000,
+    "keys": 12000,
+    "real_l3": true,
+    "rounds": 3
+  },
+  "projection": {
+    "projected_contains_hot_seconds": 0.006170389002363664,
+    "projected_contains_reval_seconds": 0.07199287700495915,
+    "projected_listdir_full_scan_seconds": 3.7162616402296407,
+    "projected_path_exists_seconds": 0.05699697399541037,
+    "projected_scandir_full_scan_seconds": 2.75736771083175,
+    "real_measured_full_scan_seconds": 4.699521236005239,
+    "real_measured_listdir_seconds": 3.687071209998976,
+    "scan_over_hot_ratio": 446.87096871453275,
+    "scan_over_reval_ratio": 38.30056285487537,
+    "scenario_amortized_reval_seconds_per_query": 0.0014398575400991834,
+    "scenario_amortized_revalidations_per_query": 240.0,
+    "scenario_queries_per_ttl_window": 50.0,
+    "target_files": 3090000,
+    "target_keys": 12000,
+    "ttl_seconds": 5.0
+  },
+  "real_l3": {
+    "bin_entries": 3314758,
+    "entries": 3314758,
+    "listdir_only_ns_per_file": 1112.3198767448412,
+    "listdir_only_seconds": 3.687071209998976,
+    "listdir_suffix_classify_ns_per_file": 132.2929701051237,
+    "listdir_suffix_classify_seconds": 0.43851918099971954,
+    "path": "/mnt/data/neuron/sglang-3090-r112-20260911/l3",
+    "path_exists_ns_per_key": 5218.793083258788,
+    "path_exists_seconds": 0.06262551699910546,
+    "scandir_classify_found": 12000,
+    "scandir_classify_ns_per_file": 1417.7569632550064,
+    "scandir_classify_seconds": 4.699521236005239
+  },
+  "synthetic": {
+    "contains_hot_ns_per_key": 514.1990835303053,
+    "contains_hot_seconds": 0.006170389002363663,
+    "contains_revalidate_ns_per_key": 5999.40641707993,
+    "contains_revalidate_seconds": 0.07199287700495915,
+    "files": 100000,
+    "keys": 12000,
+    "listdir_suffix_ns_per_file": 1202.67366997723,
+    "listdir_suffix_seconds": 0.120267366997723,
+    "listdir_suffix_stat_ns_per_file": 6234.5424800150795,
+    "listdir_suffix_stat_seconds": 0.623454248001508,
+    "path_exists_ns_per_key": 4749.747832950864,
+    "path_exists_seconds": 0.05699697399541037,
+    "raw_contains_hot_seconds": [
+      0.007515151999541558,
+      0.005617212998913601,
+      0.006170389002363663,
+      0.006729174005158711,
+      0.006083727996156085
+    ],
+    "raw_contains_revalidate_seconds": [
+      0.06960827400325797,
+      0.07212680800148519,
+      0.07720253599836724,
+      0.06877295599406352,
+      0.07199287700495915
+    ],
+    "raw_listdir_seconds": [
+      0.12626933499996085,
+      0.120267366997723,
+      0.11863273199560354
+    ],
+    "raw_scandir_seconds": [
+      0.08212038399506127,
+      0.08923520099779125,
+      0.09586568499798886
+    ],
+    "scandir_classify_ns_per_file": 892.3520099779125,
+    "scandir_classify_seconds": 0.08923520099779125
+  }
+}

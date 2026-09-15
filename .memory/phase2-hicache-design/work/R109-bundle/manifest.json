@@ -1,0 +1,25 @@
+{
+  "format": "p0b.raw-bundle.v3",
+  "task_id": "P0-B-LIVE-CHAIN-20260911-R109",
+  "epoch": "2026-09-11",
+  "runtime": {
+    "process_id": 40675,
+    "run_id": "run-40675-3216566354667",
+    "profile_id": "profile-97ee3d5d3bfdca6237dc746e",
+    "source_build": "4f41f5bab562b99562f30c67540eb05344d13637:03750d8519fdae277a0d04938c53c73ff2d5400be8c6f9f51a3d2bc7b3338d07"
+  },
+  "target": {
+    "rid": "7d0c828413124bc2886cf4be6873a104",
+    "lifecycle_key": "7d0c828413124bc2886cf4be6873a104:None"
+  },
+  "raw_files": {
+    "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/.memory/phase2-hicache-design/work/R109-bundle/raw.log": "e96655c1e0dd5bff442ae9527e9ceaca433889e9aa975bb8ec403613f380c971"
+  },
+  "source_files": {
+    "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/python/sglang/srt/managers/scheduler.py": "daf32da48b2d084976a19280b5b8eff2d232dfc1df2db9b2f4641a8f0ed9dd1d",
+    "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/python/sglang/srt/mem_cache/unified_radix_cache.py": "5d3db1528638dd1c593b9cd62fc1b380d278cac4cc1b4e1319e6bf89c0ac375b",
+    "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/python/sglang/srt/mem_cache/telemetry_context.py": "d55b057c98a4941c307bb138002340c3e8a5a5361f58417f84a3ea176658f948",
+    "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/python/sglang/srt/managers/scheduler_components/hicache_restore.py": "1cc9d2b8277039e271ce65a1e4aa7b128781b378367346edd438daee42bb3604",
+    "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/python/sglang/srt/mem_cache/hybrid_cache/hybrid_cache_controller.py": "a71acb88d886af1b5ba888828b55aae57156ceb43cd37ef7480da6ffcad06669"
+  }
+}

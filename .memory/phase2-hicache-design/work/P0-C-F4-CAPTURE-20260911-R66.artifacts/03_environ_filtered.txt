@@ -1,0 +1,31 @@
+### all environ KEY NAMES only (values redacted)
+_
+HOME
+LANG
+LC_ALL
+LC_CTYPE
+LOGNAME
+MOTD_SHOWN
+OLDPWD
+PATH
+PS1
+PWD
+SGLANG_HICACHE_FILE_BACKEND_STORAGE_DIR
+SHELL
+SHLVL
+SSH_CLIENT
+SSH_CONNECTION
+USER
+VIRTUAL_ENV
+VIRTUAL_ENV_PROMPT
+### relevant environ values (filtered)
+PWD=/root/sglang-3060-12g-hicache
+VIRTUAL_ENV=/root/sglang-env-3060-4b
+VIRTUAL_ENV_PROMPT=(sglang-env-3060-4b) 
+PATH=/root/sglang-env-3060-4b/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin
+SGLANG_HICACHE_FILE_BACKEND_STORAGE_DIR=/hy-tmp/hicache-rh-clean-20260910
+### explicit MAX_SIZE / MIN_FREE_SPACE scan (values if present)
+### explicit HICACHE scan
+SGLANG_HICACHE_FILE_BACKEND_STORAGE_DIR=/hy-tmp/hicache-rh-clean-20260910
+### environ byte count
+573

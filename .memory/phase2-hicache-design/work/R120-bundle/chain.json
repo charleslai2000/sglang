@@ -1,0 +1,198 @@
+{
+  "format": "p0b.spec-budget-chain.v1",
+  "task_id": "P1-SPEC-BUDGET-FULLCHAIN-20260911-R120",
+  "invocation": "ses-p1-spec-budget-fullchain-r120-20260911",
+  "captured_at": "2026-09-12T00:04:00+0800",
+  "verdict": "NOT_VERIFIED. Single F1(43008)+single T(27521), no decoys, distinct build sessions, one input_ids batch replay [F1,T] under the frozen R117 profile. The SPEC_BUDGET park does NOT occur. At replay T is device-resident (device_hit=27520/27521) so its prefetch is declined too_short (no speculative reservation). F1 is 95% device+host resident (device 36864 + host 4096) so its prefetch is only 2047 tokens, far below the 39321 speculative limit: no budget exhaustion, no park, no release->wake, no L3->L2->L1 restore for T (T is recomputed, disposition=RECOMPUTE reason=too_short). Upstream, neither build reached full L3 durability (F1 40958/43008 persisted; T 2046/27521 persisted in the frozen window). The no-decoy workload supplies no eviction/write-back pressure: the host KV pool is near-saturated (full_free=1114, full_evictable=27558, full_locked=36864) and the builds stay resident, so the evicted suffix is not written through.",
+  "profile": {
+    "profile_id": "profile-97ee3d5d3bfdca6237dc746e",
+    "run_id": "run-48806-4187756182262",
+    "scheduler_pid": 48806,
+    "max_running_requests": 1,
+    "max_total_tokens": 65536,
+    "speculative_budget_limit_tokens": 39321
+  },
+  "target": {
+    "rid": "r120-p1-R-T",
+    "session_id": "r120-s-R",
+    "session_generation": 41,
+    "build_session_id": "r120-s-T",
+    "build_session_generation": 40,
+    "prompt_tokens": 27521,
+    "batch": [
+      "r120-p1-R-F1",
+      "r120-p1-R-T"
+    ]
+  },
+  "issuer": {
+    "rid": "r120-p1-R-F1",
+    "build_session_id": "r120-s-F1",
+    "prompt_tokens": 43008,
+    "replay_prefetch_length_tokens": 2047,
+    "replay_speculative_used_tokens": 2047,
+    "replay_speculative_limit_tokens": 39321,
+    "replay_l3_storage_hits": 0,
+    "replay_result": "revoked_full_miss cause=miss"
+  },
+  "conditions": {
+    "C1": {
+      "verdict": "FAIL",
+      "requirement": "T full durable coverage (storage-backed); kv_hit_pages==requested, L3 objects exist, Mamba durable, session/gen/build_rid consistent across park/query/finalize",
+      "evidence": [
+        {
+          "ref": "probe.log:671 (storage_persisted build_rid=r120-p1-build-T)",
+          "detail": "frozen window: 1 node / kv_completed_tokens=2046 of 27521 persisted (~7.4%); mamba_durable=true; session_generation=40"
+        },
+        {
+          "ref": "probe.log:315 (pc_storage_query rid=r120-p1-build-T)",
+          "detail": "query_suffix_len=27520, kv_hit_pages=0, storage_hit_count=0 (query ran at build admission, pre-write)"
+        },
+        {
+          "ref": "probe.log:583/584 (pc_outcome rid=r120-p1-R-T)",
+          "detail": "attempt prefetch_length=0 then declined_too_short; NO pc_storage_query for the T replay"
+        },
+        {
+          "ref": "raw.log:36547 (rh_match_prepare r120-p1-R-T)",
+          "detail": "fill_len=27521 device_hit_tokens=27520 host_hit_tokens=0 session_generation=41"
+        },
+        {
+          "ref": "live probe re-check 00:16",
+          "detail": "build-T drain later reached 3 nodes / ~6142 tokens (22.3%) - still not full"
+        }
+      ],
+      "unmet": "T was never fully L3-durable (frozen: 2046/27521; and never restored, so no post-write pc_storage_query hit). requested_prefix==kv_hit_pages cannot hold and is not shown.",
+      "session_identity_note": "T park/query/finalize identity never occurred (no park, no finalize); build session r120-s-T gen 40 differs from replay session r120-s-R gen 41."
+    },
+    "C2": {
+      "verdict": "FAIL",
+      "requirement": "T park uniquely SPEC_BUDGET: spec_budget_used>limit on spec_budget epoch; host sufficient; not HOST_ALLOC/DEVICE_QUOTA/other; staging_eligible & restore_potential true",
+      "evidence": [
+        {
+          "ref": "grep SPEC_BUDGET raw.log",
+          "detail": "0 occurrences in the entire frozen run window"
+        },
+        {
+          "ref": "raw.log:36553 (rh_preadmission_decision r120-p1-R-T)",
+          "detail": "decision=hold reason=state_funnel; spec_budget=0, speculative_limit=39321, spec_used=0; host headroom_tokens=1204"
+        },
+        {
+          "ref": "raw.log:36554 (ready_stage r120-p1-R-T)",
+          "detail": "result=held reason=declined_too_short; speculative_budget_used_tokens=0"
+        },
+        {
+          "ref": "raw.log:36547 (rh_match_prepare r120-p1-R-T)",
+          "detail": "device_hit_tokens=27520/27521 -> T was already device-resident, so no speculative reservation was ever made for it"
+        },
+        {
+          "ref": "raw.log:56235 (promotion_reserve)",
+          "detail": "host at replay: full_free=1114 full_evictable=27558 full_locked=36864; free+evictable=28672"
+        }
+      ],
+      "unmet": "No SPEC_BUDGET park exists. T was resident and declined too_short; spec_budget_used never exceeded the limit for T."
+    },
+    "C3": {
+      "verdict": "FAIL",
+      "requirement": "F1 issue/reservation -> T SPEC_BUDGET park -> F1 exactly-once release epoch +1 -> T wake/reissue attributable to that epoch",
+      "evidence": [
+        {
+          "ref": "raw.log:36548 (prefetch_issued r120-p1-R-F1)",
+          "detail": "prefetch_length=2047 (not >39321)"
+        },
+        {
+          "ref": "raw.log:36559 (rh_preadmission_decision r120-p1-R-F1)",
+          "detail": "spec_budget=2047, speculative_limit=39321, spec_used=2047 -> budget NOT exhausted; no un-tried-tail SPEC_BUDGET park"
+        },
+        {
+          "ref": "probe.log:583/584 (pc_outcome r120-p1-R-T)",
+          "detail": "prefetch_length=0 declined_too_short -> no T park"
+        },
+        {
+          "ref": "grep SPEC_BUDGET raw.log",
+          "detail": "0 -> no release->wake chain step exists"
+        }
+      ],
+      "unmet": "Causality chain absent: no T park and no budget-exhausting F1 issue in the replay. (Build-phase F1/B-T prefetches of 43007/27520 did exceed the limit, but neither was a T park and both were revoked_full_miss.)"
+    },
+    "C4": {
+      "verdict": "FAIL",
+      "requirement": "restore_disposition==FULL, granted==requested, storage_hit==requested, kv_fetched==requested, Mamba complete, restore_success.n_tokens==requested",
+      "evidence": [
+        {
+          "ref": "raw.log:36552 (restore_disposition r120-p1-R-T)",
+          "detail": "disposition=RECOMPUTE requested=0 granted=0 reason=too_short"
+        },
+        {
+          "ref": "raw.log:36554 (ready_stage r120-p1-R-T)",
+          "detail": "result=held reason=declined_too_short"
+        },
+        {
+          "ref": "raw.log:56231 (restore_recompute r120-p1-R-F1)",
+          "detail": "cause=miss final_storage_survivability=host (issuer recompute, not T)"
+        },
+        {
+          "ref": "absence check",
+          "detail": "no restore_hybrid_finalize and no restore_success for r120-p1-R-T in the frozen window"
+        }
+      ],
+      "unmet": "T's disposition is RECOMPUTE/too_short (a FAIL class); no FULL restore, no kv_fetched, no restore_success. Absence of restore_recompute for T is not sufficient and does not apply."
+    },
+    "C5": {
+      "verdict": "FAIL",
+      "requirement": "F1_required + T_required + margin < host_allocable, measured before the run",
+      "evidence": [
+        {
+          "ref": "raw.log:56235 (promotion_reserve at replay)",
+          "detail": "full_free=1114, full_evictable=27558, full_locked=36864; host_allocable(free+evictable)=28672 tokens"
+        },
+        {
+          "ref": "raw.log:56236 (promotion_transfer)",
+          "detail": "full_free=2010 full_evictable=22566 full_locked=40960"
+        },
+        {
+          "ref": "requests.jsonl build-F1/build-T",
+          "detail": "F1_required=43008, T_required=27521, sum=70529"
+        },
+        {
+          "ref": "raw.log:36550/36553",
+          "detail": "host headroom_tokens=1204 at the replay pass"
+        }
+      ],
+      "unmet": "On the measured live basis host_allocable=28672 < F1+T=70529 (deficit ~41857; margin cannot be >=0). The static logical-pool basis (131073) would pass only with margin<60544, but the live measured allocable basis fails. No park/stage occurred so park/stage headroom is unrecordable.",
+      "basis": "host_allocable := full_free + full_evictable at the replay promotion instant (raw.log:56235); logical pool 131073 is not allocable (36864 locked + write-back working set)."
+    }
+  },
+  "unmet_conditions": [
+    "C1",
+    "C2",
+    "C3",
+    "C4",
+    "C5"
+  ],
+  "primary_decisive_unmet": "C2/C3 (no SPEC_BUDGET park): T device-resident -> declined_too_short; F1 replay prefetch 2047 < 39321 -> budget never exhausted.",
+  "structural_reason_measured": "Under the frozen R117 profile with only one F1(43008)+one T(27521) and no decoys, the two builds remain device/host resident at replay (F1 dev 36864+host 4096, T dev 27520) and their evicted suffix is not written through (L3 coverage F1 40958/43008, T 2046/27521). T therefore needs no staging (suffix 1 token) and F1 needs only 2047 (<39321). Full L3 durability and non-residency both require eviction/write-back pressure (as supplied by the R119 decoys) which this no-decoy workload does not provide. The live host pool is near-saturated (free+evictable 28672 < F1+T 70529), so the write-back drain also cannot complete.",
+  "missing_legs": [
+    "1_spec_budget_park",
+    "2_budget_release_epoch_advance",
+    "3_target_rh_reentry_wake",
+    "4_l3_to_l2_stage",
+    "5_host_ready",
+    "6_admission",
+    "7_l2_to_l1_restore_and_generation"
+  ],
+  "terminal_outcome": {
+    "http": 200,
+    "elapsed_s": 11.305,
+    "usage": {
+      "prompt_tokens": 70529,
+      "completion_tokens": 2,
+      "total_tokens": 70531
+    }
+  },
+  "server": {
+    "pid": 48746,
+    "scheduler_pid": 48806,
+    "url": "http://127.0.0.1:30000",
+    "health": 200
+  },
+  "source_head": "4f41f5bab562b99562f30c67540eb05344d13637"
+}

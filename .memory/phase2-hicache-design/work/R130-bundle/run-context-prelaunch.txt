@@ -1,0 +1,21 @@
+R130 P2-A A/B single-variable (metadata cache ON) run context
+utc_start=2026-09-12T00:35:30Z
+epoch_start=1789173330
+tz=2026-09-12T08:35:30+08:00
+server_log=/mnt/data/neuron/sglang-3090-r112-20260911/sglang-server-p2a-metacache.log
+launch_script=/mnt/data/neuron/sglang-3090-r112-20260911/launch-r112.sh
+launch_script_sha256=2259d406f8f2239289d799bfd7bffd6401dedd101ed90225ddc05508cf8caaa3
+repo=/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt
+repo_head=4f41f5bab562b99562f30c67540eb05344d13637
+probe_env_SGLANG_P2A_TIMING_PROBE=1
+single_variable_SGLANG_HICACHE_FILE_BACKEND_ENABLE_METADATA_CACHE=1
+metadata_ttl_default=5.0 (SGLANG_HICACHE_FILE_BACKEND_METADATA_TTL unset)
+N=8 TURNS=6 N_PRESSURE=6 PRESSURE_EQ_ROUND=1
+hist_targets=6000,7200,8400,9600,10800,11800,6800,9200
+max_seconds=2100
+gpu_uuid_target=GPU-2e3ed202-3655-d919-0a64-259209bc6587
+lock=/mnt/data/gpu/3090.lock
+NOTE2: attempt-1 (launch 08:54:31, health 08:56:52) was externally SIGTERM'd at
+08:56:56 (E-track cleanup window); reached health then killed 4s later. Log
+preserved as R130-bundle/attempt1-killed-at-0856.log. Relaunching fresh after
+E-track closure (E-PHASE-CLOSURE 08:59) and lock FREE. Relaunch at 2026-09-12T09:07:30+08:00.
