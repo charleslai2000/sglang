@@ -221,7 +221,8 @@ CUDA_VISIBLE_DEVICES=GPU-2e3ed202-3655-d919-0a64-259209bc6587 \
    - 32/32 transport/schema/semantic、0 error、577 completion tokens、
      completion latency p50/p95/p99 = `0.2554 / 0.4572 / 0.5401 s`；
    - 归档：`/mnt/data/cache/performance-baseline-v1/runs/B3-semantic-aggregate-20260914T1348Z/`
-     与 `summaries/SEMANTIC-AGGREGATE-BASELINE.md`；
+     与 `runs/B3-semantic-aggregate-20260914T1348Z/summaries/SEMANTIC-AGGREGATE-BASELINE.md`
+     （注意：该 summary 位于 run 目录内，**不在**顶层 `summaries/`）；
    - **限制**：non-streaming → **没有 TTFT**；不是 soak/restart，也不是 production traffic。
 
 ---
@@ -282,6 +283,16 @@ CUDA_VISIBLE_DEVICES=GPU-2e3ed202-3655-d919-0a64-259209bc6587 \
 ```
 
 今后所有 P0 修复只能**基于这个 current packet**，不要再引用缺失的历史 hash。
+
+2026-09-16 起该 packet 与其校验对象已入库（见 §7.1）：
+
+- packet 及其哈希清单：`.memory/phase2-hicache-design/evidence/p0-telemetry-20260914/packet/`
+- 被 pin 的 17 个字节：commit `a207b567fe`（15 files）+ `48233f3aba`（loader shim）
+  + `1dcaa80473`（extent-g1 test-only），三者合起来即 packet 中的 17 个路径；
+- 校验（repo 根执行）：`sha256sum -c .../packet/hashes.sha256` → 17/17 通过。
+
+**该快照是 UNREVIEWED**：终审仍为 `CHANGES_REQUIRED`（三项缺陷）。"已提交"不等于
+"已验收"。
 
 ---
 
@@ -380,8 +391,8 @@ UX 与 agent 用 streaming；纯吞吐可用 non-streaming。
 /mnt/data/nerun-dev/p3/LOCAL-PROD-BASELINE-v1/B3-oracle-correction-20260914/
 
 # P0 telemetry
-/mnt/data/cache/performance-baseline-v1/manifest/P0-TELEMETRY-DESIGN-20260914.md
-/mnt/data/cache/performance-baseline-v1/manifest/P0-TELEMETRY-EXPERT-GATE-20260914.md
+/mnt/data/cache/performance-baseline-v1/manifests/P0-TELEMETRY-DESIGN-20260914.md
+/mnt/data/cache/performance-baseline-v1/manifests/P0-TELEMETRY-EXPERT-GATE-20260914.md
 /mnt/data/cache/performance-baseline-v1/manifest/PERFORMANCE-BASELINE-SPEC-v2.md
 /mnt/data/cache/performance-baseline-v1/manifest/PERFORMANCE-BASELINE-SPEC-v2-P0-TELEMETRY-ERRATUM-20260914.md
 /mnt/data/nerun-dev/p3/LOCAL-PROD-BASELINE-v1/P0-telemetry-final-fix-20260914/
@@ -390,6 +401,36 @@ UX 与 agent 用 streaming；纯吞吐可用 non-streaming。
 
 # 性能 cache
 /mnt/data/cache/performance-baseline-v1/
+```
+
+**路径易错点（务必区分两个目录）**
+
+```
+/mnt/data/cache/performance-baseline-v1/manifest/    ← 单数：SPEC-v2 + erratum
+/mnt/data/cache/performance-baseline-v1/manifests/   ← 复数：SPEC-v1、P0 design、Expert Gate、
+                                                        telemetry-availability、prefill reconciliation
+```
+
+两者都存在且内容不同，不要按名字猜。若需在换机后使用，见下方"随 repo 分发的副本"。
+
+---
+
+## 7.1 随 repo 分发的权威输入副本（跨机可用）
+
+`/mnt/data` 是本机 NVMe（换机即失效），因此继续 P0 修复所需的权威输入已复制入库：
+
+```
+.memory/phase2-hicache-design/evidence/p0-telemetry-20260914/
+  README.md      来源、校验方法、UNREVIEWED 状态声明
+  packet/        P0-current-correction-packet-17-20260914（6 files）
+  authority/     Expert Gate、P0 design、SPEC-v2 + erratum、telemetry availability、reconciliation
+  review/        最新终审 = CHANGES_REQUIRED
+```
+
+校验 packet 哈希（必须从 repo 根执行，内置路径是 repo-root-relative）：
+
+```bash
+sha256sum -c .memory/phase2-hicache-design/evidence/p0-telemetry-20260914/packet/hashes.sha256
 ```
 
 ---
@@ -439,3 +480,71 @@ UX 与 agent 用 streaming；纯吞吐可用 non-streaming。
 > B2 G1 current-byte requalification、token-exact prefill/compute 性能基线**均已通过**；
 > 当前唯一阻塞是 **P0 telemetry 的三项终审缺陷 + provenance 需基于 current-17 packet 重建**；
 > telemetry 终审通过前，全面性能重跑与 B4 均不启动。
+
+---
+
+## 11. 换机接续（cross-host resume）
+
+### 11.1 取回工作
+
+仓库：`git@github.com:charleslai2000/sglang.git`（PRIVATE，**非** fork，默认分支见 11.3）
+
+```bash
+git fetch origin --prune
+git ls-tree -r origin/3090-24g-opt -- .memory | wc -l        # 应为 393
+git switch -c 3090-24g-opt origin/3090-24g-opt
+```
+
+若当初用 `--single-branch` 克隆：
+
+```bash
+git remote set-branches origin '*' && git fetch origin
+```
+
+**为什么以前"看不到 `.memory`"**：`.memory` 于 2026-09-16 才首次进 git（此前一直是
+未跟踪目录，不属于任何 ref），且位于 `3090-24g-opt` / `3090-24g-hicache`——**不在 `main`**。
+fresh clone 默认检出 `main`，故 `git ls-tree -r`（查 HEAD=`main`）看不到任何 `.memory`。
+另注意 `upstream`（sgl-project/sglang）永远没有它。
+
+### 11.2 换机后仍然不可用的东西（必须知道）
+
+`.memory` 与 vendored 证据可从 git 取回，但**本机 `/mnt/data` 的全部内容不会随之过去**：
+
+```
+/mnt/data/models/local-prod-baseline-v1/qwen35-9b-gptq-int4/   模型权重（需重新获取/搬运）
+/mnt/data/cache/venv/                                          运行时 venv
+/mnt/data/cache/performance-baseline-v1/ 下原始 run 日志、*.jsonl、corpora
+/mnt/data/nerun-dev/p3/LOCAL-PROD-BASELINE-v1/ 下各 gate 的运行证据目录
+/mnt/data/gpu/3090.lock                                        协调锁
+```
+
+纪律：**不要臆造缺失证据**。取不到的即标记不可用（`UNAVAILABLE`），并在报告中说明主机差异。
+`.memory` 中大量硬编码 `/mnt/data/...` 路径**仅在本机有效**。
+
+若需继续 GPU 侧工作，需在新主机上重建：模型 artifact（按 §2.3 的 revision + SHA256 校验）、
+共享 venv、task-local overlays，并重新确认 GPU 序号/UUID 映射（§2.5 的 ordinal 反转是**本机**
+特性，换机必须重新验证，不要照搬）。
+
+### 11.3 默认分支
+
+为让 fresh clone 直接得到工作内容，`charleslai2000/sglang` 的默认分支已在 2026-09-16
+从 `main` 改为 **`3090-24g-opt`**。这会改变：
+
+- fresh clone / GitHub 首页默认展示的分支；
+- 新建 PR 的默认 base 分支。
+
+撤销：`gh repo edit charleslai2000/sglang --default-branch main`。
+`main` 本身未被删除或改动（仍指向 `5263568b`）。
+
+### 11.4 分支拓扑（2026-09-16 之后）
+
+```
+main                                5263568b（与 upstream 同步线，无 .memory）
+3090-24g-opt        工作分支/默认      = 本次提交后的 tip
+wip/p0-telemetry-current-17          = 与 opt 同一 commit 的命名快照（标记 UNREVIEWED）
+3090-24g-hicache    超集归档分支      = 合并 3090-24g-opt；含 3090-dev/22151 部署文档
+checkpoint/pre-v0.5.19-20260913      冻结基线（分支 + tag）@ 993ef8e5，勿动
+```
+
+合并方向固定为 **opt → hicache**（opt 是工作分支，hicache 只作归档/超集）。
+历史分支 `3060-12g-qwen35-4b` 已删除，不要再引用。
