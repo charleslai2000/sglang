@@ -241,10 +241,10 @@ F1 INVALID vs FAIL:
   the wrap was **refused** by the product's fail-closed relocation (the
   head-slot recycle was not exercised); the victim held no live target refs;
   generation/head/index/batch_exists post-state unsatisfied; any
-  `dropped without backup`. On the preserved campaign WAL the harness now
-  reproduces exactly this: `wrap_observed = true`,
-  `victim slot 1, 953 live refs / 64 MiB, refusal headroom 49,201,152 B` ->
-  **INVALID, not FAIL**.
+  `dropped without backup`. The expected shape for this case is
+  `wrap_observed = true`, the victim holding live refs, and insufficient refusal
+  headroom -> **INVALID, not FAIL**. This is expected behavior; covered by
+  synthetic regression, not by a preserved-WAL replay artifact.
 * **FAIL** (`--expect fixed`): the reclaim executed and the cold request ran,
   but the restore did not come from storage (`storage == 0`), the zero-hit miss
   marker appeared, `batch_exists != expected`, or the ids differ from the DEVICE
@@ -313,9 +313,11 @@ head ref (slot + generation).
   `CUDA_VISIBLE_DEVICES=999`).
 * CPU-only dry-run of the new precondition logic: `wal_forensics.py --mode
   membership` was run against the **preserved campaign snapshot**
-  (`gateA-F1/store-snapshot-post-sweep-...`, read-only) and reproduces
-  `sglang.__file__` inside the tree under test, the slot cursors, the victim's
-  953 live refs / 64 MiB, and the fail-closed refusal reason.
+  (`gateA-F1/store-snapshot-post-sweep-f1-20260917T082421Z-302181`, read-only) and
+  confirms `sglang.__file__` resolves inside the tree under test and reproduces the
+  slot cursors and the membership/head state. The victim live-ref count and the
+  fail-closed refusal reason are expected values covered by synthetic regression,
+  not reproduced from this snapshot.
 * The tree under test is always asserted to resolve
   `sglang.__file__` under `<tree>/src/` (guards the editable-install landmine
   that would otherwise silently load the stale workspace copy).

@@ -140,9 +140,9 @@ def main() -> int:
         "host_pool_margin": args.host_pool_margin, "expect": args.expect,
         "run_id": rid,
         "wrap_trigger": {
-            "mode": "unique_unrelated_prefixes",
-            "note": "every sweep request uses a distinct random-id prompt with "
-                    "no shared prefix, so it allocates NEW storage keys/slots "
+            "note": "every sweep request uses a distinct per-request deterministic "
+                    "prompt seed (random.Random(180000 + i) in _filler_ids) with no "
+                    "shared prefix, so it allocates NEW storage keys/slots "
                     "(the predecessor's 'chain + unique suffix' reused the "
                     "chain's refs and never advanced the cursor)",
             "backend_env": ["SGLANG_HICACHE_EXTENT_BACKEND_EXTENT_SIZE",
