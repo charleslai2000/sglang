@@ -124,7 +124,7 @@ case "$DEST" in
     # Exact-path allowlist.  A wildcard /opt destination is never permitted;
     # each production tree must be named here explicitly.
     case "$DEST" in
-      /opt/sglang/local-prod-v1.1.2-candidate|/opt/sglang/local-prod-v1.2-candidate|/opt/sglang/local-prod-v1.2.1-candidate)
+      /opt/sglang/local-prod-v1.1.2-candidate|/opt/sglang/local-prod-v1.2-candidate|/opt/sglang/local-prod-v1.2.1-candidate|/opt/sglang/local-prod-v1.2.2-candidate)
         if [ "$ALLOW_PRODUCTION_DEST" != "1" ]; then
           die "refusing production destination $DEST; requires explicit --allow-production-dest";
         fi ;;

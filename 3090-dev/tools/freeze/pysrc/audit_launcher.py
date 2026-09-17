@@ -11,7 +11,8 @@ Checks
   2. every LOCAL-PROD-* identity string in the file equals the intended identity
   3. EXPECTED_SRC_STREAM_SHA256 equals the computed stream digest
   4. the serving-flag token list after `sglang.launch_server` is exactly the
-     reference (v1.1) token list
+     reference (v1.1) token list, with approved deltas for the v1.2 profile,
+     the approved v1.2.x bind host and exactly one approved --served-model-name
   5. the ARGS array + dry-run guard exist, the guard precedes mkdir/exec, and
      exec uses "${ARGS[@]}" (so the dry-run argv cannot diverge from the exec)
   6. the run-namespace guard refuses reserved/shared ids before anything runs
@@ -64,6 +65,22 @@ PRODUCTION_REQUIRED_SERVING_REPLACEMENTS: dict[str, str] = {
 # section 5 ("AUTH"): private-LAN deployment does not require an API key, and
 # the launch path must not pass --api-key.
 FORBIDDEN_SERVING_TOKENS: frozenset[str] = frozenset({"--api-key"})
+
+# Approved bind hosts (explicit allowlist per owner ruling, match allowed host -> replacement value):
+# - The v1.1 reference hard-codes 127.0.0.1; v1.2.x production uses 192.168.20.250.
+# This replacement is declared to allow the v1.1 -> v1.2 bind host drift while keeping
+# --api-key forbidden and enforcing the exact approved replacement.
+PRODUCTION_BIND_HOST_APPROVED: dict[str, str] = {
+    "127.0.0.1": "192.168.20.250",
+}
+
+# Approved served-model-name values (explicit allowlist per owner ruling):
+# - The frozen prod service advertises qwen35-9b-local.  This is the only
+#   allowed value for --served-model-name in any v1.2.x candidate.
+#   Any other value (including the model path qwen35-9b-w4a16) FAILS the audit.
+PRODUCTION_SERVED_MODEL_NAME_APPROVED: frozenset[str] = frozenset({
+    "qwen35-9b-local",
+})
 
 
 def strip_code(text: str) -> list[str]:
@@ -146,10 +163,22 @@ def audit(
             f"embedded stream digest {embedded} != computed {expect_stream}"
         )
 
-    # 4. serving flags vs reference
+    # 4. serving-profile firewall vs the v1.1 reference launcher.  The v1.2.x
+    # profile is an INTENTIONAL declared delta: the measured profile tokens, the
+    # approved bind host, and exactly one approved --served-model-name.  Any
+    # other flag/value, or a silently dropped reference flag, fails closed.
     tokens = strip_code(text)
     flags = serving_flags(tokens)
     details["serving_flags"] = flags
+    _sub = dict(PRODUCTION_REQUIRED_SERVING_REPLACEMENTS)
+    # approved v1.1 -> v1.2.x bind host drift (owner ruling Option A)
+    _sub.update(PRODUCTION_BIND_HOST_APPROVED)
+    _allowed_new = (
+        set(PRODUCTION_REQUIRED_SERVING_TOKENS)
+        | set(_sub.values())
+        | {"--served-model-name"}
+        | set(PRODUCTION_SERVED_MODEL_NAME_APPROVED)
+    )
     if flags is None:
         failures.append("no sglang.launch_server invocation found")
     elif ref_launcher is not None:
@@ -160,21 +189,15 @@ def audit(
         elif flags != ref_flags:
             only_new = [t for t in flags if t not in ref_flags]
             only_ref = [t for t in ref_flags if t not in flags]
-            # Fail closed on everything except the exact declared production
-            # profile delta: an unapproved new token, an unapproved dropped
-            # reference token, or a declared replacement that did not appear
-            # are all failures.
-            sub = PRODUCTION_REQUIRED_SERVING_REPLACEMENTS
-            _allowed = set(PRODUCTION_REQUIRED_SERVING_TOKENS) | set(sub.values())
-            unapproved_new = [t for t in only_new if t not in _allowed]
-            unapproved_dropped = [t for t in only_ref if t not in sub]
+            unapproved_new = [t for t in only_new if t not in _allowed_new]
+            unapproved_dropped = [t for t in only_ref if t not in _sub]
             missing_replacements = sorted(
-                new for old, new in sub.items()
+                new for old, new in _sub.items()
                 if old in only_ref and new not in flags
             )
             details["serving_delta_allowance"] = {
-                "declared_tokens": sorted(PRODUCTION_REQUIRED_SERVING_TOKENS),
-                "declared_replacements": sub,
+                "declared_tokens": sorted(_allowed_new),
+                "declared_replacements": _sub,
                 "unapproved_new": unapproved_new,
                 "unapproved_dropped": unapproved_dropped,
                 "missing_replacements": missing_replacements,
@@ -189,10 +212,58 @@ def audit(
                     f"missing_replacements={missing_replacements}"
                 )
 
+    # 4a. bind host validation (v1.1 reference -> v1.2 approved replacement).
+    # Fail closed: --host MUST appear exactly once and its value MUST be the
+    # approved v1.2 production host; unknown/other values are hard failures.
+    host_values = [
+        tokens[i + 1] if i + 1 < len(tokens) else ""
+        for i, tok in enumerate(tokens)
+        if tok == "--host"
+    ]
+    approved_hosts = sorted(set(PRODUCTION_BIND_HOST_APPROVED.values()))
+    if not host_values:
+        failures.append("no --host flag found in launcher")
+    else:
+        if len(host_values) > 1:
+            failures.append(
+                f"--host appears {len(host_values)} times; exactly one is allowed"
+            )
+        for _h in host_values:
+            if _h not in approved_hosts:
+                failures.append(
+                    f"bind host must be one of the approved v1.2 hosts "
+                    f"{approved_hosts!r}, found {_h!r}"
+                )
+    details["bind_host"] = host_values[0] if host_values else None
+    details["bind_host_approved"] = bool(
+        len(host_values) == 1 and host_values[0] in approved_hosts
+    )
+
+    # 4b. served-model-name validation (owner ruling Option A: exactly one
+    # approved value is REQUIRED; missing or unknown values fail closed).
+    served_names: list[str] = []
+    for i, tok in enumerate(tokens):
+        if tok == "--served-model-name":
+            _served_name = tokens[i + 1] if i + 1 < len(tokens) else ""
+            served_names.append(_served_name)
+            if _served_name not in PRODUCTION_SERVED_MODEL_NAME_APPROVED:
+                failures.append(
+                    f"--served-model-name must be one of "
+                    f"{sorted(PRODUCTION_SERVED_MODEL_NAME_APPROVED)!r}, "
+                    f"found {_served_name!r}"
+                )
+    if not served_names:
+        failures.append("--served-model-name missing (exactly one approved value is required)")
+    elif len(served_names) > 1:
+        failures.append(
+            f"--served-model-name appears {len(served_names)} times; exactly one is allowed"
+        )
+    details["served_model_names"] = served_names
+
     # 5. ARGS array + dry-run guard ordering
     has_args = re.search(r"^ARGS=\($", text, re.MULTILINE) is not None
 
-    # 4b. AUTH is OFF for this deployment: no API-key token may appear in the
+    # 5b. AUTH is OFF for this deployment: no API-key token may appear in the
     # serving flags.  A key on the launch path is a security regression.
     forbidden = sorted(t for t in (flags or []) if t in FORBIDDEN_SERVING_TOKENS)
     details["forbidden_serving_tokens_present"] = forbidden
@@ -200,6 +271,7 @@ def audit(
         failures.append(
             f"forbidden serving token(s) present (AUTH must be OFF): {forbidden}"
         )
+
     guard_m = re.search(r'^if \[ "\$\{SGLANG_LAUNCH_DRY_RUN:-0\}" = "1" \]; then$', text, re.MULTILINE)
     mkdir_m = re.search(r"^mkdir -p ", text, re.MULTILINE)
     exec_m = re.search(r'^exec "\$PY" -u "\$\{ARGS\[@\]\}"$', text, re.MULTILINE)
