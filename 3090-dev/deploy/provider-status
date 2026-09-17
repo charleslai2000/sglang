@@ -27,17 +27,17 @@ if [ "$alive" = "true" ]; then
   [ "$code" = "200" ] && health="up"
 fi
 
-# AUTH is MEASURED, not asserted.  A launch path that silently drops
-# --api-key still serves every endpoint with 200, so a hardcoded "AUTH=ON"
-# can report a key-less server as authenticated.  Probe one protected
-# endpoint without credentials and require a rejection.
+# AUTH is MEASURED, not asserted.  Owner ruling 2026-09-17: this provider runs
+# on a private LAN (192.168.20.0/24) with NO API key, so the expected reading
+# is "no key -> 200".  A 401/403 would mean an auth layer was re-enabled
+# unexpectedly, which is worth surfacing rather than hiding.
 auth="unknown"
 if [ "$alive" = "true" ]; then
   anon="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
           "http://$BIND_HOST:$BIND_PORT/v1/models" 2>/dev/null || echo 000)"
   case "$anon" in
-    401|403) auth="on" ;;
-    200)     auth="OFF" ;;
+    200)     auth="off" ;;
+    401|403) auth="ON" ;;
     *)       auth="unknown(http $anon)" ;;
   esac
 fi
@@ -85,8 +85,8 @@ echo "DEPLOY_DIR=$DEPLOY_DIR (tree=$deployed)"
 echo "HEALTH=$health (http $code)"
 echo "L3=OFF"
 case "$auth" in
-  on)  echo "AUTH=ON (measured: no key -> 401/403)" ;;
-  OFF) echo "AUTH=OFF (measured: no key -> 200; THE API KEY IS NOT ENFORCED)" ;;
+  off) echo "AUTH=OFF (measured: no key -> 200; expected on this private LAN)" ;;
+  ON)  echo "AUTH=ON (measured: no key -> 401/403; unexpected, ruling is AUTH=OFF)" ;;
   *)   echo "AUTH=$auth" ;;
 esac
 echo "CANONICAL_GPU_LOCK=$lock"

@@ -23,14 +23,12 @@ source "$DEPLOY_TREE/conf/provider.env"
 
 SOURCE_SHORT="$(printf '%s' "$SOURCE_COMMIT" | cut -c1-10)"
 DEPLOY_DIR="${DEPLOY_DIR_OVERRIDE:-$DEPLOY_ROOT_DEFAULT}"
-API_KEY_FILE="${API_KEY_FILE_OVERRIDE:-$API_KEY_FILE_DEFAULT}"
 RUN_DIR="${RUN_DIR_OVERRIDE:-$RUN_DIR_DEFAULT}"
 
 PID_FILE="$RUN_DIR/provider.pid"
 SUP_PID_FILE="$RUN_DIR/provider.supervisor.pid"
 CONSOLE_LOG="$RUN_DIR/server.console.log"
 SUPERVISOR_LOG="$RUN_DIR/supervisor.log"
-AUTH_CONFIG="$RUN_DIR/auth-config.yaml"
 STATE_FILE="$RUN_DIR/provider.state"
 VERIFY_DIR="$RUN_DIR/verify"
 
@@ -66,38 +64,6 @@ provider_prepare_run_dir() {
 require_sudo() {
   sudo -n true 2>/dev/null \
     || die "passwordless sudo is required (the deploy target /opt is root-owned)"
-}
-
-# ------------------------------------------------------------------ API key
-# The key file is root:root 0600.  Its value is read on demand, never echoed,
-# never written to a file we create, and never passed as a command argument.
-provider_ensure_api_key() {
-  require_sudo
-  local dir; dir="$(dirname "$API_KEY_FILE")"
-  sudo -n test -d "$dir" || sudo -n mkdir -p "$dir"
-
-  if sudo -n test -s "$API_KEY_FILE"; then
-    local mode; mode="$(sudo -n stat -c '%a' "$API_KEY_FILE")"
-    [ "$mode" = "600" ] \
-      || die "API key file $API_KEY_FILE has mode $mode (want 600); refusing"
-    log "API key file present and 0600: $API_KEY_FILE"
-    return 0
-  fi
-
-  log "generating API key into $API_KEY_FILE (0600 root-only)"
-  # The key reaches the file through a pipe, so it is never an argv element.
-  python3 -c 'import secrets; print(secrets.token_urlsafe(48))' \
-    | sudo -n install -m 600 -o root -g root /dev/stdin "$API_KEY_FILE" \
-    || die "could not write the API key file"
-  sudo -n test -s "$API_KEY_FILE" || die "API key file is empty after generation"
-  [ "$(sudo -n stat -c '%a' "$API_KEY_FILE")" = "600" ] \
-    || die "API key file mode is not 600 after generation"
-  log "API key file created (value intentionally never displayed)"
-}
-
-provider_read_api_key() {
-  sudo -n test -s "$API_KEY_FILE" || return 1
-  sudo -n cat "$API_KEY_FILE"
 }
 
 # ------------------------------------------------------------------ identity
@@ -310,18 +276,12 @@ provider_build_argv() {
 }
 
 # ------------------------------------------------------------------ launch
-# Launch detached under the supervisor, which owns the server and writes its
-# console log through the API-key redactor.
+# Launch detached under the supervisor, which owns the server and tees its
+# console log to a file.
 #
-# Authentication reaches the server WITHOUT ever touching a command line.
-# sglang exposes no environment variable and no --api-key-file for this value
-# (only --api-key, which lands in /proc/<pid>/cmdline, mode 0444), but it does
-# merge `--config <yaml>` into the resolved arguments.  Verified on this tree:
-# the --config route yields a resolved_dict() identical to passing --api-key
-# on argv.  The supervisor therefore writes a 0600 YAML containing only
-# `api-key`, passes --config, and deletes the file after the server exits.
-# The key is therefore absent from the launcher argv, the supervisor argv, the
-# server argv, and every process environment.
+# AUTH IS OFF by owner ruling (2026-09-17): this is a private LAN
+# (192.168.20.0/24) and an API key is not required.  The launch path passes
+# no --api-key, no --config, and never reads the leftover key file.
 #
 # The caller must hold the canonical lock; neither the supervisor nor the
 # server may inherit it (fd 9 is closed for both).
@@ -330,7 +290,6 @@ provider_start_server() {
   provider_prepare_run_dir
   mkdir -p "$VERIFY_DIR/metrics"
   rm -f "$PID_FILE" "$SUP_PID_FILE"
-  rm -f "$AUTH_CONFIG"
 
   # Rotate the console log.  The startup gates scan this file for evidence
   # (fp8 KV allocation, CUDA-graph capture), so an appended log from a
@@ -363,9 +322,7 @@ provider_start_server() {
     # never holds its stdout, so provider-start output can be piped.
     setsid python3 "$SUPERVISOR" \
       --log "$CONSOLE_LOG" \
-      --key-file "$API_KEY_FILE" \
       --pid-file "$PID_FILE" \
-      --auth-config "$AUTH_CONFIG" \
       -- "$VENV_PY" -P -u "${PROVIDER_ARGV[@]}" \
       9>&- >>"$SUPERVISOR_LOG" 2>&1 </dev/null &
     echo "$!" >"$SUP_PID_FILE"
@@ -428,7 +385,7 @@ provider_stop_server() {
     kill -TERM "$sup" 2>/dev/null || true
   fi
 
-  rm -f "$PID_FILE" "$SUP_PID_FILE" "$AUTH_CONFIG"
+  rm -f "$PID_FILE" "$SUP_PID_FILE"
   state_write "free" "-" "down" "stopped"
   return "$rc"
 }
