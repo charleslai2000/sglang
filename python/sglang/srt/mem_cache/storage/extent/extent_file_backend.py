@@ -144,6 +144,7 @@ _IOV_MAX = 1024
 _NATIVE_WRITE_ENV = "SGLANG_L3_NATIVE_WRITE_PATH"
 _NATIVE_WRITE_WORKSPACE_ENV = "SGLANG_L3_NATIVE_WRITE_PATH_WORKSPACE"
 _NATIVE_WRITE_BUILD_MODE_ENV = "SGLANG_L3_NATIVE_WRITE_BUILD_MODE"
+_NATIVE_WRITE_CACHE_DIR_ENV = "SGLANG_L3_NATIVE_WRITE_CACHE_DIR"
 _NATIVE_MODULE = None
 _NATIVE_MODULE_LOCK = threading.Lock()
 
@@ -175,7 +176,7 @@ def _load_native_module():
                 "sglang.srt.rust_extensions._l3wal",
                 mode=os.environ.get(_NATIVE_WRITE_BUILD_MODE_ENV, "auto"),
                 workspace=workspace,
-                cache_dir=workspace.parent / "rust-cache",
+                cache_dir=Path(os.environ.get(_NATIVE_WRITE_CACHE_DIR_ENV)).resolve() if os.environ.get(_NATIVE_WRITE_CACHE_DIR_ENV) else None,
             )
     return _NATIVE_MODULE
 
