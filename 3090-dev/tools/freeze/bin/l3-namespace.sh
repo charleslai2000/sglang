@@ -21,4 +21,4 @@
 set -euo pipefail
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TOOL_DIR="$(cd "$SELF_DIR/.." && pwd)"
-exec python3 "$TOOL_DIR/lib/l3_namespace.py" "$@"
+exec python3 "$TOOL_DIR/pysrc/l3_namespace.py" "$@"
