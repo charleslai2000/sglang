@@ -692,7 +692,8 @@ def parse_storage_events(lines) -> dict:
         "prefetch_revoke": [], "restore_success": [], "restore_recompute": [],
         "restore_disposition": [], "extent_write": [], "extent_recycle": [],
         "kv_gate": [], "reclaim_relocated": [], "reclaim_refused": [],
-        "dropped_no_backup": [],
+        "dropped_no_backup": [], "dropped_scopes": [],
+        "restore_backup": [], "match_anchor": [],
     }
     for ln in lines:
         if "evt=prefetch_revoke" in ln:
@@ -703,6 +704,10 @@ def parse_storage_events(lines) -> dict:
             ev["restore_recompute"].append(parse_kv(ln))
         elif "evt=restore_disposition" in ln:
             ev["restore_disposition"].append(parse_kv(ln))
+        elif "evt=restore_backup" in ln:
+            ev["restore_backup"].append(parse_kv(ln))
+        elif "evt=rh_match_prepare" in ln:
+            ev["match_anchor"].append(parse_kv(ln))
         elif "evt=extent_write" in ln:
             ev["extent_write"].append(parse_kv(ln))
         elif "evt=extent_recycle" in ln:
@@ -713,8 +718,9 @@ def parse_storage_events(lines) -> dict:
             ev["reclaim_relocated"].append(parse_reclaim_line(ln))
         elif "reclaim relocation" in ln and "refused" in ln:
             ev["reclaim_refused"].append(parse_reclaim_line(ln))
-        elif "without backup due to host memory pressure" in ln:
+        elif _DROP_MARKER in ln:
             ev["dropped_no_backup"].append(ln.rstrip("\n"))
+            ev["dropped_scopes"].append(parse_drop_no_backup(ln))
     return ev
 
 
@@ -731,11 +737,17 @@ def extent_write_bytes(events) -> int:
 def slim_storage_events(events, n: int = 6) -> dict:
     def tail(rows, k=None):
         return rows[-(k if k is not None else n):]
+    drop_scopes = events.get("dropped_scopes")
+    if drop_scopes is None:
+        drop_scopes = [parse_drop_no_backup(l)
+                       for l in events.get("dropped_no_backup", [])]
     return {
         "prefetch_revoke": tail(events.get("prefetch_revoke", [])),
         "restore_success": tail(events.get("restore_success", [])),
         "restore_recompute": tail(events.get("restore_recompute", [])),
         "restore_disposition": tail(events.get("restore_disposition", [])),
+        "restore_backup_n": len(events.get("restore_backup", [])),
+        "match_anchor_n": len(events.get("match_anchor", [])),
         "extent_recycle": tail(events.get("extent_recycle", [])),
         "extent_write_n": len(events.get("extent_write", [])),
         "extent_recycle_n": len(events.get("extent_recycle", [])),
@@ -746,6 +758,9 @@ def slim_storage_events(events, n: int = 6) -> dict:
         "reclaim_refused": tail(events.get("reclaim_refused", [])),
         "dropped_no_backup_n": len(events.get("dropped_no_backup", [])),
         "dropped_no_backup": tail(events.get("dropped_no_backup", []), 3),
+        # Raw subtree roots only: the target-scoped verdict needs the target
+        # node evidence and the offline refs verdict, which the callers supply.
+        "dropped_roots": [d.get("root_id") for d in drop_scopes][-6:],
     }
 
 
@@ -780,6 +795,409 @@ def revoke_storage_hit(events):
         except (TypeError, ValueError):
             continue
     return best
+
+
+# ------------------------------------- target-scoped "dropped without backup"
+#
+# The product logs one of two shapes when a write-back cannot be backed up and
+# the device/host copy is dropped:
+#   unified_radix_cache: "write_back: KV subtree dropped without backup due to
+#       host memory pressure, root node 123"
+#   hiradix_cache:       "write_back: KV cache on device are dropped without
+#       backup due to host memory pressure, subtree root 123, num_nodes 456"
+#
+# Treating ANY such line as a graded-target failure is wrong (unrelated filler
+# subtrees are disposable), but treating a target drop as foreign is a false
+# PASS.  The ONLY sound classification input available offline is a positive
+# DELTA proof that the target's durable ref set did not shrink across the drop:
+# compare the target's extent-index membership BEFORE the drop(s) with the
+# membership AFTER, using monotone set proxies (present/absent counts, leading
+# absent position, run count, longest run).  No decrease => the drop removed no
+# durable ref => foreign.  Any decrease, or no usable pre-drop baseline, =>
+# fail closed: target/unknown => INVALID.
+#
+# There is deliberately NO node-id ordering rule.  The previously assumed
+# invariant ("a parent is allocated before its children, so a subtree rooted at
+# R contains only node ids >= R") is FALSE in the tree under test:
+# ``python/sglang/srt/mem_cache/unified_cache/unified_tree_core.py``
+# ``_split_node`` (:1126-1160) allocates a NEW, higher-id node and makes it the
+# PARENT of the pre-existing, OLDER, lower-id child.  A drop rooted at such a
+# split parent has an id above the observed maximum target node id while its
+# subtree still contains a lower-id target descendant.  ``root_id`` is retained
+# as record-only evidence (``target_node_evidence``) and must never gate a
+# foreign verdict.
+_DROP_MARKER = "without backup due to host memory pressure"
+_RE_DROP_HIRADIX = re.compile(
+    r"dropped without backup due to host memory pressure, subtree root (\d+), "
+    r"num_nodes (\d+)")
+_RE_DROP_UNIFIED = re.compile(
+    r"dropped without backup due to host memory pressure, root node (\d+)")
+
+
+def parse_drop_no_backup(line: str) -> dict:
+    """Parse a dropped-without-backup line into its subtree root id.
+
+    ``root_id`` is None when the line carries no parsable subtree root, so
+    callers must fail closed (classify as unknown), never as foreign.
+    """
+    m = _RE_DROP_HIRADIX.search(line)
+    if m:
+        return {"root_id": int(m.group(1)), "num_nodes": int(m.group(2)),
+                "format": "hiradix", "line": line.rstrip("\n")}
+    m = _RE_DROP_UNIFIED.search(line)
+    if m:
+        return {"root_id": int(m.group(1)), "num_nodes": None,
+                "format": "unified", "line": line.rstrip("\n")}
+    return {"root_id": None, "num_nodes": None, "format": "unparsed",
+            "line": line.rstrip("\n")}
+
+
+def target_node_evidence(events, target_len: int) -> dict:
+    """Best-effort node-id REPORT for the graded target (console only).
+
+    REPORTING ONLY -- this is never a classification input; see ``DropScope``.
+    ``node_ids``/``max_node_id`` are recorded for human review and for spotting
+    an implausible drop root; they must not route a drop to ``foreign`` because
+    the parent/child id ordering they would rely on is false (``_split_node``).
+
+    ``durable_nodes`` are the ``restore_backup`` nodes at or below the maximum
+    ``rh_match_prepare`` anchor whose ``fill_len`` equals the target length.
+    """
+    anchors = []
+    for rec in events.get("match_anchor", []):
+        try:
+            if int(rec.get("fill_len", -1)) == int(target_len):
+                anchors.append(int(rec.get("anchor_id")))
+        except (TypeError, ValueError):
+            continue
+    anchors = sorted(set(anchors))
+    max_anchor = anchors[-1] if anchors else None
+    durable = []
+    for rec in events.get("restore_backup", []):
+        tok = rec.get("node")
+        if tok in (None, "", "None"):
+            continue
+        try:
+            n = int(tok)
+        except (TypeError, ValueError):
+            continue
+        if max_anchor is not None and n <= max_anchor:
+            durable.append(n)
+    durable = sorted(set(durable))
+    node_ids = sorted(set(anchors) | set(durable))
+    return {
+        "target_len": int(target_len),
+        "anchors": anchors,
+        "max_anchor": max_anchor,
+        "durable_nodes": durable,
+        "node_ids": node_ids,
+        "max_node_id": (max(node_ids) if node_ids else None),
+        "has_evidence": bool(node_ids),
+    }
+
+
+def _as_int(value):
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _first_absent(mem):
+    """Leading-absent position; ``None`` means "no absent page in the window"."""
+    raw = mem.get("first_absent_index")
+    return None if raw is None else _as_int(raw)
+
+
+_DELTA_PROXIES = ("n_present", "n_absent", "first_absent_index", "n_runs",
+                  "longest_run_len")
+
+
+def _missing_delta_proxies(mem) -> list:
+    """Proxy keys absent from a membership snapshot (L4: missing => unknown).
+
+    A snapshot that simply omits a proxy must never be compared as if that
+    proxy were unchanged; the caller cannot prove anything about it.
+    """
+    if not mem:
+        return list(_DELTA_PROXIES)
+    return [k for k in _DELTA_PROXIES if k not in mem]
+
+
+def baseline_is_complete(mem) -> bool:
+    """True only when a membership snapshot covers the FULL target window.
+
+    The positive delta proof is only sound against a COMPLETE baseline.  A
+    partial snapshot has an unpersisted region; pages in it can become durable
+    after the snapshot and later be dropped (or their drop can be offset by
+    concurrent growth), which the aggregate proxies cannot observe.  Such a
+    baseline can therefore never justify a FOREIGN verdict -- the caller must
+    fail closed (``unknown`` -> INVALID).
+
+    Complete means: every proxy present, ``n_present > 0``, ``n_absent == 0``,
+    no ``first_absent_index``, a single run whose length equals ``n_present``,
+    and (when the window length is known) ``n_present >= query_window_len``.
+    """
+    if not mem or _missing_delta_proxies(mem):
+        return False
+    n_present = _as_int(mem.get("n_present"))
+    n_absent = _as_int(mem.get("n_absent"))
+    if n_present is None or n_present <= 0 or n_absent != 0:
+        return False
+    if mem.get("first_absent_index") is not None:
+        return False
+    n_runs = _as_int(mem.get("n_runs"))
+    longest = _as_int(mem.get("longest_run_len"))
+    if n_runs != 1 or longest is None or longest < n_present:
+        return False
+    window = _as_int(mem.get("query_window_len"))
+    if window is not None and n_present < window:
+        return False
+    return True
+
+
+def durable_delta_status(baseline, now, require_complete_baseline=True) -> str:
+    """Positive delta proof that a drop removed no graded-target durable ref.
+
+    ``baseline`` is a membership snapshot taken while NO dropped-without-backup
+    event was in the console window (the pre-drop durable state) and ``now`` is
+    the post-drop snapshot, both for the same query window.  Returns
+    ``"intact"`` (provably no decrease), ``"lost"`` (provably decreased) or
+    ``"unknown"`` (cannot prove either -> the caller fails closed).
+
+    Two soundness requirements bound ``"intact"``:
+
+    * **Complete baseline.**  With ``require_complete_baseline=True`` (the
+      default, and what every call site uses) the baseline must pass
+      :func:`baseline_is_complete`.  A partial baseline is ``unknown``: a page
+      that became durable after the snapshot can be dropped, and the drop can
+      also be masked by concurrent growth/backfill, neither of which the
+      aggregate proxies can see (D1).
+    * **All proxies present (L4).**  A snapshot missing any of ``n_present``,
+      ``n_absent``, ``first_absent_index``, ``n_runs``, ``longest_run_len`` is
+      ``unknown``; an omitted proxy is never treated as unchanged.
+
+    The set proxies are monotone: ``n_present`` (must not fall), ``n_absent``
+    (must not rise), ``first_absent_index`` (must not move earlier; ``None`` is
+    the best value), ``n_runs`` (must not rise: a new hole splits a run) and
+    ``longest_run_len`` (must not fall).
+    """
+    if not baseline or not now:
+        return "unknown"
+    if _missing_delta_proxies(baseline) or _missing_delta_proxies(now):
+        return "unknown"
+    if require_complete_baseline and not baseline_is_complete(baseline):
+        return "unknown"
+    bl_n = _as_int(baseline.get("n_present"))
+    nw_n = _as_int(now.get("n_present"))
+    if bl_n is None or nw_n is None or bl_n <= 0:
+        return "unknown"
+    # positive LOSS proofs
+    if nw_n < bl_n:
+        return "lost"
+    bl_a, nw_a = _as_int(baseline.get("n_absent")), _as_int(now.get("n_absent"))
+    if bl_a is not None and nw_a is not None and nw_a > bl_a:
+        return "lost"
+    bl_f, nw_f = _first_absent(baseline), _first_absent(now)
+    if bl_f is None:
+        if nw_f is not None:
+            return "lost"
+    elif nw_f is None or nw_f < bl_f:
+        return "lost"
+    bl_r, nw_r = _as_int(baseline.get("n_runs")), _as_int(now.get("n_runs"))
+    if bl_r is not None and nw_r is not None and nw_r > bl_r:
+        return "lost"
+    bl_l = _as_int(baseline.get("longest_run_len"))
+    nw_l = _as_int(now.get("longest_run_len"))
+    if bl_l is not None and nw_l is not None and nw_l < bl_l:
+        return "lost"
+    return "intact"
+
+
+def delta_status_with_rechecks(baseline, snapshots) -> str:
+    """Worst-case no-decrease verdict across a baseline and re-snapshots.
+
+    ``snapshots`` are consecutive post-drop membership snapshots, the first
+    taken immediately after the drop lines and each further one a re-snapshot
+    consumed before the verdict is final (D1(ii): a drop cannot hide between
+    snapshots).  Any ``lost`` dominates; ``intact`` requires every snapshot to
+    be ``intact``; a missing/unknown snapshot forces ``unknown`` (fail closed).
+    """
+    statuses = [durable_delta_status(baseline, s)
+                for s in (snapshots or [])]
+    if not statuses:
+        return "unknown"
+    if any(s == "lost" for s in statuses):
+        return "lost"
+    if all(s == "intact" for s in statuses):
+        return "intact"
+    return "unknown"
+
+
+def combine_delta_status(statuses):
+    """Combine per-target delta verdicts into ``True``/``False``/``None``.
+
+    Any ``lost`` -> ``False`` (a target lost durable refs).  All ``intact``
+    (and at least one) -> ``True``.  Anything else (missing/unknown) -> ``None``
+    so the caller fails closed.
+    """
+    statuses = [s for s in statuses if s is not None]
+    if not statuses:
+        return None
+    if any(s == "lost" for s in statuses):
+        return False
+    if all(s == "intact" for s in statuses):
+        return True
+    return None
+
+
+class DropScope:
+    """Classify a dropped-without-backup event against the graded target.
+
+    The ONLY classification input is ``refs_intact``, the positive delta proof
+    produced by :func:`durable_delta_status`/:func:`combine_delta_status`:
+
+      * ``False`` -- the delta proves target durable refs were lost -> ``target``
+        (INVALID);
+      * ``True``  -- the delta positively proves no target durable ref was
+        removed, measured against a COMPLETE baseline (see
+        :func:`baseline_is_complete`) and confirmed by every re-snapshot
+        -> ``foreign`` (the dropped copy was redundant; a filler drop is
+        disposable);
+      * ``None``  -- not established -> ``unknown`` -> INVALID (fail closed).
+
+    ``root_id`` is accepted for recording only.  The node-id ordering bound was
+    removed because its invariant is false (see the module block above); it must
+    not steer a drop to ``foreign``.
+    """
+
+    TARGET = "target"
+    FOREIGN = "foreign"
+    UNKNOWN = "unknown"
+
+    def __init__(self, refs_intact=None):
+        self.refs_intact = refs_intact
+
+    def classify(self, root_id=None) -> str:  # noqa: ARG002 (record-only)
+        if self.refs_intact is False:
+            return self.TARGET
+        if self.refs_intact is True:
+            return self.FOREIGN
+        return self.UNKNOWN
+
+
+def scope_drop_events(events, evidence=None, refs_intact=None) -> list:
+    """Classify every dropped-without-backup event in ``events``.
+
+    ``evidence`` (:func:`target_node_evidence`) is attached to each row for
+    reporting but does NOT influence the verdict -- only ``refs_intact`` does.
+    """
+    evidence = evidence or {}
+    scope = DropScope(refs_intact)
+    raw = events.get("dropped_scopes")
+    if raw is None:
+        raw = [parse_drop_no_backup(l)
+               for l in events.get("dropped_no_backup", [])]
+    out = []
+    for rec in raw:
+        rec = dict(rec)
+        rec["scope"] = scope.classify(rec.get("root_id"))
+        rec["refs_intact"] = refs_intact
+        rec["target_evidence"] = {
+            "max_node_id": evidence.get("max_node_id"),
+            "anchors": evidence.get("anchors"),
+        }
+        out.append(rec)
+    return out
+
+
+def drop_scope_ok(scoped) -> dict:
+    """Fail-closed summary: ok only when every drop is provably FOREIGN.
+
+    Only an explicit ``scope == FOREIGN`` counts as disposable.  Any other row
+    -- ``target``, ``unknown``, or a row with a missing/unrecognised ``scope``
+    key -- is fail-closed, so the caller returns INVALID (never FAIL/PASS).
+    """
+    foreign, target, unknown = [], [], []
+    for d in scoped or []:
+        s = d.get("scope")
+        if s == DropScope.FOREIGN:
+            foreign.append(d)
+        elif s == DropScope.TARGET:
+            target.append(d)
+        else:
+            unknown.append(d)
+    return {
+        "n_total": len(scoped or []),
+        "n_foreign": len(foreign),
+        "n_target": len(target),
+        "n_unknown": len(unknown),
+        # an EMPTY event list is vacuously ok (no drop events at all); a
+        # non-empty list is ok only when every row is explicitly FOREIGN.
+        "ok": not target and not unknown,
+        "target_roots": [d.get("root_id") for d in target],
+        "unknown_roots": [d.get("root_id") for d in unknown],
+    }
+
+
+def relocation_reserve_check(detail, reserve_bytes=0) -> dict:
+    """Preflight for the F1 circular-reclaim relocation destination.
+
+    ``detail`` is the offline victim slot detail produced by
+    ``wal_forensics.py`` (``live_bytes``, ``target_live_refs``,
+    ``relocation_headroom_bytes``, ``reclaim_relocatable``).  A 100%-live store
+    with no destination capacity outside the victim is the product's EXPECTED
+    fail-closed backpressure: it is INVALID geometry for a relocation-success
+    measurement, never PASS/FAIL.  ``reserve_bytes`` is a caller-supplied
+    minimum destination size (default 0 => the victim's own live bytes).
+    """
+    detail = detail or {}
+    live = int(detail.get("live_bytes") or 0)
+    headroom = int(detail.get("relocation_headroom_bytes") or 0)
+    target_refs = int(detail.get("target_live_refs") or 0)
+    required = max(live, int(reserve_bytes or 0))
+    holds_target = target_refs > 0
+    reclaimable = bool(detail.get("reclaim_relocatable")) and live > 0
+    destination_ok = headroom >= required and required > 0
+    return {
+        "victim_slot": detail.get("slot"),
+        "live_bytes": live,
+        "relocation_headroom_bytes": headroom,
+        "reserve_bytes": int(reserve_bytes or 0),
+        "required_destination_bytes": required,
+        "target_live_refs": target_refs,
+        "holds_target_live_refs": holds_target,
+        "destination_capacity_exists": destination_ok,
+        "reclaim_relocatable": reclaimable,
+        "ok": bool(holds_target and destination_ok and reclaimable),
+    }
+
+
+def assert_preconditions(gate, label: str, checks) -> bool:
+    """Record required pre-measurement checks; any failure -> INVALID.
+
+    ``checks`` is an iterable of ``(name, ok)`` or ``(name, ok, detail)`` or
+    ``(name, ok, detail, reason)``.  Every check is registered as required (so
+    it shows in the report); the first failure invalidates (never fails), and
+    the caller MUST withhold the measured request and return INVALID.
+    """
+    failed = []
+    for item in checks:
+        name, ok = item[0], bool(item[1])
+        detail = item[2] if len(item) > 2 else None
+        reason = item[3] if len(item) > 3 else None
+        gate.check(name, ok, detail=detail)
+        if not ok:
+            failed.append((name, reason or name))
+    if failed:
+        gate.invalidate(
+            f"{label}: precondition(s) not established -> INVALID before the "
+            "measured request: "
+            + "; ".join(f"{n} ({r})" for n, r in failed))
+        return False
+    return True
 
 
 # ------------------------------------------------------------- reclaim events
