@@ -1,0 +1,378 @@
+# Patch: worktree -> frozen v1.1.2
+# Generated: 2026-09-17
+# Files: 2
+#
+
+============================================================
+# FILE: python/sglang/srt/mem_cache/storage/extent/extent_file_backend.py
+============================================================
+--- a/python/sglang/srt/mem_cache/storage/extent/extent_file_backend.py
++++ b/python/sglang/srt/mem_cache/storage/extent/extent_file_backend.py
+@@ -1139,6 +1139,49 @@
+     def _append_ungrouped_commit(self, storage_keys, refs, component: int) -> None:
+         self._append_batch_commit(storage_keys, refs, component)
+ 
++    def _append_relocation_commit(self, relocated) -> None:
++        """Durably publish relocated refs with the existing WAL protocol.
++
++        ``relocated`` is an ordered list of ``(key, ExtentRef, component)``.
++        Exactly one SET frame plus one BATCH_COMMIT frame are appended and
++        fsynced (no new frame type, no new protocol): replay folds the batch
++        only when its commit is present, and the later SET deterministically
++        wins over the victim's earlier SET for the same key.  Components are
++        carried per entry so KV and Mamba payloads keep their opaque pool
++        identity across the move.
++        """
++        batch_id = self._next_batch_id
++        self._next_batch_id += 1
++        entries = [
++            SetEntry(
++                storage_key=key.encode("utf-8"),
++                extent_id=ref.extent_id,
++                offset=ref.offset,
++                length=ref.length,
++                generation=ref.generation,
++                component=component,
++            )
++            for key, ref, component in relocated
++        ]
++        self._append_wal_frame(
++            FRAME_SET,
++            encode_set_payload(
++                SetPayload(
++                    group_epoch=b"\x00" * 16,
++                    group_seq=0,
++                    batch_id=batch_id,
++                    member_index=0,
++                    member_count=1,
++                    entries=entries,
++                )
++            ),
++        )
++        self._append_wal_frame(
++            FRAME_BATCH_COMMIT,
++            encode_batch_commit_payload(BatchCommitPayload(batch_id, 1)),
++        )
++        self._sync_wal()
++
+     # ---- key scoping (same semantics as HiCacheFile) ----
+     # v1 and v2 share the same transform: the engine writes via v1 batch_set
+     # and queries via v2 batch_exists_v2, so both sides must produce the same
+@@ -1410,6 +1453,10 @@
+                     self._extent_size,
+                 )
+                 return [False] * len(keys)
++            # Reclaim-time relocation: a circular-reclaim victim's live refs
++            # must have a durable replacement before its generation is bumped.
++            if not self._relocate_reclaim_victims_locked(passed, drop_events, refs):
++                return [False] * len(keys)
+             try:
+                 self._append_drops(drop_events)
+                 self._allocator.apply_drops(
+@@ -1936,6 +1983,129 @@
+         self._stats["last_batch_preads"] = preads
+         return out
+ 
++    # ---- reclaim-time live-ref relocation ----
++
++    def _reclaim_victims(self, passed, drop_events):
++        """Enumerate the live refs held by circular-reclaim victim slots.
++
++        A victim is a slot the pure planner put in ``passed``: its generation
++        is about to be bumped and its bytes reused.  Only refs that currently
++        resolve (present in the index, in this exact slot, at the slot's
++        current generation) are returned; dead/stale entries are never copied.
++        """
++        drop_slots = {slot for slot, _ in drop_events}
++        order = []
++        seen = set()
++        for slot in passed:
++            if slot in seen or slot not in drop_slots:
++                continue
++            seen.add(slot)
++            order.append(slot)
++        victims = []
++        for slot in sorted(order):
++            generation = self._allocator._generations[slot]
++            for key in sorted(self._allocator._slot_keys[slot]):
++                ref = self._allocator._index.get(key)
++                if ref is None or ref.extent_id != slot:
++                    continue
++                if ref.generation != generation:
++                    continue
++                victims.append((key, ref))
++        return victims
++
++    def _relocate_reclaim_victims_locked(self, passed, drop_events, planned_refs):
++        """Move every live ref out of the reclaim victims before they drop.
++
++        Preserves the existing durability order exactly: exact bytes are
++        pread from the victim and pwritten to non-victim space, then the
++        replacements are published with SET -> BATCH_COMMIT -> fsync and
++        installed.  Only after that may the caller append the DROP_SLOT
++        frames and bump the victim generation.  Returns False (fail closed)
++        when no destination capacity can be secured; the victim is then left
++        untouched and the whole write is refused.
++        """
++        victims = self._reclaim_victims(passed, drop_events)
++        if not victims:
++            return True
++        # Destination space must never be a victim (about to be dropped), a
++        # slot carrying this plan's own refs (its pwrite/`_cursors` update
++        # follows), or a staged reservation (its bytes are already written
++        # but its refs are not installed yet).
++        excluded = {slot for slot, _ in drop_events}
++        excluded.update(ref.extent_id for ref in planned_refs if ref is not None)
++        excluded.update(self._staged_slots())
++        start_slot = max(
++            (ref.extent_id for ref in planned_refs if ref is not None),
++            default=self._allocator._next_slot,
++        )
++        key_lengths = [(key, ref.length) for key, ref in victims]
++        destination_refs = self._allocator.plan_relocation(
++            [slot for slot in {ref.extent_id for _key, ref in victims}],
++            key_lengths,
++            excluded_slots=sorted(excluded),
++            start_slot=start_slot,
++        )
++        if destination_refs is None:
++            logger.warning(
++                "ExtentFileBackend: reclaim relocation of %d live refs "
++                "refused: no destination capacity outside victims %s",
++                len(victims),
++                sorted({ref.extent_id for _key, ref in victims}),
++            )
++            return False
++        # Exact bytes, read from the victim and written to the replacement.
++        for (key, ref), destination in zip(victims, destination_refs):
++            buffer = bytearray(ref.length)
++            if (
++                self._pread_full(
++                    buffer, ref.extent_id * self._extent_size + ref.offset
++                )
++                != ref.length
++            ):
++                logger.error(
++                    "ExtentFileBackend: reclaim relocation read failed for %s", key
++                )
++                return False
++            if not self._pwritev(
++                destination.extent_id * self._extent_size + destination.offset,
++                [memoryview(buffer)],
++            ):
++                logger.error(
++                    "ExtentFileBackend: reclaim relocation write failed for %s", key
++                )
++                return False
++        relocated = [
++            (
++                key,
++                destination,
++                self._components.get(key, component_from_pool_name(PoolName.KV)),
++            )
++            for (key, _ref), destination in zip(victims, destination_refs)
++        ]
++        try:
++            self._append_relocation_commit(relocated)
++        except Exception as exc:
++            logger.error(
++                "ExtentFileBackend: reclaim relocation WAL commit failed: %s", exc
++            )
++            return False
++        if not self._allocator.commit_install(
++            [key for key, _ref in victims], destination_refs
++        ):
++            logger.error(
++                "ExtentFileBackend: reclaim relocation install failed; "
++                "refusing the write"
++            )
++            return False
++        logger.info(
++            "ExtentFileBackend: reclaim relocated %d live refs out of victim "
++            "slots %s (%d bytes)",
++            len(victims),
++            sorted({ref.extent_id for _key, ref in victims}),
++            sum(ref.length for _key, ref in victims),
++        )
++        return True
++
+     def _write_pages(
+         self,
+         keys: List[str],
+@@ -1991,6 +2161,10 @@
+                     self._extent_size,
+                 )
+                 return False
++            # Reclaim-time relocation: a circular-reclaim victim's live refs
++            # must have a durable replacement before its generation is bumped.
++            if not self._relocate_reclaim_victims_locked(passed, drop_events, refs):
++                return False
+             try:
+                 self._append_drops(drop_events)
+                 self._allocator.apply_drops(drop_events, trace_context=trace_context)
+@@ -2158,6 +2332,9 @@
+             self._wal_generation = new_generation
+             self._wal_offset = SEGMENT_HEADER_SIZE
+             self._wal_next_seq = state.checkpoint_lsn + 1
++            # _open_active_wal() max()es against this watermark; a stale value
++            # renumbers the new segment below the published checkpoint lsn.
++            self._wal_recovered_next_seq = self._wal_next_seq
+             self._open_active_wal()
+ 
+             # Recovery intentionally does not enumerate this directory.  The
+
+
+============================================================
+# FILE: test/registered/unit/mem_cache/test_extent_file_backend_unit.py
+============================================================
+--- a/test/registered/unit/mem_cache/test_extent_file_backend_unit.py
++++ b/test/registered/unit/mem_cache/test_extent_file_backend_unit.py
+@@ -869,18 +869,77 @@
+         finally:
+             backend.close()
+ 
+-    def test_circular_wrap_drops_oldest_slot(self):
+-        # 16 KiB extents, 1000 B pages, 64 KiB file (4 slots): after 80 keys
+-        # in 4 batches, key 64 wraps into slot 0 and invalidates keys 0..15.
+-        for start in range(0, 80, 20):
++    def test_circular_wrap_relocates_live_refs_or_fails_closed(self):
++        """F1 reclaim contract: no live ref is destroyed in place.
++
++        Circular slot reclaim used to bump the victim's generation and drop
++        every live ref pointing into it (the write-once chain head was lost
++        and ``batch_exists`` then reported the whole chain missing).  Reclaim
++        now relocates the victim's live refs first, or -- when no destination
++        capacity can be secured -- fails closed and leaves the victim intact.
++        """
++        # (a) No destination capacity: the 4x16 KiB file is already filled by
++        # 60 KiB of pages, so the 20-page wrap batch cannot relocate slot 0's
++        # live 16 KiB.  It must be refused with the victim untouched.
++        for start in range(0, 60, 20):
+             self._write_keys_into(self.backend, 20, start)
+-        self.assertFalse(self.backend.exists("k0000"))
+-        self.assertIsNone(self.backend.get("k0000", bytearray(1000)))
+-        self.assertTrue(self.backend.exists("k0016"))
+-        self.assertTrue(self.backend.exists("k0064"))
+-        got = self.backend.get("k0064", bytearray(1000))
+-        self.assertEqual(bytes(got), bytes(self._page_bytes(64)))
+-        self.assertEqual(self.backend._allocator.used_bytes, 64 * 1000)
++        wrap_keys = self._make_keys(20, start=60)
++        wrap_values = [self._page_bytes(i) for i in range(60, 80)]
++        self.assertFalse(self.backend.batch_set(wrap_keys, wrap_values))
++        self.assertTrue(self.backend.exists("k0000"))
++        self.assertFalse(self.backend.exists("k0060"))
++        self.assertEqual(self.backend._allocator.used_bytes, 60 * 1000)
++        # (b) Destination capacity present: slot 0 is full but holds only a
++        # small live head (a large recorded filler was overwritten out of it)
++        # and the middle slots keep tail room, so the same circular reclaim
++        # relocates the head into non-victim space instead of dropping it.
++        relocate = ExtentFileBackend(
++            _make_config(
++                model_name="circular-relocate",
++                extra_config={
++                    "storage_dir": self.tmpdir,
++                    "extent_size": "16Ki",
++                    "file_size": "64Ki",
++                },
++            )
++        )
++        try:
++            head = {
++                "h0": self._page_bytes(10, 500),
++                "h1": self._page_bytes(11, 500),
++                "h2": self._page_bytes(12, 500),
++            }
++            self.assertTrue(
++                relocate.batch_set(
++                    ["F1", "h0", "h1", "h2"],
++                    [
++                        self._page_bytes(1, 14000),
++                        head["h0"],
++                        head["h1"],
++                        head["h2"],
++                    ],
++                )
++            )
++            # F1 no longer fits slot 0: it moves to slot 1 and dies in place.
++            self.assertTrue(
++                relocate.batch_set(["F1"], [self._page_bytes(99, 14000)])
++            )
++            # g6 wraps into the full slot 0 -> reclaim with the live head.
++            self.assertTrue(
++                relocate.batch_set(
++                    [f"g{i}" for i in range(9)],
++                    [self._page_bytes(100 + i, 5000) for i in range(9)],
++                )
++            )
++            self.assertEqual(relocate.batch_exists(["h0", "h1", "h2"], None), 3)
++            for key, value in head.items():
++                got = relocate.get(key, bytearray(len(value)))
++                self.assertEqual(bytes(got), bytes(value))
++                ref = relocate._allocator.lookup(relocate._storage_key(key))
++                self.assertIsNotNone(ref)
++                self.assertNotEqual(ref.extent_id, 0)
++        finally:
++            relocate.close()
+ 
+     def test_watermark_gc_keeps_used_bytes_under_cap(self):
+         backend = ExtentFileBackend(
+@@ -969,6 +1028,58 @@
+         )
+         self.assertTrue(all(self.backend.exists(key) for key in keys))
+ 
++    def test_mid_life_checkpoint_crash_reopen_replays_post_checkpoint_appends(self):
++        """A mid-life checkpoint must not renumber later WAL frames.
++
++        ``checkpoint()`` publishes ``checkpoint_lsn = N`` and rotates to a
++        fresh segment, so recovery seeds ``expected_seq = N + 1``.  If
++        rotation lets ``_open_active_wal()`` drag ``_wal_next_seq`` back to
++        the stale startup recovery watermark, every frame appended after the
++        checkpoint is numbered below ``N + 1`` and the next non-clean restart
++        raises ``WAL sequence discontinuity``.  A clean ``close()`` masks the
++        defect because its shutdown checkpoint folds the post-checkpoint
++        appends into the manifest.
++        """
++        pre_keys = self._write_keys(4)
++        self.assertTrue(self.backend.checkpoint())
++        checkpoint_lsn = read_manifest(self.backend._manifest_path).checkpoint_lsn
++        self.assertEqual(self.backend._wal_next_seq, checkpoint_lsn + 1)
++        post_keys = self._make_keys(4, start=100)
++        post_values = [self._page_bytes(50 + i) for i in range(4)]
++        self.assertTrue(self.backend.batch_set(post_keys, post_values))
++        frames = iter_segment_frames(
++            segment_path(
++                self.tmpdir,
++                self.backend.config_suffix,
++                self.backend._wal_generation,
++            ),
++            active=True,
++        )
++        frame_seqs = [frame.seq for frame in frames]
++        self.assertGreaterEqual(len(frame_seqs), 1)
++        self.assertEqual(frame_seqs[0], checkpoint_lsn + 1)
++        self.assertEqual(
++            frame_seqs,
++            list(range(frame_seqs[0], frame_seqs[0] + len(frame_seqs))),
++        )
++        # Non-clean exit: close the fds but skip the shutdown checkpoint
++        # (same crash simulation as the incomplete-group restart test).
++        self.backend._constructor_complete = False
++        self.backend.close()
++        self.backend = ExtentFileBackend(
++            _make_config(
++                extra_config={
++                    "storage_dir": self.tmpdir,
++                    "extent_size": "16Ki",
++                    "file_size": "64Ki",
++                }
++            )
++        )
++        for key in pre_keys + post_keys:
++            self.assertTrue(self.backend.exists(key), key)
++        targets = [bytearray(len(value)) for value in post_values]
++        self._assert_pages_equal(self.backend.batch_get(post_keys, targets), post_values)
++
+     def test_close_checkpoint_reopens_entries(self):
+         keys = self._write_keys(3)
+         self.backend.close()
+
