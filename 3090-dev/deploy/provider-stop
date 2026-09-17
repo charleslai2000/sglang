@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# provider-stop — gracefully stop the DEV provider and free the GPU.
+#
+# Sequence:
+#   1. read the recorded pid
+#   2. refuse to signal anything that is not our own launch_server on port
+#      30000 importing from our deploy tree (identity-checked)
+#   3. SIGTERM, then bounded SIGKILL
+#   4. WAIT until nvidia-smi shows no material compute holder, which is the
+#      step that actually frees the GPU for the main line
+#
+# Exits 0 only when the process is gone AND the GPU is materially free.
+# This script never takes the canonical lock: stopping must always work, even
+# while another task holds the lock.
+
+set -euo pipefail
+# shellcheck source=/dev/null
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/bin/provider-common.sh"
+
+if [ ! -f "$PID_FILE" ]; then
+  log "no pid file at $PID_FILE"
+  remaining="$(gpu_material_holder)"
+  if [ -n "$remaining" ]; then
+    warn "no provider pid recorded, but the GPU has a material compute holder:"
+    warn "$remaining"
+    warn "this is NOT the provider's process; it was not touched"
+    state_write "free" "-" "down" "no provider pid; foreign GPU holder present"
+    exit 2
+  fi
+  log "nothing to stop; the GPU is free"
+  state_write "free" "-" "down" "nothing to stop"
+  exit 0
+fi
+
+provider_stop_server
+rc=$?
+if [ "$rc" -eq 0 ]; then
+  log "provider stopped and the GPU is released"
+fi
+exit "$rc"
