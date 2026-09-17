@@ -35,9 +35,13 @@ from typing import Any, Callable, Dict, Optional
 from transformers import PretrainedConfig
 
 from sglang.srt.configs.muse_glimmer import MuseGlimmerConfig
+from sglang.srt.configs.qwen3_5 import Qwen3_5TextConfig
 
 GGUF_NATIVE_CONFIG_BUILDERS: Dict[str, Callable[[str], PretrainedConfig]] = {
     "muse-glimmer": MuseGlimmerConfig.from_gguf,
+    # llama.cpp spells the Qwen3.5 archive architecture "qwen35"; the HF side of
+    # the same checkpoint is the text backbone (``qwen3_5_text``).
+    "qwen35": Qwen3_5TextConfig.from_gguf,
 }
 
 
@@ -82,6 +86,14 @@ _PRE_TOKENIZER_REGEX = {
     ),
     "gpt-4o": _GPT4O_SPLIT_REGEX,
     "llama4": _GPT4O_SPLIT_REGEX,
+    # LLAMA_VOCAB_PRE_TYPE_QWEN35 from llama.cpp src/llama-vocab.cpp. The HF
+    # tokenizer.json expresses the same split case-insensitively; llama.cpp
+    # expands it because its regex engine has no inline ``(?i:...)``.
+    "qwen35": (
+        r"(?:'[sS]|'[tT]|'[rR][eE]|'[vV][eE]|'[mM]|'[lL][lL]|'[dD])|"
+        r"[^\r\n\p{L}\p{N}]?[\p{L}\p{M}]+|\p{N}| ?[^\s\p{L}\p{M}\p{N}]+[\r\n]*|"
+        r"\s*[\r\n]+|\s+(?!\S)|\s+"
+    ),
 }
 
 _GGML_TOKEN_TYPE_CONTROL = 3

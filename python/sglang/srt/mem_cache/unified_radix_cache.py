@@ -113,6 +113,9 @@ from sglang.srt.mem_cache.unified_cache.unified_tree_core import (  # noqa: F401
     UnifiedTreeCore,
     UnifiedTreeNode,
 )
+from sglang.srt.observability.hicache_telemetry import (
+    validate_matched_prefix_proof,
+)
 from sglang.srt.observability.metrics_collector import (
     StorageMetrics,
     StorageMetricsCollector,
@@ -5556,6 +5559,10 @@ class UnifiedRadixCache(BasePrefixCache):
             ),
             matched_prefix_tokens=len(matched_prefix_tokens or []),
         )
+        # Operation-local layout fact: the required L3 component set the
+        # matched-prefix proof/suffix completeness must cover.  Carried on the
+        # existing operation handoff; no new registry or global state.
+        operation.required_l3_components = self._required_l3_component_set()
         operation.host_alloc_attempt_id = host_alloc_attempt_id
         stats["issued"] += 1
         if _p2a_enabled():
@@ -5887,16 +5894,21 @@ class UnifiedRadixCache(BasePrefixCache):
             for transfer in transfers
         )
 
-    def _host_alloc_hybrid_sidecar_counts(self, operation: PrefetchOperation) -> dict:
+    def _host_alloc_hybrid_sidecar_counts(
+        self, operation: PrefetchOperation, completed_tokens: Optional[int] = None
+    ) -> dict:
         hit_pages = getattr(
             getattr(operation, "pool_storage_result", None),
             "extra_pool_hit_pages",
             {},
         ) or {}
+        completed_pages = (
+            max(0, int(completed_tokens)) // max(1, int(self.page_size))
+            if completed_tokens is not None
+            else None
+        )
         sidecars = {}
         for transfer in getattr(operation, "pool_transfers", None) or []:
-            if getattr(transfer, "indices_from_pool", None) == PoolName.KV:
-                continue
             name = getattr(transfer, "name", None)
             pool = getattr(name, "value", name) or "unknown"
             keys = getattr(transfer, "keys", None)
@@ -5904,6 +5916,23 @@ class UnifiedRadixCache(BasePrefixCache):
                 expected = len(keys or ())
             except TypeError:
                 expected = 0
+            if getattr(transfer, "indices_from_pool", None) == PoolName.KV:
+                # KV-derived sidecars share the KV page geometry and the
+                # prefetch read path already clamps the KV frontier to the
+                # minimum common prefix across KV and every KV-derived
+                # sidecar.  The accepted KV prefix IS this component's
+                # operation-local durable boundary, so record it explicitly
+                # instead of skipping the component.
+                if completed_pages is None:
+                    fetched = expected
+                else:
+                    fetched = min(expected, completed_pages) if expected else completed_pages
+                sidecars[str(pool)] = {
+                    "expected": int(fetched),
+                    "fetched": int(fetched),
+                    "indices_from_pool": PoolName.KV.value,
+                }
+                continue
             try:
                 fetched = hit_pages.get(name, hit_pages.get(pool, 0))
             except (AttributeError, TypeError):
@@ -5929,8 +5958,41 @@ class UnifiedRadixCache(BasePrefixCache):
         sidecar_counts = (
             sidecar_counts
             if sidecar_counts is not None
-            else self._host_alloc_hybrid_sidecar_counts(operation)
+            else self._host_alloc_hybrid_sidecar_counts(operation, completed_tokens)
         )
+        proof = getattr(operation, "matched_prefix_l3_proof", None)
+        required = getattr(operation, "required_l3_components", None)
+        if required is None:
+            required = self._required_l3_component_set()
+        # Validate the FULL proof tuple against the operation before any
+        # durable total is derived.  Truthiness is not proof: a mismatched /
+        # incomplete tuple leaves every dependent durable fact null.
+        proof_join = validate_matched_prefix_proof(
+            proof,
+            request_lineage=getattr(operation, "request_id", None),
+            prefetch_attempt_id=getattr(operation, "prefetch_attempt_id", None),
+            session_generation=getattr(
+                operation, "telemetry_session_generation", None
+            ),
+            matched_token_boundary=getattr(
+                operation, "stats_matched_prefix_tokens", None
+            ),
+            required_component_set=required,
+        )
+        restore_complete = self._host_alloc_hybrid_restore_complete(
+            operation, completed_tokens
+        )
+        authoritative_md = proof_join["md_tokens"]
+        if (
+            finalize_result == "accepted"
+            and authoritative_md is not None
+            and restore_complete
+        ):
+            durable_reusable_prefix_tokens: Optional[int] = int(
+                authoritative_md
+            ) + int(completed_tokens)
+        else:
+            durable_reusable_prefix_tokens = None
         return {
             "completed_kv_tokens": int(completed_tokens),
             "required_aux_pools": sorted(sidecar_counts),
@@ -5951,24 +6013,31 @@ class UnifiedRadixCache(BasePrefixCache):
             "storage_query_end_mono_ns": getattr(
                 operation, "storage_query_end_mono_ns", None
             ),
-            "durable_reusable_prefix_tokens": (
-                int(getattr(operation, "stats_matched_prefix_tokens", 0))
-                + int(completed_tokens)
-                if finalize_result == "accepted"
-                and getattr(operation, "matched_prefix_l3_proof", None)
-                and self._host_alloc_hybrid_restore_complete(operation)
-                else None
-            ),
-            "hybrid_restore_complete": self._host_alloc_hybrid_restore_complete(
-                operation
-            ),
-            "matched_prefix_l3_proof": getattr(
-                operation, "matched_prefix_l3_proof", None
-            ),
+            "durable_reusable_prefix_tokens": durable_reusable_prefix_tokens,
+            "hybrid_restore_complete": restore_complete,
+            "matched_prefix_l3_proof": proof,
             "matched_prefix_tokens": getattr(
                 operation, "stats_matched_prefix_tokens", None
             ),
         }
+
+    def _required_l3_component_set(self) -> tuple[str, ...]:
+        """The active layout's required L3 component names (KV plus every
+        sidecar), observed from the layout this cache already carries.  It is
+        an operation-local fact, not a new registry or global authority."""
+        names = ["kv"]
+        for spec in getattr(self, "sidecar_pool_specs", None) or ():
+            pool_name = getattr(spec, "pool_name", None)
+            name = getattr(pool_name, "value", pool_name)
+            if name is not None and str(name) not in names:
+                names.append(str(name))
+        for component in getattr(self, "tree_components", None) or ():
+            if component == BASE_COMPONENT_TYPE:
+                continue
+            name = getattr(component, "name", str(component)).lower()
+            if name not in names:
+                names.append(name)
+        return tuple(names)
 
     def _matched_prefix_l3_proof(
         self,
@@ -5980,6 +6049,7 @@ class UnifiedRadixCache(BasePrefixCache):
         prompt_hash_lineage: Optional[str],
     ) -> Optional[dict]:
         """Return only an operation-local proof; never infer from residency."""
+        required_components = self._required_l3_component_set()
         if matched_tokens == 0 and self.tree_core.is_root(anchor_id):
             return {
                 "request_lineage": req_id,
@@ -5988,17 +6058,33 @@ class UnifiedRadixCache(BasePrefixCache):
                 "prompt_hash_lineage": prompt_hash_lineage or "root-zero",
                 "selected_anchor": "root",
                 "matched_token_boundary": 0,
-                "required_component_set": ("kv",),
-                "per_component_durable_boundary": {"kv": 0},
+                "required_component_set": required_components,
+                "per_component_durable_boundary": {
+                    name: 0 for name in required_components
+                },
                 "proof_kind": "root_zero",
                 "proof_observation_point": "controller_acceptance",
             }
+        # A positive matched-prefix durability proof needs an authoritative
+        # durable boundary for EVERY required component.  The tree exposes a
+        # KV-level persisted predicate only, so a hybrid layout (any sidecar
+        # or extra component) cannot prove its sidecar boundary here and MUST
+        # stay unknown/null -- never zero, never an inferred positive.
+        # An unobservable layout (missing `tree_components` / `sidecar_pool_specs`)
+        # is treated identically: without the layout there is no way to prove
+        # every required component is complete, so no positive proof is emitted
+        # and the dependent durable fact stays null.
+        tree_components = getattr(self, "tree_components", None)
+        sidecar_pool_specs = getattr(self, "sidecar_pool_specs", None)
         if not (
             attempt_id
             and session_generation is not None
             and prompt_hash_lineage
             and self.tree_core.is_storage_persisted(anchor_id)
-            and len(self.tree_components) == 1
+            and tree_components is not None
+            and sidecar_pool_specs is not None
+            and len(tree_components) == 1
+            and not sidecar_pool_specs
         ):
             return None
         return {
@@ -6008,15 +6094,21 @@ class UnifiedRadixCache(BasePrefixCache):
             "prompt_hash_lineage": prompt_hash_lineage,
             "selected_anchor": str(anchor_id),
             "matched_token_boundary": matched_tokens,
-            "required_component_set": ("kv",),
-            "per_component_durable_boundary": {"kv": matched_tokens},
+            "required_component_set": required_components,
+            "per_component_durable_boundary": {
+                name: matched_tokens for name in required_components
+            },
             "proof_kind": "persisted_contiguous",
             "proof_observation_point": "controller_acceptance",
         }
 
-    def _host_alloc_hybrid_restore_complete(self, operation: PrefetchOperation) -> bool:
+    def _host_alloc_hybrid_restore_complete(
+        self, operation: PrefetchOperation, completed_tokens: Optional[int] = None
+    ) -> bool:
         """Return whether accepted KV material has every required sidecar."""
-        sidecar_counts = self._host_alloc_hybrid_sidecar_counts(operation)
+        sidecar_counts = self._host_alloc_hybrid_sidecar_counts(
+            operation, completed_tokens
+        )
         if not sidecar_counts:
             return True
         return all(
