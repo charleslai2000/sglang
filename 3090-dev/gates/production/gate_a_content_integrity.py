@@ -328,6 +328,35 @@ def main() -> int:
             gate.invalidate(persist["reason"])
             return _finish(gate)
 
+        # ---- (f) required pre-assertions before the measured request -----
+        # Owner closure 3: prove the target is in the extent index, the device
+        # and host tiers are cold by unrelated-filler volume, a storage
+        # candidate hit exists, host-pool sizing covers the workload, and no
+        # graded-target drop occurred.  Any missing precondition -> INVALID
+        # (never FAIL) and the measured request is withheld.  These are proven
+        # offline / by volume, NOT by a re-warming request.
+        pre = persist.get("preconditions") or {}
+        if not gc.assert_preconditions(gate, "gate-a-l3-arm", [
+            ("pre_host_pool_stages_workload",
+             gate.checks.get("host_pool_stages_graded_prompt",
+                             {}).get("ok") is True,
+             {k: hp.get(k) for k in ("kv_tokens", "required_kv_host_tokens")}),
+            ("pre_target_in_extent_index",
+             bool(pre.get("target_in_extent_index")), pre.get("membership")),
+            ("pre_device_miss_guaranteed",
+             bool(pre.get("device_eviction_proven")),
+             (persist.get("device_eviction_proof") or {})),
+            ("pre_host_miss_guaranteed",
+             bool(pre.get("host_eviction_proven")),
+             (persist.get("host_eviction_proof") or {})),
+            ("pre_storage_candidate_hit",
+             bool(pre.get("storage_candidate_hit")), pre.get("membership")),
+            ("pre_no_target_drop_without_backup",
+             bool(pre.get("no_target_drop_without_backup")),
+             pre.get("drop_scope")),
+        ]):
+            return _finish(gate)
+
         # ---- (g) measured L3 arm (preconditions proven above) ----------
         l3_a = gc.generate(args.port, ids_a, args.max_new)
         l3_b = gc.generate(args.port, ids_b, args.max_new)
@@ -469,6 +498,29 @@ def _storage_proven(a: dict, b: dict) -> bool:
             and int(tb.get("device") or 0) == 0)
 
 
+def _as_positive(value) -> int:
+    """Non-negative int for baseline comparison; None/garbage -> 0."""
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _targets_in_index_ok(membership, min_present_by_target, default_min) -> bool:
+    """Every target present at its OWN threshold; empty membership is NOT ok.
+
+    An empty membership dict means the offline verdict has no target rows to
+    stand on -- it must never default to ``True`` (fail-open).
+    """
+    if not membership:
+        return False
+    return all(
+        (m.get("n_present") or 0) >=
+        min_present_by_target.get(
+            name, m.get("min_present_required") or default_min)
+        for name, m in membership.items())
+
+
 def _assert_storage_arm(gate, prefix, ra, rb, dev_a, dev_b, ids_a, ids_b):
     """The measured-arm oracle: storage-sourced restore with exact ids.
 
@@ -515,9 +567,18 @@ def _persist_targets(gate, args, console_path, off, namespace, suffix,
     filler_tokens_total = 0
     target_n = max(len(ids) for ids, _ in targets.values())
     min_present = math.ceil(args.min_index_fraction * (target_n - 1))
+    # Per-target acceptance thresholds: A and B need not be equal length, so
+    # each target is compared against its OWN window (a global max would be a
+    # false-INVALID for the shorter prompt).
+    min_present_by_target = {
+        name: math.ceil(args.min_index_fraction * (len(ids) - 1))
+        for name, (ids, _) in targets.items()}
     kv_host_tokens = int(gc.parse_host_pool(console_path).get("kv_tokens") or 0)
     host_cycle_target = kv_host_tokens or (target_n + args.host_pool_margin)
     last_membership = None
+    # Pre-drop durable baseline per target: the best membership seen while NO
+    # dropped-without-backup event was in the cumulative console window.
+    baseline_by_target = {}
     last_man = {}
     ev = {}
     for i in range(args.max_fillers):
@@ -529,29 +590,108 @@ def _persist_targets(gate, args, console_path, off, namespace, suffix,
             return None
         filler_tokens_total += args.filler_tokens
         ev = gc.parse_storage_events(gc.read_new_lines(console_path, off))
-        if ev.get("dropped_no_backup"):
-            gate.report["persist_console_evidence"] = gc.slim_storage_events(ev)
-            gate.invalidate(
-                "kv subtree dropped without backup due to host memory pressure "
-                f"({len(ev['dropped_no_backup'])} event(s)) after "
-                f"{filler_tokens_total} filler tokens; the host pool is still "
-                "mis-sized for the graded prompt")
-            return None
         written = gc.extent_write_bytes(ev)
         man = gc.namespace_manifest(namespace, suffix)
         last_man = man
+        membership = None
+        if written > 0 or ev.get("dropped_no_backup"):
+            membership = _membership_both(
+                gate, args, namespace, suffix, targets, run_dir, rid, i)
+            if membership is None:
+                return None
+            if not membership:
+                gate.invalidate(
+                    f"offline membership [{i}] returned no target rows; the "
+                    "target-scoped drop verdict is unestablishable")
+                return None
+            last_membership = membership
+        drops_present = bool(ev.get("dropped_no_backup"))
+        if membership is not None and not drops_present:
+            for name, m in membership.items():
+                if (_as_positive(m.get("n_present"))
+                        > _as_positive((baseline_by_target.get(name) or {})
+                                       .get("n_present"))):
+                    baseline_by_target[name] = m
+        # Target-scoped drop predicate (owner closure 1, tightened D1).
+        # FOREIGN requires a positive DELTA proof per target measured against a
+        # COMPLETE (full-window) drop-free baseline, and confirmed by a
+        # re-snapshot consumed immediately after the drop lines: a target page
+        # that became durable only after the baseline, or a drop masked by
+        # concurrent growth/backfill, can no longer read "intact".  No complete
+        # baseline, an empty membership, a missing proxy, or any decrease =>
+        # target/unknown => INVALID.  The node-id ordering bound is deliberately
+        # NOT used (its invariant is false; see gate_common).
+        refs_intact = None
+        recheck = None
+        if membership is not None:
+            post_snaps = [membership]
+            if drops_present:
+                # D1(ii): re-snapshot immediately around the drop window.  The
+                # verdict must hold for BOTH post-drop snapshots, so a drop
+                # landing between them cannot be hidden.
+                recheck = _membership_both(
+                    gate, args, namespace, suffix, targets, run_dir, rid, i)
+                if recheck is None:
+                    return None
+                post_snaps.append(recheck)
+            refs_intact = gc.combine_delta_status([
+                gc.delta_status_with_rechecks(
+                    baseline_by_target.get(name),
+                    [s.get(name) for s in post_snaps])
+                for name in membership])
+        drop_evidence = gc.target_node_evidence(ev, target_n)
+        scoped = gc.scope_drop_events(ev, drop_evidence, refs_intact=refs_intact)
+        scoped_ok = gc.drop_scope_ok(scoped)
+        if ev.get("dropped_no_backup"):
+            gate.report["persist_drop_scope"] = {
+                "evidence": drop_evidence, "summary": scoped_ok,
+                "refs_intact": refs_intact,
+                "baseline": {k: {"n_present": v.get("n_present"),
+                                 "n_absent": v.get("n_absent"),
+                                 "first_absent_index":
+                                     v.get("first_absent_index"),
+                                 "n_runs": v.get("n_runs"),
+                                 "longest_run_len": v.get("longest_run_len")}
+                             for k, v in baseline_by_target.items()},
+                "now": {k: {"n_present": v.get("n_present"),
+                            "n_absent": v.get("n_absent"),
+                            "first_absent_index": v.get("first_absent_index"),
+                            "n_runs": v.get("n_runs"),
+                            "longest_run_len": v.get("longest_run_len")}
+                        for k, v in (membership or {}).items()},
+                "recheck": ({k: {"n_present": v.get("n_present"),
+                                 "n_absent": v.get("n_absent"),
+                                 "first_absent_index":
+                                     v.get("first_absent_index"),
+                                 "n_runs": v.get("n_runs"),
+                                 "longest_run_len": v.get("longest_run_len")}
+                             for k, v in recheck.items()}
+                            if recheck else None),
+                "filler_tokens_total": filler_tokens_total,
+                "scoped_tail": scoped[-8:],
+            }
+        if not scoped_ok["ok"]:
+            gate.report["persist_console_evidence"] = gc.slim_storage_events(ev)
+            gate.invalidate(
+                "graded-target (or unattributable) kv subtree dropped without "
+                "backup due to host memory pressure "
+                f"({scoped_ok['n_total']} event(s)) after "
+                f"{filler_tokens_total} filler tokens: "
+                f"target_roots={scoped_ok['target_roots']} "
+                f"unknown_roots={scoped_ok['unknown_roots']} "
+                f"(refs_intact={refs_intact}); only drops with a no-decrease "
+                "delta proof against a COMPLETE full-window baseline, confirmed "
+                "by the immediately-following re-snapshot, are disposable "
+                "(the node-id ordering bound is not used)")
+            return None
         gate.log(f"filler {i}: extent_write_bytes={written} "
                  f"wal_current={man.get('wal_current')} "
                  f"filler_tokens_total={filler_tokens_total} "
                  f"host_cycle_target={host_cycle_target}")
         if written <= 0:
             continue
-        membership = _membership_both(
-            gate, args, namespace, suffix, targets, run_dir, rid, i)
-        if membership is None:
-            return None
-        last_membership = membership
-        ok = all(m["n_present"] >= min_present for m in membership.values())
+        ok = _targets_in_index_ok(membership, min_present_by_target,
+                                  min_present)
         # The target can only be in the extent index after it left L2, but a
         # page may briefly exist in both tiers.  Require one full host-pool of
         # UNRELATED filler traffic after the last target access so L2 eviction is
@@ -569,7 +709,9 @@ def _persist_targets(gate, args, console_path, off, namespace, suffix,
                 "extent_recycle_n": gc.extent_recycle_count(ev),
                 "reclaim_relocated_n": len(ev.get("reclaim_relocated", [])),
                 "reclaim_refused_n": len(ev.get("reclaim_refused", [])),
-                "dropped_no_backup_n": 0,
+                "dropped_no_backup_n": len(ev.get("dropped_no_backup", [])),
+                "dropped_scope": scoped_ok,
+                "drop_evidence": drop_evidence,
                 "namespace_after": man,
                 "membership": {k: {kk: v[kk] for kk in
                                    ("n_present", "n_absent",
@@ -592,6 +734,16 @@ def _persist_targets(gate, args, console_path, off, namespace, suffix,
                             "from L2 to the storage tier",
                 },
                 "console_evidence": gc.slim_storage_events(ev),
+                "preconditions": {
+                    "target_in_extent_index": ok,
+                    "device_eviction_proven": device_cycle_done,
+                    "host_eviction_proven": host_cycle_done,
+                    "storage_candidate_hit": ok,
+                    "no_target_drop_without_backup": scoped_ok["ok"],
+                    "membership": {k: v["n_present"]
+                                   for k, v in membership.items()},
+                    "drop_scope": scoped_ok,
+                },
             }
             gate.check("persist_extent_write_seen",
                        evidence["extent_write_n"] > 0, detail=written)
@@ -604,9 +756,14 @@ def _persist_targets(gate, args, console_path, off, namespace, suffix,
                        detail=evidence["device_eviction_proof"])
             gate.check("persist_host_eviction_proven", host_cycle_done,
                        detail=evidence["host_eviction_proof"])
-            gate.check("persist_no_drop_without_backup", True,
-                       detail={"events": 0,
-                               "filler_tokens_total": filler_tokens_total})
+            # Computed, target-scoped verdict -- never the old decorative True.
+            gate.check("persist_no_target_drop_without_backup",
+                       scoped_ok["ok"],
+                       detail={"scope": scoped_ok,
+                               "events": evidence["dropped_no_backup_n"],
+                               "filler_tokens_total": filler_tokens_total,
+                               "max_target_node_id":
+                                   drop_evidence.get("max_node_id")})
             gate.report["persist_console_evidence"] = gc.slim_storage_events(ev)
             return evidence
         gate.log(f"filler {i}: not yet complete: "
@@ -620,6 +777,7 @@ def _persist_targets(gate, args, console_path, off, namespace, suffix,
         "fillers": records, "filler_tokens_total": filler_tokens_total,
         "extent_write_bytes": gc.extent_write_bytes(ev),
         "dropped_no_backup_n": len(ev.get("dropped_no_backup", [])),
+        "dropped_scope": gc.drop_scope_ok(ev.get("dropped_scopes") or []),
         "namespace_after": last_man,
         "membership": {k: {"n_present": v.get("n_present"),
                            "query_window_len": v.get("query_window_len")}

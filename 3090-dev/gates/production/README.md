@@ -142,13 +142,52 @@ measured request is withheld):
 5. **(d)/(e) L1+L2 eviction forced by unrelated fillers** -- filler prompts are
    random-id prompts that do not share the target prefix; the report proves
    `unrelated_tokens >= device pool (65536)` and `>= one full host-pool cycle`;
-6. **no `dropped without backup due to host memory pressure`** event for the
-   graded prefix (any such event is INVALID: the pool is still mis-sized);
-7. **only then** the measured L3 arm: `storage > 0`, `device == 0`,
+6. **no GRADED-TARGET `dropped without backup due to host memory pressure`**
+   event (target-scoped). A drop is disposable only when a **positive DELTA
+   proof** shows the target's durable extent-index refs did not shrink across
+   the drop: the frozen drop-free baseline must be **complete** for the full
+   target window, every membership proxy must be present in both snapshots, and
+   a re-snapshot consumed immediately after the drop lines must confirm the
+   no-decrease verdict. A partial baseline, a missing proxy, a decrease, or an
+   unattributable drop is `unknown` => INVALID (fail closed). The console
+   node-id ordering is **not** an attribution mechanism (the rule was removed:
+   its parent-before-child invariant is false). The
+   `--min-index-fraction 0.99` STAGE acceptance
+   (`persist_target_in_extent_index`) is a separate pre-existing tolerance and
+   is intentionally unchanged.
+7. **required pre-measurement pre-assertions** (`invalidates`, never FAILs):
+   host pool stages the workload, target in the extent index, device-miss and
+   host-miss guaranteed by unrelated-filler volume, storage candidate hit, and
+   no target-scoped drop -- proven offline / by volume, **not** by a re-warming
+   request;
+8. **only then** the measured L3 arm: `storage > 0`, `device == 0`,
    `storage_backend == ExtentFileBackend`, ids == DEVICE ids;
-8. **RECOVERED arm**: stop s1, wait for `/proc/<pid>` to disappear, relaunch a
+9. **RECOVERED arm**: stop s1, wait for `/proc/<pid>` to disappear, relaunch a
    new process against the same namespace, assert same `file_uuid`, host pool
    still stages the prompt, and `storage > 0`, `device == 0`, ids == DEVICE ids.
+
+### Target-scoped drop predicate: positive complete-baseline delta
+
+`gate_common.durable_delta_status` / `delta_status_with_rechecks` classify a
+`dropped without backup` row.  A row becomes **FOREIGN** (disposable) only when
+a positive no-decrease **delta** proof holds on the target's extent-index
+membership:
+
+* monotone proxies, none may worsen: `n_present` (must not fall), `n_absent`
+  (must not rise), `first_absent_index` (must not move earlier; `None` is best),
+  `n_runs` (must not rise), `longest_run_len` (must not fall);
+* the frozen drop-free baseline must be **COMPLETE** (all proxies present,
+  `n_absent == 0`, one run, `n_present >= query_window_len`).  A **partial**
+  baseline is `unknown` => INVALID: a target page that only becomes durable
+  after the snapshot can then be dropped, and the drop can be masked by
+  concurrent growth -- neither is observable in the aggregate proxies;
+* a **re-snapshot** is consumed immediately after the drop lines, and the
+  verdict must hold for **every** post-drop snapshot (worst case), so a drop
+  landing between snapshots is still caught.
+
+Anything else -- partial baseline, missing proxy, decrease, unparsed root, empty
+membership -- is `unknown` => INVALID (fail closed).  `root_id` is record-only;
+the removed console node-id ordering rule is never used.
 
 INVALID vs FAIL (Gate A): `INVALID` = a precondition above did not hold (host
 pool, tree binding, port, server health, flush, offline membership, store
@@ -178,9 +217,11 @@ no **new** slots, so the circular cursor never advanced. F1 now writes
 ### Slot-allocation math proving the cursor reaches a live target slot
 
 Pinned geometry: `EXTENT_SIZE=64 MiB`, page = 16 KiB -> `4096 pages/slot`;
-`FILE_SIZE = (chain_slots + 2*filler_slots + 8) * 64 MiB`.
+`FILE_SIZE = (chain_slots + 2*filler_slots + 8 + reloc_reserve_slots) * 64 MiB`
+(`--reloc-reserve-slots`, default 2 -> the closure-2 destination reserve).
 For a 62,000-token chain: `chain_slots = ceil(62000/4096) = 16`,
-`filler_slots = ceil(16000/4096) = 4` -> **32 slots (2 GiB)**.
+`filler_slots = ceil(16000/4096) = 4` -> **34 slots (2.125 GiB)** with the
+default reserve.
 
 * the chain is written first into an empty store, so the target's refs occupy
   the oldest slots (the head lands in the first slot the cursor fills);
@@ -216,7 +257,44 @@ For a 62,000-token chain: `chain_slots = ceil(62000/4096) = 16`,
   moved out of the victim generation;
 * `post_target_in_index` and `batch_exists_eq_expected` -- the offline
   `batch_exists` equals the full requested window;
-* `post_no_drop_without_backup`.
+* `post_no_target_drop_without_backup` -- target-scoped: a drop is disposable
+  only under the positive complete-baseline delta above; every other drop is
+  INVALID.  The unique-prefix **sweep** has no pre-drop baseline, so **any**
+  `dropped without backup` inside it is `unknown` => INVALID -- deliberately
+  **conservative** (**false-INVALID**: campaign-blocking but verdict-safe),
+  because unrelated-filler disposability is NOT provable in that window without
+  per-drop attribution.
+
+### Relocation-destination reserve (owner closure 2)
+
+Before the sweep is sent, and again pre-cold, the harness proves a **bounded
+non-victim destination capacity** exists and that the expected relocation of the
+largest target-holding candidate fits into it
+(`relocation_headroom_bytes >= live_bytes`, `reclaim_relocatable`,
+`target_live_refs > 0`). A 100%-live store with no destination outside the
+victim is the product's **expected fail-closed Option-C backpressure**, not a
+valid relocation-success geometry: it returns **INVALID before the measured
+request** (`gate-a-f1-reserve-preflight`), never FAIL/PASS.
+
+**Conservative by construction: possible false-INVALID, never false-PASS.**
+`relocation_headroom_bytes` is the **max single** non-victim free tail, while the
+product's `plan_relocation` fits the relocation across the **aggregate** free
+tail of all non-victim slots; the sequential sweep cursor also packs the
+trailing slots (including the `--reloc-reserve-slots` reserve) before it can
+wrap, so trailing-slot packing can consume that reserve at the exact wrap
+moment. This preflight is therefore **conservative**: it can return INVALID
+(failure class **false-INVALID** -- campaign-blocking but verdict-safe) even
+where the product would have found a destination. It can **never** produce a
+**false-PASS**: a PASS still requires an observed successful relocation
+(`victim_target_relocation_count_positive` in `fixed` mode), and a
+refusal/recycle-only reclaim path is INVALID before the measured cold request.
+
+`--reloc-reserve-slots` (default 2) appends that many spare slots to
+`FILE_SIZE` -- a small, bounded term so the wrap is still reached; it is *not*
+a pad large enough to dodge the wrap. `wal_forensics`'s
+`relocation_headroom_bytes`/`reclaim_relocatable` are the offline oracle for
+this. INVALID in `fixed` mode; recorded as optional evidence in the `unfixed`
+control, where a destructive reclaim is the expectation.
 
 The "allocator has no free destination except through the normal reclaim path"
 condition is reported as the victim's `relocation_headroom_bytes` vs
@@ -240,8 +318,13 @@ F1 INVALID vs FAIL:
 * **INVALID**: flush not confirmed; host pool mis-sized; no wrap attempted;
   the wrap was **refused** by the product's fail-closed relocation (the
   head-slot recycle was not exercised); the victim held no live target refs;
+  the pre-sweep/post-sweep relocation reserve is absent (no bounded non-victim
+  destination capacity, or the expected relocation does not fit);
   generation/head/index/batch_exists post-state unsatisfied; any
-  `dropped without backup`. The expected shape for this case is
+  `dropped without backup` not proven FOREIGN by the positive
+  complete-baseline delta (in the SWEEP there is no baseline at all, so every
+  drop there is INVALID -- **conservative** **false-INVALID**, see above).
+  The expected shape for this case is
   `wrap_observed = true`, the victim holding live refs, and insufficient refusal
   headroom -> **INVALID, not FAIL**. This is expected behavior; covered by
   synthetic regression, not by a preserved-WAL replay artifact.
@@ -264,10 +347,15 @@ offline replay showing the head absent with the rest of the chain present.
 
 * **primer**: unique namespace, host-pool sizing asserted, chain written and
   proved present in the extent index (offline membership) with no
-  `dropped without backup`, WAL checkpoint rotation count `> 1`, manifest grew,
-  storage restore positive; SIGTERM server #1 while the driver still holds the
-  lock; prove `/proc/<pid>` is gone and a fresh-process lock probe still sees
-  the lock held; release the lock.
+  `dropped without backup due to host memory pressure` at all.  The primer takes
+  a single post-write-back membership snapshot, so no pre-drop baseline and no
+  positive delta proof exists: ANY drop is `unknown` => INVALID.  This is
+  deliberately **conservative** (**false-INVALID**: campaign-blocking but
+  verdict-safe) because unrelated-filler disposability is NOT provable in that
+  window without per-drop attribution.  WAL checkpoint rotation count `> 1`,
+  manifest grew, storage restore positive; SIGTERM server #1 while the driver
+  still holds the lock; prove `/proc/<pid>` is gone and a fresh-process lock
+  probe still sees the lock held; release the lock.
 * **recover**: a NEW process re-acquires the lock (generation must advance),
   relaunches against the same namespace, asserts the same `file_uuid`, the
   host pool still stages the chain, and the post-restart request has
@@ -309,8 +397,8 @@ head ref (slot + generation).
 
 * `python -m py_compile` on every `.py` in this directory: **all rc=0**
   (`PYTHONDONTWRITEBYTECODE=1`).
-* `python -m unittest -v test_gate_helpers`: **42 tests, OK** (CPU only,
-  `CUDA_VISIBLE_DEVICES=999`).
+* `CUDA_VISIBLE_DEVICES="" PYTHONDONTWRITEBYTECODE=1 python3 -m unittest
+  test_gate_helpers`: **74 tests, OK** (CPU only).
 * CPU-only dry-run of the new precondition logic: `wal_forensics.py --mode
   membership` was run against the **preserved campaign snapshot**
   (`gateA-F1/store-snapshot-post-sweep-f1-20260917T082421Z-302181`, read-only) and
