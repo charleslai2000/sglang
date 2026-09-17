@@ -1,6 +1,7 @@
 # Approved v1.2.1 candidate delta vs baseline /opt/sglang/local-prod-v1.1-candidate
-# Repo-relative paths matching the freeze staging src/ key space. One per line.
+# Repo-relative; matches the freeze staging src/ key space. One per line.
 # This file is itself part of the frozen identity.
+src/.dockerignore
 src/.memory/phase2-hicache-design/work/BRANCH-TOPOLOGY-AND-SERVICE-SCAFFOLD-20260917.md
 src/.memory/phase2-hicache-design/work/DELETE-ALLOWLIST-20260917.md
 src/.memory/phase2-hicache-design/work/DIRECTORY-MAP-AND-MERGE-EVALUATION-20260917.md
@@ -19,6 +20,7 @@ src/.memory/phase2-hicache-design/work/OPTION-C-ORACLE-ADJUDICATION-VERDICT-2026
 src/.memory/phase2-hicache-design/work/OWNER-RULINGS-HARNESS-AND-GPU-SCHEDULE-20260917.md
 src/.memory/phase2-hicache-design/work/PROD-SERVICE-ANALYSIS-20260917.md
 src/.memory/phase2-hicache-design/work/PROD-SERVICE-README-20260917.md
+src/.memory/phase2-hicache-design/work/PROVENANCE-CORRECTION-AND-V1.2.1-CLOSURE-20260917.md
 src/.memory/phase2-hicache-design/work/RECONCILE-REPORT-20260917.md
 src/.memory/phase2-hicache-design/work/RECONCILIATION-STEP1-RECON-20260917.md
 src/.memory/phase2-hicache-design/work/REPO-AND-DIRECTORY-INVENTORY-20260917.md
@@ -114,6 +116,7 @@ src/3090-dev/tools/freeze/bin/preflight.sh
 src/3090-dev/tools/freeze/pins/local-prod-v1.1-candidate-pins.json
 src/3090-dev/tools/freeze/pins/local-prod-v1.1.2-candidate-pins.json
 src/3090-dev/tools/freeze/pins/local-prod-v1.1.2-selftest-pins.json
+src/3090-dev/tools/freeze/pins/local-prod-v1.2-candidate-allowlist.txt
 src/3090-dev/tools/freeze/pins/reforest-v1.1-pins.json
 src/3090-dev/tools/freeze/pins/reused-preflight_identity.sha256
 src/3090-dev/tools/freeze/pysrc/audit_launcher.py
@@ -122,6 +125,7 @@ src/3090-dev/tools/freeze/pysrc/manifest_tool.py
 src/3090-dev/tools/freeze/pysrc/mode_histogram.py
 src/3090-dev/tools/freeze/pysrc/preflight_identity.py
 src/3090-dev/tools/freeze/pysrc/repoint_telemetry.py
+src/3090-dev/tools/freeze/pysrc/rust_identity.py
 src/3090-dev/tools/freeze/pysrc/test_audit_launcher.py
 src/3090-dev/tools/freeze/templates/launch.sh.tmpl
 src/3090-dev/tools/prod-service/bin/common.sh
@@ -133,8 +137,10 @@ src/3090-dev/tools/prod-service/bin/supervise.sh
 src/3090-dev/tools/prod-service/bin/switch.sh
 src/3090-dev/tools/prod-service/conf/service.env
 src/3090-dev/tools/scorecard/production_performance_scorecard_v0.py
+src/python/sglang/srt/mem_cache/cpp_radix_tree/.clang-format
 src/rust/l3wal/Cargo.toml
 src/rust/l3wal/src/lib.rs
+src/sgl-model-gateway/LICENSE
 src/test/registered/unit/mem_cache/native/test_l3_native_drop_reuse_durability.py
 src/test/registered/unit/mem_cache/native/test_l3_native_wal_equivalence.py
 src/test/registered/unit/models/test_qwen3_5_gguf_norm_fold.py

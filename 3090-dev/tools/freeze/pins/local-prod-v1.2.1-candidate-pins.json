@@ -1,0 +1,27 @@
+{
+  "LAUNCHER_HASH": "38487942de63cb56249dae5080d2caef281364dcbac6c92ac53b1ff916672914",
+  "LOADED_SO_HASH": "f1f0c0d3634f3e11891d6632790fc9301167d2e9168b2e441506684846220750",
+  "LOADED_SO_PATH": "/home/ubuntu/.cache/sglang/rust_extensions/artifacts/l3-native-wal/51ca2e73eb48bd054bcab6ea100bd2faf84411579a0296b31b53ab58804b0376/_l3wal.cpython-312-x86_64-linux-gnu.so",
+  "RUST_SOURCE_DIGEST": "51ca2e73eb48bd054bcab6ea100bd2faf84411579a0296b31b53ab58804b0376",
+  "SOURCE_COMMIT": "b2bbd6ea28",
+  "TREE_HASH": "3bd285d51e3fdb0c338400dd0203bf8d131f26504baf1076084eea372849f7c8",
+  "created_at_utc": "2026-09-17T18:36:32Z",
+  "freeze_tool": "v1.1.2-freeze-20260917",
+  "identity": "LOCAL-PROD-v1.2.1",
+  "launcher_sha256": "38487942de63cb56249dae5080d2caef281364dcbac6c92ac53b1ff916672914",
+  "source_tree": "/tmp/opencode/v1.2.1-stage",
+  "src_file_count": 14784,
+  "src_stream_digest_v1_convention": "c7427132b7977797a4cf3ff3ec46e665842229482bb1e45f7b874e15bb3dafbc",
+  "src_total_bytes": 2014047336,
+  "tools_sha256": {
+    "l3_namespace.py": "40e65e04b1daabbd9248aa273dc5ceaa55343e50050d46daa0e5df4dce880b44",
+    "preflight_identity.py": "29a5a11bc8f1bef402a6a4b10ac62240798eca1a1a2e288c30b650208ac858de",
+    "validate_telemetry.py": "6324681519d9d2f71d6a3e75a1bc5bf834033c038ed6cfd0ee69c6c6f2bc89f8"
+  },
+  "tree": "/opt/sglang/local-prod-v1.2.1-candidate",
+  "tree_file_count": 14788,
+  "tree_manifest_bytes": 2042130,
+  "tree_manifest_sha256": "3bd285d51e3fdb0c338400dd0203bf8d131f26504baf1076084eea372849f7c8",
+  "tree_name": "local-prod-v1.2.1-candidate",
+  "tree_total_bytes": 2014085068
+}
