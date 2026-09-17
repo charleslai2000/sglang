@@ -60,12 +60,46 @@ state_write "$ROLE" "$SERVER_PID" "$PORT" "$RUN_ID" "$NAMESPACE" "$TREE" \
             "LOCAL-PROD-v1.1.2" "starting"
 
 # ---- runtime environment verification ---------------------------------------
-sleep 3
-if ! [ -d "/proc/$SERVER_PID" ]; then
-  die "launcher exited immediately; see $CONSOLE" 1
-fi
-PROC_PYTHONPATH="$(tr '\0' '\n' <"/proc/$SERVER_PID/environ" 2>/dev/null | sed -n 's/^PYTHONPATH=//p' || true)"
-PROC_CVD="$(tr '\0' '\n' <"/proc/$SERVER_PID/environ" 2>/dev/null | sed -n 's/^CUDA_VISIBLE_DEVICES=//p' || true)"
+# The launcher only *exports* PYTHONPATH/CUDA_VISIBLE_DEVICES into its own bash
+# environment; /proc/<pid>/environ does not carry them until it reaches its
+# `exec "$PY" ...`, which happens only AFTER its fail-closed identity gate
+# (~17-20 s).  A fixed sleep therefore races the launcher.  Poll the process
+# image, bounded, until it carries the runtime env, then assert exactly as
+# before; a launcher that dies during the wait is reported immediately, and a
+# poll that never converges still fails closed.
+ENV_POLL_INTERVAL_S=1
+ENV_POLL_TIMEOUT_S=120
+# A bash launcher that exits before its `exec` becomes a zombie, and /proc/<pid>
+# still exists for a zombie; the state field is what distinguishes "gone" from
+# "still starting".
+launcher_is_live() {
+  local pid="$1" state
+  [ -d "/proc/$pid" ] || return 1
+  state="$(sed -n 's/^State:[[:space:]]*\([A-Z]\).*/\1/p' "/proc/$pid/status" 2>/dev/null || true)"
+  [ "$state" != "Z" ]
+}
+ENV_POLL_DEADLINE=$(( SECONDS + ENV_POLL_TIMEOUT_S ))
+PROC_PYTHONPATH=""; PROC_CVD=""
+while :; do
+  if ! launcher_is_live "$SERVER_PID"; then
+    die "launcher exited immediately; see $CONSOLE" 1
+  fi
+  PROC_PYTHONPATH="$(tr '\0' '\n' <"/proc/$SERVER_PID/environ" 2>/dev/null | sed -n 's/^PYTHONPATH=//p' || true)"
+  PROC_CVD="$(tr '\0' '\n' <"/proc/$SERVER_PID/environ" 2>/dev/null | sed -n 's/^CUDA_VISIBLE_DEVICES=//p' || true)"
+  if [ -n "$PROC_PYTHONPATH" ] \
+     && [ "${PROC_PYTHONPATH#"$TREE/src/python"}" != "$PROC_PYTHONPATH" ] \
+     && [ "$PROC_CVD" = "$GPU_UUID" ]; then
+    break
+  fi
+  if [ "$SECONDS" -ge "$ENV_POLL_DEADLINE" ]; then
+    log "/proc/$SERVER_PID/environ PYTHONPATH=$PROC_PYTHONPATH CUDA_VISIBLE_DEVICES=$PROC_CVD (poll timed out after ${ENV_POLL_TIMEOUT_S}s)"
+    if [ -z "$PROC_PYTHONPATH" ] || [ "${PROC_PYTHONPATH#"$TREE/src/python"}" = "$PROC_PYTHONPATH" ]; then
+      die "runtime PYTHONPATH not inside tree: '$PROC_PYTHONPATH'" 1
+    fi
+    die "runtime CUDA_VISIBLE_DEVICES not the 3090 UUID: '$PROC_CVD'" 1
+  fi
+  sleep "$ENV_POLL_INTERVAL_S"
+done
 log "/proc/$SERVER_PID/environ PYTHONPATH=$PROC_PYTHONPATH CUDA_VISIBLE_DEVICES=$PROC_CVD"
 if [ "${PROC_PYTHONPATH#"$TREE/src/python"}" = "$PROC_PYTHONPATH" ]; then
   die "runtime PYTHONPATH not inside tree: '$PROC_PYTHONPATH'" 1
