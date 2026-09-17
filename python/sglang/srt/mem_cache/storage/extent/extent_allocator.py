@@ -429,6 +429,69 @@ class ExtentAllocator:
                 self._next_slot = ref.extent_id
             return True
 
+    # ---- reclaim-time live-ref relocation ----
+
+    def plan_relocation(
+        self,
+        victim_slots: Sequence[int],
+        key_lengths: Sequence[Tuple[str, int]],
+        excluded_slots: Sequence[int] = (),
+        start_slot: Optional[int] = None,
+    ) -> Optional[List[ExtentRef]]:
+        """Pure placement of relocated refs outside the victim generation.
+
+        Circular reclaim bumps a victim slot's generation and reuses its
+        bytes, destroying every live index entry that still points into that
+        generation.  Before any of that happens the backend enumerates the
+        victim's live refs and asks for replacement space here.
+
+        Relocated refs are appended to the live tail (``_cursors``) of slots
+        that are neither victims nor ``excluded_slots`` (the in-flight plan's
+        own refs and the staged reservations), scanning forward circularly
+        from ``start_slot``.  The method is pure: it never passes, drops,
+        resets or recurses into a slot, and it never bumps a generation -- the
+        returned refs carry each destination slot's *current* generation.
+
+        Returns a list aligned with ``key_lengths``, or ``None`` when the
+        total free tail space is smaller than the requested bytes (fail
+        closed: the caller must not touch the victim).  The caller performs
+        the byte IO and the durable publish (SET -> BATCH_COMMIT) before
+        applying the drops.
+        """
+        avoid = set(victim_slots) | set(excluded_slots)
+        if not key_lengths:
+            return []
+        for _key, length in key_lengths:
+            if length < 0 or length > self.extent_size:
+                return None
+        if start_slot is None:
+            start_slot = self._next_slot
+        order: List[int] = []
+        for step in range(self.num_slots):
+            slot = (start_slot + step) % self.num_slots
+            if slot not in avoid:
+                order.append(slot)
+        refs: List[ExtentRef] = []
+        floors = {slot: self._cursors[slot] for slot in order}
+        index = 0
+        for slot in order:
+            room = self.extent_size - floors[slot]
+            while index < len(key_lengths) and (room > 0 or key_lengths[index][1] == 0):
+                length = key_lengths[index][1]
+                if length > room:
+                    break
+                refs.append(
+                    ExtentRef(slot, floors[slot], length, self._generations[slot])
+                )
+                floors[slot] += length
+                room -= length
+                index += 1
+            if index >= len(key_lengths):
+                break
+        if index < len(key_lengths):
+            return None
+        return refs
+
     # ---- GC ----
 
     def evict_slot_lru(self, trace_context: Optional[dict] = None) -> int:

@@ -1139,6 +1139,49 @@ class ExtentFileBackend(HiCacheStorage):
     def _append_ungrouped_commit(self, storage_keys, refs, component: int) -> None:
         self._append_batch_commit(storage_keys, refs, component)
 
+    def _append_relocation_commit(self, relocated) -> None:
+        """Durably publish relocated refs with the existing WAL protocol.
+
+        ``relocated`` is an ordered list of ``(key, ExtentRef, component)``.
+        Exactly one SET frame plus one BATCH_COMMIT frame are appended and
+        fsynced (no new frame type, no new protocol): replay folds the batch
+        only when its commit is present, and the later SET deterministically
+        wins over the victim's earlier SET for the same key.  Components are
+        carried per entry so KV and Mamba payloads keep their opaque pool
+        identity across the move.
+        """
+        batch_id = self._next_batch_id
+        self._next_batch_id += 1
+        entries = [
+            SetEntry(
+                storage_key=key.encode("utf-8"),
+                extent_id=ref.extent_id,
+                offset=ref.offset,
+                length=ref.length,
+                generation=ref.generation,
+                component=component,
+            )
+            for key, ref, component in relocated
+        ]
+        self._append_wal_frame(
+            FRAME_SET,
+            encode_set_payload(
+                SetPayload(
+                    group_epoch=b"\x00" * 16,
+                    group_seq=0,
+                    batch_id=batch_id,
+                    member_index=0,
+                    member_count=1,
+                    entries=entries,
+                )
+            ),
+        )
+        self._append_wal_frame(
+            FRAME_BATCH_COMMIT,
+            encode_batch_commit_payload(BatchCommitPayload(batch_id, 1)),
+        )
+        self._sync_wal()
+
     # ---- key scoping (same semantics as HiCacheFile) ----
     # v1 and v2 share the same transform: the engine writes via v1 batch_set
     # and queries via v2 batch_exists_v2, so both sides must produce the same
@@ -1409,6 +1452,10 @@ class ExtentFileBackend(HiCacheStorage):
                     len(keys),
                     self._extent_size,
                 )
+                return [False] * len(keys)
+            # Reclaim-time relocation: a circular-reclaim victim's live refs
+            # must have a durable replacement before its generation is bumped.
+            if not self._relocate_reclaim_victims_locked(passed, drop_events, refs):
                 return [False] * len(keys)
             try:
                 self._append_drops(drop_events)
@@ -1936,6 +1983,129 @@ class ExtentFileBackend(HiCacheStorage):
         self._stats["last_batch_preads"] = preads
         return out
 
+    # ---- reclaim-time live-ref relocation ----
+
+    def _reclaim_victims(self, passed, drop_events):
+        """Enumerate the live refs held by circular-reclaim victim slots.
+
+        A victim is a slot the pure planner put in ``passed``: its generation
+        is about to be bumped and its bytes reused.  Only refs that currently
+        resolve (present in the index, in this exact slot, at the slot's
+        current generation) are returned; dead/stale entries are never copied.
+        """
+        drop_slots = {slot for slot, _ in drop_events}
+        order = []
+        seen = set()
+        for slot in passed:
+            if slot in seen or slot not in drop_slots:
+                continue
+            seen.add(slot)
+            order.append(slot)
+        victims = []
+        for slot in sorted(order):
+            generation = self._allocator._generations[slot]
+            for key in sorted(self._allocator._slot_keys[slot]):
+                ref = self._allocator._index.get(key)
+                if ref is None or ref.extent_id != slot:
+                    continue
+                if ref.generation != generation:
+                    continue
+                victims.append((key, ref))
+        return victims
+
+    def _relocate_reclaim_victims_locked(self, passed, drop_events, planned_refs):
+        """Move every live ref out of the reclaim victims before they drop.
+
+        Preserves the existing durability order exactly: exact bytes are
+        pread from the victim and pwritten to non-victim space, then the
+        replacements are published with SET -> BATCH_COMMIT -> fsync and
+        installed.  Only after that may the caller append the DROP_SLOT
+        frames and bump the victim generation.  Returns False (fail closed)
+        when no destination capacity can be secured; the victim is then left
+        untouched and the whole write is refused.
+        """
+        victims = self._reclaim_victims(passed, drop_events)
+        if not victims:
+            return True
+        # Destination space must never be a victim (about to be dropped), a
+        # slot carrying this plan's own refs (its pwrite/`_cursors` update
+        # follows), or a staged reservation (its bytes are already written
+        # but its refs are not installed yet).
+        excluded = {slot for slot, _ in drop_events}
+        excluded.update(ref.extent_id for ref in planned_refs if ref is not None)
+        excluded.update(self._staged_slots())
+        start_slot = max(
+            (ref.extent_id for ref in planned_refs if ref is not None),
+            default=self._allocator._next_slot,
+        )
+        key_lengths = [(key, ref.length) for key, ref in victims]
+        destination_refs = self._allocator.plan_relocation(
+            [slot for slot in {ref.extent_id for _key, ref in victims}],
+            key_lengths,
+            excluded_slots=sorted(excluded),
+            start_slot=start_slot,
+        )
+        if destination_refs is None:
+            logger.warning(
+                "ExtentFileBackend: reclaim relocation of %d live refs "
+                "refused: no destination capacity outside victims %s",
+                len(victims),
+                sorted({ref.extent_id for _key, ref in victims}),
+            )
+            return False
+        # Exact bytes, read from the victim and written to the replacement.
+        for (key, ref), destination in zip(victims, destination_refs):
+            buffer = bytearray(ref.length)
+            if (
+                self._pread_full(
+                    buffer, ref.extent_id * self._extent_size + ref.offset
+                )
+                != ref.length
+            ):
+                logger.error(
+                    "ExtentFileBackend: reclaim relocation read failed for %s", key
+                )
+                return False
+            if not self._pwritev(
+                destination.extent_id * self._extent_size + destination.offset,
+                [memoryview(buffer)],
+            ):
+                logger.error(
+                    "ExtentFileBackend: reclaim relocation write failed for %s", key
+                )
+                return False
+        relocated = [
+            (
+                key,
+                destination,
+                self._components.get(key, component_from_pool_name(PoolName.KV)),
+            )
+            for (key, _ref), destination in zip(victims, destination_refs)
+        ]
+        try:
+            self._append_relocation_commit(relocated)
+        except Exception as exc:
+            logger.error(
+                "ExtentFileBackend: reclaim relocation WAL commit failed: %s", exc
+            )
+            return False
+        if not self._allocator.commit_install(
+            [key for key, _ref in victims], destination_refs
+        ):
+            logger.error(
+                "ExtentFileBackend: reclaim relocation install failed; "
+                "refusing the write"
+            )
+            return False
+        logger.info(
+            "ExtentFileBackend: reclaim relocated %d live refs out of victim "
+            "slots %s (%d bytes)",
+            len(victims),
+            sorted({ref.extent_id for _key, ref in victims}),
+            sum(ref.length for _key, ref in victims),
+        )
+        return True
+
     def _write_pages(
         self,
         keys: List[str],
@@ -1990,6 +2160,10 @@ class ExtentFileBackend(HiCacheStorage):
                     len(keys),
                     self._extent_size,
                 )
+                return False
+            # Reclaim-time relocation: a circular-reclaim victim's live refs
+            # must have a durable replacement before its generation is bumped.
+            if not self._relocate_reclaim_victims_locked(passed, drop_events, refs):
                 return False
             try:
                 self._append_drops(drop_events)
