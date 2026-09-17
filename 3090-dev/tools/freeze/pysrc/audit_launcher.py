@@ -60,6 +60,9 @@ PRODUCTION_REQUIRED_SERVING_REPLACEMENTS: dict[str, str] = {
 }
 # AUTH is OFF for this private LAN deployment: the launch path must NOT carry
 # an API key.  Its presence is a security regression, not a profile choice.
+# Recorded ruling: .memory/phase2-hicache-design/HANDOFF-20260917-PRODUCTION-PRIORITY.md
+# section 5 ("AUTH"): private-LAN deployment does not require an API key, and
+# the launch path must not pass --api-key.
 FORBIDDEN_SERVING_TOKENS: frozenset[str] = frozenset({"--api-key"})
 
 
