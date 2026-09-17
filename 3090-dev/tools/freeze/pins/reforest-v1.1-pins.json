@@ -1,0 +1,19 @@
+{
+  "created_at_utc": "2026-09-17T00:44:03Z",
+  "freeze_tool": "v1.1.2-freeze-20260917",
+  "identity": "LOCAL-PROD-v1.1",
+  "launcher_sha256": "a69d231ed35fb5d19653b17099d93ef399ad084213bc20e5be1db8ce6e985581",
+  "source_tree": "/opt/sglang/local-prod-v1.1-candidate",
+  "src_file_count": 14644,
+  "src_stream_digest_v1_convention": "2c061dfcad8cc219e5c35b74e752a9694ce7a3747c8cf4542eff02463e77617e",
+  "src_total_bytes": 2012754184,
+  "tools_sha256": {
+    "validate_telemetry.py": "d1e8b95e73ca80c28d23c33811160e3b639345cc4815eb4d16d08910683eae4c"
+  },
+  "tree": "/tmp/opencode/v1.1.2-freeze-20260917/selftest/reforest-v1.1",
+  "tree_file_count": 14646,
+  "tree_manifest_bytes": 2024721,
+  "tree_manifest_sha256": "f0ca9206100f52d4fc85f6358b27bd805c578337f9e903cebeb8a35e38297ab7",
+  "tree_name": "reforest-v1.1",
+  "tree_total_bytes": 2012763064
+}
