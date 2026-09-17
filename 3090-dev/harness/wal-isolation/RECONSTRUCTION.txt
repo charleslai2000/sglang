@@ -1,6 +1,0 @@
-base_commit=ad749d6f283b7d6c59a8df928304325eda90e98b
-source_repo=/home/ubuntu/workspaces/3rdparty/sglang-3090-24g-opt
-overlay_files=
-python/sglang/srt/mem_cache/storage/extent/extent_file_backend.py
-python/sglang/srt/environ.py
-test/registered/unit/mem_cache/test_extent_file_backend_unit.py
