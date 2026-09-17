@@ -1,0 +1,56 @@
+--- /opt/sglang/local-prod-v1.1-candidate/src/python/sglang/srt/mem_cache/unified_cache/unified_tree_core.py	2026-09-15 19:58:15.180619064 +0000
++++ /tmp/opencode/v1.1.2-f1fix-20260916/src/python/sglang/srt/mem_cache/unified_cache/unified_tree_core.py	2026-09-16 23:49:56.199032637 +0000
+@@ -2078,14 +2078,50 @@
+             )
+             if transfers:
+                 comp_xfers[comp.component_type] = transfers
++        host_value = node.component_data[BASE_COMPONENT_TYPE].host_value
++        token_ids = node.key.token_ids
++        hash_value = node.hash_value
++        # F1 (L3 restore false negative): the chain head is written once and
++        # every later request matches it in L1/L2, so it is never re-written.
++        # The circular extent allocator eventually recycles the head's slot and
++        # every later query from page 0 then reports the whole chain missing
++        # (ExtentFileBackend.batch_exists returns the index of the first absent
++        # key). Re-submit the anchor chain's head page with each ordinary backup
++        # so it stops being write-once. A node with an empty matched prefix
++        # (fresh / unique-head prompt) has no head to refresh and keeps the
++        # previous path unchanged.
++        head = self._storage_chain_head(node)
++        if (
++            head is not None
++            and head.hash_value
++            and host_value is not None
++            and head.component_data[BASE_COMPONENT_TYPE].host_value is not None
++        ):
++            head_host = head.component_data[BASE_COMPONENT_TYPE].host_value
++            page = self.page_size
++            host_value = torch.cat((head_host[:page], host_value))
++            token_ids = head.key.token_ids[:page] + token_ids
++            hash_value = [head.hash_value[0]] + list(hash_value)
+         return StorageBackupSpec(
+-            host_value=node.component_data[BASE_COMPONENT_TYPE].host_value,
+-            token_ids=node.key.token_ids,
+-            hash_value=node.hash_value,
++            host_value=host_value,
++            token_ids=token_ids,
++            hash_value=hash_value,
+             prefix_keys=prefix_keys,
+             comp_xfers=comp_xfers,
+         )
+ 
++    def _storage_chain_head(self, node: UnifiedTreeNode) -> Optional[UnifiedTreeNode]:
++        """The topmost non-root ancestor that owns stored page hashes; its
++        first page is the anchor chain's head. Returns None when the node has
++        an empty matched prefix (no ancestor hashes to refresh)."""
++        head = None
++        cur = node.parent
++        while cur is not None and cur is not self.root_node:
++            if cur.hash_value:
++                head = cur
++            cur = cur.parent
++        return head
++
+     def collect_storage_gap(self, node_id: NodeId) -> list[NodeId]:
+         """Ancestors-first node ids from the nearest storage-persisted
+         ancestor (root when none) down to node_id whose KV is not in L3.

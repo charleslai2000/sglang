@@ -1,0 +1,180 @@
+#!/bin/bash
+# LOCAL-PROD-v1.1.2-SELFTEST-DO-NOT-PROMOTE — canonical launcher (built by bin/launcher-repin.sh)
+# Frozen tree:   /tmp/opencode/v1.1.2-freeze-20260917/selftest/candidate-selftest-1
+# Frozen identity: /tmp/opencode/v1.1.2-freeze-20260917/selftest/candidate-selftest-1/manifest/IDENTITY.md
+# Frozen pins:     /tmp/opencode/v1.1.2-freeze-20260917/selftest/candidate-selftest-1/manifest/identity.json
+# Profile: SGLANG_PROFILE=perf|capacity   (default perf)
+#
+# ---------------------------------------------------------------------------
+# FAIL-CLOSED SOURCE-IDENTITY GATE — runs BEFORE anything is executed.
+# A stale/byte-copied launcher (the v1 -> v1.1 failure mode) cannot pass it:
+#   * sglang.__file__ must resolve under /tmp/opencode/v1.1.2-freeze-20260917/selftest/candidate-selftest-1/src/python (not the venv
+#     editable binding, which points at the live WIP workspace);
+#   * every file hash must match /tmp/opencode/v1.1.2-freeze-20260917/selftest/candidate-selftest-1/manifest/TREE-SHA256.txt and the
+#     manifest's own digest must match identity.json;
+#   * the src-subtree stream digest must equal EXPECTED_SRC_STREAM_SHA256,
+#     which is baked into this file and does not depend on the launcher bytes;
+#   * /proc/self/environ must show PYTHONPATH=/tmp/opencode/v1.1.2-freeze-20260917/selftest/candidate-selftest-1/src/python;
+#   * the L3 store namespace must be unique to SGLANG_RUN_ID.
+# The gate imports sglang in a CPU-only child (CUDA_VISIBLE_DEVICES=999) and
+# never starts a server or binds a port.  Cost: one full tree hash (~7 s) plus
+# one import (~10 s).  There is no skip switch, by design.
+# ---------------------------------------------------------------------------
+set -euo pipefail
+
+PROFILE="${SGLANG_PROFILE:-perf}"
+PORT="${SGLANG_PORT:-30000}"
+
+# --- frozen src-subtree stream digest (v1 convention; independent of this file) ---
+EXPECTED_SRC_STREAM_SHA256="2c061dfcad8cc219e5c35b74e752a9694ce7a3747c8cf4542eff02463e77617e"
+
+# --- per-run L3 namespace: one task/run -> one unique store ---------------
+# A shared store is NEVER used or cleared by a run: clearing unlinks the
+# previous task's WAL segment and destroys concurrent durability evidence.
+: "${SGLANG_RUN_ID:?FATAL: SGLANG_RUN_ID must be set; one task/run -> one unique L3 store namespace (e.g. run-20260917T0130Z-<task>)}"
+case "$SGLANG_RUN_ID" in
+  local-prod-* | shared | default | common | prod | production | l3 | data)
+    echo "FATAL: refusing reserved/shared L3 namespace SGLANG_RUN_ID=$SGLANG_RUN_ID" >&2
+    exit 4 ;;
+esac
+case "$SGLANG_RUN_ID" in
+  *[!A-Za-z0-9._-]* | *..* | .* | -*)
+    echo "FATAL: SGLANG_RUN_ID must match [A-Za-z0-9][A-Za-z0-9._-]* : $SGLANG_RUN_ID" >&2
+    exit 4 ;;
+esac
+
+# --- pinned cache budgets. Physical capacity != benchmark cache budget. ---
+# NOTE: --hicache-size is SI GB (10^9), NOT GiB.
+case "$PROFILE" in
+  perf)     L2_GB=32; L3_MAX=100Gi ;;   # L2 = 32 GB = 29.8 GiB
+  capacity) L2_GB=48; L3_MAX=200Gi ;;   # L2 = 48 GB = 44.7 GiB
+  *) echo "FATAL: unknown SGLANG_PROFILE=$PROFILE (want perf|capacity)" >&2; exit 2 ;;
+esac
+
+TREE="/tmp/opencode/v1.1.2-freeze-20260917/selftest/candidate-selftest-1"
+SRC="$TREE/src"
+PY="$TREE/env/bin/python"
+IDENTITY="LOCAL-PROD-v1.1.2-SELFTEST-DO-NOT-PROMOTE"
+
+# L3_ROOT is overridable ONLY so that non-production dry-runs can point at a
+# scratch root.  Production (default) is /data/l3.
+L3_ROOT="${SGLANG_L3_ROOT:-/data/l3}"
+L3_DIR="$L3_ROOT/$SGLANG_RUN_ID"
+
+# Per-run log dir so that a run can never overwrite a previous run's metrics
+# evidence.  Overridable for dry-runs.
+LOG_DIR="${SGLANG_LOG_DIR:-/var/log/sglang/candidate-selftest-1/$SGLANG_RUN_ID}"
+
+# --- source binding: MUST be the frozen snapshot, NOT the editable venv path ---
+export PYTHONPATH=/home/ubuntu/workspaces/3rdparty/sglang-3090-24g-opt/python
+
+# --- CUDA ---
+export CUDA_HOME=/usr/local/cuda-12.9
+export PATH="$CUDA_HOME/bin:$PATH"
+
+# --- GPU pin: UUID only (NVML index and CUDA ordinal are INVERTED on this box) ---
+export CUDA_VISIBLE_DEVICES=GPU-2e3ed202-3655-d919-0a64-259209bc6587
+
+# --- Extent L3 backend. The extent backend reads EXTENT_BACKEND_*, NOT FILE_BACKEND_*. ---
+export SGLANG_HICACHE_EXTENT_BACKEND_STORAGE_DIR="$L3_DIR"
+export SGLANG_HICACHE_EXTENT_BACKEND_MAX_SIZE="$L3_MAX"
+export SGLANG_HICACHE_EXTENT_BACKEND_MIN_FREE_SPACE=50Gi
+
+echo "=== $IDENTITY launcher ==="
+echo "tree=$TREE"
+echo "profile=$PROFILE port=$PORT hicache-size=${L2_GB}GB(SI) L3_MAX=$L3_MAX"
+echo "PYTHONPATH=$PYTHONPATH"
+echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
+echo "SGLANG_RUN_ID=$SGLANG_RUN_ID"
+echo "L3_DIR=$L3_DIR"
+echo "LOG_DIR=$LOG_DIR"
+echo "=============================="
+
+# ---------------------------------------------------------------------------
+# GATE 1/3 — source identity: resolve + full manifest + /proc environ.
+# ---------------------------------------------------------------------------
+GATE_RC=0
+GATE_OUT="$(env CUDA_VISIBLE_DEVICES=999 PYTHONDONTWRITEBYTECODE=1 \
+  "$PY" "$TREE/tools/preflight_identity.py" \
+  --tree "$TREE" --pid self --all --json 2>&1)" || GATE_RC=$?
+if [ "$GATE_RC" -ne 0 ]; then
+  echo "FATAL: source-identity gate FAILED (exit $GATE_RC) for tree $TREE" >&2
+  echo "$GATE_OUT" >&2
+  exit "$GATE_RC"
+fi
+
+# ---------------------------------------------------------------------------
+# GATE 2/3 — frozen src-subtree stream digest (rule out a stale launcher that
+# points at a different tree with a valid-looking path).
+# ---------------------------------------------------------------------------
+STREAM_SHA="$( cd "$SRC" && find . -type f \
+    -not -path '*/__pycache__/*' -not -path '*/.pytest_cache/*' -print0 \
+    | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1 )"
+if [ "$STREAM_SHA" != "$EXPECTED_SRC_STREAM_SHA256" ]; then
+  echo "FATAL: src stream digest mismatch" >&2
+  echo "  expected $EXPECTED_SRC_STREAM_SHA256" >&2
+  echo "  actual   $STREAM_SHA" >&2
+  exit 12
+fi
+
+# ---------------------------------------------------------------------------
+# GATE 3/3 — per-run L3 namespace must be allocated and owned by this run.
+# ---------------------------------------------------------------------------
+NS_RC=0
+NS_OUT="$(env PYTHONDONTWRITEBYTECODE=1 "$PY" "$TREE/tools/l3_namespace.py" \
+  --validate --task-id "$SGLANG_RUN_ID" --root "$L3_ROOT" \
+  --path "$L3_DIR" --json 2>&1)" || NS_RC=$?
+if [ "$NS_RC" -ne 0 ]; then
+  echo "FATAL: L3 namespace gate FAILED (exit $NS_RC) for $L3_DIR" >&2
+  echo "$NS_OUT" >&2
+  exit "$NS_RC"
+fi
+
+# ---------------------------------------------------------------------------
+# Serving argv.  The dry-run prints exactly this array; the real path execs
+# exactly this array, so the dry-run cannot diverge from the launch.
+# ---------------------------------------------------------------------------
+ARGS=(
+  -m sglang.launch_server
+  --model-path /data/models/qwen35-9b-w4a16
+  --host 127.0.0.1 --port "$PORT"
+  --tp-size 1
+  --mem-fraction-static 0.92
+  --max-total-tokens 65536
+  --kv-cache-dtype fp8_e4m3
+  --attention-backend flashinfer
+  --linear-attn-prefill-backend triton
+  --linear-attn-decode-backend triton
+  --mamba-radix-cache-strategy extra_buffer
+  --mamba-ssm-dtype float32
+  --enable-hierarchical-cache
+  --hicache-write-policy write_back
+  --hicache-storage-backend extent
+  --hicache-storage-prefetch-policy wait_complete
+  --hicache-size "$L2_GB"
+  --enable-ready-horizon
+  --reasoning-parser qwen3
+  --tool-call-parser qwen3_coder
+  --enable-metrics
+  --export-metrics-to-file
+  --export-metrics-to-file-dir "$LOG_DIR"
+  --disable-prefill-cuda-graph
+)
+
+# Dry-run: gates 1-3 already ran, nothing has been created or bound yet.
+# Prints the exact argv that would be exec'd; exits without starting anything.
+if [ "${SGLANG_LAUNCH_DRY_RUN:-0}" = "1" ]; then
+  printf 'DRY-RUN OK identity=%s tree=%s run_id=%s l3=%s\n' \
+    "$IDENTITY" "$TREE" "$SGLANG_RUN_ID" "$L3_DIR"
+  printf 'DRY-RUN src_stream_sha256=%s\n' "$STREAM_SHA"
+  printf 'DRY-RUN LOG_DIR=%s\n' "$LOG_DIR"
+  printf 'DRY-RUN argv:'
+  printf ' %q' "$PY" -u "${ARGS[@]}"
+  printf '\n'
+  exit 0
+fi
+
+mkdir -p "$LOG_DIR"
+
+cd /tmp   # avoid the /home/ubuntu cwd-shadowing trap for `import sglang`
+exec "$PY" -u "${ARGS[@]}"

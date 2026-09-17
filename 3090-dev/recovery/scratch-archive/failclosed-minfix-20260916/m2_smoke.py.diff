@@ -1,0 +1,131 @@
+--- orig/m2_smoke.py	2026-09-16 19:21:13.520414675 +0000
++++ /var/log/sglang/local-prod-v1/phase8/m2-bringup-smoke-20260916/m2_smoke.py	2026-09-16 19:15:41.561064738 +0000
+@@ -133,7 +133,7 @@
+     ttft = None
+     t_last = None
+     n = 0
+-    parts = []
++    final_text = None
+     meta = None
+     try:
+         with urllib.request.urlopen(req, timeout=timeout) as r:
+@@ -151,17 +151,20 @@
+                 txt = obj.get("text", "")
+                 if txt:
+                     n += 1
+-                    parts.append(txt)
++                    # --incremental-streaming-output defaults to False, so each
++                    # chunk repeats the FULL accumulated text; keep only the
++                    # last chunk instead of concatenating deltas (D3).
++                    final_text = txt
+                     if ttft is None:
+                         ttft = time.time() - t0
+                     t_last = time.time() - t0
+                 if obj.get("meta_info"):
+                     meta = obj["meta_info"]
+-        return 200, ttft, t_last, n, "".join(parts), meta, None
++        return 200, ttft, t_last, n, final_text or "", meta, None
+     except urllib.error.HTTPError as e:
+-        return e.code, ttft, t_last, n, "".join(parts), meta, e.read().decode(errors="replace")
++        return e.code, ttft, t_last, n, final_text or "", meta, e.read().decode(errors="replace")
+     except Exception as e:  # noqa: BLE001
+-        return None, ttft, t_last, n, "".join(parts), meta, f"{type(e).__name__}: {e}"
++        return None, ttft, t_last, n, final_text or "", meta, f"{type(e).__name__}: {e}"
+ 
+ 
+ def port_free() -> bool:
+@@ -186,18 +189,27 @@
+         return None, None, None
+ 
+ 
+-def finite_values(x):
++def logprob_values(seq):
++    """Extract only the logprob number (entry[0]) from [logprob, token_id, text].
++
++    SGLang returns token logprobs as these triples and ``*_top_logprobs`` as one
++    list of triples per position.  Recursively collecting every int/float would
++    mix token ids (>= 0) into the logprob statistic and hide the real range;
++    keep only the logprob slot (D2).
++    """
++    out = []
++    for e in seq or []:
++        if (isinstance(e, (list, tuple)) and e
++                and isinstance(e[0], (int, float)) and not isinstance(e[0], bool)):
++            out.append(float(e[0]))
++    return out
++
++
++def top_logprob_values(seq):
++    """``*_top_logprobs`` is one list of [logprob, token_id, text] per position."""
+     out = []
+-    if isinstance(x, bool):
+-        return out
+-    if isinstance(x, (int, float)):
+-        out.append(float(x))
+-    elif isinstance(x, list):
+-        for v in x:
+-            out += finite_values(v)
+-    elif isinstance(x, dict):
+-        for v in x.values():
+-            out += finite_values(v)
++    for pos in seq or []:
++        out += logprob_values(pos)
+     return out
+ 
+ 
+@@ -307,10 +319,12 @@
+             res[tag] = {"http": code, "body": body}
+             continue
+         mi = body.get("meta_info", {})
+-        vals = finite_values([mi.get("input_token_logprobs"),
+-                              mi.get("output_token_logprobs"),
+-                              mi.get("input_top_logprobs"),
+-                              mi.get("output_top_logprobs")])
++        # Single source of truth: only the logprob slot of every token/top
++        # logprob triple, never token ids or text (D2).
++        vals = (logprob_values(mi.get("input_token_logprobs"))
++                + logprob_values(mi.get("output_token_logprobs"))
++                + top_logprob_values(mi.get("input_top_logprobs"))
++                + top_logprob_values(mi.get("output_top_logprobs")))
+         bad = [v for v in vals if not math.isfinite(v)]
+         res[tag] = {"http": code, "text": body.get("text"),
+                     "n_values_checked": len(vals),
+@@ -601,6 +615,38 @@
+             art["step_exception"] = traceback.format_exc()
+             write_report(art)
+ 
++        # FAIL CLOSED: a step exception means later probes never ran, and a
++        # non-200 probe means its evidence is missing; neither may be recorded
++        # as "completed" with rc=0.  (Same class as the M3/M4 D1 defect.)
++        missing = []
++        if "step_exception" in art:
++            missing.append("step_exception")
++        for tag in ("p1", "p2"):
++            rec = art.get("step2_finite_logits", {}).get(tag)
++            if not isinstance(rec, dict) or rec.get("http") != 200:
++                missing.append(f"finite_logits[{tag}] not executed")
++            elif rec.get("n_nonfinite") != 0:
++                missing.append(f"finite_logits[{tag}] n_nonfinite={rec.get('n_nonfinite')}")
++        for tag in ("arithmetic", "capital"):
++            rec = art.get("step3_semantic", {}).get(tag)
++            if not isinstance(rec, dict) or rec.get("http") != 200:
++                missing.append(f"semantic[{tag}] not executed")
++        if art.get("step6_short_gen", {}).get("http") != 200:
++            missing.append("short_gen not executed")
++        if missing:
++            art["status"] = "probe_not_executed"
++            art["verdict"] = "FAIL"
++            art["verdict_failures"] = missing
++            write_report(art)
++            terminate(proc)
++            logf.close()
++            art["server_returncode"] = proc.returncode
++            write_report(art)
++            log(f"FAIL-CLOSED: required probes not executed/passed: {missing}")
++            return 7
++        art["verdict"] = "PASS"
++        art["verdict_failures"] = []
++
+         time.sleep(2)
+         logf.flush()
+         lt = readlog(server_log)
