@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# provider-status — report UP/DOWN, pid, port, source commit and health.
+#
+# Read-only.  Takes no lock and signals nothing, so it is safe to run at any
+# time, including while a main-line experiment owns the GPU.
+#
+# Usage: provider-status [--json]
+
+set -euo pipefail
+# shellcheck source=/dev/null
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/bin/provider-common.sh"
+
+JSON=0
+[ "${1:-}" = "--json" ] && JSON=1
+
+pid=""
+[ -f "$PID_FILE" ] && pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+[ -z "$pid" ] && pid="-"
+
+alive=false
+[ "$pid" != "-" ] && pid_alive "$pid" && alive=true
+
+health="down"
+code="000"
+if [ "$alive" = "true" ]; then
+  code="$(provider_health_code)"
+  [ "$code" = "200" ] && health="up"
+fi
+
+state="down"
+[ "$alive" = "true" ] && [ "$health" = "up" ] && state="up"
+
+lock="$(gpu_lock_state 2>/dev/null || echo unknown)"
+gpu_used="$(nvidia-smi --query-gpu=memory.used,utilization.gpu --format=csv,noheader 2>/dev/null || echo '?')"
+material="$(gpu_material_holder)"
+[ -n "$material" ] && material_txt="$material" || material_txt="none"
+
+deployed="-"
+if sudo -n test -f "$DEPLOY_DIR/MANIFEST-provider-tree.tsv" 2>/dev/null; then
+  deployed="present"
+fi
+
+if [ "$JSON" = "1" ]; then
+  jq -n \
+    --arg state "$state" --arg pid "$pid" --argjson port "$BIND_PORT" \
+    --arg host "$BIND_HOST" --arg model "$SERVED_MODEL_NAME" \
+    --arg commit "$SOURCE_COMMIT" --arg commit_short "$SOURCE_SHORT" \
+    --arg deploy "$DEPLOY_DIR" --arg deployed "$deployed" \
+    --arg health "$health" --arg code "$code" \
+    --arg lock "$lock" --arg gpu "$gpu_used" --arg material "$material_txt" \
+    '{state:$state, pid:($pid|if .=="-" then null else tonumber end),
+      port:$port, host:$host, served_model_name:$model,
+      source_commit:$commit, source_commit_short:$commit_short,
+      deploy_dir:$deploy, deploy_tree:$deployed,
+      health_http:$code, health:$health,
+      canonical_gpu_lock:$lock, gpu_used_util:$gpu, gpu_material_holder:$material,
+      l3:"off", auth:"on"}'
+  exit 0
+fi
+
+echo "DEV_PROVIDER=$(printf '%s' "$state" | tr '[:lower:]' '[:upper:]')"
+echo "PID=$pid"
+echo "PORT=$BIND_PORT"
+echo "HOST=$BIND_HOST"
+echo "MODEL=$SERVED_MODEL_NAME"
+echo "SOURCE_COMMIT=$SOURCE_COMMIT"
+echo "SOURCE_COMMIT_SHORT=$SOURCE_SHORT"
+echo "DEPLOY_DIR=$DEPLOY_DIR (tree=$deployed)"
+echo "HEALTH=$health (http $code)"
+echo "L3=OFF"
+echo "AUTH=ON"
+echo "CANONICAL_GPU_LOCK=$lock"
+echo "GPU=$gpu_used"
+echo "GPU_MATERIAL_HOLDER=$material_txt"
+echo "RUN_DIR=$RUN_DIR"
