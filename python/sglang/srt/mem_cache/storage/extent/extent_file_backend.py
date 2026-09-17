@@ -32,6 +32,7 @@ aligned, so only whole-extent aligned IO could use O_DIRECT safely.
 
 from __future__ import annotations
 
+import argparse
 import ctypes
 import json
 import logging
@@ -41,6 +42,7 @@ import threading
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, List, Optional
 
 from sglang.srt.environ import envs
@@ -58,6 +60,7 @@ from sglang.srt.mem_cache.storage.extent.extent_allocator import (
     ExtentRef,
 )
 from sglang.srt.mem_cache.storage.extent.extent_metadata import (
+    DEFAULT_WAL_MAX_RECORD_BYTES,
     FRAME_BATCH_COMMIT,
     FRAME_CLEAR,
     FRAME_DROP_SLOT,
@@ -103,6 +106,7 @@ from sglang.srt.mem_cache.storage.extent.extent_metadata import (
 )
 from sglang.srt.mem_cache.storage.file.lru_file_evictor import _parse_size_to_bytes
 from sglang.srt.mem_cache.trace_context import attach_trace_context
+from sglang.srt.utils.common import human_readable_int
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +114,9 @@ logger = logging.getLogger(__name__)
 _DEFAULT_EXTENT_SIZE = 64 << 20
 # B3 single-file layout: 64 GiB sparse preallocation per rank/suffix.
 _DEFAULT_FILE_SIZE = 64 << 30
+_DEFAULT_WAL_CHECKPOINT_BYTES = 1 << 30
+_WAL_CHECKPOINT_MAX_RETRIES = 3
+_WAL_CHECKPOINT_RETRY_DELAY = 0.1
 # Read-side merge threshold: adjacent requested ranges whose gap is at most
 # one 4KiB sector are merged into a single exact pread.  Absorbing a <=4KiB
 # dead gap is bounded amplification (<= 1.13x on a ~31KB page) and keeps
@@ -121,6 +128,109 @@ _MERGE_GAP_THRESHOLD = 4096
 # The v1 batch packs 2 blocks per page, so a 1024-page batch is 2048 iovecs
 # and the IO helpers shard at this boundary.
 _IOV_MAX = 1024
+
+# --------------------------------------------------------------------------- #
+# Native (GIL-free) write path -- L3-NATIVE-WRITEPATH-PROTOTYPE A/B seam.
+#
+# Select with SGLANG_L3_NATIVE_WRITE_PATH=1. Default 0 = the untouched Python
+# reference path (arm A). Arm B moves the page ``pwritev``, the
+# FRAME_SET/FRAME_BATCH_COMMIT encoding + append and the ``fdatasync`` onto a
+# Rust worker thread that never takes the GIL and never calls back into Python.
+# The durable order is unchanged:
+#   data pwritev -> WAL frames -> fdatasync -> commit_install.
+# Only the seam to <worktree>/rust (the l3wal crate) is added; allocator/index,
+# tree and controller layers are untouched.
+# --------------------------------------------------------------------------- #
+_NATIVE_WRITE_ENV = "SGLANG_L3_NATIVE_WRITE_PATH"
+_NATIVE_WRITE_WORKSPACE_ENV = "SGLANG_L3_NATIVE_WRITE_PATH_WORKSPACE"
+_NATIVE_WRITE_BUILD_MODE_ENV = "SGLANG_L3_NATIVE_WRITE_BUILD_MODE"
+_NATIVE_MODULE = None
+_NATIVE_MODULE_LOCK = threading.Lock()
+
+
+def _native_write_path_enabled() -> bool:
+    value = os.environ.get(_NATIVE_WRITE_ENV, "0")
+    return value.strip().lower() not in ("", "0", "false", "no", "off")
+
+
+def _native_workspace() -> Path:
+    override = os.environ.get(_NATIVE_WRITE_WORKSPACE_ENV)
+    if override:
+        return Path(override)
+    # <worktree>/rust, resolved from <worktree>/python/sglang/srt/.../this file.
+    return Path(__file__).resolve().parents[6] / "rust"
+
+
+def _load_native_module():
+    """Import (building offline if needed) the l3wal Rust extension."""
+    global _NATIVE_MODULE
+    if _NATIVE_MODULE is not None:
+        return _NATIVE_MODULE
+    with _NATIVE_MODULE_LOCK:
+        if _NATIVE_MODULE is None:
+            from sglang.srt.rust_extensions.loader import load_rust_extension
+
+            workspace = _native_workspace()
+            _NATIVE_MODULE = load_rust_extension(
+                "sglang.srt.rust_extensions._l3wal",
+                mode=os.environ.get(_NATIVE_WRITE_BUILD_MODE_ENV, "auto"),
+                workspace=workspace,
+                cache_dir=workspace.parent / "rust-cache",
+            )
+    return _NATIVE_MODULE
+
+
+class _NativePageSource:
+    """One page's source bytes for the native arm.
+
+    ``blocks`` (raw) is the zero-intermediate-gather-copy form exported by
+    ``pool_host.get_page_buffer_meta``: the ``(ptr, len)`` pool blocks in flat
+    page order.  ``buffers`` is the fallback form for a host pool without that
+    API (or for the explicit ``batch_set(values=...)`` surface): the page
+    memoryview is handed straight to the worker, which takes its buffer pointer.
+    """
+
+    __slots__ = ("length", "blocks", "buffers")
+
+    def __init__(self, length, blocks=None, buffers=None):
+        self.length = length
+        self.blocks = blocks
+        self.buffers = buffers
+
+
+def _host_pool_arena_regions(pool):
+    """``(base, nbytes)`` regions covering a host pool's stable allocations.
+
+    Every raw ``(ptr, len)`` produced by ``get_page_buffer_meta`` must fall
+    inside one of these, so a wrong address is rejected before dereference,
+    never silently written.
+    """
+    regions = []
+    for name in ("kv_buffer", "temporal_buffer"):
+        tensor = getattr(pool, name, None)
+        if tensor is not None and hasattr(tensor, "data_ptr"):
+            regions.append(
+                (
+                    int(tensor.data_ptr()),
+                    int(tensor.numel()) * int(tensor.element_size()),
+                )
+            )
+    conv = getattr(pool, "conv_buffer", None)
+    if conv is not None:
+        try:
+            conv_buffers = list(conv)
+        except TypeError:
+            conv_buffers = []
+        for tensor in conv_buffers:
+            if tensor is not None and hasattr(tensor, "data_ptr"):
+                regions.append(
+                    (
+                        int(tensor.data_ptr()),
+                        int(tensor.numel()) * int(tensor.element_size()),
+                    )
+                )
+    return regions
+
 
 _T38C_DURABLE_SEQ = {}
 _T38C_DURABLE_SEQ_LOCK = threading.Lock()
@@ -314,6 +424,35 @@ def _as_bool(value) -> bool:
     return bool(value)
 
 
+def _parse_wal_checkpoint_bytes(value, source: str) -> int:
+    """Parse the live-WAL checkpoint threshold without silently disabling it."""
+    if isinstance(value, bool):
+        raise ValueError(
+            f"wal_checkpoint_bytes from {source} must be a non-negative size, not bool"
+        )
+    if isinstance(value, int):
+        parsed = value
+    elif isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            raise ValueError(f"wal_checkpoint_bytes from {source} must not be empty")
+        try:
+            parsed = human_readable_int(raw)
+        except (TypeError, ValueError, argparse.ArgumentTypeError) as exc:
+            raise ValueError(
+                f"invalid wal_checkpoint_bytes from {source}: {value!r}"
+            ) from exc
+    else:
+        raise ValueError(
+            f"wal_checkpoint_bytes from {source} must be an integer or size string"
+        )
+    if parsed < 0:
+        raise ValueError(
+            f"wal_checkpoint_bytes from {source} must be non-negative, got {parsed}"
+        )
+    return parsed
+
+
 class ExtentFileBackend(HiCacheStorage):
     def __init__(self, storage_config: HiCacheStorageConfig, file_path=None):
         extra = storage_config.extra_config or {}
@@ -404,6 +543,21 @@ class ExtentFileBackend(HiCacheStorage):
                 "O_DIRECT calibration tier; this slice uses buffered IO."
             )
 
+        threshold_raw = extra.get("wal_checkpoint_bytes")
+        if threshold_raw is not None:
+            threshold_source = "extra_config"
+        elif envs.SGLANG_HICACHE_EXTENT_BACKEND_WAL_CHECKPOINT_BYTES.is_set():
+            threshold_raw = envs.SGLANG_HICACHE_EXTENT_BACKEND_WAL_CHECKPOINT_BYTES.get()
+            threshold_source = "env"
+        else:
+            threshold_raw = _DEFAULT_WAL_CHECKPOINT_BYTES
+            threshold_source = "default"
+        self._wal_checkpoint_bytes = _parse_wal_checkpoint_bytes(
+            threshold_raw, threshold_source
+        )
+        self._wal_checkpoint_source = threshold_source
+        self._wal_checkpoint_requested = threshold_raw
+
         # One data file per rank/config suffix: ranks never share an allocator.
         self._data_path = os.path.join(
             self._storage_dir, f"hicache.data{self.config_suffix}"
@@ -431,11 +585,24 @@ class ExtentFileBackend(HiCacheStorage):
         self._components = {}
         self._constructor_complete = False
         self._closed = False
+        self._lifecycle_state = "OPENING"
+        self._lifecycle_lock = threading.Lock()
+        self._close_lock = threading.Lock()
+        self._checkpoint_event = threading.Event()
+        self._checkpoint_stop = threading.Event()
+        self._checkpoint_thread = None
         self._lock = threading.Lock()
         # Lock order is deliberately fixed at _write_gate -> _lock.  The gate
         # quiesces writers while checkpoint rotates and reclaims WAL segments;
         # reads continue to use _lock only.
         self._write_gate = threading.RLock()
+        # Native write-path A/B switch (arm A = 0, the Python reference path).
+        # The worker is created lazily on the first arm-B write, so an arm-A
+        # run neither builds nor imports the Rust extension.
+        self._native_write_path = _native_write_path_enabled()
+        self._native_writer = None
+        self._native_writer_lock = threading.Lock()
+        self._native_registered_arenas = set()
         self._stats = {
             "opens": 0,
             "preads": 0,
@@ -454,6 +621,18 @@ class ExtentFileBackend(HiCacheStorage):
             "last_batch_requested_bytes": 0,
             "last_batch_physical_bytes": 0,
             "last_batch_preads": 0,
+            "wal_checkpoint_bytes": self._wal_checkpoint_bytes,
+            "wal_checkpoint_requested_bytes": self._wal_checkpoint_requested,
+            "wal_checkpoint_source": self._wal_checkpoint_source,
+            "wal_active_bytes": 0,
+            "wal_checkpoint_requested": 0,
+            "wal_checkpoint_successes": 0,
+            "wal_checkpoint_failures": 0,
+            "wal_checkpoint_retries": 0,
+            "wal_checkpoint_last_error": None,
+            # Native seam (arm B) failure accounting (H2).
+            "native_write_failures": 0,
+            "native_write_last_error": None,
         }
         try:
             (
@@ -471,12 +650,22 @@ class ExtentFileBackend(HiCacheStorage):
                 self._startup_metadata()
             self._open_active_wal()
             self._constructor_complete = True
+            self._lifecycle_state = "OPEN"
+            self._start_checkpoint_worker()
             logger.info(
                 f"ExtentFileBackend: file={self._data_path} extent={extent_size} B "
                 f"slots={self._file_size // extent_size} "
-                f"max_size={self._max_size_bytes} min_free={self._min_free_bytes}"
+                f"max_size={self._max_size_bytes} min_free={self._min_free_bytes} "
+                f"wal_checkpoint_bytes={self._wal_checkpoint_bytes} "
+                f"wal_checkpoint_requested={self._wal_checkpoint_requested!r} "
+                f"wal_checkpoint_source={self._wal_checkpoint_source}"
             )
         except Exception:
+            self._checkpoint_stop.set()
+            self._checkpoint_event.set()
+            if self._checkpoint_thread is not None:
+                self._checkpoint_thread.join()
+                self._checkpoint_thread = None
             if self._wal_fd is not None:
                 os.close(self._wal_fd)
                 self._wal_fd = None
@@ -487,6 +676,66 @@ class ExtentFileBackend(HiCacheStorage):
                 finally:
                     self._fd = None
             raise
+
+    def _start_checkpoint_worker(self) -> None:
+        if self._wal_checkpoint_bytes == 0:
+            return
+        checkpoint_thread = threading.Thread(
+            target=self._checkpoint_worker,
+            name=f"extent-wal-checkpoint-{self.config_suffix}",
+            daemon=True,
+        )
+        checkpoint_thread.start()
+        self._checkpoint_thread = checkpoint_thread
+
+    def _checkpoint_worker(self) -> None:
+        while not self._checkpoint_stop.is_set():
+            if not self._checkpoint_event.wait(0.5):
+                continue
+            # Clear the request under the same lifecycle lock used by the
+            # signaler.  A signal that arrives during checkpoint processing is
+            # not cleared afterward, so it remains a distinct retry request.
+            with self._lifecycle_lock:
+                self._checkpoint_event.clear()
+                if self._lifecycle_state != "OPEN":
+                    return
+            if self._checkpoint_stop.is_set():
+                return
+            self._stats["wal_checkpoint_requested"] += 1
+            succeeded = False
+            for attempt in range(_WAL_CHECKPOINT_MAX_RETRIES):
+                if self._checkpoint_stop.is_set():
+                    return
+                try:
+                    # checkpoint() takes _write_gate itself; no backend lock is
+                    # held across this call, preserving the existing lock order.
+                    if not self.checkpoint(preserve_incomplete_groups=True):
+                        break
+                    self._stats["wal_checkpoint_successes"] += 1
+                    self._stats["wal_active_bytes"] = max(
+                        0, self._wal_offset - SEGMENT_HEADER_SIZE
+                    )
+                    succeeded = True
+                    break
+                except Exception as exc:
+                    self._stats["wal_checkpoint_failures"] += 1
+                    self._stats["wal_checkpoint_last_error"] = repr(exc)
+                    if attempt + 1 < _WAL_CHECKPOINT_MAX_RETRIES:
+                        self._stats["wal_checkpoint_retries"] += 1
+                        if self._checkpoint_stop.wait(_WAL_CHECKPOINT_RETRY_DELAY):
+                            return
+            # Do not clear here: a signal received while the attempt was in
+            # flight is a newer request and must survive this failure/decline.
+
+    def _signal_wal_checkpoint_if_needed(self) -> None:
+        """Signal only after the writer's _lock-protected boundary completes."""
+        if self._wal_checkpoint_bytes <= 0:
+            return
+        if self._wal_offset - SEGMENT_HEADER_SIZE < self._wal_checkpoint_bytes:
+            return
+        with self._lifecycle_lock:
+            if self._lifecycle_state == "OPEN":
+                self._checkpoint_event.set()
 
     @staticmethod
     def _new_nonzero_epoch() -> bytes:
@@ -817,6 +1066,9 @@ class ExtentFileBackend(HiCacheStorage):
                 getattr(self, "_wal_recovered_next_seq", 1),
             )
             self._wal_recovered_next_seq = self._wal_next_seq
+            self._stats["wal_active_bytes"] = max(
+                0, self._wal_offset - SEGMENT_HEADER_SIZE
+            )
             max_batch_id = 0
             for frame in frames:
                 if frame.frame_type == FRAME_SET:
@@ -843,6 +1095,9 @@ class ExtentFileBackend(HiCacheStorage):
             written += count
         self._wal_offset += written
         self._wal_next_seq += 1
+        self._stats["wal_active_bytes"] = max(
+            0, self._wal_offset - SEGMENT_HEADER_SIZE
+        )
 
     def _sync_wal(self) -> None:
         if self._wal_fd is None:
@@ -933,12 +1188,16 @@ class ExtentFileBackend(HiCacheStorage):
                         (key, member[2]) for key in member[0]
                     )
             self._abort_group_locked(group_id)
+            self._signal_wal_checkpoint_if_needed()
             return True
 
     def abort_group(self, group_id) -> bool:
         group_id = self._validate_group_id(group_id)
         with self._write_gate:
-            return self._abort_group_locked(group_id)
+            aborted = self._abort_group_locked(group_id)
+            if aborted:
+                self._signal_wal_checkpoint_if_needed()
+            return aborted
 
     def _abort_all_groups_locked(self) -> None:
         self._staged_groups.clear()
@@ -994,6 +1253,49 @@ class ExtentFileBackend(HiCacheStorage):
 
     def _append_ungrouped_commit(self, storage_keys, refs, component: int) -> None:
         self._append_batch_commit(storage_keys, refs, component)
+
+    def _append_relocation_commit(self, relocated) -> None:
+        """Durably publish relocated refs with the existing WAL protocol.
+
+        ``relocated`` is an ordered list of ``(key, ExtentRef, component)``.
+        Exactly one SET frame plus one BATCH_COMMIT frame are appended and
+        fsynced (no new frame type, no new protocol): replay folds the batch
+        only when its commit is present, and the later SET deterministically
+        wins over the victim's earlier SET for the same key.  Components are
+        carried per entry so KV and Mamba payloads keep their opaque pool
+        identity across the move.
+        """
+        batch_id = self._next_batch_id
+        self._next_batch_id += 1
+        entries = [
+            SetEntry(
+                storage_key=key.encode("utf-8"),
+                extent_id=ref.extent_id,
+                offset=ref.offset,
+                length=ref.length,
+                generation=ref.generation,
+                component=component,
+            )
+            for key, ref, component in relocated
+        ]
+        self._append_wal_frame(
+            FRAME_SET,
+            encode_set_payload(
+                SetPayload(
+                    group_epoch=b"\x00" * 16,
+                    group_seq=0,
+                    batch_id=batch_id,
+                    member_index=0,
+                    member_count=1,
+                    entries=entries,
+                )
+            ),
+        )
+        self._append_wal_frame(
+            FRAME_BATCH_COMMIT,
+            encode_batch_commit_payload(BatchCommitPayload(batch_id, 1)),
+        )
+        self._sync_wal()
 
     # ---- key scoping (same semantics as HiCacheFile) ----
     # v1 and v2 share the same transform: the engine writes via v1 batch_set
@@ -1222,7 +1524,9 @@ class ExtentFileBackend(HiCacheStorage):
         extra_info: Optional[HiCacheStorageExtraInfo] = None,
     ) -> List[bool]:
         with self._write_gate:
-            return self._batch_set_v1_locked(keys, host_indices, extra_info)
+            result = self._batch_set_v1_locked(keys, host_indices, extra_info)
+            self._signal_wal_checkpoint_if_needed()
+            return result
 
     def _batch_set_v1_locked(
         self,
@@ -1263,6 +1567,10 @@ class ExtentFileBackend(HiCacheStorage):
                     len(keys),
                     self._extent_size,
                 )
+                return [False] * len(keys)
+            # Reclaim-time relocation: a circular-reclaim victim's live refs
+            # must have a durable replacement before its generation is bumped.
+            if not self._relocate_reclaim_victims_locked(passed, drop_events, refs):
                 return [False] * len(keys)
             try:
                 self._append_drops(drop_events)
@@ -1664,10 +1972,17 @@ class ExtentFileBackend(HiCacheStorage):
                 )
                 continue
             storage_keys = [self._component_key(transfer.name, k) for k in keys]
-            values = [
-                host_pool.get_data_page(int(host_indices[i * page_size]), flat=True)
-                for i in range(len(keys))
-            ]
+            page_sources = None
+            if self._native_write_path:
+                page_sources = self._native_page_sources_from_meta(
+                    host_pool, host_indices, len(keys), page_size
+                )
+            values = None
+            if page_sources is None:
+                values = [
+                    host_pool.get_data_page(int(host_indices[i * page_size]), flat=True)
+                    for i in range(len(keys))
+                ]
             trace_context = {
                 **(
                     getattr(transfer, "_t38c_trace_context", None) or {}
@@ -1684,6 +1999,7 @@ class ExtentFileBackend(HiCacheStorage):
                 trace_context,
                 group_id=group_id,
                 component=component_from_pool_name(transfer.name),
+                page_sources=page_sources,
             )
             results[transfer.name] = [ok] * len(keys)
             _t38c_durable_log(
@@ -1713,7 +2029,9 @@ class ExtentFileBackend(HiCacheStorage):
                     transfer.name,
                     getattr(extra_info, "node_id", None),
                     storage_keys,
-                    values,
+                    values
+                    if values is not None
+                    else [source.length for source in page_sources],
                 )
         return results
 
@@ -1790,6 +2108,129 @@ class ExtentFileBackend(HiCacheStorage):
         self._stats["last_batch_preads"] = preads
         return out
 
+    # ---- reclaim-time live-ref relocation ----
+
+    def _reclaim_victims(self, passed, drop_events):
+        """Enumerate the live refs held by circular-reclaim victim slots.
+
+        A victim is a slot the pure planner put in ``passed``: its generation
+        is about to be bumped and its bytes reused.  Only refs that currently
+        resolve (present in the index, in this exact slot, at the slot's
+        current generation) are returned; dead/stale entries are never copied.
+        """
+        drop_slots = {slot for slot, _ in drop_events}
+        order = []
+        seen = set()
+        for slot in passed:
+            if slot in seen or slot not in drop_slots:
+                continue
+            seen.add(slot)
+            order.append(slot)
+        victims = []
+        for slot in sorted(order):
+            generation = self._allocator._generations[slot]
+            for key in sorted(self._allocator._slot_keys[slot]):
+                ref = self._allocator._index.get(key)
+                if ref is None or ref.extent_id != slot:
+                    continue
+                if ref.generation != generation:
+                    continue
+                victims.append((key, ref))
+        return victims
+
+    def _relocate_reclaim_victims_locked(self, passed, drop_events, planned_refs):
+        """Move every live ref out of the reclaim victims before they drop.
+
+        Preserves the existing durability order exactly: exact bytes are
+        pread from the victim and pwritten to non-victim space, then the
+        replacements are published with SET -> BATCH_COMMIT -> fsync and
+        installed.  Only after that may the caller append the DROP_SLOT
+        frames and bump the victim generation.  Returns False (fail closed)
+        when no destination capacity can be secured; the victim is then left
+        untouched and the whole write is refused.
+        """
+        victims = self._reclaim_victims(passed, drop_events)
+        if not victims:
+            return True
+        # Destination space must never be a victim (about to be dropped), a
+        # slot carrying this plan's own refs (its pwrite/`_cursors` update
+        # follows), or a staged reservation (its bytes are already written
+        # but its refs are not installed yet).
+        excluded = {slot for slot, _ in drop_events}
+        excluded.update(ref.extent_id for ref in planned_refs if ref is not None)
+        excluded.update(self._staged_slots())
+        start_slot = max(
+            (ref.extent_id for ref in planned_refs if ref is not None),
+            default=self._allocator._next_slot,
+        )
+        key_lengths = [(key, ref.length) for key, ref in victims]
+        destination_refs = self._allocator.plan_relocation(
+            [slot for slot in {ref.extent_id for _key, ref in victims}],
+            key_lengths,
+            excluded_slots=sorted(excluded),
+            start_slot=start_slot,
+        )
+        if destination_refs is None:
+            logger.warning(
+                "ExtentFileBackend: reclaim relocation of %d live refs "
+                "refused: no destination capacity outside victims %s",
+                len(victims),
+                sorted({ref.extent_id for _key, ref in victims}),
+            )
+            return False
+        # Exact bytes, read from the victim and written to the replacement.
+        for (key, ref), destination in zip(victims, destination_refs):
+            buffer = bytearray(ref.length)
+            if (
+                self._pread_full(
+                    buffer, ref.extent_id * self._extent_size + ref.offset
+                )
+                != ref.length
+            ):
+                logger.error(
+                    "ExtentFileBackend: reclaim relocation read failed for %s", key
+                )
+                return False
+            if not self._pwritev(
+                destination.extent_id * self._extent_size + destination.offset,
+                [memoryview(buffer)],
+            ):
+                logger.error(
+                    "ExtentFileBackend: reclaim relocation write failed for %s", key
+                )
+                return False
+        relocated = [
+            (
+                key,
+                destination,
+                self._components.get(key, component_from_pool_name(PoolName.KV)),
+            )
+            for (key, _ref), destination in zip(victims, destination_refs)
+        ]
+        try:
+            self._append_relocation_commit(relocated)
+        except Exception as exc:
+            logger.error(
+                "ExtentFileBackend: reclaim relocation WAL commit failed: %s", exc
+            )
+            return False
+        if not self._allocator.commit_install(
+            [key for key, _ref in victims], destination_refs
+        ):
+            logger.error(
+                "ExtentFileBackend: reclaim relocation install failed; "
+                "refusing the write"
+            )
+            return False
+        logger.info(
+            "ExtentFileBackend: reclaim relocated %d live refs out of victim "
+            "slots %s (%d bytes)",
+            len(victims),
+            sorted({ref.extent_id for _key, ref in victims}),
+            sum(ref.length for _key, ref in victims),
+        )
+        return True
+
     def _write_pages(
         self,
         keys: List[str],
@@ -1797,11 +2238,19 @@ class ExtentFileBackend(HiCacheStorage):
         trace_context=None,
         group_id=None,
         component=None,
+        page_sources=None,
     ) -> bool:
         with self._write_gate:
-            return self._write_pages_locked(
-                keys, values, trace_context, group_id=group_id, component=component
+            result = self._write_pages_locked(
+                keys,
+                values,
+                trace_context,
+                group_id=group_id,
+                component=component,
+                page_sources=page_sources,
             )
+            self._signal_wal_checkpoint_if_needed()
+            return result
 
     def _write_pages_locked(
         self,
@@ -1810,6 +2259,7 @@ class ExtentFileBackend(HiCacheStorage):
         trace_context=None,
         group_id=None,
         component=None,
+        page_sources=None,
     ) -> bool:
         """Pack pages into extents and pwrite, all-or-nothing.
 
@@ -1818,7 +2268,10 @@ class ExtentFileBackend(HiCacheStorage):
         half-applied write and no state is mutated if a pwrite fails (ACK =
         pwrite success + index registration).
         """
-        if len(keys) != len(values) or any(v is None for v in values):
+        if page_sources is None:
+            if len(keys) != len(values) or any(v is None for v in values):
+                return False
+        elif len(page_sources) != len(keys):
             return False
         if group_id is not None:
             try:
@@ -1828,10 +2281,16 @@ class ExtentFileBackend(HiCacheStorage):
             if group_id[0] != self._namespace_epoch or group_id not in self._staged_groups:
                 return False
         with self._lock:
-            views = [_page_byte_view(v) for v in values]
+            if page_sources is not None:
+                # Arm B with a raw meta source: skip the Python gather entirely.
+                page_lens = [source.length for source in page_sources]
+                views = None
+            else:
+                views = [_page_byte_view(v) for v in values]
+                page_lens = [len(v) for v in views]
             pending_drops = self._select_gc_victims()
             refs, passed, drop_events = self._plan_split_with_staged(
-                list(zip(keys, [len(v) for v in views])), pending_drops
+                list(zip(keys, page_lens)), pending_drops
             )
             if any(slot in self._staged_slots() for slot, _ in drop_events):
                 return False
@@ -1843,6 +2302,10 @@ class ExtentFileBackend(HiCacheStorage):
                     self._extent_size,
                 )
                 return False
+            # Reclaim-time relocation: a circular-reclaim victim's live refs
+            # must have a durable replacement before its generation is bumped.
+            if not self._relocate_reclaim_victims_locked(passed, drop_events, refs):
+                return False
             try:
                 self._append_drops(drop_events)
                 self._allocator.apply_drops(drop_events, trace_context=trace_context)
@@ -1852,24 +2315,37 @@ class ExtentFileBackend(HiCacheStorage):
             groups: dict = {}
             for i, ref in enumerate(refs):
                 groups.setdefault(ref.extent_id, []).append(i)
-            for extent_id, idxs in groups.items():
-                first = refs[idxs[0]].offset
-                bufs = [views[i] for i in idxs]
-                if not self._pwritev(extent_id * self._extent_size + first, bufs):
+            pool = (trace_context or {}).get("pool", PoolName.KV)
+            persisted_component = (
+                component
+                if component is not None
+                else component_from_pool_name(pool)
+            )
+            if self._native_write_path:
+                # Arm B: data pwritev + WAL frames + fdatasync on the Rust worker.
+                if not self._native_write_locked(
+                    keys,
+                    page_sources,
+                    views,
+                    refs,
+                    groups,
+                    persisted_component,
+                    group_id,
+                ):
                     return False
-            try:
-                pool = (trace_context or {}).get("pool", PoolName.KV)
-                persisted_component = (
-                    component
-                    if component is not None
-                    else component_from_pool_name(pool)
-                )
-                self._append_batch_commit(
-                    keys, refs, persisted_component, group_id=group_id
-                )
-            except Exception as exc:
-                logger.error("ExtentFileBackend: WAL commit failed: %s", exc)
-                return False
+            else:
+                for extent_id, idxs in groups.items():
+                    first = refs[idxs[0]].offset
+                    bufs = [views[i] for i in idxs]
+                    if not self._pwritev(extent_id * self._extent_size + first, bufs):
+                        return False
+                try:
+                    self._append_batch_commit(
+                        keys, refs, persisted_component, group_id=group_id
+                    )
+                except Exception as exc:
+                    logger.error("ExtentFileBackend: WAL commit failed: %s", exc)
+                    return False
             if group_id is not None:
                 return self._stage_group_members(
                     group_id,
@@ -1885,6 +2361,230 @@ class ExtentFileBackend(HiCacheStorage):
             )
             _t38c_extent_commits(keys, refs, groups, trace_context)
             return True
+
+    # ---- native write path (arm B) ----
+
+    def _ensure_native_writer(self):
+        """Lazily create the Rust worker for this backend instance."""
+        if self._native_writer is not None:
+            return self._native_writer
+        with self._native_writer_lock:
+            if self._native_writer is None:
+                module = _load_native_module()
+                self._native_writer = module.Writer()
+        return self._native_writer
+
+    def _register_pool_arena(self, pool) -> bool:
+        """Register the pool's stable allocation(s) as pointer-validity arenas."""
+        regions = _host_pool_arena_regions(pool)
+        if not regions:
+            return False
+        writer = self._ensure_native_writer()
+        for base, length in regions:
+            if (base, length) not in self._native_registered_arenas:
+                writer.register_arena(int(base), int(length))
+                self._native_registered_arenas.add((base, length))
+        return True
+
+    def _native_inflight(self) -> int:
+        """Native jobs queued or running (0 == no worker can touch a pointer)."""
+        if self._native_writer is None:
+            return 0
+        return int(self._native_writer.inflight())
+
+    def _native_outstanding_leases(self) -> int:
+        """Page leases established but not released; must be 0 before teardown."""
+        if self._native_writer is None:
+            return 0
+        return int(self._native_writer.outstanding_leases())
+
+    def _native_shutdown(self, timeout_s: float = -1.0) -> bool:
+        """**H3** teardown barrier: drain in-flight native work, resolve every
+        outstanding lease, join the worker, and only then close the fds it
+        writes through. Returns False if a lease is still outstanding after the
+        join (fail-closed: the caller must not free the pinned allocation).
+        """
+        writer = self._native_writer
+        if writer is None:
+            return True
+        if self._native_inflight():
+            if not writer.drain(timeout_s):
+                logger.error(
+                    "ExtentFileBackend: native worker did not drain within %ss; "
+                    "refusing to tear down while %s lease(s) are outstanding",
+                    timeout_s,
+                    writer.outstanding_leases(),
+                )
+                return False
+        writer.shutdown()
+        outstanding = int(writer.outstanding_leases())
+        if outstanding:
+            logger.error(
+                "ExtentFileBackend: %s native lease(s) unresolved after join; "
+                "pinned memory must not be freed",
+                outstanding,
+            )
+            return False
+        return True
+
+    def _native_page_sources_from_meta(self, pool, host_indices, count, page_size):
+        """Raw per-page ``(ptr, len)`` blocks from ``get_page_buffer_meta``.
+
+        Returns ``None`` when the pool cannot supply a validated raw source, in
+        which case the caller falls back to the arm-A gather + buffer submit.
+        """
+        if not callable(getattr(pool, "get_page_buffer_meta", None)):
+            return None
+        if getattr(pool, "layout", "") == "layer_first":
+            return None
+        if not self._register_pool_arena(pool):
+            return None
+        try:
+            ptr_list, size_list = pool.get_page_buffer_meta(host_indices)
+        except Exception as exc:
+            logger.error("ExtentFileBackend: native meta gather failed: %s", exc)
+            return None
+        if not ptr_list or len(ptr_list) != len(size_list):
+            return None
+        if len(ptr_list) % count != 0:
+            return None
+        blocks_per_page = len(ptr_list) // count
+        if blocks_per_page == 0:
+            return None
+        sources = []
+        for page in range(count):
+            blocks = [
+                (
+                    int(ptr_list[page * blocks_per_page + j]),
+                    int(size_list[page * blocks_per_page + j]),
+                )
+                for j in range(blocks_per_page)
+            ]
+            sources.append(
+                _NativePageSource(
+                    sum(length for _, length in blocks), blocks=blocks
+                )
+            )
+        return sources
+
+    def _native_write_locked(
+        self, keys, page_sources, views, refs, groups, component, group_id
+    ) -> bool:
+        """Arm B: run the whole data + WAL durable sequence on the Rust worker.
+
+        The worker owns page pwritev, frame encoding, WAL append and fdatasync;
+        it never calls back into Python.  ``commit_install`` still runs in
+        Python only after this returns (invariant 3).
+        """
+        if page_sources is None:
+            page_sources = [
+                _NativePageSource(len(view), buffers=[view]) for view in views
+            ]
+        raw = page_sources[0].blocks is not None
+        plans = []
+        for extent_id, idxs in groups.items():
+            ordered = sorted(idxs, key=lambda index: refs[index].offset)
+            first = refs[ordered[0]].offset
+            if raw:
+                spec = []
+                for index in ordered:
+                    spec.extend(page_sources[index].blocks)
+            else:
+                spec = []
+                for index in ordered:
+                    spec.extend(page_sources[index].buffers)
+            plans.append((int(extent_id * self._extent_size + first), spec))
+        if group_id is None:
+            group_epoch, group_seq = b"\x00" * 16, 0
+        else:
+            group_epoch, group_seq = self._validate_group_id(group_id)
+        batch_id = self._next_batch_id
+        self._next_batch_id += 1
+        entries = [
+            (
+                key.encode("utf-8"),
+                int(ref.extent_id),
+                int(ref.offset),
+                int(ref.length),
+                int(ref.generation),
+                int(component),
+            )
+            for key, ref in zip(keys, refs)
+        ]
+        writer = self._ensure_native_writer()
+        common = dict(
+            data_fd=self._fd,
+            wal_fd=self._wal_fd,
+            wal_offset=int(self._wal_offset),
+            wal_seq=int(self._wal_next_seq),
+            group_epoch=group_epoch,
+            group_seq=group_seq,
+            batch_id=batch_id,
+            member_index=0,
+            member_count=1,
+            entries=entries,
+            wal_max_record_bytes=DEFAULT_WAL_MAX_RECORD_BYTES,
+        )
+        try:
+            if raw:
+                job_id = writer.submit_write_raw(plans=plans, **common)
+            else:
+                job_id = writer.submit_write_buffers(plans=plans, **common)
+        except Exception as exc:
+            logger.error("ExtentFileBackend: native submit failed: %s", exc)
+            return False
+        completion = writer.wait(job_id)
+        if completion is None:
+            # H2: a missing completion is a protocol violation, not success.
+            logger.error(
+                "ExtentFileBackend: native write job %s produced no completion; "
+                "failing the batch closed",
+                job_id,
+            )
+            return False
+        (
+            _job_id,
+            ok,
+            error,
+            errno,
+            bytes_written,
+            wal_offset,
+            wal_seq,
+            data_syscalls,
+        ) = completion
+        # Advance the shared WAL cursor even on failure: a frame the worker
+        # already appended must not be overwritten (same invariant as
+        # _append_wal_frame's per-frame accounting).
+        if wal_offset >= self._wal_offset:
+            self._wal_offset = wal_offset
+            self._wal_next_seq = wal_seq
+            self._stats["wal_active_bytes"] = max(
+                0, wal_offset - SEGMENT_HEADER_SIZE
+            )
+        if data_syscalls:
+            self._stats["pwrites"] += data_syscalls
+            self._stats["bytes_written"] += bytes_written
+        # Invariant 3: completion arrived, so the page lease may (and must) be
+        # released -- on failure too, otherwise a refused batch would keep a
+        # stale lease on its pages forever.
+        writer.release(job_id)
+        if not ok:
+            # H2: explicit failure (errno/message) is propagated as a whole-batch
+            # refusal. The caller returns False to the engine, no WAL frame
+            # beyond what the worker durably appended is assumed, and
+            # commit_install is never reached.
+            self._stats["native_write_failures"] += 1
+            self._stats["native_write_last_error"] = (
+                f"errno={errno} {error}" if errno else error
+            )
+            logger.error(
+                "ExtentFileBackend: native write failed (errno=%s): %s; "
+                "batch refused (no commit_install)",
+                errno,
+                error,
+            )
+            return False
+        return True
 
     # ---- GC / lifecycle ----
 
@@ -1979,7 +2679,7 @@ class ExtentFileBackend(HiCacheStorage):
             recency_order=[entry_indexes[key] for key in allocator._recency if key in entry_indexes],
         )
 
-    def checkpoint(self) -> bool:
+    def checkpoint(self, preserve_incomplete_groups: bool = False) -> bool:
         """Publish a checkpoint, rotate WAL, then unlink covered segments.
 
         The write gate remains held for the full manifest-publish,
@@ -1987,6 +2687,8 @@ class ExtentFileBackend(HiCacheStorage):
         append to the old generation after the published floor.
         """
         with self._write_gate:
+            if preserve_incomplete_groups and self._staged_groups:
+                return False
             self._abort_all_groups_locked()
             with self._lock:
                 old_generation = self._wal_generation
@@ -2008,6 +2710,9 @@ class ExtentFileBackend(HiCacheStorage):
             self._wal_generation = new_generation
             self._wal_offset = SEGMENT_HEADER_SIZE
             self._wal_next_seq = state.checkpoint_lsn + 1
+            # _open_active_wal() max()es against this watermark; a stale value
+            # renumbers the new segment below the published checkpoint lsn.
+            self._wal_recovered_next_seq = self._wal_next_seq
             self._open_active_wal()
 
             # Recovery intentionally does not enumerate this directory.  The
@@ -2049,22 +2754,42 @@ class ExtentFileBackend(HiCacheStorage):
             return dict(self._stats)
 
     def close(self) -> None:
-        if self._closed:
-            return
-        try:
-            if self._constructor_complete and os.path.isdir(self._storage_dir):
-                with self._write_gate:
-                    self._abort_all_groups_locked()
-                self.checkpoint()
-            if self._wal_fd is not None:
-                os.close(self._wal_fd)
-                self._wal_fd = None
-            if self._fd is not None:
-                os.close(self._fd)
-                self._fd = None
-        finally:
-            self._closed = True
-            self._release_backend_meta_lock()
+        with self._close_lock:
+            if self._closed:
+                return
+            try:
+                with self._lifecycle_lock:
+                    if self._lifecycle_state == "OPEN":
+                        self._lifecycle_state = "CLOSING"
+                self._checkpoint_stop.set()
+                self._checkpoint_event.set()
+                checkpoint_thread = self._checkpoint_thread
+                if checkpoint_thread is not None:
+                    checkpoint_thread.join()
+                    self._checkpoint_thread = None
+                # H3 teardown barrier: drain + join the native worker before the
+                # fds it writes through close, and before any host-pool
+                # destroy()/cudaHostUnregister can run after close() returns.
+                if self._native_writer is not None:
+                    if not self._native_shutdown():
+                        raise RuntimeError(
+                            "ExtentFileBackend.close: native worker still holds "
+                            "page leases; refusing to tear down pinned memory"
+                        )
+                    self._native_writer = None
+                if self._constructor_complete and os.path.isdir(self._storage_dir):
+                    with self._write_gate:
+                        self._abort_all_groups_locked()
+                    self.checkpoint()
+                if self._wal_fd is not None:
+                    os.close(self._wal_fd)
+                    self._wal_fd = None
+                if self._fd is not None:
+                    os.close(self._fd)
+                    self._fd = None
+            finally:
+                self._closed = True
+                self._release_backend_meta_lock()
 
     # ---- raw fd IO (explicit offsets, thread-safe on a shared fd) ----
 

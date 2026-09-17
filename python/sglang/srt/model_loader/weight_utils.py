@@ -1466,6 +1466,11 @@ def gguf_quant_weights_iterator(
             if weight_type.name != "F32":
                 name = name.replace("weight", "qweight")
             param = torch.tensor(weight)
+            if weight_type.name == "BF16" and param.dtype == torch.uint8:
+                # gguf hands back the raw little-endian bytes for bfloat16
+                # (numpy has no bfloat16 dtype), which the unquantized GGUF
+                # matmul path would otherwise feed to torch as a uint8 weight.
+                param = param.view(torch.bfloat16)
             yield name, param
 
 
