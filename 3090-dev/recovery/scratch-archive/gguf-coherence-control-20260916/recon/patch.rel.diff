@@ -1,0 +1,38 @@
+--- qwen3_5_text.py	2026-09-16 12:39:33.431794160 +0000
++++ qwen3_5_text.py	2026-09-16 19:48:06.620183220 +0000
+@@ -51,6 +51,26 @@
+     return torch.log(-raw)
+ 
+ 
++# llama.cpp writes Gemma-style (offset) norms to GGUF as the *absolute* scale
++# ``1 + w_hf``.  ``GemmaRMSNorm`` applies ``x * (1 + weight)`` (and precomputes
++# ``weight + 1``), so the loader must strip the embedded ``+1`` or every such
++# norm is applied twice.  ``linear_attn.norm`` is a plain ``RMSNormGated`` and
++# must NOT be adjusted.
++_GGUF_OFFSET_NORM_SUFFIXES = (
++    ".input_layernorm.weight",
++    ".post_attention_layernorm.weight",
++    ".q_norm.weight",
++    ".k_norm.weight",
++)
++
++
++def _gguf_is_offset_norm(name: str) -> bool:
++    """True for a GGUF weight naming a Gemma-style (offset) norm."""
++    if name.endswith(".linear_attn.norm.weight"):
++        return False
++    return name == "model.norm.weight" or name.endswith(_GGUF_OFFSET_NORM_SUFFIXES)
++
++
+ class Qwen3_5ForCausalLM(nn.Module):
+     body_cls = qwen3_5.Qwen3_5ForCausalLM
+ 
+@@ -188,6 +208,8 @@
+                 # runtime A_log parameter expects the un-transformed log decay.
+                 if self._is_gguf and name.endswith(".linear_attn.A_log"):
+                     loaded_weight = _gguf_ssm_a_to_a_log(loaded_weight)
++                if self._is_gguf and _gguf_is_offset_norm(name):
++                    loaded_weight = loaded_weight - 1.0
+                 body_weights.append((name[len(_MODEL_PREFIX) :], loaded_weight))
+             elif name in _LM_HEAD_PARAM_NAMES:
+                 if self.config.tie_word_embeddings:
