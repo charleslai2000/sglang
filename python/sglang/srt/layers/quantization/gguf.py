@@ -413,6 +413,22 @@ class GGUFLinearMethod(LinearMethodBase):
         # For MergedColumnParallelLinear and QKVParallelLinear, we need to
         # materialize the padded weight parameter for CUDA Graph compatibility.
         self._create_padded_weight_param(layer)
+        self._match_dense_weight_dtype(layer)
+
+    def _match_dense_weight_dtype(self, layer: torch.nn.Module):
+        """Cast an unquantized GGUF weight to the layer's compute dtype.
+
+        ``fused_mul_mat_gguf`` consumes F32/BF16 weights with a plain
+        ``x @ qweight.T``, so a checkpoint that stores a fused shard
+        unquantized (e.g. F32) would mix dtypes in a bf16 model.  An ordinary
+        float checkpoint is cast into the bf16 parameter on load; do the same
+        once here.  Quantized (integer) payloads are left untouched.
+        """
+        qweight = layer.qweight
+        if isinstance(qweight, UninitializedParameter):
+            return
+        if qweight.is_floating_point() and qweight.dtype != self.params_dtype:
+            qweight.data = qweight.data.to(self.params_dtype)
 
     def _create_padded_weight_param(self, layer: torch.nn.Module):
         """Create padded weight parameter for GGUF MergedLinear layer."""

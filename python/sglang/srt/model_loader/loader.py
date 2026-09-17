@@ -3131,7 +3131,7 @@ class GGUFModelLoader(BaseModelLoader):
         else:
             raise ValueError(f"{model_name_or_path} is not a file.")
 
-    def _get_gguf_weights_map(self, model_config: ModelConfig):
+    def _get_gguf_weights_map(self, model_config: ModelConfig, gguf_path: str):
         """
         GGUF uses this naming convention for their tensors from HF checkpoint:
         `blk.N.BB.weight` and `blk.N.BB.bias`
@@ -3151,13 +3151,23 @@ class GGUFModelLoader(BaseModelLoader):
                 "Please install gguf via `pip install gguf` to use gguf quantizer."
             ) from err
 
-        from sglang.srt.model_loader.gguf_name_maps import GGUF_HF_NAME_MAP_BUILDERS
+        from sglang.srt.model_loader.gguf_name_maps import (
+            GGUF_HF_NAME_MAP_BUILDERS,
+            GGUF_HF_NAME_MAP_VALIDATORS,
+        )
 
         config = model_config.hf_config
         model_type = config.model_type
         name_map_builder = GGUF_HF_NAME_MAP_BUILDERS.get(model_type)
         if name_map_builder is not None:
-            return name_map_builder(config)
+            name_map = name_map_builder(config)
+            # Architectures whose map is authored by hand can also declare a
+            # coverage check, so a source tensor with no base-model consumer is
+            # a hard error instead of a silent skip.
+            validator = GGUF_HF_NAME_MAP_VALIDATORS.get(model_type)
+            if validator is not None:
+                validator(gguf_path, name_map, config)
+            return name_map
 
         # hack: ggufs have a different name than transformers
         if model_type == "cohere":
@@ -3200,7 +3210,7 @@ class GGUFModelLoader(BaseModelLoader):
     ) -> nn.Module:
 
         local_model_path = self._prepare_weights(model_config.model_path)
-        gguf_weights_map = self._get_gguf_weights_map(model_config)
+        gguf_weights_map = self._get_gguf_weights_map(model_config, local_model_path)
         # we can only know if tie word embeddings after mapping weights
         if "lm_head.weight" in get_gguf_extra_tensor_names(
             local_model_path, gguf_weights_map

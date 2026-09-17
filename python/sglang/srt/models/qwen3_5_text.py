@@ -36,6 +36,20 @@ logger = logging.getLogger(__name__)
 
 _MODEL_PREFIX = "model."
 
+# Runtime names the LM head can receive. Under ``GGUFConfig`` the LM head is a
+# quantized ``ParallelLMHead`` exposing ``qweight``/``qweight_type``; the GGUF
+# iterator renames ``output.weight`` to ``lm_head.qweight``.
+_LM_HEAD_PARAM_NAMES = ("lm_head.weight", "lm_head.qweight", "lm_head.qweight_type")
+
+
+def _gguf_ssm_a_to_a_log(raw: torch.Tensor) -> torch.Tensor:
+    """Undo llama.cpp's GGUF-time ``A_log -> -exp(A_log)`` storage transform."""
+    if not raw.is_floating_point() or not torch.isfinite(raw).all():
+        raise ValueError("qwen35 GGUF ssm_a must contain finite floating values")
+    if not torch.all(raw < 0):
+        raise ValueError("qwen35 GGUF ssm_a must contain only -exp(A_log) values")
+    return torch.log(-raw)
+
 
 class Qwen3_5ForCausalLM(nn.Module):
     body_cls = qwen3_5.Qwen3_5ForCausalLM
@@ -60,6 +74,9 @@ class Qwen3_5ForCausalLM(nn.Module):
         self.config = config
         self.quant_config = quant_config
         self.pp_group = get_pp_group()
+        self._is_gguf = (
+            quant_config is not None and quant_config.get_name() == "gguf"
+        )
 
         if quant_config is not None and hasattr(quant_config, "packed_modules_mapping"):
             quant_config.packed_modules_mapping = self.packed_modules_mapping
@@ -166,21 +183,21 @@ class Qwen3_5ForCausalLM(nn.Module):
 
         body_weights = []
         for name, loaded_weight in weights:
-            if name.startswith("model.language_model."):
-                body_weights.append(
-                    (name[len("model.language_model.") :], loaded_weight)
-                )
-            elif name.startswith(_MODEL_PREFIX):
+            if name.startswith(_MODEL_PREFIX):
+                # llama.cpp folds A_log to -exp(A_log) when writing GGUF; the
+                # runtime A_log parameter expects the un-transformed log decay.
+                if self._is_gguf and name.endswith(".linear_attn.A_log"):
+                    loaded_weight = _gguf_ssm_a_to_a_log(loaded_weight)
                 body_weights.append((name[len(_MODEL_PREFIX) :], loaded_weight))
-            elif name == "lm_head.weight":
+            elif name in _LM_HEAD_PARAM_NAMES:
                 if self.config.tie_word_embeddings:
                     continue
-                if "lm_head.weight" not in params_dict:
+                if name not in params_dict:
                     continue
-                param = params_dict["lm_head.weight"]
+                param = params_dict[name]
                 weight_loader = getattr(param, "weight_loader", default_weight_loader)
                 weight_loader(param, loaded_weight)
-                loaded_params.add("lm_head.weight")
+                loaded_params.add(name)
 
         body_loaded = self.model.load_weights(body_weights)
         loaded_params.update(f"{_MODEL_PREFIX}{n}" for n in body_loaded)
