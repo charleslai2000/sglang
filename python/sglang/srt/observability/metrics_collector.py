@@ -26,6 +26,12 @@ from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Set, Union
 from sglang.srt.disaggregation.utils import DisaggregationMode
 from sglang.srt.model_executor.forward_batch_info import ForwardMode
 from sglang.srt.observability.utils import exponential_buckets, generate_buckets
+from sglang.srt.observability.hicache_telemetry import (
+    HICACHE_LATENCY_BUCKETS,
+    HICACHE_OUTCOMES,
+    HICACHE_PROMPT_SOURCES,
+    HICACHE_STAGE_NAMES,
+)
 from sglang.srt.runtime_context import (
     get_disagg,
     get_observability,
@@ -844,6 +850,40 @@ class SchedulerMetricsCollector(_StatLoggerDIMixin):
             labelnames=list(labels.keys()) + ["stage"],
         )
 
+        self.hicache_prompt_tokens_total = Counter(
+            name="sglang:hicache_prompt_tokens_total",
+            documentation="Logical prompt tokens by HiCache tier/source.",
+            labelnames=list(labels.keys()) + ["source"],
+        )
+        self.hicache_avoidable_recompute_tokens_total = Counter(
+            name="sglang:hicache_avoidable_recompute_tokens_total",
+            documentation="Authoritative HiCache recomputation opportunity tokens.",
+            labelnames=labels.keys(),
+        )
+        self.hicache_rh_prefetch_lead_seconds = Histogram(
+            name="sglang:hicache_rh_prefetch_lead_seconds",
+            documentation="RH prefetch issue to successful admission latency.",
+            labelnames=labels.keys(),
+            buckets=HICACHE_LATENCY_BUCKETS,
+        )
+        self.hicache_rh_ready_slack_seconds = Histogram(
+            name="sglang:hicache_rh_ready_slack_seconds",
+            documentation="RH READY to successful admission slack.",
+            labelnames=labels.keys(),
+            buckets=HICACHE_LATENCY_BUCKETS,
+        )
+        self.hicache_stage_latency_seconds = Histogram(
+            name="sglang:hicache_stage_latency_seconds",
+            documentation="HiCache lifecycle stage latency.",
+            labelnames=list(labels.keys()) + ["stage"],
+            buckets=HICACHE_LATENCY_BUCKETS,
+        )
+        self.hicache_telemetry_records_total = Counter(
+            name="sglang:hicache_telemetry_records_total",
+            documentation="HiCache telemetry records by bounded outcome.",
+            labelnames=list(labels.keys()) + ["outcome"],
+        )
+
         # =================================================================
         # Grammar
         # =================================================================
@@ -1283,6 +1323,44 @@ class SchedulerMetricsCollector(_StatLoggerDIMixin):
     def observe_per_stage_req_latency(self, stage: str, latency: float) -> None:
         labels_with_stage = {**self.labels, "stage": stage}
         self.per_stage_req_latency_seconds.labels(**labels_with_stage).observe(latency)
+
+    def observe_hicache_telemetry(self, telemetry: dict) -> None:
+        if telemetry.get("_prometheus_observed"):
+            return
+        labels = self.labels
+        values = {
+            "l1": telemetry.get("l1_tokens", 0),
+            "l2": telemetry.get("l2_tokens", 0),
+            "l3": telemetry.get("l3_tokens", 0),
+            "newly_prefilled": telemetry.get("newly_prefilled_tokens", 0),
+        }
+        if telemetry.get("outcome") != "invalid":
+            for source in HICACHE_PROMPT_SOURCES:
+                value = values[source]
+                if value is not None:
+                    self.hicache_prompt_tokens_total.labels(
+                        **labels, source=source
+                    ).inc(value)
+        avoidable = telemetry.get("avoidable_recompute_tokens")
+        if avoidable is not None and telemetry.get("outcome") != "invalid":
+            self.hicache_avoidable_recompute_tokens_total.labels(**labels).inc(avoidable)
+        lead = telemetry.get("rh_prefetch_lead_seconds")
+        if lead is not None:
+            self.hicache_rh_prefetch_lead_seconds.labels(**labels).observe(lead)
+        slack = telemetry.get("rh_ready_slack_seconds")
+        if slack is not None:
+            self.hicache_rh_ready_slack_seconds.labels(**labels).observe(slack)
+        for stage, duration in telemetry.get("stage_latency_seconds", {}).items():
+            if stage in HICACHE_STAGE_NAMES:
+                self.hicache_stage_latency_seconds.labels(
+                    **labels, stage=stage
+                ).observe(duration)
+        outcome = telemetry.get("_outcome", "partial")
+        if outcome not in HICACHE_OUTCOMES:
+            outcome = "invalid"
+        self.hicache_telemetry_records_total.labels(
+            **labels, outcome=outcome
+        ).inc()
 
     def observe_queue_time(self, latency: float) -> None:
         self._log_histogram(self.queue_time, latency)

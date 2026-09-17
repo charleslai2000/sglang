@@ -7228,3 +7228,141 @@ EVIDENCE: `/mnt/data/nerun-dev/p3/LOCAL-PROD-BASELINE-v1/B1-9B-gpu-runtime-disab
 `manifest.json`, `argv.txt`, `logs/operation.log`, `logs/server.log`,
 `logs/server.err`, GPU identity/capacity/final-process artifacts, and
 `residual.txt`.
+
+
+### 2026-09-16 — 分支整合：`3060-12g-qwen35-4b` → `3090-24g-opt`，hicache 合并为超集
+
+USER RULING: 整个 `3060-12g-qwen35-4b` 分支的工作实质都是 opt 相关工作（名字是历史残留），
+因此合并入 `3090-24g-opt` 并删除该分支；待将来适配 4B 时再新建分支。
+用户选择方案 A：push hicache、保留 opt、后续工作继续在 opt 分支展开。
+
+FACT — 分支谱系（已按 reflog 与 merge-base 核实，全程线性无 merge commit）：
+`upstream/main b644771e07` → `54c394a2e1`（= `origin/5090-32-hicache` tip，即 `origin/HEAD`）
+→ 7 commits（P2-IO extent L3 storage backend）→ `202a37eba4`（freeze 3090-24g-hicache stable
+baseline，即 `3090-24g-opt` 的创建点）→ `fac8ccb4cf`（= 原 `origin/3090-24g-hicache`）
+→ 10 hicache fixes → `9c9e7b7c`（原 `origin/3090-24g-opt`）→ `d49214e592`（= `3090-24g-opt`
+local tip，同时是 `codex/phase2-hicache-opt-20260908` 的别名 ref，也是
+`3060-12g-qwen35-4b` 的创建点）→ 35 commits → `34bd2ed49f`。
+`3060-12g-qwen35-4b` 名字来源：最老 6–8 个 commit 为 12GB RTX 3060 的 sm_86 kernel/loader
+适配（`4e1e7cfeb5` build: add minimal SM86 kernel source option；
+`ac1a869e6d` fix 3060 Torch runtime compatibility）。sm_86 同为 RTX 3090 架构，
+故该批工作被 3090 复用，只是 `12g`/`4b` 字样已失效。
+
+FACT — 整合动作与结果（全部已用命令输出核对）：
+
+```
+3090-24g-opt     d49214e592 → 34bd2ed49f   (git fetch . 3060-12g-qwen35-4b:3090-24g-opt, FF)
+worktree 分支     3060-12g-qwen35-4b → 3090-24g-opt
+本地分支          3060-12g-qwen35-4b 删除 (was 34bd2ed49f)
+push              origin/3090-24g-opt 9c9e7b7c → 34bd2ed49f (36 commits)
+push --delete     origin/3060-12g-qwen35-4b (其 tip 与 origin/3090-24g-opt 同为 34bd2ed49f，
+                  删除前已核对相等，无 commit 丢失)
+merge             opt → hicache: 560f9ad525, parents 0a725c6385 + 34bd2ed49f
+push              origin/3090-24g-hicache fac8ccb4cf → 560f9ad525
+```
+
+结果拓扑：`3090-24g-opt` unique vs hicache = 0；hicache unique vs opt = 3
+（2 个 22151 文档 commit + merge commit）。merge 结果相对 opt 仅差
+`3090-dev/{README.md,handover-22151.md,prod-deploy-issues.md,prod-deploy/relaunch-e1.sh}`
+= 4 files / +278 行。约定后续 merge 方向为 **opt → hicache**。
+
+CONTROL — 未提交 baseline 工作零改动（本次整合的核心安全条件）：
+worktree dirty fingerprint `sha256(git status --porcelain | sort)` 在整合前后均为
+`41aff138c2aacc195a8e7105480aed407092a1e5ecf1351ae275e6e90778a119`；
+`git diff --shortstat` 恒为 `15 files changed, 455 insertions(+), 19 deletions(-)`。
+即 loader shim + 未终审的 P0 telemetry（含 untracked `hicache_telemetry.py`、
+`test_hicache_request_telemetry.py`）**未受任何字节影响**，仍以未提交形式保留在
+`3090-24g-opt` worktree 中；本次整合**未**把这些未审字节提交入库。
+`refs/heads/checkpoint/pre-v0.5.19-20260913` 与同名 tag 仍在 `993ef8e5`。
+
+FACT — production source 身份不变（关键）：
+`tree(34bd2ed49f) = tree(993ef8e5) + .memory/`；且
+`git diff --name-only 993ef8e5 34bd2ed49f -- . ':(exclude).memory'` 为空，
+即除 `.memory/` 外两者逐字节相同。canonical tree manifest
+`sha256(git ls-tree -r 993ef8e5 --full-tree)` 重算 = `5fe5a694…`，与既有记录一致。
+（注意：`993ef8e5` 时 `.memory/` 尚未被跟踪。opt HEAD tree = `8f812b66…`。）
+
+BLOCKER-FOUND-AND-RESOLVED — hicache merge 首次被 git 正确拒绝（此前未识别）：
+hicache worktree 有 9 个未跟踪文件与 opt 的 tracked 路径重名，其中 8 个内容不同，
+且**全部不在 merge-base `fac8ccb4cf` 中**（即 merge 需新建它们）：
+`3090-dev/{gate3_capacity.py,gate3_parked.py,gate3_parked_analyze.py}`、
+`.memory/phase2-hicache-design/{context.md,ledger.md,plan.md}`、
+`.memory/phase2-hicache-design/work/{P0-A-REMOTE-FINAL-20260911-R16,P0-A-REVIEW-TYPED-20260911-R5,P0-B-HARNESS-IMPLEMENT-20260911-R76}.md`。
+这些是 2026-09-07～09-11 的旧快照（例：ledger.md 4668 行 vs opt 已维护版 7230 行）。
+首次 `git merge` 返回 `error: The following untracked working tree files would be
+overwritten by merge ... Aborting`，HEAD 与 worktree 均未变化，无内容被覆盖。
+处理：**移动**（非删除）9 个文件并先行保全整个未跟踪集。
+
+EVIDENCE（整合）：
+`/mnt/data/nerun-dev/p3/LOCAL-PROD-BASELINE-v1/hicache-worktree-collision-backup-20260916/`
+含 `untracked-snapshot-20260916.tar.gz`（3,098,996 bytes / 619 entries / `tar -tzf` 校验 OK）、
+`moved-aside/`（9 files，保留原相对路径）、`moved-aside-manifest.txt`
+（逐文件 sha256 + mtime + 行数，记录 worktree HEAD 为 `0a725c6385`）。
+
+CONTROL — `.memory` 中刻意保持 epoch 语义、未随本次整合改写者（已知含过时 branch 字段）：
+`plan.md`、`authority.yaml`（`run_epoch: G1-20260912`，其 digest 受 repin 纪律追踪，
+改动会产生未被本 ledger 记录的新 digest，故不改）、以及全部日期化的
+`work/*2026090*` / `*2026091*` 记录。已在这些文件的读取入口
+（`context.md` 顶部 banner、本 ledger 条目、`HANDOFF-20260914`、`WORK-INVENTORY-20260914`）
+明确标注其为历史证据。`ledger.md:5731` 与 `work/*` 中的旧 branch 引用**保留原样**，
+不改写历史记录。
+
+
+### 2026-09-16 — 提交在制品、vendored 权威证据、默认分支改为 3090-24g-opt
+
+USER RULING（三项同时授权）：(1) 把 P0 在制品字节提交到分支并推送；
+(2) 把 packet 与权威文档提交入库（在分支上，不并入 main 语义）；
+(3) 修改该 repo 的默认分支。用户澄清换机来源是 **charleslai2000 的 GitHub 账户**
+（此前误报为 Gitea；已核实 Gitea `gitea.lorestack.dev` 上 40 个仓库中**不存在** sglang，
+`charles/sglang` 等均 404，故不涉及 Gitea）。
+
+FACT — 为什么另一台机器此前"看不到 `.memory`"（已定位，非缺陷）：
+`.memory` 于 2026-09-16 才**首次**进 git（在此之前一直是未跟踪目录，不属于任何 ref）；
+它存在于 `origin/3090-24g-opt` 与 `origin/3090-24g-hicache`（实测各 393 个 `.memory` 文件），
+而 `origin/main` 与 `upstream/main` 均为 0。fresh clone 默认检出 `main`，
+故 `git ls-tree -r`（查 HEAD=`main`）自然"全库无匹配"。
+附带事实：本机 `refs/remotes/origin/HEAD` 是**过期 symref**，指向 `origin/5090-32-hicache`，
+与真实默认分支 `main` 不符；按"默认分支"解析的脚本会得到错误结果。
+
+FACT — 提交（branch `wip/p0-telemetry-current-17`，按 provenance 分组，避免混淆验收状态）：
+
+```
+ce73d6671f  docs(memory): vendor P0 权威证据（28 files / 232,699 bytes）
+48233f3aba  fix(qwen3_5_text): loader shim                      ← 已验收
+a207b567fe  wip(p0-telemetry): 15 files UNREVIEWED 快照          ← CHANGES_REQUIRED
+1dcaa80473  test(extent-g1): KV+Mamba grouped fixture            ← B2/G1 既有 test-only
+```
+
+17 = 1 (loader shim) + 15 (P0 telemetry) + 1 (extent-g1 test-only)。分组依据：
+loader shim 已通过独立复审 + GPU 验证，不应与未审 P0 字节混为一条记录；
+extent-g1 属 B2/G1 既有 test-only 改动，provenance 亦不同。
+
+Vendored 证据位置与校验（**换机可用性**是本项的目的）：
+`.memory/phase2-hicache-design/evidence/p0-telemetry-20260914/{README.md,packet/,authority/,review/}`。
+packet 内 `hashes.sha256` 的路径是 **repo-root-relative**，须在 repo 根执行
+`sha256sum -c .../packet/hashes.sha256`；提交后复测 **17/17 通过**（提交不改变文件对象）。
+
+CONTROL — "已提交" ≠ "已验收"：`a207b567fe` 的 15 个文件仍是未验收实现，
+终审维持 `CHANGES_REQUIRED`（三项缺陷）。禁止据此解锁 telemetry-enabled 性能重跑、
+cache/agent 矩阵、soak/restart、scorecard freeze、B4。冻结身份仍是 `993ef8e5` 与
+`refs/heads/checkpoint/pre-v0.5.19-20260913`（+ 同名 tag），未被上述提交触及。
+
+FACT — 默认分支变更：`charleslai2000/sglang` 默认分支由 `main` 改为 `3090-24g-opt`
+（内容变更见 `1352a69997`）。影响 fresh clone 默认检出与新建 PR 的默认 base。
+`main` 未删除、未改动（仍 `5263568bcbf9da7b463e25c136f6aa92eedc3c08`）。
+撤销方式：`gh repo edit charleslai2000/sglang --default-branch main`。
+
+FACT — 文档修正（此前记录有误，已改正，避免重复误导）：
+
+- `PERFORMANCE-BASELINE-SPEC-v2.*` 与 `...-ERRATUM-20260914.*` 位于
+  `performance-baseline-v1/manifest/`（**单数**）；`manifests/`（**复数**）存放 SPEC-v1、
+  P0 design、Expert Gate、telemetry-availability、prefill-context-reconciliation。
+  两个目录都存在且内容不同。`manifests/telemetry-availability.json` **无**日期后缀。
+- B3 semantic aggregate 的 summary 位于
+  `runs/B3-semantic-aggregate-20260914T1348Z/summaries/SEMANTIC-AGGREGATE-BASELINE.md`，
+  **不在**顶层 `summaries/`。
+
+CONTROL — 换机接续的界限（写入 `HANDOFF-20260914` §11）：仓库可跨机取回，
+但本机 `/mnt/data` 全部内容（模型权重、venv、原始 run 日志与 `*.jsonl`、各 gate 证据目录、
+`3090.lock`）**不会**随之过去。取不到的必须标 `UNAVAILABLE`，不得臆造；
+且 §2.5 的 GPU NVML/CUDA ordinal 反转是**本机**特性，换机需重新验证。

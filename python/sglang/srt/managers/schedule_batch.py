@@ -1054,6 +1054,30 @@ class Req(ReqDllmMixin):
         self.hicache_last_rh_decision_id: Optional[str] = None
         self.hicache_last_rh_decision_fingerprint = None
         self.hicache_request_enqueue_seq: Optional[int] = None
+        # P0 HiCache telemetry is observational and enabled only when an
+        # existing metrics collector or request-file exporter is active.
+        self.hicache_telemetry_enabled = False
+        self.hicache_telemetry_export_enabled = False
+        self.hicache_rh_eligible = False
+        self.hicache_enqueue_mono_ns = None
+        self.hicache_prefetch_issue_mono_ns = None
+        self.hicache_telemetry_session_generation = None
+        self.hicache_storage_query_start_mono_ns = None
+        self.hicache_storage_query_end_mono_ns = None
+        self.hicache_ready_mono_ns = None
+        self.hicache_admission_mono_ns = None
+        self.hicache_prefill_finish_mono_ns = None
+        self.hicache_durable_reusable_prefix_tokens = None
+        self.hicache_matched_prefix_tokens = None
+        self.hicache_matched_prefix_authority = "unknown"
+        self.hicache_matched_prefix_l3_tokens = None
+        self.hicache_matched_prefix_l3_proof = None
+        self.hicache_completed_kv_tokens = None
+        self.hicache_required_aux_pools = []
+        self.hicache_completed_aux_units = None
+        self.hicache_hybrid_restore_complete = None
+        self.hicache_invalid_reason = None
+        self.hicache_prometheus_observed = False
         # Cache-provided HOST_ALLOC cursor; the scheduler owns FIFO admission
         # and consumes at most one retry per observed generation vector.
         self.hicache_host_alloc_wait_cursor = None

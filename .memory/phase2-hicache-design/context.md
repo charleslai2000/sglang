@@ -1,6 +1,24 @@
 # Phase 2 HiCache / RH takeover context
 
-Updated: 2026-09-12
+> **2026-09-16 BRANCH CONSOLIDATION — 先读这一段。**
+>
+> 本 repo 现在的 working branch 是 **`3090-24g-opt`**。原 `3060-12g-qwen35-4b` 已于
+> 2026-09-16 快进合并入 `3090-24g-opt` 并从本地与 `origin` 删除；其全部 35 个 commit
+> 现在都位于 `3090-24g-opt` 历史中。超集归档分支为 `3090-24g-hicache`
+> @ `560f9ad525`（= opt + `3090-dev/` 的 22151 部署文档 4 files）。
+>
+> **下方 "Confirmed baseline" 是 2026-09-12 epoch 的冻结记录，其 `Branch` / `HEAD`
+> 字段已过时**（当时 HEAD 为 `4f41f5ba`，早于 `993ef8e5` pre-v0.5.19 checkpoint）。
+> 它保留作为历史证据，**不得**据此判断当前状态。
+>
+> 同样保持 epoch 语义、未随本次整合改写的文件（已知含过时 branch 字段，属刻意保留）：
+> `plan.md`、`authority.yaml`（`run_epoch: G1-20260912`，其 digest 受 repin 纪律追踪）、
+> 以及全部 `work/*2026090*` / `*2026091*` 日期化记录。
+>
+> 当前状态与接手入口：
+> `HANDOFF-20260914-LOCAL-PROD-BASELINE-v1.md`、`WORK-INVENTORY-20260914.md`。
+
+Updated: 2026-09-16 (branch consolidation banner) / epoch content dated 2026-09-12
 
 ## Goal
 
@@ -8,8 +26,8 @@ Updated: 2026-09-12
 
 ## Confirmed baseline
 
-- Branch: `3060-12g-qwen35-4b`.
-- HEAD: `4f41f5bab562b99562f30c67540eb05344d13637` (`[3060] retrigger ready horizon after speculative budget release`).
+- ~~Branch: `3060-12g-qwen35-4b`.~~（历史；现为 `3090-24g-opt`，见顶部 banner）
+- ~~HEAD: `4f41f5bab562b99562f30c67540eb05344d13637`~~（历史 2026-09-12 epoch 值）
 - Worktree is intentionally dirty: six tracked source/test files plus untracked `.memory/`, `review/gates/`, and `storage/` artifacts.
 - Narrow RH speculative-budget retrigger gate is PASS only; it does not establish production or live-runtime acceptance.
 - HOST_ALLOC epoch architecture remains blocked at G1/G2 admission: canonical Pattern Intake and accepted Novel Mechanism/design authority are absent.

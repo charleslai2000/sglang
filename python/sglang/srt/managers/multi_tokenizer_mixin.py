@@ -193,6 +193,9 @@ def _handle_output_by_index(output, i):
             cached_tokens_details=_extract_field_by_index(
                 output, "cached_tokens_details", i
             ),
+            hicache_telemetry=_extract_field_by_index(
+                output, "hicache_telemetry", i
+            ),
             image_tokens=_extract_field_by_index(output, "image_tokens", i),
             audio_tokens=_extract_field_by_index(output, "audio_tokens", i),
             video_tokens=_extract_field_by_index(output, "video_tokens", i),
@@ -281,6 +284,9 @@ def _handle_output_by_index(output, i):
             embeddings=_extract_field_by_index(output, "embeddings", i),
             prompt_tokens=_extract_field_by_index(output, "prompt_tokens", i),
             cached_tokens=_extract_field_by_index(output, "cached_tokens", i),
+            hicache_telemetry=_extract_field_by_index(
+                output, "hicache_telemetry", i
+            ),
             placeholder_tokens_idx=None,
             placeholder_tokens_val=None,
         )
@@ -313,6 +319,9 @@ def _handle_output_by_index(output, i):
             cached_tokens=_extract_field_by_index(output, "cached_tokens", i),
             cached_tokens_details=_extract_field_by_index(
                 output, "cached_tokens_details", i
+            ),
+            hicache_telemetry=_extract_field_by_index(
+                output, "hicache_telemetry", i
             ),
             image_tokens=_extract_field_by_index(output, "image_tokens", i),
             audio_tokens=_extract_field_by_index(output, "audio_tokens", i),

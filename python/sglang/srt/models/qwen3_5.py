@@ -450,7 +450,18 @@ class Qwen3_5GatedDeltaNet(nn.Module):
 
     def _bind_packed_weight_loaders(self, module):
         """Bind packed-checkpoint-aware loaders to all relevant params of a merged module."""
-        for attr_name in ("weight", "weight_scale_inv", "weight_scale", "input_scale"):
+        # ``qweight``/``qweight_type`` are the GGUF names for a fused LinearBase
+        # weight; the GGUF checkpoint also ships ``in_proj_qkv``/``in_proj_z``
+        # (and ``in_proj_b``/``in_proj_a``) separately, so they need the same
+        # tuple-shard merge the float ``weight`` path uses.
+        for attr_name in (
+            "weight",
+            "qweight",
+            "qweight_type",
+            "weight_scale_inv",
+            "weight_scale",
+            "input_scale",
+        ):
             param = getattr(module, attr_name, None)
             if param is None:
                 continue
@@ -491,6 +502,15 @@ class Qwen3_5GatedDeltaNet(nn.Module):
             # Only intercept split-checkpoint tuple shards.
             # int shard_id and None should preserve original behavior.
             if isinstance(loaded_shard_id, tuple):
+                if getattr(param, "is_gguf_weight_type", False) is True:
+                    # GGUF ships one 0-dim quant-type scalar per source tensor,
+                    # while the fused runtime param stores one type per logical
+                    # shard.  The scalar must reach each shard's int loader
+                    # unchanged; the value-splitting path below would reshape it
+                    # to [1] and fail to copy into a 0-dim shard slot.
+                    for idx in loaded_shard_id:
+                        original_weight_loader(param, loaded_weight, idx)
+                    return
                 split_sizes = cls._get_split_sizes_for_param(
                     module, param, loaded_shard_id
                 )
@@ -1361,6 +1381,38 @@ QWEN3_5_KV_SCALE_MAPPER = WeightsMapper(
 )
 
 
+def _gguf_dense_shard_target(params_dict, name):
+    """Return the GGUF ``qweight`` a dense (F32) shard feeds, or ``None``.
+
+    ``gguf_quant_weights_iterator`` yields ``.weight`` for F32 tensors, while a
+    GGUF ``LinearBase`` exposes ``qweight``/``qweight_type``. Some checkpoints
+    (e.g. M4's ``ssm_alpha``/``ssm_beta``) store a fused projection's shards
+    unquantized, so without this redirection the shard is dropped silently.
+    """
+    if not name.endswith(".weight"):
+        return None
+    qweight = params_dict.get(name[: -len("weight")] + "qweight")
+    if qweight is None or not getattr(qweight, "is_gguf_weight", False):
+        return None
+    return qweight
+
+
+def _load_gguf_dense_shard(params_dict, weight_name, loaded_weight, shard_id):
+    """Store a dense GGUF shard in its ``qweight``/``qweight_type`` pair as F32."""
+    from gguf import GGMLQuantizationType
+
+    qweight_name = weight_name[: -len("weight")] + "qweight"
+    qweight = params_dict[qweight_name]
+    qweight_type = params_dict[qweight_name + "_type"]
+    qweight.weight_loader(qweight, loaded_weight, shard_id)
+    qweight_type.weight_loader(
+        qweight_type,
+        torch.tensor(int(GGMLQuantizationType.F32), dtype=torch.uint8),
+        shard_id,
+    )
+    return (qweight_name, qweight_name + "_type")
+
+
 class Qwen3_5ForCausalLM(nn.Module):
     """Qwen3.5 Model with support for dense variant."""
 
@@ -1449,7 +1501,9 @@ class Qwen3_5ForCausalLM(nn.Module):
             self.embed_tokens = VocabParallelEmbedding(
                 config.vocab_size,
                 config.hidden_size,
+                quant_config=quant_config,
                 org_num_embeddings=config.vocab_size,
+                prefix=add_prefix("embed_tokens", prefix),
                 enable_tp=not is_dp_attention_enabled(),
             )
         else:
@@ -1618,6 +1672,15 @@ class Qwen3_5ForCausalLM(nn.Module):
             ):
                 continue
 
+            # GGUF stores the conv kernel as 2-D ``[conv_dim, kernel]``; the
+            # runtime parameter keeps the singleton middle dim the mamba v2
+            # sharded loader indexes into.
+            if (
+                name.endswith(".linear_attn.conv1d.weight")
+                and loaded_weight.dim() == 2
+            ):
+                loaded_weight = loaded_weight.unsqueeze(1)
+
             for param_name, weight_name, shard_id in stacked_params_mapping:
                 if weight_name not in name:
                     continue
@@ -1633,6 +1696,16 @@ class Qwen3_5ForCausalLM(nn.Module):
                 # if is_pp_missing_parameter(name, self):
                 #     continue
                 if name not in params_dict:
+                    # Dense (F32) GGUF shards of a fused projection arrive as
+                    # ``.weight`` while the runtime parameter is ``qweight``;
+                    # consume them instead of dropping them.
+                    if _gguf_dense_shard_target(params_dict, name) is not None:
+                        loaded_params.update(
+                            _load_gguf_dense_shard(
+                                params_dict, name, loaded_weight, shard_id
+                            )
+                        )
+                        break
                     continue
                 param = params_dict[name]
                 weight_loader = getattr(param, "weight_loader")
@@ -1649,7 +1722,10 @@ class Qwen3_5ForCausalLM(nn.Module):
 
                 weight_loader = getattr(param, "weight_loader", default_weight_loader)
                 weight_loader(param, loaded_weight)
-            loaded_params.add(name)
+            # A dense-shard redirect above records the qweight/qweight_type
+            # names itself, so only add names that are real parameters.
+            if name in params_dict:
+                loaded_params.add(name)
         return loaded_params
 
     @classmethod
