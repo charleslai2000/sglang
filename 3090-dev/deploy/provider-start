@@ -272,6 +272,24 @@ expected sglang=$DEPLOY_DIR/python/sglang/__init__.py" ;;
   fi
 
   # ------------------------------------------------------------------ G9..G11
+  # G9a is the important one: verify AUTH is actually ENFORCED, not merely
+  # configured.  A launch path that silently drops --api-key serves every
+  # endpoint with 200, so without this explicit negative probe the service
+  # could be declared UP with authentication effectively OFF.  That was a
+  # real defect here: an earlier launch never passed the key at all, and a
+  # hardcoded "AUTH=ON" report concealed it.
+  local anon_code
+  anon_code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+               "http://$BIND_HOST:$BIND_PORT/v1/models" 2>/dev/null || echo 000)"
+  case "$anon_code" in
+    401|403)
+      log "G9a PASS: auth enforced (unauthenticated /v1/models -> $anon_code)" ;;
+    *)
+      gate_fail "G9a" "unauthenticated /v1/models returned $anon_code; AUTH is OFF"
+      die "G9a FAIL: the API key is not enforced (unauthenticated /v1/models -> $anon_code, expected 401/403).
+The server was launched without a usable --api-key." ;;
+  esac
+
   local smoke_out smoke_rc=0
   smoke_out="$("$VENV_PY" "$SMOKE" \
       "http://$BIND_HOST:$BIND_PORT" "$SERVED_MODEL_NAME" "$API_KEY_FILE" \

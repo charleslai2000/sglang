@@ -22,17 +22,26 @@ never holds the launcher's descriptors.
 
 Key handling
 ------------
-The key is read from the root-only key file with `sudo -n cat` at start-up.
-It is deliberately NOT taken from this process's argv or environment: argv is
-world-readable through /proc/<pid>/cmdline and the environment through
-/proc/<pid>/environ.  The only argv that carries it is the server child's own
-`--api-key` argument, which sglang requires and the owner dispatch mandates.
+The key is read from the root-only key file with `sudo -n cat` at start-up,
+and is handed to the server without ever entering a command line:
+
+  * sglang has no environment variable and no `--api-key-file` flag for this
+    value (only `--api-key`), but it does accept `--config <yaml>`, whose
+    keys are merged into the resolved arguments.
+  * Verified on this tree: `--config` carries `api-key` and yields a
+    `resolved_dict()` byte-identical to passing `--api-key` on argv.
+  * `/proc/<pid>/cmdline` is mode 0444 (readable by every local user and
+    visible in plain `ps`), whereas this file is 0600 inside a 0700 dir, so
+    the config route is strictly less exposed.
+
+The generated YAML holds only `api-key`, is written 0600, and is removed
+after the server exits.  It is never inside the repository.
 
 If this supervisor dies, the server's stdout pipe closes and the server sees
 EPIPE; it cannot silently continue writing unredacted output into the log.
 
 Usage:
-    provider-supervise.py --log L --key-file K --pid-file P [--inject-api-key]
+    provider-supervise.py --log L --key-file K --pid-file P [--auth-config A]
                           -- <server command...>
 """
 
@@ -46,9 +55,8 @@ MASK = b"[REDACTED-API-KEY]"
 CHUNK = 65536
 
 
-def parse_argv(argv: list[str]) -> tuple[dict[str, str], bool, list[str]]:
+def parse_argv(argv: list[str]) -> tuple[dict[str, str], list[str]]:
     opts: dict[str, str] = {}
-    inject = False
     rest: list[str] = []
     i = 0
     while i < len(argv):
@@ -56,16 +64,25 @@ def parse_argv(argv: list[str]) -> tuple[dict[str, str], bool, list[str]]:
         if tok == "--":
             rest = argv[i + 1 :]
             break
-        if tok == "--inject-api-key":
-            inject = True
-            i += 1
-            continue
         if tok.startswith("--") and i + 1 < len(argv):
             opts[tok[2:]] = argv[i + 1]
             i += 2
             continue
         raise SystemExit(f"provider-supervise: unexpected argument {tok!r}")
-    return opts, inject, rest
+    return opts, rest
+
+
+def write_auth_config(path: str, secret: str) -> None:
+    """Write a 0600 YAML holding only `api-key`, and nothing else."""
+    tmp = path + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        # Double-quoted scalar; the key is URL-safe base64 so no escaping.
+        os.write(fd, f'api-key: "{secret}"\n'.encode())
+    finally:
+        os.close(fd)
+    os.replace(tmp, path)
+    os.chmod(path, 0o600)
 
 
 def read_secret(keyfile: str) -> str:
@@ -88,7 +105,7 @@ def read_secret(keyfile: str) -> str:
 
 
 def main() -> int:
-    opts, inject, cmd = parse_argv(sys.argv[1:])
+    opts, cmd = parse_argv(sys.argv[1:])
     for required in ("log", "key-file", "pid-file"):
         if required not in opts:
             print(f"provider-supervise: --{required} is required", file=sys.stderr)
@@ -98,10 +115,12 @@ def main() -> int:
         return 2
 
     secret = read_secret(opts["key-file"])
-    if inject:
-        # Appended here rather than by the launcher so the key never appears
-        # in the launcher's own argv.
-        cmd = [*cmd, "--api-key", secret]
+    auth_config = opts.get("auth-config")
+    if auth_config:
+        # Merged into the resolved args by prepare_server_args; the key never
+        # reaches any process's command line.
+        write_auth_config(auth_config, secret)
+        cmd = [*cmd, "--config", auth_config]
 
     log_fd = os.open(opts["log"], os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
 
@@ -142,6 +161,11 @@ def main() -> int:
             os.write(log_fd, carry.replace(needle, MASK))
     finally:
         os.close(log_fd)
+        if auth_config:
+            try:
+                os.unlink(auth_config)
+            except FileNotFoundError:
+                pass
 
     return child.wait()
 
