@@ -1,0 +1,42 @@
+Task: LOCAL-P0-TELEMETRY-EXPERT-GATE-20260914
+Date: 2026-09-14
+Boundary: documentation/evidence inspection only; no GPU/server, workload, test rerun, or product-code modification.
+
+Input inspection was performed with read-only OpenCode Read/Glob/Grep operations over:
+- /mnt/data/AGENTS.md
+- /mnt/data/cache/performance-baseline-v1/manifests/P0-TELEMETRY-DESIGN-20260914.md
+- /mnt/data/cache/performance-baseline-v1/manifests/P0-telemetry-design.json
+- /mnt/data/cache/performance-baseline-v1/manifest/PERFORMANCE-BASELINE-SPEC-v2.md
+- /mnt/data/cache/performance-baseline-v1/manifest/PERFORMANCE-BASELINE-SPEC-v2.json
+- /mnt/data/nerun-dev/p3/LOCAL-PROD-BASELINE-v1/P0-telemetry-implementation-20260914/
+- /mnt/data/nerun-dev/p3/LOCAL-PROD-BASELINE-v1/P0-telemetry-fix-20260914/
+- /mnt/data/nerun-dev/p3/LOCAL-PROD-BASELINE-v1/P0-telemetry-terminal-review-20260914/
+- /mnt/data/nerun-dev/p3/LOCAL-PROD-BASELINE-v1/P0-telemetry-final-review-20260914/
+- current RH/HiCache/telemetry source under /home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt
+
+OpenCode read/search operations: success; no shell exit code applies.
+
+Validation commands are appended below after artifact creation.
+
+1. python3 -m json.tool "/mnt/data/cache/performance-baseline-v1/manifests/P0-TELEMETRY-EXPERT-GATE-20260914.json" >/dev/null
+   exit: 0
+   stdout/stderr: empty
+
+2. python3 -c '<Markdown required-clause assertions>'
+   assertions: decision; issue<=query ordering; exclusive conservation; separate avoidable metric; matched authority; no-GPU test boundary
+   exit: 0
+   stdout/stderr: empty
+
+3. python3 -c '<JSON semantic assertions>'
+   assertions: resolved decision; reruns false; avoidable non-additive; six fixed metric families
+   exit: 0
+   stdout/stderr: empty
+
+4. sha256sum over Markdown, JSON, and commands-exits; write requested .hash artifact
+   exit: 0
+   stdout/stderr: empty (redirected hash manifest)
+
+5. sha256sum -c "/mnt/data/cache/performance-baseline-v1/manifests/P0-TELEMETRY-EXPERT-GATE-20260914.hash"
+   exit: 0
+   result at pre-final verification: Markdown OK; JSON OK; commands-exits OK
+   note: command 5 was run against the then-current commands-exits bytes; the final hash manifest is regenerated after recording this line.

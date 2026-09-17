@@ -1,3 +1,5 @@
+from typing import Any, Dict
+
 from transformers import PretrainedConfig
 
 from sglang.srt.configs.qwen3_next import Qwen3NextConfig
@@ -32,6 +34,99 @@ class Qwen3_5TextConfig(Qwen3NextConfig):
 
         # Keep both names for compatibility with model code paths that read either.
         self.rope_parameters = rope_parameters or self.rope_scaling
+
+    @classmethod
+    def from_gguf(cls, gguf_path: str) -> "Qwen3_5TextConfig":
+        """Build the text config of a ``qwen35`` GGUF whose arch transformers lacks."""
+        return cls(**qwen35_text_config_kwargs_from_gguf(gguf_path))
+
+
+_GGUF_ARCH = "qwen35"
+
+
+def qwen35_text_config_kwargs_from_gguf(gguf_path: str) -> Dict[str, Any]:
+    """Translate a ``qwen35`` GGUF header into ``Qwen3_5TextConfig`` kwargs.
+
+    Mirrors ``muse_glimmer_config_kwargs_from_gguf``: the reader supplies every
+    architecture constant the checkpoint declares, and the two facts the GGUF
+    header cannot express (the MTP block is not part of the base stack, and a
+    text-only checkpoint still carries the multimodal RoPE split) are derived
+    from the header and the sibling Qwen3.5 HF config respectively.
+    """
+    from gguf import GGUFReader
+
+    reader = GGUFReader(gguf_path)
+    meta = {key: field.contents() for key, field in reader.fields.items()}
+    shapes = {
+        tensor.name: tuple(int(x) for x in tensor.shape) for tensor in reader.tensors
+    }
+    tensor_names = set(shapes)
+
+    def get(suffix):
+        return meta[f"{_GGUF_ARCH}.{suffix}"]
+
+    def opt(suffix):
+        return meta.get(f"{_GGUF_ARCH}.{suffix}")
+
+    head_dim = int(get("attention.key_length"))
+    # qwen35.rope.dimension_count is the rotary width per head; the GGUF writes
+    # it separately from head_dim because partial RoPE only rotates a slice.
+    rotary_dim = int(opt("rope.dimension_count") or head_dim)
+    partial_rotary_factor = rotary_dim / head_dim
+
+    # A checkpoint that bundles an MTP/draft block reports it in block_count too;
+    # only ``block_count - nextn_predict_layers`` layers belong to the base stack.
+    block_count = int(get("block_count"))
+    nextn_predict_layers = int(opt("nextn_predict_layers") or 0)
+
+    # llama.cpp stores the mRoPE split with a trailing zero-pad section; the HF
+    # config (Qwen/Qwen3.8-27B text_config) carries the same list without it.
+    sections = [int(section) for section in (opt("rope.dimension_sections") or [])]
+    while sections and sections[-1] == 0:
+        sections.pop()
+
+    rope_parameters: Dict[str, Any] = {
+        "rope_type": "default",
+        "rope_theta": float(get("rope.freq_base")),
+        "partial_rotary_factor": partial_rotary_factor,
+    }
+    if sections:
+        rope_parameters["mrope_section"] = sections
+        # The HF Qwen3.5 text config declares interleaved mRoPE; for text-only
+        # inputs the three position rows coincide and this degenerates to 1-D
+        # RoPE, which is what ``qwen3_5_text`` relies on.
+        rope_parameters["mrope_interleaved"] = True
+
+    return dict(
+        # token_embd is stored [n_embd, n_vocab] in ggml's reversed order.
+        vocab_size=shapes["token_embd.weight"][1],
+        hidden_size=int(get("embedding_length")),
+        intermediate_size=int(get("feed_forward_length")),
+        num_hidden_layers=block_count - nextn_predict_layers,
+        num_attention_heads=int(get("attention.head_count")),
+        num_key_value_heads=int(get("attention.head_count_kv")),
+        head_dim=head_dim,
+        max_position_embeddings=int(get("context_length")),
+        rms_norm_eps=float(get("attention.layer_norm_rms_epsilon")),
+        hidden_act="silu",
+        attention_bias=False,
+        attention_dropout=0.0,
+        output_gate_type=None,
+        linear_conv_kernel_dim=int(get("ssm.conv_kernel")),
+        linear_key_head_dim=int(get("ssm.state_size")),
+        linear_value_head_dim=int(get("ssm.state_size")),
+        linear_num_key_heads=int(get("ssm.group_count")),
+        linear_num_value_heads=int(get("ssm.time_step_rank")),
+        full_attention_interval=int(get("full_attention_interval")),
+        partial_rotary_factor=partial_rotary_factor,
+        rope_theta=float(get("rope.freq_base")),
+        rope_parameters=rope_parameters,
+        num_nextn_predict_layers=nextn_predict_layers,
+        # The base stack has no head when the GGUF omits ``output.weight``.
+        tie_word_embeddings="output.weight" not in tensor_names,
+        architectures=["Qwen3_5ForCausalLM"],
+        dtype="bfloat16",
+    )
 
 
 class Qwen3_5Config(PretrainedConfig):

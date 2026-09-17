@@ -1,0 +1,297 @@
+#!/usr/bin/env bash
+# provider-start — fail-closed bring-up of the RTX-3090 DEV provider.
+#
+# Every gate runs BEFORE anything is launched.  If any gate fails, nothing is
+# started (or what was started is torn down), the exit status is non-zero, and
+# the failing check is named.
+#
+# Gates:
+#   G1  branch/commit identity of the repo this deployment came from
+#   G2  deployed source identity (deploy tree == pinned commit, hashes match)
+#   G3  sglang imports from INSIDE the deploy tree, not the editable worktree
+#   G4  L3/Extent is off (no forbidden env, no extent argv)
+#   G5  GPU free, port free, CUDA ordinal resolved
+#   -- launch, holding the canonical lock only for this window --
+#   G6  fp8 KV startup evidence in the server log
+#   G7  decode CUDA graph active; prefill graph intentionally disabled
+#   G8  /health returns 200
+#   G9  /v1/models lists the served model
+#   G10 chat completion smoke
+#   G11 tool-call smoke
+#
+# AUTH is OFF by owner ruling (2026-09-17): this is a private LAN
+# (192.168.20.0/24) and an API key is not required.  There is deliberately no
+# API-key gate and no auth-enforcement gate here.
+#
+# GPU arbitration: the canonical lock is taken only for the start/verify
+# window and released as soon as the service is verified UP.  The running
+# server never holds it, so the main line can take the GPU at any time.
+
+set -euo pipefail
+# shellcheck source=/dev/null
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/bin/provider-common.sh"
+
+FAILED_GATE=""
+ROLLBACK_NEEDED=0
+
+on_exit() {
+  local rc=$?
+  if [ "$ROLLBACK_NEEDED" = "1" ]; then
+    warn "tearing down a partially started provider"
+    provider_stop_server || true
+  fi
+  gpu_lock_release || true
+  if [ -n "$FAILED_GATE" ] && [ "$rc" -ne 0 ]; then
+    warn "startup aborted; failing check: $FAILED_GATE"
+  fi
+  exit "$rc"
+}
+trap on_exit EXIT
+
+gate_fail() { FAILED_GATE="$1"; printf 'GATE %s FAILED: %s\n' "$1" "$2" >&2; }
+
+main() {
+  require_sudo
+  provider_prepare_run_dir
+  log "=== DEV provider start: $SERVED_MODEL_NAME on $BIND_HOST:$BIND_PORT ==="
+
+  # ------------------------------------------------------------------ G4 (L3 OFF)
+  # Checked first: a stale EXTENT_* variable in the caller's shell would
+  # silently switch the cache mode, which is the one thing this provider must
+  # not inherit from the frozen production environment.
+  local v
+  for v in $L3_FORBIDDEN_ENV; do
+    if [ -n "${!v:-}" ]; then
+      gate_fail "G4" "L3/Extent env $v is set; L3 must be OFF"
+      die "refusing to start with L3/Extent configuration present"
+    fi
+  done
+  provider_build_argv
+  local arg
+  for arg in "${PROVIDER_ARGV[@]}"; do
+    case "$arg" in
+      *hicache-storage-backend*|*extent*)
+        gate_fail "G4" "L3/Extent argv present: $arg"
+        die "refusing to start with an L3/Extent argument" ;;
+    esac
+  done
+  log "G4 PASS: L3/Extent OFF (no forbidden env, no extent argv)"
+
+  # ------------------------------------------------------------------ G1
+  local branch head py_tree sg_tree
+  branch="$(git -C "$REPO" rev-parse --abbrev-ref HEAD)"
+  [ "$branch" = "$BRANCH" ] \
+    || die "G1 FAIL: repo is on branch '$branch', expected '$BRANCH'"
+  head="$(git -C "$REPO" rev-parse HEAD)"
+  git -C "$REPO" cat-file -e "$SOURCE_COMMIT^{commit}" 2>/dev/null \
+    || die "G1 FAIL: pinned commit $SOURCE_COMMIT is not present in $REPO"
+  # The served code is the pinned commit, never HEAD.  Require it to be
+  # reachable from the branch so it cannot be pruned by gc, and require its
+  # python subtrees to match the validated hashes, so a moved branch tip
+  # cannot silently change what runs.
+  git -C "$REPO" merge-base --is-ancestor "$SOURCE_COMMIT" "$head" \
+    || die "G1 FAIL: pinned commit $SOURCE_COMMIT is not an ancestor of $BRANCH"
+  py_tree="$(git -C "$REPO" rev-parse "$SOURCE_COMMIT:python")"
+  sg_tree="$(git -C "$REPO" rev-parse "$SOURCE_COMMIT:python/sglang")"
+  [ "$py_tree" = "$PYTHON_TREE_SHA" ] \
+    || die "G1 FAIL: $SOURCE_COMMIT:python is $py_tree, expected $PYTHON_TREE_SHA"
+  [ "$sg_tree" = "$PYTHON_SGLANG_TREE_SHA" ] \
+    || die "G1 FAIL: $SOURCE_COMMIT:python/sglang is $sg_tree, expected $PYTHON_SGLANG_TREE_SHA"
+  log "G1 PASS: branch=$branch pinned=$SOURCE_SHORT python/sglang=$sg_tree"
+
+  # ------------------------------------------------------------------ G5a GPU free
+  local material; material="$(gpu_material_holder)"
+  if [ -n "$material" ]; then
+    gate_fail "G5" "GPU already has a material compute holder"
+    die "G5 FAIL: the GPU is busy and this script never signals the incumbent:
+$material"
+  fi
+  log "G5a PASS: no material GPU compute holder (>= ${GPU_MIN_MATERIAL_MIB}MiB)"
+
+  # ------------------------------------------------------------------ G5b port
+  if ! provider_port_is_free; then
+    gate_fail "G5" "port $BIND_PORT is already bound"
+    die "G5 FAIL: $BIND_HOST:$BIND_PORT is already bound:
+$(provider_port_owner || true)"
+  fi
+  log "G5b PASS: $BIND_HOST:$BIND_PORT free"
+
+  # ------------------------------------------------------------------ G5c ordinal
+  local ordinal; ordinal="$(provider_gpu_ordinal)"
+  log "G5c PASS: $GPU_UUID resolves to CUDA ordinal $ordinal"
+
+  # ------------------------------------------------------------------ G2
+  provider_export_tree >/dev/null
+  provider_verify_tree
+  log "G2 PASS: deploy tree verified against the pinned commit"
+
+  # ------------------------------------------------------------------ G3
+  # The venv carries an editable-install finder pointing sglang at the live
+  # worktree.  PYTHONPATH wins on this box, but assume nothing: import in a
+  # CPU-only child and require both the package and the module that actually
+  # gets executed to resolve inside the deploy tree.
+  local probe_out probe_rc=0
+  probe_out="$(cd /tmp && env -u PYTHONPATH \
+      PROVIDER_DEPLOY_EXPECT="$DEPLOY_DIR" \
+      PYTHONPATH="$DEPLOY_DIR/python" PYTHONDONTWRITEBYTECODE=1 \
+      CUDA_VISIBLE_DEVICES=999 "$VENV_PY" -P -c '
+import importlib
+import os
+
+import sglang
+
+expect = os.environ.pop("PROVIDER_DEPLOY_EXPECT")
+prefix = expect + "/"
+leaks = []
+
+# The modules that decide what actually runs, plus the namespace packages
+# the editable-install finder could capture (a namespace package has no
+# __file__, so its __path__ must be checked instead).
+for name in (
+    "sglang",
+    "sglang.launch_server",
+    "sglang.srt",
+    "sglang.srt.server_args",
+    "sglang.srt.managers.scheduler",
+    "sglang.srt.entrypoints.http_server",
+    "sglang.srt.mem_cache.unified_radix_cache",
+    "sglang.srt.models.qwen3_5_text",
+    "sglang.srt.function_call.qwen3_coder_detector",
+):
+    mod = importlib.import_module(name)
+    path = getattr(mod, "__file__", None)
+    if path is None:
+        for entry in list(getattr(mod, "__path__", [])):
+            if not str(entry).startswith(prefix):
+                leaks.append(f"{name}: namespace path {entry}")
+        continue
+    if not path.startswith(prefix):
+        leaks.append(f"{name}: {path}")
+
+print("sglang=" + sglang.__file__)
+if leaks:
+    print("LEAKS=" + " | ".join(leaks))
+else:
+    print("LEAKS=")
+print("DEPLOY_OK")
+' 2>&1)" || probe_rc=$?
+  if [ "$probe_rc" -ne 0 ]; then
+    gate_fail "G3" "import probe failed"
+    die "G3 FAIL: import probe failed (rc=$probe_rc):
+$probe_out"
+  fi
+  # The probe prints an exact one-line `LEAKS=` when every module resolved
+  # inside the deploy tree, and `LEAKS=<details>` otherwise.
+  if ! printf '%s\n' "$probe_out" | grep -qx 'LEAKS='; then
+    gate_fail "G3" "one or more sglang modules resolve outside the deploy tree"
+    die "G3 FAIL: stale worktree import detected:
+$probe_out"
+  fi
+  case "$probe_out" in
+    *"DEPLOY_OK"*) ;;
+    *) gate_fail "G3" "import probe did not complete"
+       die "G3 FAIL: import probe did not complete:
+$probe_out" ;;
+  esac
+  case "$probe_out" in
+    *"sglang=$DEPLOY_DIR/python/sglang/__init__.py"*) ;;
+    *) gate_fail "G3" "sglang resolves outside the deploy tree"
+       die "G3 FAIL: unexpected sglang location:
+$probe_out
+expected sglang=$DEPLOY_DIR/python/sglang/__init__.py" ;;
+  esac
+  log "G3 PASS: sglang resolves inside the deploy tree (no stale worktree import)"
+
+  # ------------------------------------------------------------------ launch
+  if ! gpu_lock_acquire "provider-start-$SOURCE_SHORT"; then
+    gate_fail "LOCK" "canonical GPU lock unavailable"
+    die "not starting: another task owns the GPU (the main line has priority)"
+  fi
+  ROLLBACK_NEEDED=1
+
+  provider_start_server "$ordinal"
+
+  # ------------------------------------------------------------------ readiness
+  local pid; pid="$(cat "$PID_FILE")"
+  local deadline=$(( SECONDS + START_TIMEOUT_S )) ready=0
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    if ! pid_alive "$pid"; then
+      die "the server process died during startup (pid=$pid); see $CONSOLE_LOG"
+    fi
+    if grep -q "The server is fired up and ready to roll!" "$CONSOLE_LOG" 2>/dev/null; then
+      ready=1
+      break
+    fi
+    sleep 3
+  done
+  if [ "$ready" != "1" ]; then
+    die "the server did not become ready within ${START_TIMEOUT_S}s; see $CONSOLE_LOG"
+  fi
+
+  # ------------------------------------------------------------------ G6 fp8 KV
+  if ! grep -q "dtype: torch.float8_e4m3fn" "$CONSOLE_LOG"; then
+    gate_fail "G6" "no fp8_e4m3 KV-cache allocation line in the server log"
+    die "G6 FAIL: fp8 KV startup evidence missing"
+  fi
+  log "G6 PASS: $(grep -m1 -o 'KV Cache is allocated\. dtype: [^,]*' "$CONSOLE_LOG")"
+
+  # ------------------------------------------------------------------ G7 graphs
+  if ! grep -q "Capture target decode CUDA graph end" "$CONSOLE_LOG"; then
+    gate_fail "G7" "no decode CUDA-graph capture in the server log"
+    die "G7 FAIL: the decode CUDA graph is not active"
+  fi
+  if ! grep -q "Disable prefill CUDA graph" "$CONSOLE_LOG"; then
+    gate_fail "G7" "the prefill CUDA-graph disable message is missing"
+    die "G7 FAIL: the prefill CUDA graph was not intentionally disabled"
+  fi
+  log "G7 PASS: decode CUDA graph captured, prefill CUDA graph disabled by design"
+
+  # ------------------------------------------------------------------ G8
+  local code="000"
+  deadline=$(( SECONDS + HEALTH_TIMEOUT_S ))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    code="$(provider_health_code)"
+    [ "$code" = "200" ] && break
+    sleep 3
+  done
+  if [ "$code" != "200" ]; then
+    gate_fail "G8" "/health returned HTTP $code"
+    die "G8 FAIL: /health is not 200"
+  fi
+  log "G8 PASS: /health 200"
+
+  # ------------------------------------------------------------------ GPU pin
+  local got_uuid; got_uuid="$(gpu_pid_uuid "$pid" || true)"
+  if [ -z "$got_uuid" ]; then
+    log "note: server not yet listed as a GPU compute app; ordinal pin was verified at launch"
+  elif [ "$got_uuid" != "$GPU_UUID" ]; then
+    die "FAIL: the server is on GPU $got_uuid, expected $GPU_UUID"
+  else
+    log "GPU pin verified: the server holds $GPU_UUID"
+  fi
+
+  # ------------------------------------------------------------------ G9..G11
+  local smoke_out smoke_rc=0
+  smoke_out="$("$VENV_PY" "$SMOKE" \
+      "http://$BIND_HOST:$BIND_PORT" "$SERVED_MODEL_NAME" \
+      "$SMOKE_TIMEOUT_S" 2>&1)" || smoke_rc=$?
+  printf '%s\n' "$smoke_out"
+  if [ "$smoke_rc" -ne 0 ]; then
+    die "smoke checks FAILED (rc=$smoke_rc)"
+  fi
+  case "$smoke_out" in
+    *"SMOKE=ALL_PASS"*) ;;
+    *) die "smoke output did not report SMOKE=ALL_PASS" ;;
+  esac
+
+  # ------------------------------------------------------------------ settle
+  # Verified UP: release the canonical lock so a main-line experiment can use
+  # the GPU while this provider is idle.
+  gpu_lock_release
+  ROLLBACK_NEEDED=0
+  state_write "up" "$pid" "up" "started and verified"
+  log "the canonical GPU lock is released; the provider does not hold it while running"
+  log "=== DEV provider UP: $SERVED_MODEL_NAME on $BIND_HOST:$BIND_PORT ==="
+}
+
+main "$@"

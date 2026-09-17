@@ -1,0 +1,29 @@
+{
+  "contains_native_write_path": true,
+  "exists": true,
+  "file_count": 4594,
+  "files_differing_from_frozen_examples": [
+    "sglang/srt/mem_cache/unified_radix_cache.py",
+    "sglang/srt/mem_cache/storage/extent/extent_file_backend.py",
+    "sglang/srt/mem_cache/storage/extent/extent_allocator.py",
+    "sglang/srt/managers/scheduler.py",
+    "sglang/srt/managers/cache_controller.py"
+  ],
+  "reconstruction": "not reconstructable from /opt or git \u2014 this tree holds the ONLY copy of the native L3 write path",
+  "sglang_source_root": "python",
+  "size": "95M",
+  "source_file_count": 4582,
+  "source_path": "/tmp/opencode/l3-native-ab-inst-20260916",
+  "source_subtree": "python",
+  "top_level": [
+    "manifest",
+    "python",
+    "src"
+  ],
+  "vs_frozen_v1.1.2": {
+    "absent_from_frozen": 1,
+    "differ": 5,
+    "identical": 4584,
+    "total": 4590
+  }
+}

@@ -36,16 +36,34 @@
 ```
 repo            /home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt
                 （git worktree，共享 .git 在 sglang-3090-24g-hicache）
-HEAD            993ef8e5c3a6448aff2e752cf66cc45deadab59a
-git tree obj    75d8d1af8dfef5680085e67767c670554d7163af
-branch          3060-12g-qwen35-4b（历史名，不代表模型）
+branch          3090-24g-opt（working branch；后续工作在此展开）
+HEAD            34bd2ed49f2b2e6fef504019bfe3840eb30ac061（.memory 交接提交）
+prod-source     993ef8e5c3a6448aff2e752cf66cc45deadab59a（= HEAD 去掉 .memory，逐字节相同）
+git tree obj    75d8d1af8dfef5680085e67767c670554d7163af（生产源 tree，属 993ef8e5）
 tree manifest   5fe5a694a628867ee6c5a7be10a7dfa5dd854501e9c2b75e475c24b6a033f338
-                = sha256(git ls-tree -r HEAD --full-tree bytes)，≠ tree object ID
+                = sha256(git ls-tree -r 993ef8e5 --full-tree bytes)，≠ tree object ID
+superset        origin/3090-24g-hicache @ 560f9ad5256ad95b8075f474a679918340fcca47
+                （= opt + 3090-dev 的 22151 部署文档，+4 files / +278 行）
 remote origin   git@github.com:charleslai2000/sglang.git（PRIVATE）
-protected refs  refs/heads/3060-12g-qwen35-4b
-                refs/heads/checkpoint/pre-v0.5.19-20260913
+protected refs  refs/heads/checkpoint/pre-v0.5.19-20260913
                 refs/tags/checkpoint/pre-v0.5.19-20260913
 ```
+
+分支整合（2026-09-16，已核实）：
+
+- `3060-12g-qwen35-4b` 是历史命名（源于最初在 12GB RTX 3060 / sm_86 上的适配工作，
+  sm_86 同时是 3090 架构，故 kernel/loader 工作被 3090 复用）；其 tip `34bd2ed49f`
+  已快进合并入 `3090-24g-opt` 并从本地与 `origin` 删除，35 个 commit 全部保留。
+- `3090-24g-opt` 与 `3090-24g-hicache` 现为父子超集关系：
+  `3090-24g-opt` unique = 0；`3090-24g-hicache` unique = 3（2 个文档 commit + merge commit）。
+- merge 方向约定：**opt → hicache**。后续工作在 opt 上展开，需要归档时再合并入 hicache。
+- `3090-24g-hicache` 的更上游来源是 `5090-32-hicache`
+  （merge-base `54c394a2e1` = `origin/5090-32-hicache` 的 tip），再向上为
+  `upstream/main b644771e07`。
+- 合并时 hicache worktree 有 9 个未跟踪文件与 opt 的 tracked 路径重名（其中 8 个内容不同，
+  且均不在 merge-base 中），已**移动**（非删除）至
+  `/mnt/data/nerun-dev/p3/LOCAL-PROD-BASELINE-v1/hicache-worktree-collision-backup-20260916/`
+  并附 `untracked-snapshot-20260916.tar.gz`（619 entries）+ `moved-aside-manifest.txt`（逐文件 sha256）。
 
 模型：`mssfj/Qwen3.5-9B-GPTQ-INT4` rev `d44718f79ab5dd3e46ce546d25168bb7ac6a175e`，
 本地 `/mnt/data/models/local-prod-baseline-v1/qwen35-9b-gptq-int4/`，
@@ -118,7 +136,8 @@ protected refs  refs/heads/3060-12g-qwen35-4b
   `c1/c2/c4/c8 × 8` requests；completion latency p50/p95/p99
   = `0.2554 / 0.4572 / 0.5401 s`；
 - 归档：`/mnt/data/cache/performance-baseline-v1/runs/B3-semantic-aggregate-20260914T1348Z/`
-  与 `summaries/SEMANTIC-AGGREGATE-BASELINE.md`；
+  与 `runs/B3-semantic-aggregate-20260914T1348Z/summaries/SEMANTIC-AGGREGATE-BASELINE.md`
+  （在 run 目录内，**不在**顶层 `summaries/`）；
 - **限制**：non-streaming → 无 TTFT；bounded synthetic，非 production traffic；
   不是 soak/restart，不计入稳定性结论。
 
@@ -140,9 +159,14 @@ protected refs  refs/heads/3060-12g-qwen35-4b
 
 - `manifest/PERFORMANCE-BASELINE-SPEC-v2.{md,json}`（三类 TPS 定义、repeats、warmup/cold 纪律）
 - `manifest/PERFORMANCE-BASELINE-SPEC-v2-P0-TELEMETRY-ERRATUM-20260914.*`
-- `manifest/telemetry-availability-20260914.{md,json}`（不可用字段一律 `UNAVAILABLE`）
-- `manifest/prefill-context-reconciliation-20260914.{md,json}`
-- `manifest/P0-TELEMETRY-DESIGN-20260914.*`、`manifest/P0-TELEMETRY-EXPERT-GATE-20260914.*`
+- `manifests/telemetry-availability-20260914.md` + `manifests/telemetry-availability.json`
+  （不可用字段一律 `UNAVAILABLE`；注意 json 无日期后缀）
+- `manifests/prefill-context-reconciliation-20260914.{md,json}`
+- `manifests/P0-TELEMETRY-DESIGN-20260914.*`、`manifests/P0-TELEMETRY-EXPERT-GATE-20260914.*`
+
+**目录易混**：`manifest/`（单数，SPEC-v2 + erratum）与 `manifests/`（复数，SPEC-v1 +
+P0 design + Expert Gate + telemetry availability + reconciliation）**都存在且内容不同**，
+不要按名字猜。
 
 三类吞吐（**绝不混用**）：
 
@@ -242,18 +266,31 @@ baseline manifest 冻结、launcher、rollback 程序、limitations、3090 canar
 
 ---
 
-## 4. 未提交状态（进入 repo 的只有 `.memory/`）
+## 4. 提交状态（2026-09-16，worktree 现为 clean）
 
-退出时 worktree 的 production 变更是 **uncommitted**，这是有意的：
+早先这些 production 变更以 **uncommitted** 形式只存在于本机工作树（单点、换机即失效）。
+2026-09-16 已按 provenance 分组提交并推送，worktree 现为 **clean**：
 
-- 已授权但待 P0 终审：`python/sglang/srt/observability/hicache_telemetry.py`（untracked）
-  与 13 个已修改文件（managers / mem_cache / observability / models）；
-- loader shim：`python/sglang/srt/models/qwen3_5_text.py`（已通过自身 review，但未单独 commit）；
-- test-only：`test/registered/unit/mem_cache/test_extent_g1_metadata_unit.py`、
-  `test/registered/unit/managers/test_multi_tokenizer_mixin.py`、
-  `test/registered/unit/observability/test_hicache_request_telemetry.py`（untracked）。
+| commit | 内容 | 状态 |
+|---|---|---|
+| `ce73d6671f` | `docs(memory)`：vendored P0 权威证据（packet/authority/review，28 files） | 已推送 |
+| `48233f3aba` | `fix(qwen3_5_text)`：loader shim（1170 body tensors 根因修复） | **已验收**（独立复审 + GPU 验证） |
+| `a207b567fe` | `wip(p0-telemetry)`：15 files 未审快照 | **UNREVIEWED**，对应 `CHANGES_REQUIRED` |
+| `1dcaa80473` | `test(extent-g1)`：KV+Mamba grouped fixture（B2/G1 既有 test-only 改动） | 既有授权 |
 
-**不要把 P0 telemetry 未终审的字节随 `.memory` 一起提交。**
+分支：这批提交位于 `wip/p0-telemetry-current-17`，并已快进合并入 **`3090-24g-opt`**
+（工作分支）后推送。因此 `3090-24g-opt` 是唯一需要维护的分支。
+
+关键不变量（提交后仍成立）：`sha256sum -c` packet 的 17 个哈希**全部通过**，
+因为这些文件的对象就是 packet 所 pin 的工作树字节；此前只在本机可复现，现在任何检出该
+分支的主机都可复现。
+
+**警告**：`a207b567fe` 内的 15 个文件是**未验收**实现（对应终审 `CHANGES_REQUIRED`
+的三项缺陷），不要把它当作 P0 telemetry 已通过，也不要据此解锁后续性能工作。
+验收状态由独立终审决定，不由"已提交"决定。
+
+**约定**：不要把这些未审字节合并进冻结基线。冻结身份是 `993ef8e5` 与
+`refs/heads/checkpoint/pre-v0.5.19-20260913`（+ 同名 tag），不受上述提交影响。
 
 `.memory/` 的提交范围说明：
 
