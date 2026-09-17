@@ -30,6 +30,7 @@ PID_FILE="$RUN_DIR/provider.pid"
 SUP_PID_FILE="$RUN_DIR/provider.supervisor.pid"
 CONSOLE_LOG="$RUN_DIR/server.console.log"
 SUPERVISOR_LOG="$RUN_DIR/supervisor.log"
+AUTH_CONFIG="$RUN_DIR/auth-config.yaml"
 STATE_FILE="$RUN_DIR/provider.state"
 VERIFY_DIR="$RUN_DIR/verify"
 
@@ -312,8 +313,15 @@ provider_build_argv() {
 # Launch detached under the supervisor, which owns the server and writes its
 # console log through the API-key redactor.
 #
-# The API key is injected by the supervisor, NOT built into PROVIDER_ARGV, so
-# it never appears in this launcher's own argv.
+# Authentication reaches the server WITHOUT ever touching a command line.
+# sglang exposes no environment variable and no --api-key-file for this value
+# (only --api-key, which lands in /proc/<pid>/cmdline, mode 0444), but it does
+# merge `--config <yaml>` into the resolved arguments.  Verified on this tree:
+# the --config route yields a resolved_dict() identical to passing --api-key
+# on argv.  The supervisor therefore writes a 0600 YAML containing only
+# `api-key`, passes --config, and deletes the file after the server exits.
+# The key is therefore absent from the launcher argv, the supervisor argv, the
+# server argv, and every process environment.
 #
 # The caller must hold the canonical lock; neither the supervisor nor the
 # server may inherit it (fd 9 is closed for both).
@@ -322,6 +330,7 @@ provider_start_server() {
   provider_prepare_run_dir
   mkdir -p "$VERIFY_DIR/metrics"
   rm -f "$PID_FILE" "$SUP_PID_FILE"
+  rm -f "$AUTH_CONFIG"
 
   # Rotate the console log.  The startup gates scan this file for evidence
   # (fp8 KV allocation, CUDA-graph capture), so an appended log from a
@@ -356,7 +365,7 @@ provider_start_server() {
       --log "$CONSOLE_LOG" \
       --key-file "$API_KEY_FILE" \
       --pid-file "$PID_FILE" \
-      --inject-api-key \
+      --auth-config "$AUTH_CONFIG" \
       -- "$VENV_PY" -P -u "${PROVIDER_ARGV[@]}" \
       9>&- >>"$SUPERVISOR_LOG" 2>&1 </dev/null &
     echo "$!" >"$SUP_PID_FILE"
@@ -419,7 +428,7 @@ provider_stop_server() {
     kill -TERM "$sup" 2>/dev/null || true
   fi
 
-  rm -f "$PID_FILE" "$SUP_PID_FILE"
+  rm -f "$PID_FILE" "$SUP_PID_FILE" "$AUTH_CONFIG"
   state_write "free" "-" "down" "stopped"
   return "$rc"
 }

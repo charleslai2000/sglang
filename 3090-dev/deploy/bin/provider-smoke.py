@@ -4,9 +4,10 @@
 Runs, against an already-running server:
 
   1. /health       -> 200
-  2. /v1/models    -> contains the served model name
-  3. chat completion -> non-empty, coherent answer
-  4. tool call     -> the model really emits a function call
+  2. /v1/models WITHOUT a key -> 401/403 (auth is really enforced)
+  3. /v1/models WITH the key  -> 200 and contains the served model name
+  4. chat completion -> non-empty, coherent answer
+  5. tool call     -> the model really emits a function call
 
 Exits non-zero on the first failure, printing which check failed.  Standard
 library only.
@@ -16,6 +17,11 @@ Auth notes
 * sglang always allows /health and /metrics without a key (deliberate, so
   liveness probes and Prometheus need no secret); every other endpoint needs
   the bearer token once --api-key is set.
+* Check 2 exists because "AUTH=ON" is otherwise an assertion rather than a
+  measured fact: a launch path that silently drops --api-key still serves 200
+  on every endpoint, and nothing else in the startup gates would notice.
+  Confirmed possible on this host -- a pre-fix launch ran with no key and all
+  other checks passed.
 * The key file is root:root 0600, so this process reads it through
   `sudo -n cat` rather than opening it directly.  The value never becomes an
   argv element of any process.
@@ -99,7 +105,19 @@ def main() -> int:
         fail("HEALTH", f"/health returned HTTP {code}")
     print("HEALTH=PASS")
 
-    # ---- 2. /v1/models ---------------------------------------------------
+    # ---- 2. auth is really enforced --------------------------------------
+    # Without this, a key-less launch is indistinguishable from a keyed one
+    # for every other check in this file.
+    code, body = request(f"{base}/v1/models", timeout=60.0)
+    if code not in (401, 403):
+        fail(
+            "AUTH_REQUIRED",
+            f"/v1/models without a key returned HTTP {code}; expected 401/403. "
+            f"API key is NOT being enforced. body={body[:200]!r}",
+        )
+    print(f"AUTH_REQUIRED=PASS (no key -> {code})")
+
+    # ---- 3. /v1/models with the key --------------------------------------
     code, body = request(f"{base}/v1/models", token=token, timeout=60.0)
     if code != 200:
         fail("MODELS", f"/v1/models returned HTTP {code}: {body[:200]!r}")
@@ -109,9 +127,9 @@ def main() -> int:
         fail("MODELS", f"unparseable /v1/models body: {exc}")
     if model not in listed:
         fail("MODELS", f"{model!r} not in served models {listed}")
-    print(f"MODELS=PASS ({model})")
+    print(f"AUTH_WITH_KEY=PASS (with key -> 200, {model})")
 
-    # ---- 3. chat completion ---------------------------------------------
+    # ---- 4. chat completion ---------------------------------------------
     # A factual question with a single-token answer, so "non-empty and
     # coherent" is checkable without a judge.
     chat_payload = {
@@ -146,7 +164,7 @@ def main() -> int:
         )
     print(f"CHAT_SMOKE=PASS ({content[:60]!r})")
 
-    # ---- 4. tool call ----------------------------------------------------
+    # ---- 5. tool call ----------------------------------------------------
     # The qwen3_coder parser emits <tool_call><function=...>.  Require a real
     # parsed tool_calls entry with the required argument, not just prose about
     # calling a function.
