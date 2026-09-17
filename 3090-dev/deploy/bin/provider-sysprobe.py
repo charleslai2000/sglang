@@ -35,47 +35,76 @@ def lock_state(path: str) -> int:
     return 0
 
 
-def gpu_ordinal(uuid: str) -> int:
-    """CUDA_VISIBLE_DEVICES=GPU-<uuid> is not valid; we need the numeric ordinal."""
+def nvml_order() -> list[tuple[int, str]]:
+    """[(nvml_index, uuid)] in NVML order."""
     try:
         import pynvml
     except ImportError:
-        print("PROBE_FAIL: pynvml unavailable", file=sys.stderr)
-        return 2
-    try:
-        import torch
-    except ImportError:
-        print("PROBE_FAIL: torch unavailable", file=sys.stderr)
-        return 2
-
-    want = uuid[len("GPU-") :] if uuid.startswith("GPU-") else uuid
+        return []
     pynvml.nvmlInit()
     try:
-        count = pynvml.nvmlDeviceGetCount()
-        # CUDA orders devices by PCI bus id (unless pinned otherwise); NVML
-        # index order matches torc's default ordering on this host, but we
-        # cross-check against torch before trusting it.
-        for idx in range(count):
+        out = []
+        for idx in range(pynvml.nvmlDeviceGetCount()):
             handle = pynvml.nvmlDeviceGetHandleByIndex(idx)
-            got = pynvml.nvmlDeviceGetUUID(handle)
-            got = got[len("GPU-") :] if got.startswith("GPU-") else got
-            if got == want:
-                if not torch.cuda.is_available():
-                    print("PROBE_FAIL: torch reports no CUDA device", file=sys.stderr)
-                    return 2
-                if torch.cuda.device_count() != count:
-                    print(
-                        "PROBE_FAIL: torch device_count=%d but NVML count=%d"
-                        % (torch.cuda.device_count(), count),
-                        file=sys.stderr,
-                    )
-                    return 2
-                print(idx)
-                return 0
+            out.append((idx, pynvml.nvmlDeviceGetUUID(handle)))
+        return out
     finally:
         pynvml.nvmlShutdown()
-    print(f"PROBE_FAIL: no GPU with UUID {uuid}", file=sys.stderr)
-    return 2
+
+
+def cuda_visible_order() -> list[str]:
+    """UUIDs in CUDA_VISIBLE_DEVICES order as torch enumerates them."""
+    import torch
+
+    out = []
+    for idx in range(torch.cuda.device_count()):
+        props = torch.cuda.get_device_properties(idx)
+        raw = getattr(props, "uuid", None)
+        if raw is None:
+            raise RuntimeError(f"torch exposes no uuid for device {idx}")
+        out.append(raw if str(raw).startswith("GPU-") else f"GPU-{raw}")
+    return out
+
+
+def gpu_ordinal(uuid: str) -> int:
+    """Print the CUDA ordinal whose device UUID matches `uuid`.
+
+    NVML index and CUDA ordinal are inverted on this box, so the ordinal is
+    resolved by identity rather than assumed.  Both NVML and torch are
+    consulted, and they must agree, because the server is pinned by whatever
+    CUDA sees inside its own processes.
+    """
+    import torch
+
+    if not torch.cuda.is_available():
+        print("PROBE_FAIL: torch reports no CUDA device", file=sys.stderr)
+        return 2
+    cuda_uuids = cuda_visible_order()
+    if uuid not in cuda_uuids:
+        print(
+            f"PROBE_FAIL: {uuid} not among CUDA devices {cuda_uuids}",
+            file=sys.stderr,
+        )
+        return 2
+    ordinal = cuda_uuids.index(uuid)
+
+    nvml = nvml_order()
+    if nvml:
+        nvml_uuids = [u for _i, u in nvml]
+        if uuid not in nvml_uuids:
+            print(f"PROBE_FAIL: {uuid} not among NVML devices {nvml_uuids}",
+                  file=sys.stderr)
+            return 2
+        nvml_index = nvml_uuids.index(uuid)
+        if nvml_index != ordinal:
+            # Not fatal, but recorded: the pin below is the CUDA ordinal.
+            print(
+                f"note: NVML index {nvml_index} != CUDA ordinal {ordinal} "
+                f"for {uuid}",
+                file=sys.stderr,
+            )
+    print(ordinal)
+    return 0
 
 
 def port_free(host: str, port: int) -> int:
