@@ -1,0 +1,22 @@
+{
+  "exists": true,
+  "file_count": 16268,
+  "size": "1.9G",
+  "source_file_count": 9071,
+  "source_path": "/tmp/opencode/v1.1.2-f1fix-20260916",
+  "source_subtree": "src",
+  "top_level": [
+    "env",
+    "f1-evidence",
+    "launcher",
+    "manifest",
+    "src",
+    "tools"
+  ],
+  "vs_frozen_v1.1.2_sampled": {
+    "differ": 0,
+    "identical": 400,
+    "only_in_this_tree": 0,
+    "sampled": 400
+  }
+}
