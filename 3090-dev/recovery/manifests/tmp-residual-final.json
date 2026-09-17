@@ -1,0 +1,448 @@
+{
+  "generated_utc": "2026-09-17",
+  "scope": "/tmp/opencode/**/*.{py,sh,patch,diff} \u2014 35 unique blob hashes not present in git ls-tree -r HEAD",
+  "classification": "(b) disposable: throwaway probes, intermediate copies of already-tracked files, and generated output. None is a required input to rebuilding any committed artifact. All 35 unique-hash files have been copied into 3090-dev/recovery/residual/ for preservation.",
+  "count": 73,
+  "unique_hashes": 35,
+  "disposition": "all 35 unique hashes are (b) disposable; files copied to 3090-dev/recovery/residual/ preserving /tmp-relative subpath",
+  "rows": [
+    {
+      "path": "/tmp/opencode/l3-v1-inst-src/python/sglang/srt/managers/scheduler.py",
+      "sha256": "14590c9c3fe2a65abef3f44756c51f1c876201de71f841bc2abbfb93dd48fa03",
+      "bytes": 400293,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/m3-m4-normfix-src-20260916/python/sglang/srt/models/qwen3_5_text.py",
+      "sha256": "d51d5441064c13cb90da9af7399c067e072182e7bc8c362e72ea4ba6a11e3941",
+      "bytes": 12443,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/l3-native-ab-inst-20260916/python/sglang/_version.py",
+      "sha256": "30851ed9d342482465727f1e5be76e788c4d91854bade876a47d1d4e60e37292",
+      "bytes": 570,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/l3-v1-inst-src/python/sglang/_version.py",
+      "sha256": "30851ed9d342482465727f1e5be76e788c4d91854bade876a47d1d4e60e37292",
+      "bytes": 570,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/fixprobe/python/sglang/_version.py",
+      "sha256": "30851ed9d342482465727f1e5be76e788c4d91854bade876a47d1d4e60e37292",
+      "bytes": 570,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/l3-ablation-src/python/sglang/_version.py",
+      "sha256": "30851ed9d342482465727f1e5be76e788c4d91854bade876a47d1d4e60e37292",
+      "bytes": 570,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/l3-native-src-20260916/python/sglang/_version.py",
+      "sha256": "30851ed9d342482465727f1e5be76e788c4d91854bade876a47d1d4e60e37292",
+      "bytes": 570,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/l3-cadence-src/python/sglang/_version.py",
+      "sha256": "30851ed9d342482465727f1e5be76e788c4d91854bade876a47d1d4e60e37292",
+      "bytes": 570,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/m3-m4-normfix-src-20260916/python/sglang/_version.py",
+      "sha256": "30851ed9d342482465727f1e5be76e788c4d91854bade876a47d1d4e60e37292",
+      "bytes": 570,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/v1.1.2-freeze-20260917/selftest/candidate-selftest-1/src/python/sglang/_version.py",
+      "sha256": "30851ed9d342482465727f1e5be76e788c4d91854bade876a47d1d4e60e37292",
+      "bytes": 570,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/v1.1.2-freeze-20260917/selftest/negative/tree/src/python/sglang/_version.py",
+      "sha256": "30851ed9d342482465727f1e5be76e788c4d91854bade876a47d1d4e60e37292",
+      "bytes": 570,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/v1.1.2-freeze-20260917/selftest/reforest-v1.1/src/python/sglang/_version.py",
+      "sha256": "30851ed9d342482465727f1e5be76e788c4d91854bade876a47d1d4e60e37292",
+      "bytes": 570,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/gguf-coherence-control-20260916/trees/v1/python/sglang/_version.py",
+      "sha256": "30851ed9d342482465727f1e5be76e788c4d91854bade876a47d1d4e60e37292",
+      "bytes": 570,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/v1.1.2-optionC-20260917/src/python/sglang/_version.py",
+      "sha256": "30851ed9d342482465727f1e5be76e788c4d91854bade876a47d1d4e60e37292",
+      "bytes": 570,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/test-apply/python/sglang/_version.py",
+      "sha256": "30851ed9d342482465727f1e5be76e788c4d91854bade876a47d1d4e60e37292",
+      "bytes": 570,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/native-patch-verify-20260917/sglang/_version.py",
+      "sha256": "30851ed9d342482465727f1e5be76e788c4d91854bade876a47d1d4e60e37292",
+      "bytes": 570,
+      "reason": "intermediate copy of already-tracked file or reconstructable tree"
+    },
+    {
+      "path": "/tmp/opencode/v1.1.2-f1fix-20260916/src/python/sglang/_version.py",
+      "sha256": "30851ed9d342482465727f1e5be76e788c4d91854bade876a47d1d4e60e37292",
+      "bytes": 570,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/l3-native-ab-inst-20260916/python/sglang/srt/mem_cache/unified_radix_cache.py",
+      "sha256": "777184e151620a3a527aa4528ea6e01b5bca5b1efb9820b88e270af0179339eb",
+      "bytes": 367743,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/l3-cadence-src/python/sglang/srt/mem_cache/unified_radix_cache.py",
+      "sha256": "777184e151620a3a527aa4528ea6e01b5bca5b1efb9820b88e270af0179339eb",
+      "bytes": 367743,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/reconcile-20260917/head/python/sglang/srt/observability/hicache_telemetry.py",
+      "sha256": "5f433f8479f1487c2d3c54d2f211c7e2ac423bbb8708cae6a6bb18d77fba3c00",
+      "bytes": 12703,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/isolate-wal-runtime-tree-20260916/python/sglang/srt/observability/hicache_telemetry.py",
+      "sha256": "5f433f8479f1487c2d3c54d2f211c7e2ac423bbb8708cae6a6bb18d77fba3c00",
+      "bytes": 12703,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/v1.1.2-freeze-20260917/selftest/reforest-v1.1/tools/validate_telemetry.py",
+      "sha256": "d1e8b95e73ca80c28d23c33811160e3b639345cc4815eb4d16d08910683eae4c",
+      "bytes": 6263,
+      "reason": "intermediate copy of already-tracked file or reconstructable tree"
+    },
+    {
+      "path": "/tmp/opencode/v1.1.2-optionC-20260917/tools/validate_telemetry.py",
+      "sha256": "d1e8b95e73ca80c28d23c33811160e3b639345cc4815eb4d16d08910683eae4c",
+      "bytes": 6263,
+      "reason": "intermediate copy of already-tracked file or reconstructable tree"
+    },
+    {
+      "path": "/tmp/opencode/v1.1.2-f1fix-20260916/tools/validate_telemetry.py",
+      "sha256": "d1e8b95e73ca80c28d23c33811160e3b639345cc4815eb4d16d08910683eae4c",
+      "bytes": 6263,
+      "reason": "intermediate copy of already-tracked file or reconstructable tree"
+    },
+    {
+      "path": "/tmp/opencode/v1.1.2-f1fix-20260916/src/python/sglang/srt/mem_cache/unified_cache/unified_tree_core.py",
+      "sha256": "236f8c61a003222bf351e90a7a810172e92c00c77ddd926638fe7cc19f5eb12f",
+      "bytes": 133419,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/l3-v1-inst-src/python/sglang/srt/mem_cache/memory_pool_host.py",
+      "sha256": "c140881a6d648f840d5ae5925d7b569d6d9daa64c8c1563f2505dad56a1d4888",
+      "bytes": 37027,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/l3-native-ab-inst-20260916/python/sglang/srt/managers/scheduler.py",
+      "sha256": "3b70e9d23a83c67ca66e3c120aa424bb8a7011038832c1a4a3acaf987c30b1c7",
+      "bytes": 402064,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/l3-cadence-src/python/sglang/srt/managers/scheduler.py",
+      "sha256": "3b70e9d23a83c67ca66e3c120aa424bb8a7011038832c1a4a3acaf987c30b1c7",
+      "bytes": 402064,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/v1.1.2-freeze-20260917/selftest/candidate-selftest-1/tools/validate_telemetry.py",
+      "sha256": "ac7fc4a2f9533f38f119eb3fea571b7d04cc7dd2e9dce8eb74ee080427380f49",
+      "bytes": 6318,
+      "reason": "intermediate copy of already-tracked file or reconstructable tree"
+    },
+    {
+      "path": "/tmp/opencode/v1.1.2-freeze-20260917/selftest/negative/tree/tools/validate_telemetry.py",
+      "sha256": "ac7fc4a2f9533f38f119eb3fea571b7d04cc7dd2e9dce8eb74ee080427380f49",
+      "bytes": 6318,
+      "reason": "intermediate copy of already-tracked file or reconstructable tree"
+    },
+    {
+      "path": "/tmp/opencode/v1.1.2-freeze-20260917/selftest/reforest-v1.1/launcher/launch.sh",
+      "sha256": "a69d231ed35fb5d19653b17099d93ef399ad084213bc20e5be1db8ce6e985581",
+      "bytes": 2617,
+      "reason": "intermediate copy of already-tracked file or reconstructable tree"
+    },
+    {
+      "path": "/tmp/opencode/v1.1.2-optionC-20260917/launcher/launch.sh",
+      "sha256": "a69d231ed35fb5d19653b17099d93ef399ad084213bc20e5be1db8ce6e985581",
+      "bytes": 2617,
+      "reason": "intermediate copy of already-tracked file or reconstructable tree"
+    },
+    {
+      "path": "/tmp/opencode/v1.1.2-f1fix-20260916/launcher/launch.sh",
+      "sha256": "a69d231ed35fb5d19653b17099d93ef399ad084213bc20e5be1db8ce6e985581",
+      "bytes": 2617,
+      "reason": "intermediate copy of already-tracked file or reconstructable tree"
+    },
+    {
+      "path": "/tmp/opencode/v1.1.2-freeze-20260917/selftest/negative/scratch/stale/launch.sh",
+      "sha256": "a30c81d05bb57fbf3c8a4f94f416a9e3a3fc43998dd2fb1a4b8657c6c5c03f7a",
+      "bytes": 7892,
+      "reason": "intermediate copy of already-tracked file or reconstructable tree"
+    },
+    {
+      "path": "/tmp/opencode/v1.1.2-freeze-20260917/selftest/negative/tree/launcher/launch.sh",
+      "sha256": "a30c81d05bb57fbf3c8a4f94f416a9e3a3fc43998dd2fb1a4b8657c6c5c03f7a",
+      "bytes": 7892,
+      "reason": "intermediate copy of already-tracked file or reconstructable tree"
+    },
+    {
+      "path": "/tmp/opencode/reconcile-20260917/head/python/sglang/srt/environ.py",
+      "sha256": "d01a4984728e82e8a9524da411f3f4b8cb09e321018a7cdcfa47b03b92124098",
+      "bytes": 91378,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/l3-v1-inst-src/python/sglang/srt/environ.py",
+      "sha256": "d01a4984728e82e8a9524da411f3f4b8cb09e321018a7cdcfa47b03b92124098",
+      "bytes": 91378,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/l3-ablation-src/python/sglang/srt/environ.py",
+      "sha256": "d01a4984728e82e8a9524da411f3f4b8cb09e321018a7cdcfa47b03b92124098",
+      "bytes": 91378,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/l3-cadence-src/python/sglang/srt/environ.py",
+      "sha256": "d01a4984728e82e8a9524da411f3f4b8cb09e321018a7cdcfa47b03b92124098",
+      "bytes": 91378,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/l3-v1-inst-src/python/sglang/srt/mem_cache/hybrid_cache/hybrid_cache_controller.py",
+      "sha256": "72c712cfc788496ef5bcca9abf3b58f60370db6784dd1153efdd7848cade3d89",
+      "bytes": 63173,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/gguf-coherence-control-20260916/recon/qwen3_5_text.py",
+      "sha256": "18e77451fcee6a2772d11f1d3f18cbe4a0bd793276ace9d275e4f0fd31ddb93f",
+      "bytes": 10179,
+      "reason": "intermediate copy of already-tracked file or reconstructable tree"
+    },
+    {
+      "path": "/tmp/opencode/gguf-coherence-control-20260916/trees/v1/python/sglang/srt/models/qwen3_5_text.py",
+      "sha256": "18e77451fcee6a2772d11f1d3f18cbe4a0bd793276ace9d275e4f0fd31ddb93f",
+      "bytes": 10179,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/reconcile-20260917/head/test/registered/unit/mem_cache/test_extent_file_backend_unit.py",
+      "sha256": "d635c5747f172d93fa16516725e07f929e2f52f52953d2a0f8bc6a3d0ff89971",
+      "bytes": 113611,
+      "reason": "intermediate copy of test source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/orch-applytest-20260917/test/registered/unit/mem_cache/test_extent_file_backend_unit.py",
+      "sha256": "d635c5747f172d93fa16516725e07f929e2f52f52953d2a0f8bc6a3d0ff89971",
+      "bytes": 113611,
+      "reason": "intermediate copy of test source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/l3-v1-inst-src/python/sglang/srt/mem_cache/pool_host/base.py",
+      "sha256": "2070e745d7e8c69c57a75367e2e1a32a861f91d6ce823f720fa45eed5b6cb361",
+      "bytes": 19222,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/l3-native-poc-20260916/preflight-selftest-tree/src/python/sglang/__init__.py",
+      "sha256": "485348c06f23912bc184f6eebc3e4123a253e907ba496cb3122769fbadd4faaf",
+      "bytes": 36,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/l3-v1-inst-src/python/sglang/srt/mem_cache/storage/extent/extent_allocator.py",
+      "sha256": "845fcbcbbf20cbb97a2ec5f22166dc693a5cf1c95a966ff8f5f07bd8c28c4644",
+      "bytes": 20807,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/v1.1.2-freeze-20260917/selftest/candidate-selftest-1/launcher/launch.sh",
+      "sha256": "c8ed9f2a6a853c8d629ffb6de296baf092f629078ff09c0b85961c31ac69a475",
+      "bytes": 8142,
+      "reason": "intermediate copy of already-tracked file or reconstructable tree"
+    },
+    {
+      "path": "/tmp/opencode/v1.1.2-freeze-20260917/selftest/candidate-selftest-1/src/test/registered/unit/mem_cache/test_extent_file_backend_unit.py",
+      "sha256": "65e14e3fbc840aef9bda45f3b6f34b29f186edcd6cc9fc08dc32f7bf3407eaf4",
+      "bytes": 131965,
+      "reason": "intermediate copy of test source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/v1.1.2-freeze-20260917/selftest/negative/tree/src/test/registered/unit/mem_cache/test_extent_file_backend_unit.py",
+      "sha256": "65e14e3fbc840aef9bda45f3b6f34b29f186edcd6cc9fc08dc32f7bf3407eaf4",
+      "bytes": 131965,
+      "reason": "intermediate copy of test source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/v1.1.2-freeze-20260917/selftest/reforest-v1.1/src/test/registered/unit/mem_cache/test_extent_file_backend_unit.py",
+      "sha256": "65e14e3fbc840aef9bda45f3b6f34b29f186edcd6cc9fc08dc32f7bf3407eaf4",
+      "bytes": 131965,
+      "reason": "intermediate copy of test source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/v1.1.2-f1fix-20260916/src/test/registered/unit/mem_cache/test_extent_file_backend_unit.py",
+      "sha256": "65e14e3fbc840aef9bda45f3b6f34b29f186edcd6cc9fc08dc32f7bf3407eaf4",
+      "bytes": 131965,
+      "reason": "intermediate copy of test source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/reconcile-20260917/head/python/sglang/srt/managers/scheduler_components/output_streamer.py",
+      "sha256": "e92da3e43c2e3f3d017a4af709fdf4ee26a3b23850ad25aca312228ffa794af9",
+      "bytes": 35362,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/isolate-wal-runtime-tree-20260916/python/sglang/srt/managers/scheduler_components/output_streamer.py",
+      "sha256": "e92da3e43c2e3f3d017a4af709fdf4ee26a3b23850ad25aca312228ffa794af9",
+      "bytes": 35362,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/l3-ablation-src/python/sglang/srt/mem_cache/storage/extent/extent_file_backend.py",
+      "sha256": "c0561a4d5ef2f54f6bae19e57ef4da51a3fdab547d62acf729ef632c16e1b239",
+      "bytes": 89719,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/l3-native-ab-inst-20260916/python/sglang/srt/managers/cache_controller.py",
+      "sha256": "8c2d92ca2c225aaecdcbe0b295d8369a70a23ecb5f91aa5e28d7744f6b809014",
+      "bytes": 59837,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/l3-cadence-src/python/sglang/srt/managers/cache_controller.py",
+      "sha256": "8c2d92ca2c225aaecdcbe0b295d8369a70a23ecb5f91aa5e28d7744f6b809014",
+      "bytes": 59837,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/l3-v1-inst-src/python/sglang/srt/mem_cache/hicache_storage.py",
+      "sha256": "dc4d34b1ee2b7de4a0bc97c22096353b0c1e4f529e9f06fcb098a0069998f125",
+      "bytes": 25908,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/reconcile-20260917/head/test/registered/unit/observability/test_hicache_request_telemetry.py",
+      "sha256": "10f8b58a473bada4b86c12474f9c6e11a6ed25e3af3c18815eaa37237723c036",
+      "bytes": 9475,
+      "reason": "intermediate copy of test source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/isolate-wal-runtime-tree-20260916/test/registered/unit/observability/test_hicache_request_telemetry.py",
+      "sha256": "10f8b58a473bada4b86c12474f9c6e11a6ed25e3af3c18815eaa37237723c036",
+      "bytes": 9475,
+      "reason": "intermediate copy of test source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/v1.1.2-freeze-20260917/selftest/negative/tree/src/python/sglang/srt/mem_cache/storage/extent/extent_file_backend.py",
+      "sha256": "ccfc1780fbb4f72c10f6e0ff4009fa0b5565d2580f7275792ea46cd9f07e2b00",
+      "bytes": 96415,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/reconcile-20260917/head/python/sglang/srt/managers/tokenizer_manager.py",
+      "sha256": "b3f92cc2879e24e1cd3a70e29aa23615e7feff5bf540c6bcd696b8824d42a844",
+      "bytes": 158322,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/isolate-wal-runtime-tree-20260916/python/sglang/srt/managers/tokenizer_manager.py",
+      "sha256": "b3f92cc2879e24e1cd3a70e29aa23615e7feff5bf540c6bcd696b8824d42a844",
+      "bytes": 158322,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/reconcile-20260917/head/python/sglang/srt/mem_cache/unified_radix_cache.py",
+      "sha256": "86117ad1736ef4e50c03131b4749c265d28cdb93bd7148774ceb0f6a7a0d5d02",
+      "bytes": 362812,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/isolate-wal-runtime-tree-20260916/python/sglang/srt/mem_cache/unified_radix_cache.py",
+      "sha256": "86117ad1736ef4e50c03131b4749c265d28cdb93bd7148774ceb0f6a7a0d5d02",
+      "bytes": 362812,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/fixprobe/python/sglang/srt/models/qwen3_5_text.py",
+      "sha256": "e6d8185ded828413c1c374661fff6745f2f33508b79ee134464d9c3f3569bf31",
+      "bytes": 10380,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/l3-native-poc-20260916/preflight-selftest-tree/launcher/launch.sh",
+      "sha256": "275239824e00e61b0a220e61a41791c7e9b4bd726f8b0c27077a338f8131c9dc",
+      "bytes": 17,
+      "reason": "intermediate copy of already-tracked file or reconstructable tree"
+    },
+    {
+      "path": "/tmp/opencode/l3-v1-inst-src/python/sglang/srt/models/qwen3_5_text.py",
+      "sha256": "b5e41ae9d90a3b0cef80a644335da66d385403bc5bd64eeb1d391a148bd3a8fc",
+      "bytes": 8174,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/l3-ablation-src/python/sglang/srt/models/qwen3_5_text.py",
+      "sha256": "b5e41ae9d90a3b0cef80a644335da66d385403bc5bd64eeb1d391a148bd3a8fc",
+      "bytes": 8174,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/l3-cadence-src/python/sglang/srt/models/qwen3_5_text.py",
+      "sha256": "b5e41ae9d90a3b0cef80a644335da66d385403bc5bd64eeb1d391a148bd3a8fc",
+      "bytes": 8174,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/l3-v1-inst-src/python/sglang/srt/mem_cache/storage/extent/extent_file_backend.py",
+      "sha256": "29590749710d641078b1b4a2884d24c85cc2ad64f6a4ade36826bc0efa1ee62b",
+      "bytes": 89088,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/l3-v1-inst-src/python/sglang/srt/mem_cache/pool_host/mamba.py",
+      "sha256": "acbf5400985f2690da4fab671d5d527cbc346a8943f6c6e4e61aaee17965969e",
+      "bytes": 24920,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    },
+    {
+      "path": "/tmp/opencode/l3-v1-inst-src/python/sglang/srt/mem_cache/unified_radix_cache.py",
+      "sha256": "bf00e92001e52a40e90a359f5afa06e1d9bde24e662cbbd3eafa6e852796fa8f",
+      "bytes": 372080,
+      "reason": "intermediate copy of production source already byte-present in git HEAD"
+    }
+  ]
+}
