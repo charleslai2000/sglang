@@ -56,8 +56,17 @@ echo "$NAMESPACE"  >"$PID_DIR/$ROLE.namespace"
 echo "$TREE"       >"$PID_DIR/$ROLE.tree"
 echo "$$"          >"$PID_DIR/$ROLE.supervisor.pid"
 
+# The identity recorded in the GPU-owner state must describe the tree actually
+# being served, never a literal.  A hardcoded identity here silently mislabels
+# whichever candidate is live.  Read it from the tree's own frozen manifest and
+# fail closed if the tree carries no identity.
+IDENTITY="$(jq -r '.name // empty' "$TREE/manifest/identity.json" 2>/dev/null || true)"
+if [ -z "$IDENTITY" ]; then
+  die "tree $TREE has no manifest/identity.json name; refusing to publish an unknown identity" 1
+fi
+
 state_write "$ROLE" "$SERVER_PID" "$PORT" "$RUN_ID" "$NAMESPACE" "$TREE" \
-            "LOCAL-PROD-v1.1.2" "starting"
+            "$IDENTITY" "starting"
 
 # ---- runtime environment verification ---------------------------------------
 # The launcher only *exports* PYTHONPATH/CUDA_VISIBLE_DEVICES into its own bash
@@ -140,7 +149,7 @@ log "COLD START (launch -> /health 200): ${COLD_START}s"
 } >"$RUN_DIR/$ROLE.run"
 
 state_write "$ROLE" "$SERVER_PID" "$PORT" "$RUN_ID" "$NAMESPACE" "$TREE" \
-            "LOCAL-PROD-v1.1.2" "serving"
+            "$IDENTITY" "serving"
 touch "$READY"
 log "=== $ROLE UP: pid=$SERVER_PID port=$PORT cold_start=${COLD_START}s ==="
 
