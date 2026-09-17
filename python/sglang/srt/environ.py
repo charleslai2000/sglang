@@ -704,6 +704,7 @@ class Envs:
     SGLANG_HICACHE_EXTENT_BACKEND_MIN_FREE_SPACE = EnvStr("0")
     SGLANG_HICACHE_EXTENT_BACKEND_EXTENT_SIZE = EnvStr(None)
     SGLANG_HICACHE_EXTENT_BACKEND_FILE_SIZE = EnvStr(None)
+    SGLANG_HICACHE_EXTENT_BACKEND_WAL_CHECKPOINT_BYTES = EnvStr(None)
     # O_DIRECT calibration tier (default off): the first slice uses buffered IO.
     SGLANG_HICACHE_EXTENT_BACKEND_DIRECT_IO = EnvBool(False)
     # Selector: storage backend name used when --hicache-storage-backend is unset.

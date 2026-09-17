@@ -32,6 +32,7 @@ aligned, so only whole-extent aligned IO could use O_DIRECT safely.
 
 from __future__ import annotations
 
+import argparse
 import ctypes
 import json
 import logging
@@ -103,6 +104,7 @@ from sglang.srt.mem_cache.storage.extent.extent_metadata import (
 )
 from sglang.srt.mem_cache.storage.file.lru_file_evictor import _parse_size_to_bytes
 from sglang.srt.mem_cache.trace_context import attach_trace_context
+from sglang.srt.utils.common import human_readable_int
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +112,9 @@ logger = logging.getLogger(__name__)
 _DEFAULT_EXTENT_SIZE = 64 << 20
 # B3 single-file layout: 64 GiB sparse preallocation per rank/suffix.
 _DEFAULT_FILE_SIZE = 64 << 30
+_DEFAULT_WAL_CHECKPOINT_BYTES = 1 << 30
+_WAL_CHECKPOINT_MAX_RETRIES = 3
+_WAL_CHECKPOINT_RETRY_DELAY = 0.1
 # Read-side merge threshold: adjacent requested ranges whose gap is at most
 # one 4KiB sector are merged into a single exact pread.  Absorbing a <=4KiB
 # dead gap is bounded amplification (<= 1.13x on a ~31KB page) and keeps
@@ -314,6 +319,35 @@ def _as_bool(value) -> bool:
     return bool(value)
 
 
+def _parse_wal_checkpoint_bytes(value, source: str) -> int:
+    """Parse the live-WAL checkpoint threshold without silently disabling it."""
+    if isinstance(value, bool):
+        raise ValueError(
+            f"wal_checkpoint_bytes from {source} must be a non-negative size, not bool"
+        )
+    if isinstance(value, int):
+        parsed = value
+    elif isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            raise ValueError(f"wal_checkpoint_bytes from {source} must not be empty")
+        try:
+            parsed = human_readable_int(raw)
+        except (TypeError, ValueError, argparse.ArgumentTypeError) as exc:
+            raise ValueError(
+                f"invalid wal_checkpoint_bytes from {source}: {value!r}"
+            ) from exc
+    else:
+        raise ValueError(
+            f"wal_checkpoint_bytes from {source} must be an integer or size string"
+        )
+    if parsed < 0:
+        raise ValueError(
+            f"wal_checkpoint_bytes from {source} must be non-negative, got {parsed}"
+        )
+    return parsed
+
+
 class ExtentFileBackend(HiCacheStorage):
     def __init__(self, storage_config: HiCacheStorageConfig, file_path=None):
         extra = storage_config.extra_config or {}
@@ -404,6 +438,21 @@ class ExtentFileBackend(HiCacheStorage):
                 "O_DIRECT calibration tier; this slice uses buffered IO."
             )
 
+        threshold_raw = extra.get("wal_checkpoint_bytes")
+        if threshold_raw is not None:
+            threshold_source = "extra_config"
+        elif envs.SGLANG_HICACHE_EXTENT_BACKEND_WAL_CHECKPOINT_BYTES.is_set():
+            threshold_raw = envs.SGLANG_HICACHE_EXTENT_BACKEND_WAL_CHECKPOINT_BYTES.get()
+            threshold_source = "env"
+        else:
+            threshold_raw = _DEFAULT_WAL_CHECKPOINT_BYTES
+            threshold_source = "default"
+        self._wal_checkpoint_bytes = _parse_wal_checkpoint_bytes(
+            threshold_raw, threshold_source
+        )
+        self._wal_checkpoint_source = threshold_source
+        self._wal_checkpoint_requested = threshold_raw
+
         # One data file per rank/config suffix: ranks never share an allocator.
         self._data_path = os.path.join(
             self._storage_dir, f"hicache.data{self.config_suffix}"
@@ -431,6 +480,12 @@ class ExtentFileBackend(HiCacheStorage):
         self._components = {}
         self._constructor_complete = False
         self._closed = False
+        self._lifecycle_state = "OPENING"
+        self._lifecycle_lock = threading.Lock()
+        self._close_lock = threading.Lock()
+        self._checkpoint_event = threading.Event()
+        self._checkpoint_stop = threading.Event()
+        self._checkpoint_thread = None
         self._lock = threading.Lock()
         # Lock order is deliberately fixed at _write_gate -> _lock.  The gate
         # quiesces writers while checkpoint rotates and reclaims WAL segments;
@@ -454,6 +509,15 @@ class ExtentFileBackend(HiCacheStorage):
             "last_batch_requested_bytes": 0,
             "last_batch_physical_bytes": 0,
             "last_batch_preads": 0,
+            "wal_checkpoint_bytes": self._wal_checkpoint_bytes,
+            "wal_checkpoint_requested_bytes": self._wal_checkpoint_requested,
+            "wal_checkpoint_source": self._wal_checkpoint_source,
+            "wal_active_bytes": 0,
+            "wal_checkpoint_requested": 0,
+            "wal_checkpoint_successes": 0,
+            "wal_checkpoint_failures": 0,
+            "wal_checkpoint_retries": 0,
+            "wal_checkpoint_last_error": None,
         }
         try:
             (
@@ -471,12 +535,22 @@ class ExtentFileBackend(HiCacheStorage):
                 self._startup_metadata()
             self._open_active_wal()
             self._constructor_complete = True
+            self._lifecycle_state = "OPEN"
+            self._start_checkpoint_worker()
             logger.info(
                 f"ExtentFileBackend: file={self._data_path} extent={extent_size} B "
                 f"slots={self._file_size // extent_size} "
-                f"max_size={self._max_size_bytes} min_free={self._min_free_bytes}"
+                f"max_size={self._max_size_bytes} min_free={self._min_free_bytes} "
+                f"wal_checkpoint_bytes={self._wal_checkpoint_bytes} "
+                f"wal_checkpoint_requested={self._wal_checkpoint_requested!r} "
+                f"wal_checkpoint_source={self._wal_checkpoint_source}"
             )
         except Exception:
+            self._checkpoint_stop.set()
+            self._checkpoint_event.set()
+            if self._checkpoint_thread is not None:
+                self._checkpoint_thread.join()
+                self._checkpoint_thread = None
             if self._wal_fd is not None:
                 os.close(self._wal_fd)
                 self._wal_fd = None
@@ -487,6 +561,66 @@ class ExtentFileBackend(HiCacheStorage):
                 finally:
                     self._fd = None
             raise
+
+    def _start_checkpoint_worker(self) -> None:
+        if self._wal_checkpoint_bytes == 0:
+            return
+        checkpoint_thread = threading.Thread(
+            target=self._checkpoint_worker,
+            name=f"extent-wal-checkpoint-{self.config_suffix}",
+            daemon=True,
+        )
+        checkpoint_thread.start()
+        self._checkpoint_thread = checkpoint_thread
+
+    def _checkpoint_worker(self) -> None:
+        while not self._checkpoint_stop.is_set():
+            if not self._checkpoint_event.wait(0.5):
+                continue
+            # Clear the request under the same lifecycle lock used by the
+            # signaler.  A signal that arrives during checkpoint processing is
+            # not cleared afterward, so it remains a distinct retry request.
+            with self._lifecycle_lock:
+                self._checkpoint_event.clear()
+                if self._lifecycle_state != "OPEN":
+                    return
+            if self._checkpoint_stop.is_set():
+                return
+            self._stats["wal_checkpoint_requested"] += 1
+            succeeded = False
+            for attempt in range(_WAL_CHECKPOINT_MAX_RETRIES):
+                if self._checkpoint_stop.is_set():
+                    return
+                try:
+                    # checkpoint() takes _write_gate itself; no backend lock is
+                    # held across this call, preserving the existing lock order.
+                    if not self.checkpoint(preserve_incomplete_groups=True):
+                        break
+                    self._stats["wal_checkpoint_successes"] += 1
+                    self._stats["wal_active_bytes"] = max(
+                        0, self._wal_offset - SEGMENT_HEADER_SIZE
+                    )
+                    succeeded = True
+                    break
+                except Exception as exc:
+                    self._stats["wal_checkpoint_failures"] += 1
+                    self._stats["wal_checkpoint_last_error"] = repr(exc)
+                    if attempt + 1 < _WAL_CHECKPOINT_MAX_RETRIES:
+                        self._stats["wal_checkpoint_retries"] += 1
+                        if self._checkpoint_stop.wait(_WAL_CHECKPOINT_RETRY_DELAY):
+                            return
+            # Do not clear here: a signal received while the attempt was in
+            # flight is a newer request and must survive this failure/decline.
+
+    def _signal_wal_checkpoint_if_needed(self) -> None:
+        """Signal only after the writer's _lock-protected boundary completes."""
+        if self._wal_checkpoint_bytes <= 0:
+            return
+        if self._wal_offset - SEGMENT_HEADER_SIZE < self._wal_checkpoint_bytes:
+            return
+        with self._lifecycle_lock:
+            if self._lifecycle_state == "OPEN":
+                self._checkpoint_event.set()
 
     @staticmethod
     def _new_nonzero_epoch() -> bytes:
@@ -817,6 +951,9 @@ class ExtentFileBackend(HiCacheStorage):
                 getattr(self, "_wal_recovered_next_seq", 1),
             )
             self._wal_recovered_next_seq = self._wal_next_seq
+            self._stats["wal_active_bytes"] = max(
+                0, self._wal_offset - SEGMENT_HEADER_SIZE
+            )
             max_batch_id = 0
             for frame in frames:
                 if frame.frame_type == FRAME_SET:
@@ -843,6 +980,9 @@ class ExtentFileBackend(HiCacheStorage):
             written += count
         self._wal_offset += written
         self._wal_next_seq += 1
+        self._stats["wal_active_bytes"] = max(
+            0, self._wal_offset - SEGMENT_HEADER_SIZE
+        )
 
     def _sync_wal(self) -> None:
         if self._wal_fd is None:
@@ -933,12 +1073,16 @@ class ExtentFileBackend(HiCacheStorage):
                         (key, member[2]) for key in member[0]
                     )
             self._abort_group_locked(group_id)
+            self._signal_wal_checkpoint_if_needed()
             return True
 
     def abort_group(self, group_id) -> bool:
         group_id = self._validate_group_id(group_id)
         with self._write_gate:
-            return self._abort_group_locked(group_id)
+            aborted = self._abort_group_locked(group_id)
+            if aborted:
+                self._signal_wal_checkpoint_if_needed()
+            return aborted
 
     def _abort_all_groups_locked(self) -> None:
         self._staged_groups.clear()
@@ -1222,7 +1366,9 @@ class ExtentFileBackend(HiCacheStorage):
         extra_info: Optional[HiCacheStorageExtraInfo] = None,
     ) -> List[bool]:
         with self._write_gate:
-            return self._batch_set_v1_locked(keys, host_indices, extra_info)
+            result = self._batch_set_v1_locked(keys, host_indices, extra_info)
+            self._signal_wal_checkpoint_if_needed()
+            return result
 
     def _batch_set_v1_locked(
         self,
@@ -1799,9 +1945,11 @@ class ExtentFileBackend(HiCacheStorage):
         component=None,
     ) -> bool:
         with self._write_gate:
-            return self._write_pages_locked(
+            result = self._write_pages_locked(
                 keys, values, trace_context, group_id=group_id, component=component
             )
+            self._signal_wal_checkpoint_if_needed()
+            return result
 
     def _write_pages_locked(
         self,
@@ -1979,7 +2127,7 @@ class ExtentFileBackend(HiCacheStorage):
             recency_order=[entry_indexes[key] for key in allocator._recency if key in entry_indexes],
         )
 
-    def checkpoint(self) -> bool:
+    def checkpoint(self, preserve_incomplete_groups: bool = False) -> bool:
         """Publish a checkpoint, rotate WAL, then unlink covered segments.
 
         The write gate remains held for the full manifest-publish,
@@ -1987,6 +2135,8 @@ class ExtentFileBackend(HiCacheStorage):
         append to the old generation after the published floor.
         """
         with self._write_gate:
+            if preserve_incomplete_groups and self._staged_groups:
+                return False
             self._abort_all_groups_locked()
             with self._lock:
                 old_generation = self._wal_generation
@@ -2008,6 +2158,9 @@ class ExtentFileBackend(HiCacheStorage):
             self._wal_generation = new_generation
             self._wal_offset = SEGMENT_HEADER_SIZE
             self._wal_next_seq = state.checkpoint_lsn + 1
+            # _open_active_wal() max()es against this watermark; a stale value
+            # renumbers the new segment below the published checkpoint lsn.
+            self._wal_recovered_next_seq = self._wal_next_seq
             self._open_active_wal()
 
             # Recovery intentionally does not enumerate this directory.  The
@@ -2049,22 +2202,32 @@ class ExtentFileBackend(HiCacheStorage):
             return dict(self._stats)
 
     def close(self) -> None:
-        if self._closed:
-            return
-        try:
-            if self._constructor_complete and os.path.isdir(self._storage_dir):
-                with self._write_gate:
-                    self._abort_all_groups_locked()
-                self.checkpoint()
-            if self._wal_fd is not None:
-                os.close(self._wal_fd)
-                self._wal_fd = None
-            if self._fd is not None:
-                os.close(self._fd)
-                self._fd = None
-        finally:
-            self._closed = True
-            self._release_backend_meta_lock()
+        with self._close_lock:
+            if self._closed:
+                return
+            try:
+                with self._lifecycle_lock:
+                    if self._lifecycle_state == "OPEN":
+                        self._lifecycle_state = "CLOSING"
+                self._checkpoint_stop.set()
+                self._checkpoint_event.set()
+                checkpoint_thread = self._checkpoint_thread
+                if checkpoint_thread is not None:
+                    checkpoint_thread.join()
+                    self._checkpoint_thread = None
+                if self._constructor_complete and os.path.isdir(self._storage_dir):
+                    with self._write_gate:
+                        self._abort_all_groups_locked()
+                    self.checkpoint()
+                if self._wal_fd is not None:
+                    os.close(self._wal_fd)
+                    self._wal_fd = None
+                if self._fd is not None:
+                    os.close(self._fd)
+                    self._fd = None
+            finally:
+                self._closed = True
+                self._release_backend_meta_lock()
 
     # ---- raw fd IO (explicit offsets, thread-safe on a shared fd) ----
 
