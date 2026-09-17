@@ -79,6 +79,8 @@ export CUDA_VISIBLE_DEVICES=GPU-2e3ed202-3655-d919-0a64-259209bc6587
 export SGLANG_HICACHE_EXTENT_BACKEND_STORAGE_DIR="$L3_DIR"
 export SGLANG_HICACHE_EXTENT_BACKEND_MAX_SIZE="$L3_MAX"
 export SGLANG_HICACHE_EXTENT_BACKEND_MIN_FREE_SPACE=50Gi
+# --- native (GIL-free) L3 write path: explicit, never inherited ---
+export SGLANG_L3_NATIVE_WRITE_PATH=1
 
 echo "=== $IDENTITY launcher ==="
 echo "tree=$TREE"
@@ -133,6 +135,10 @@ fi
 # ---------------------------------------------------------------------------
 # Serving argv.  The dry-run prints exactly this array; the real path execs
 # exactly this array, so the dry-run cannot diverge from the launch.
+# Values pinned from the MEASURED 128K/C8 profile in
+# 3090-dev/deploy/conf/provider.env (CONTEXT_LENGTH / MAX_RUNNING_REQUESTS /
+# MAX_TOTAL_TOKENS / MAX_MAMBA_CACHE_SIZE); every value is measured on this
+# box/GPU/model, not derived.
 # ---------------------------------------------------------------------------
 ARGS=(
   -m sglang.launch_server
@@ -140,7 +146,10 @@ ARGS=(
   --host 127.0.0.1 --port "$PORT"
   --tp-size 1
   --mem-fraction-static 0.92
-  --max-total-tokens 65536
+  --max-total-tokens 524288
+  --context-length 131072
+  --max-running-requests 8
+  --max-mamba-cache-size 48
   --kv-cache-dtype fp8_e4m3
   --attention-backend flashinfer
   --linear-attn-prefill-backend triton

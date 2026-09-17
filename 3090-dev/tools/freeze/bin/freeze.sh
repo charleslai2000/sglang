@@ -33,10 +33,11 @@ set -euo pipefail
 
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TOOL_DIR="$(cd "$SELF_DIR/.." && pwd)"
-MT="$TOOL_DIR/lib/manifest_tool.py"
-MH="$TOOL_DIR/lib/mode_histogram.py"
-L3LIB="$TOOL_DIR/lib/l3_namespace.py"
-REPOINT="$TOOL_DIR/lib/repoint_telemetry.py"
+MT="$TOOL_DIR/pysrc/manifest_tool.py"
+MH="$TOOL_DIR/pysrc/mode_histogram.py"
+L3LIB="$TOOL_DIR/pysrc/l3_namespace.py"
+REPOINT="$TOOL_DIR/pysrc/repoint_telemetry.py"
+RUSTID="$TOOL_DIR/pysrc/rust_identity.py"
 REPIN="$TOOL_DIR/bin/launcher-repin.sh"
 
 MODE=""
@@ -52,6 +53,12 @@ ALLOWED_SOURCE_CHANGES=(
   "src/python/sglang/srt/mem_cache/unified_cache/unified_tree_core.py"
   "src/test/registered/unit/mem_cache/test_l3_head_refresh_f1_unit.py"
 )
+# An explicit, committed allowlist file may instead enumerate every approved
+# added/changed path (one repo-relative path per line, '#' comments allowed).
+# This is the auditable form: the approved delta is a reviewed artifact rather
+# than a hardcoded pair of literals.
+ALLOWED_SOURCE_CHANGES_FILE=""
+SOURCE_COMMIT_ARG=""
 TEMPLATE_TREE="/opt/sglang/local-prod-v1.1-candidate"
 TEMPLATE_IDENTITY="LOCAL-PROD-v1.1"
 WORK_DIR=""
@@ -76,6 +83,8 @@ while [ $# -gt 0 ]; do
     --expect-src-manifest) EXPECT_SRC_MANIFEST="${2:?}"; shift 2 ;;
     --baseline-tree) BASELINE_TREE="${2:?}"; shift 2 ;;
     --allowed-source-change) ALLOWED_SOURCE_CHANGES+=("${2:?}"); shift 2 ;;
+    --allowed-source-changes-file) ALLOWED_SOURCE_CHANGES_FILE="${2:?}"; shift 2 ;;
+    --source-commit) SOURCE_COMMIT_ARG="${2:?}"; shift 2 ;;
     --template-tree) TEMPLATE_TREE="${2:?}"; shift 2 ;;
     --template-identity) TEMPLATE_IDENTITY="${2:?}"; shift 2 ;;
     --work-dir) WORK_DIR="${2:?}"; shift 2 ;;
@@ -112,9 +121,16 @@ case "$DEST" in
   /|/opt|/data|/data/*|"$SRC"|"$SRC"/*)
     die "refusing destination $DEST (protected or identical to source)" ;;
   /opt/*)
-    if [ "$ALLOW_PRODUCTION_DEST" != "1" ] || [ "$DEST" != "/opt/sglang/local-prod-v1.1.2-candidate" ]; then
-      die "refusing production destination $DEST; exact future target requires explicit --allow-production-dest";
-    fi ;;
+    # Exact-path allowlist.  A wildcard /opt destination is never permitted;
+    # each production tree must be named here explicitly.
+    case "$DEST" in
+      /opt/sglang/local-prod-v1.1.2-candidate|/opt/sglang/local-prod-v1.2-candidate)
+        if [ "$ALLOW_PRODUCTION_DEST" != "1" ]; then
+          die "refusing production destination $DEST; requires explicit --allow-production-dest";
+        fi ;;
+      *)
+        die "refusing production destination $DEST; not in the exact-path allowlist (exact future target requires an explicit entry + --allow-production-dest)" ;;
+    esac ;;
 esac
 case "$SRC" in
   /opt/sglang/*) ;;
@@ -176,9 +192,9 @@ if [ "$MODE" = "build" ]; then
   phase "install identity tools"
   mkdir -p "$DEST/tools" "$DEST/launcher"
   chmod u+w "$DEST/tools" "$DEST/launcher" 2>/dev/null || true
-  install -m 0644 "$TOOL_DIR/lib/preflight_identity.py" "$DEST/tools/preflight_identity.py"
+  install -m 0644 "$TOOL_DIR/pysrc/preflight_identity.py" "$DEST/tools/preflight_identity.py"
   install -m 0644 "$L3LIB" "$DEST/tools/l3_namespace.py"
-  diff -q "$TOOL_DIR/lib/preflight_identity.py" "$DEST/tools/preflight_identity.py" >/dev/null
+  diff -q "$TOOL_DIR/pysrc/preflight_identity.py" "$DEST/tools/preflight_identity.py" >/dev/null
   diff -q "$L3LIB" "$DEST/tools/l3_namespace.py" >/dev/null
   ok "tools/preflight_identity.py $(sha256sum "$DEST/tools/preflight_identity.py" | cut -d' ' -f1)"
   ok "tools/l3_namespace.py $(sha256sum "$DEST/tools/l3_namespace.py" | cut -d' ' -f1)"
@@ -292,6 +308,14 @@ fi
 
 if [ "$MODE" = "build" ]; then
   phase "approved source scope vs baseline"
+  if [ -n "$ALLOWED_SOURCE_CHANGES_FILE" ]; then
+    [ -f "$ALLOWED_SOURCE_CHANGES_FILE" ] || die "allowlist file not found: $ALLOWED_SOURCE_CHANGES_FILE"
+    while IFS= read -r line; do
+      line="${line%%#*}"; line="$(printf '%s' "$line" | tr -d '[:space:]')"
+      [ -n "$line" ] && ALLOWED_SOURCE_CHANGES+=("$line")
+    done <"$ALLOWED_SOURCE_CHANGES_FILE"
+    ok "allowlist file: $ALLOWED_SOURCE_CHANGES_FILE ($(grep -cvE '^\s*(#|$)' "$ALLOWED_SOURCE_CHANGES_FILE") entries)"
+  fi
   SCOPE_ALLOW="$(IFS=,; printf '%s' "${ALLOWED_SOURCE_CHANGES[*]}")"
   set +e
   python3 "$MT" compare --source "$BASELINE_TREE/manifest/TREE-SHA256.txt" \
@@ -307,7 +331,28 @@ added = {p.lstrip("./") for p in report.get("added", [])}
 changed = {p.lstrip("./") for p in (c["path"] for c in report.get("changed_allowed", []))}
 unapproved_added = sorted(added - allow)
 unapproved_changed = sorted(changed - allow)
-gguf = sorted(p for p in added | changed if "gguf" in p.lower())
+# GGUF hard refusal, restored to its original fail-closed form: ANY added or
+# changed path containing "gguf" is refused.  GGUF is excluded from this
+# production identity unless separately proven inert.
+#
+# The smallest possible explicit exception is granted for a set of exact,
+# enumerated NON-RUNTIME artifacts: diagnostic probe scripts and their unit
+# test.  None of them is imported, exec'd, or otherwise reachable by the served
+# process; they cannot change serving behavior.  This is an exact-path list --
+# a new, renamed, moved or newly-added GGUF-related path is STILL a hard
+# refusal, and no `gguf*` prefix/glob is ever allowed.  Extending this list is a
+# reviewed production decision, not a tooling change.
+GGUF_INERT_EXACT_PATHS = {
+    "src/3090-dev/gates/gguf-probes/dump_meta.py",
+    "src/3090-dev/gates/gguf-probes/dump_shapes.py",
+    "src/3090-dev/gates/gguf-probes/gguf_dump.py",
+    "src/3090-dev/gates/gguf-probes/peek_small.py",
+    "src/3090-dev/gates/gguf-probes/qwen35_gguf_validate.py",
+    "src/3090-dev/gates/gguf-probes/type_hist.py",
+    "src/test/registered/unit/models/test_qwen3_5_gguf_norm_fold.py",
+}
+gguf_all = sorted(p for p in added | changed if "gguf" in p.lower())
+gguf = sorted(p for p in gguf_all if p not in GGUF_INERT_EXACT_PATHS)
 if unapproved_added or unapproved_changed or gguf:
     print(json.dumps({
         "unapproved_added": unapproved_added,
@@ -338,15 +383,47 @@ STREAM="$(python3 "$MT" src-stream --tree "$DEST")"
 STATS_JSON="$(python3 "$MT" stats --tree "$DEST" --manifest "$MANIFEST_DIR/TREE-SHA256.txt" --json)"
 LAUNCHER_SHA=""
 if [ -f "$DEST/launcher/launch.sh" ]; then LAUNCHER_SHA="$(sha256sum "$DEST/launcher/launch.sh" | cut -d' ' -f1)"; fi
+
+# --- the five required identity fields ------------------------------------
+# A frozen candidate must carry these so source identity, launcher bytes and
+# the *executed* native binary cannot diverge:
+#   SOURCE_COMMIT      commit the candidate was built from (never a timestamp)
+#   TREE_HASH          the tree manifest digest already computed above
+#   LAUNCHER_HASH      sha256 of the rendered launcher/launch.sh
+#   RUST_SOURCE_DIGEST loader fingerprint over src/rust, i.e. the cache key the
+#                      native .so binds to (null + reason if no toolchain)
+#   LOADED_SO_HASH     sha256 of the .so the loader selects; when the artifact
+#                      is not cached yet the resolved path is recorded and the
+#                      hash is null, to be verified at launch
+SOURCE_COMMIT=""
+if [ -n "$SOURCE_COMMIT_ARG" ]; then
+  SOURCE_COMMIT="$SOURCE_COMMIT_ARG"
+elif git -C "$SRC" rev-parse --verify HEAD >/dev/null 2>&1; then
+  SOURCE_COMMIT="$(git -C "$SRC" rev-parse HEAD)"
+else
+  echo "   WARNING: $SRC is not a git checkout and --source-commit was not given;" >&2
+  echo "            SOURCE_COMMIT will be null (a committed build cannot be proven)" >&2
+fi
+RUST_ID_JSON=""
+if [ -f "$RUSTID" ]; then
+  # Prefer the tree interpreter: the fingerprint binds the Python ABI.  Never
+  # fatal -- a missing toolchain yields null fields plus a machine-readable reason.
+  RUST_PY="python3"
+  if [ -x "$VENV/bin/python" ]; then RUST_PY="$VENV/bin/python"; fi
+  RUST_ID_JSON="$(env CUDA_VISIBLE_DEVICES=999 "$RUST_PY" "$RUSTID" \
+      --tree "$DEST" --json 2>/dev/null || true)"
+fi
+[ -n "$RUST_ID_JSON" ] || RUST_ID_JSON='{"rust_source_digest": null, "loaded_so_path": null, "loaded_so_sha256": null, "loaded_so_bytes": null, "loaded_so_present": false, "unavailable_reason": "rust_identity.py did not return a report"}'
 python3 - "$MANIFEST_DIR" "$DEST" "$IDENTITY" "$MAN_SHA" "$MAN_BYTES" "$STATS_JSON" "$STREAM" \
   "$LAUNCHER_SHA" "$SRC" "$MODE" "$VENV" "$TEMPLATE_IDENTITY" "$TOOL_DIR" \
-  "$WORK_DIR/fidelity.json" <<'PY' || { echo "identity emit failed" >&2; exit 9; }
+  "$WORK_DIR/fidelity.json" "$SOURCE_COMMIT" "$RUST_ID_JSON" <<'PY' || { echo "identity emit failed" >&2; exit 9; }
 import json, sys, hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 (man_dir, tree, identity, man_sha, man_bytes, stats_json, stream,
- launcher_sha, source_tree, mode, _venv, template_identity, tool_dir, fidelity_json) = sys.argv[1:15]
-sys.path.insert(0, str(Path(tool_dir) / "lib"))
+ launcher_sha, source_tree, mode, _venv, template_identity, tool_dir, fidelity_json,
+ source_commit, rust_id_json) = sys.argv[1:17]
+sys.path.insert(0, str(Path(tool_dir) / "pysrc"))
 import manifest_tool as mt
 
 tree_p = Path(tree)
@@ -386,6 +463,38 @@ identity_doc["launcher"] = {
 }
 identity_doc["tools_sha256"] = tools
 identity_doc["template_identity"] = template_identity
+# --- the five required identity fields (all computed, never invented) -----
+_rust_id = json.loads(rust_id_json)
+_rust_source_digest = _rust_id.get("rust_source_digest")
+_loaded_so_hash = _rust_id.get("loaded_so_sha256")
+identity_doc["SOURCE_COMMIT"] = source_commit or None
+identity_doc["TREE_HASH"] = man_sha
+identity_doc["LAUNCHER_HASH"] = launcher_sha or None
+identity_doc["RUST_SOURCE_DIGEST"] = _rust_source_digest
+identity_doc["LOADED_SO_HASH"] = {
+    "path": _rust_id.get("loaded_so_path"),
+    "sha256": _loaded_so_hash,
+    "bytes": _rust_id.get("loaded_so_bytes"),
+    "verified_at_freeze": bool(_loaded_so_hash),
+    "verified_at_launch": not bool(_loaded_so_hash),
+    "resolved_fingerprint": _rust_source_digest,
+    "source_digest": _rust_id.get("source_digest"),
+    "target_fingerprint": _rust_id.get("target_fingerprint"),
+    "cache_root": _rust_id.get("cache_root"),
+    "unavailable_reason": _rust_id.get("unavailable_reason"),
+    "note": (
+        "sha256 of the native extension the loader selects for this source; "
+        "when null the resolved path is recorded and the hash must be verified at launch"
+    ),
+}
+identity_doc["identity_fields"] = {
+    "SOURCE_COMMIT": ("git -C <src> rev-parse HEAD" if source_commit
+                      else "null: source tree is not a git checkout"),
+    "TREE_HASH": "sha256 of manifest/TREE-SHA256.txt (self-digest)",
+    "LAUNCHER_HASH": "sha256 of launcher/launch.sh",
+    "RUST_SOURCE_DIGEST": "loader fingerprint over src/rust (cache key the .so binds to)",
+    "LOADED_SO_HASH": "sha256 of the loader-selected native .so",
+}
 Path(man_dir, "identity.json").write_text(
     json.dumps(identity_doc, indent=2, sort_keys=True) + "\n"
 )
@@ -405,11 +514,23 @@ pins = {
     "tools_sha256": tools,
     "freeze_tool": "v1.1.2-freeze-20260917",
     "source_tree": source_tree,
+    "SOURCE_COMMIT": source_commit or None,
+    "TREE_HASH": man_sha,
+    "LAUNCHER_HASH": launcher_sha or None,
+    "RUST_SOURCE_DIGEST": _rust_source_digest,
+    "LOADED_SO_HASH": _loaded_so_hash,
+    "LOADED_SO_PATH": _rust_id.get("loaded_so_path"),
 }
 Path(man_dir, "identity-pins.json").write_text(
     json.dumps(pins, indent=2, sort_keys=True) + "\n"
 )
 print(f"identity.json + identity-pins.json written; launcher_sha256={launcher_sha}")
+print("identity fields: "
+      f"SOURCE_COMMIT={source_commit or 'null'} "
+      f"TREE_HASH={man_sha[:12]} "
+      f"LAUNCHER_HASH={(launcher_sha or 'null')[:12]} "
+      f"RUST_SOURCE_DIGEST={(_rust_source_digest or 'null')[:12]} "
+      f"LOADED_SO_HASH={(_loaded_so_hash or 'null')[:12]}")
 PY
 cp "$MANIFEST_DIR/identity-pins.json" "$TOOL_DIR/pins/$DEST_NAME-pins.json"
 ok "identity.json, identity-pins.json written (also pinned at pins/$DEST_NAME-pins.json)"

@@ -31,6 +31,37 @@ TREE_RE = re.compile(r"/opt/sglang/[A-Za-z0-9._\-]+")
 IDENT_RE = re.compile(r"LOCAL-PROD-[A-Za-z0-9._\-]+")
 STREAM_RE = re.compile(r'^EXPECTED_SRC_STREAM_SHA256="([0-9a-f]{64})"$', re.MULTILINE)
 
+# ---------------------------------------------------------------------------
+# Serving-profile firewall (check 4).
+#
+# The launcher's serving flags are compared against the v1.1 reference launcher
+# so that an accidental change (wrong context size, wrong backend, a silently
+# dropped flag, an injected flag) cannot reach a frozen production candidate.
+#
+# The v1.2 production profile is an INTENTIONAL, MEASURED delta from v1.1.  It
+# is declared here as the smallest possible explicit exception: the exact
+# production-required flag tokens, and the one reference value they replace.
+# Anything else -- any flag or value that is neither in the reference nor in
+# this exact set -- remains a hard failure.
+#
+# Source of truth for these values: the measured 128K / C8 profile served by
+# the frozen launcher (3090-dev/deploy/conf/provider.env, commit 116afefbbe):
+#   context-length 131072 | max-running-requests 8 | max-mamba-cache-size 48
+#   max-total-tokens 524288 (replaces the v1.1 value 65536)
+# This list is NOT a whitelist for convenience.  Growing it changes the frozen
+# serving profile and is a reviewed production decision, not a tooling tweak.
+PRODUCTION_REQUIRED_SERVING_TOKENS: frozenset[str] = frozenset({
+    "--context-length", "131072",
+    "--max-running-requests", "8",
+    "--max-mamba-cache-size", "48",
+})
+PRODUCTION_REQUIRED_SERVING_REPLACEMENTS: dict[str, str] = {
+    "65536": "524288",
+}
+# AUTH is OFF for this private LAN deployment: the launch path must NOT carry
+# an API key.  Its presence is a security regression, not a profile choice.
+FORBIDDEN_SERVING_TOKENS: frozenset[str] = frozenset({"--api-key"})
+
 
 def strip_code(text: str) -> list[str]:
     """Return code tokens with comments, backslash continuations and quotes
@@ -126,13 +157,46 @@ def audit(
         elif flags != ref_flags:
             only_new = [t for t in flags if t not in ref_flags]
             only_ref = [t for t in ref_flags if t not in flags]
-            failures.append(
-                "serving flags differ from reference: "
-                f"only-in-new={only_new} only-in-reference={only_ref}"
+            # Fail closed on everything except the exact declared production
+            # profile delta: an unapproved new token, an unapproved dropped
+            # reference token, or a declared replacement that did not appear
+            # are all failures.
+            sub = PRODUCTION_REQUIRED_SERVING_REPLACEMENTS
+            _allowed = set(PRODUCTION_REQUIRED_SERVING_TOKENS) | set(sub.values())
+            unapproved_new = [t for t in only_new if t not in _allowed]
+            unapproved_dropped = [t for t in only_ref if t not in sub]
+            missing_replacements = sorted(
+                new for old, new in sub.items()
+                if old in only_ref and new not in flags
             )
+            details["serving_delta_allowance"] = {
+                "declared_tokens": sorted(PRODUCTION_REQUIRED_SERVING_TOKENS),
+                "declared_replacements": sub,
+                "unapproved_new": unapproved_new,
+                "unapproved_dropped": unapproved_dropped,
+                "missing_replacements": missing_replacements,
+            }
+            if unapproved_new or unapproved_dropped or missing_replacements:
+                failures.append(
+                    "serving flags differ from reference beyond the exact "
+                    f"production profile delta: only-in-new={only_new} "
+                    f"only-in-reference={only_ref} "
+                    f"unapproved_new={unapproved_new} "
+                    f"unapproved_dropped={unapproved_dropped} "
+                    f"missing_replacements={missing_replacements}"
+                )
 
     # 5. ARGS array + dry-run guard ordering
     has_args = re.search(r"^ARGS=\($", text, re.MULTILINE) is not None
+
+    # 4b. AUTH is OFF for this deployment: no API-key token may appear in the
+    # serving flags.  A key on the launch path is a security regression.
+    forbidden = sorted(t for t in (flags or []) if t in FORBIDDEN_SERVING_TOKENS)
+    details["forbidden_serving_tokens_present"] = forbidden
+    if forbidden:
+        failures.append(
+            f"forbidden serving token(s) present (AUTH must be OFF): {forbidden}"
+        )
     guard_m = re.search(r'^if \[ "\$\{SGLANG_LAUNCH_DRY_RUN:-0\}" = "1" \]; then$', text, re.MULTILINE)
     mkdir_m = re.search(r"^mkdir -p ", text, re.MULTILINE)
     exec_m = re.search(r'^exec "\$PY" -u "\$\{ARGS\[@\]\}"$', text, re.MULTILINE)

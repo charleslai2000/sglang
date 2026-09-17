@@ -28,8 +28,8 @@ set -euo pipefail
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TOOL_DIR="$(cd "$SELF_DIR/.." && pwd)"
 TEMPLATE="$TOOL_DIR/templates/launch.sh.tmpl"
-AUDIT="$TOOL_DIR/lib/audit_launcher.py"
-L3LIB="$TOOL_DIR/lib/l3_namespace.py"
+AUDIT="$TOOL_DIR/pysrc/audit_launcher.py"
+L3LIB="$TOOL_DIR/pysrc/l3_namespace.py"
 
 TREE=""
 IDENTITY=""
