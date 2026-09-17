@@ -2176,6 +2176,25 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
             self.last_receive_tstamp = real_time()
             self.soft_watchdog.feed()
 
+    def _attach_hicache_telemetry(self, meta_info, recv_obj, i) -> None:
+        """Attach the bounded public HiCache telemetry object for one item.
+
+        The `FileRequestMetricsExporter` remains the sole writer: this only
+        publishes the already-built public object onto the response
+        ``meta_info`` so the exporter can persist it.  Shared by the token,
+        string and embedding output paths.
+        """
+        if not self.request_metrics_exporter_manager.exporter_enabled():
+            return
+        telemetry = getattr(recv_obj, "hicache_telemetry", None)
+        if not telemetry or i >= len(telemetry) or telemetry[i] is None:
+            return
+        from sglang.srt.observability.hicache_telemetry import (
+            public_hicache_telemetry,
+        )
+
+        meta_info["hicache_telemetry"] = public_hicache_telemetry(telemetry[i])
+
     async def _handle_batch_output(
         self,
         recv_obj: Union[
@@ -2273,18 +2292,7 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
                     meta_info["cached_tokens_details"] = recv_obj.cached_tokens_details[
                         i
                     ]
-                if (
-                    self.request_metrics_exporter_manager.exporter_enabled()
-                    and getattr(recv_obj, "hicache_telemetry", None)
-                    and recv_obj.hicache_telemetry[i] is not None
-                ):
-                    from sglang.srt.observability.hicache_telemetry import (
-                        public_hicache_telemetry,
-                    )
-
-                    meta_info["hicache_telemetry"] = public_hicache_telemetry(
-                        recv_obj.hicache_telemetry[i]
-                    )
+                self._attach_hicache_telemetry(meta_info, recv_obj, i)
                 if customized_info is not None:
                     self.update_request_meta_info(
                         meta_info,
@@ -2428,6 +2436,7 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
                     "embedding": recv_obj.embeddings[i],
                     "meta_info": meta_info,
                 }
+                self._attach_hicache_telemetry(meta_info, recv_obj, i)
                 # Unpack pooled hidden states (PHS).
                 # See paired sender logic in output_streamer.py.
                 #   Stacked:     len == 1 and N > 1 → unwrap the tensor

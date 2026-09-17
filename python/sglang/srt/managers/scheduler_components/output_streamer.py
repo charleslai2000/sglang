@@ -120,7 +120,7 @@ class SchedulerOutputStreamer:
 
     @staticmethod
     def get_hicache_telemetry(req: Req) -> Optional[dict]:
-        if not req.hicache_telemetry_enabled:
+        if not getattr(req, "hicache_telemetry_enabled", False):
             return None
         telemetry = build_and_observe_hicache_telemetry(
             req, getattr(req, "metrics_collector", None)
@@ -188,6 +188,7 @@ class SchedulerOutputStreamer:
             default_stream_interval=get_serving().stream_interval,
             default_force_stream_interval=DEFAULT_FORCE_STREAM_INTERVAL,
             get_cached_tokens_details=self.get_cached_tokens_details,
+            get_hicache_telemetry=self.get_hicache_telemetry,
             rust_server_mode=self.rust_server is not None,
             current_weight_version=get_serving().weight_version,
         )
@@ -341,6 +342,7 @@ class _GenerationStreamAccumulator:
     default_stream_interval: int
     default_force_stream_interval: int
     get_cached_tokens_details: Callable[[Req], Optional[CachedTokensDetails]]
+    get_hicache_telemetry: Callable[[Req], Optional[dict]] = lambda req: None
     current_weight_version: Optional[str]
     rids: list = field(default_factory=list)
     output_reqs: list[Req] = field(default_factory=list)
