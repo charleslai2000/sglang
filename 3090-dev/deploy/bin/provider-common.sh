@@ -27,24 +27,38 @@ API_KEY_FILE="${API_KEY_FILE_OVERRIDE:-$API_KEY_FILE_DEFAULT}"
 RUN_DIR="${RUN_DIR_OVERRIDE:-$RUN_DIR_DEFAULT}"
 
 PID_FILE="$RUN_DIR/provider.pid"
-PGID_FILE="$RUN_DIR/provider.pgid"
+SUP_PID_FILE="$RUN_DIR/provider.supervisor.pid"
 CONSOLE_LOG="$RUN_DIR/server.console.log"
+SUPERVISOR_LOG="$RUN_DIR/supervisor.log"
 STATE_FILE="$RUN_DIR/provider.state"
 VERIFY_DIR="$RUN_DIR/verify"
 
 TREE_ID="$_HERE/provider-tree-id.py"
 SYSPROBE="$_HERE/provider-sysprobe.py"
 SMOKE="$_HERE/provider-smoke.py"
-REDACTOR="$_HERE/provider-log-redactor.py"
+SUPERVISOR="$_HERE/provider-supervise.py"
 
 log()  { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 warn() { printf '[%s] WARN: %s\n' "$(date -u +%H:%M:%S)" "$*" >&2; }
 die()  { printf '[%s] FATAL: %s\n' "$(date -u +%H:%M:%S)" "$*" >&2; exit "${2:-1}"; }
 
 # ------------------------------------------------------------------ runtime dir
+# The run dir lives beside the other root-owned deploy trees, but its logs,
+# pid and metrics are produced by this (unprivileged) user, so it is created
+# once with sudo and then owned by the invoking user with mode 700.
 provider_prepare_run_dir() {
-  mkdir -p "$RUN_DIR" "$VERIFY_DIR"
-  chmod 700 "$RUN_DIR" 2>/dev/null || true
+  if [ ! -d "$RUN_DIR" ]; then
+    require_sudo
+    sudo -n mkdir -p "$RUN_DIR"
+    sudo -n chown "$(id -u):$(id -g)" "$RUN_DIR"
+    sudo -n chmod 700 "$RUN_DIR"
+  fi
+  if [ ! -w "$RUN_DIR" ]; then
+    require_sudo
+    sudo -n chown -R "$(id -u):$(id -g)" "$RUN_DIR"
+    sudo -n chmod 700 "$RUN_DIR"
+  fi
+  mkdir -p "$VERIFY_DIR" "$RUN_DIR/metrics"
 }
 
 # ------------------------------------------------------------------ sudo
@@ -161,10 +175,18 @@ gpu_pid_uuid() {
 
 provider_gpu_ordinal() {
   local out rc=0
-  out="$(CUDA_VISIBLE_DEVICES=999 python3 "$SYSPROBE" gpu-ordinal "$GPU_UUID" 2>&1)" || rc=$?
+  # Run through the venv interpreter: it is the one that will run the server,
+  # and it is the one with torch and pynvml available.  CUDA must NOT be
+  # masked here -- the probe has to enumerate the real device list to find
+  # the ordinal for this UUID.
+  out="$(env -u CUDA_VISIBLE_DEVICES "$VENV_PY" "$SYSPROBE" gpu-ordinal "$GPU_UUID" 2>&1)" || rc=$?
   [ "$rc" -eq 0 ] || die "cannot resolve the CUDA ordinal for $GPU_UUID: $out"
-  [ -n "$out" ] || die "empty CUDA ordinal for $GPU_UUID"
-  printf '%s' "$out"
+  # The probe may interleave a diagnostic note; the ordinal is the last line.
+  local ordinal; ordinal="$(printf '%s\n' "$out" | tail -1)"
+  case "$ordinal" in
+    ''|*[!0-9]*) die "CUDA ordinal probe returned a non-numeric result: $out" ;;
+  esac
+  printf '%s' "$ordinal"
 }
 
 # ------------------------------------------------------------------ port
@@ -232,33 +254,10 @@ pid_is_our_server() {
   return 0
 }
 
-provider_pid_alive() {
-  local pid=""
-  [ -f "$PID_FILE" ] && pid="$(cat "$PID_FILE" 2>/dev/null || true)"
-  [ -n "$pid" ] && pid_alive "$pid"
-}
-
 # ------------------------------------------------------------------ HTTP
 provider_health_code() {
   curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
     "http://$BIND_HOST:$BIND_PORT/health" 2>/dev/null || echo 000
-}
-
-# Authenticated request; the bearer token travels through a pipe-fed curl
-# config, never as an argv element.
-provider_curl() {
-  local method="$1" path="$2" body="${3:-}" key
-  key="$(provider_read_api_key)" || die "cannot read the API key file"
-  local cfg
-  cfg="$(printf 'url = "http://%s:%s%s"\nheader = "Authorization: Bearer %s"\n' \
-         "$BIND_HOST" "$BIND_PORT" "$path" "$key")"
-  if [ -n "$body" ]; then
-    printf '%s' "$body" | curl -sS --max-time "$SMOKE_TIMEOUT_S" -X "$method" \
-      --config <(printf '%s\nheader = "Content-Type: application/json"\n' "$cfg") -d @-
-  else
-    curl -sS --max-time "$SMOKE_TIMEOUT_S" -X "$method" \
-      --config <(printf '%s\n' "$cfg")
-  fi
 }
 
 # ------------------------------------------------------------------ state
@@ -310,14 +309,32 @@ provider_build_argv() {
 }
 
 # ------------------------------------------------------------------ launch
-# Launch detached, with the API key redacted out of the console log.
-# The caller must hold the canonical lock; neither the server nor the log
-# filter may inherit it.
+# Launch detached under the supervisor, which owns the server and writes its
+# console log through the API-key redactor.
+#
+# The API key is injected by the supervisor, NOT built into PROVIDER_ARGV, so
+# it never appears in this launcher's own argv.
+#
+# The caller must hold the canonical lock; neither the supervisor nor the
+# server may inherit it (fd 9 is closed for both).
 provider_start_server() {
   local ordinal="$1"
   provider_prepare_run_dir
   mkdir -p "$VERIFY_DIR/metrics"
-  rm -f "$PID_FILE" "$PGID_FILE"
+  rm -f "$PID_FILE" "$SUP_PID_FILE"
+
+  # Rotate the console log.  The startup gates scan this file for evidence
+  # (fp8 KV allocation, CUDA-graph capture), so an appended log from a
+  # previous run would let a broken start "pass" on stale evidence.  Each run
+  # gets a fresh file; prior logs are kept for forensics.
+  if [ -s "$CONSOLE_LOG" ]; then
+    local stamp; stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    mv -f "$CONSOLE_LOG" "$RUN_DIR/server.console.$stamp.log"
+    log "archived the previous console log as server.console.$stamp.log"
+  fi
+  : >"$CONSOLE_LOG"
+  chmod 600 "$CONSOLE_LOG"
+  rm -f "$SUPERVISOR_LOG"
 
   (
     cd /tmp   # avoid cwd shadowing `import sglang`
@@ -333,15 +350,22 @@ provider_start_server() {
     local v
     for v in $L3_FORBIDDEN_ENV; do unset "$v" || true; done
 
-    # `9>&-` on the server, plus `exec 9>&-` inside the log filter, keep the
-    # canonical lock out of both long-lived processes.
-    setsid "$VENV_PY" -P -u "${PROVIDER_ARGV[@]}" \
-      9>&- \
-      > >(exec 9>&-; exec python3 "$REDACTOR" "$CONSOLE_LOG" "$API_KEY_FILE") 2>&1 \
-      </dev/null &
-    echo "$!" >"$PID_FILE"
-    ps -o pgid= -p "$!" 2>/dev/null | tr -d ' ' >"$PGID_FILE" || true
+    # setsid + fully detached stdio: the supervisor outlives this launcher and
+    # never holds its stdout, so provider-start output can be piped.
+    setsid python3 "$SUPERVISOR" \
+      --log "$CONSOLE_LOG" \
+      --key-file "$API_KEY_FILE" \
+      --pid-file "$PID_FILE" \
+      --inject-api-key \
+      -- "$VENV_PY" -P -u "${PROVIDER_ARGV[@]}" \
+      9>&- >>"$SUPERVISOR_LOG" 2>&1 </dev/null &
+    echo "$!" >"$SUP_PID_FILE"
   )
+
+  # Wait for the supervisor to record the server pid.
+  local deadline=$(( SECONDS + 60 ))
+  while [ ! -s "$PID_FILE" ] && [ "$SECONDS" -lt "$deadline" ]; do sleep 1; done
+  [ -s "$PID_FILE" ] || die "the supervisor did not record a server pid; see $SUPERVISOR_LOG"
   log "launched pid=$(cat "$PID_FILE") on $BIND_HOST:$BIND_PORT (CUDA ordinal $ordinal)"
 }
 
@@ -386,7 +410,27 @@ provider_stop_server() {
     log "GPU released: no material compute holder and no provider process"
   fi
 
-  rm -f "$PID_FILE" "$PGID_FILE"
+  # Stop the supervisor too: it holds the server's stdout pipe and would
+  # otherwise linger after the server exits.
+  local sup=""
+  [ -f "$SUP_PID_FILE" ] && sup="$(cat "$SUP_PID_FILE" 2>/dev/null || true)"
+  if [ -n "$sup" ] && pid_alive "$sup" && pid_matches_supervisor "$sup"; then
+    log "stopping supervisor pid=$sup"
+    kill -TERM "$sup" 2>/dev/null || true
+  fi
+
+  rm -f "$PID_FILE" "$SUP_PID_FILE"
   state_write "free" "-" "down" "stopped"
   return "$rc"
+}
+
+# The supervisor is identified by its own script path plus our run dir, so we
+# never signal an unrelated python process.
+pid_matches_supervisor() {
+  local pid="$1" cl
+  pid_alive "$pid" || return 1
+  cl="$(pid_cmdline "$pid")"
+  case "$cl" in *provider-supervise.py*) ;; *) return 1 ;; esac
+  case "$cl" in *"$RUN_DIR"*) ;; *) return 1 ;; esac
+  return 0
 }
