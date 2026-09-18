@@ -1,0 +1,8 @@
+== launcher-repin: tree=/tmp/opencode/m2-a2-repin-repro-20260918T211829Z/tree identity=LOCAL-PROD-v1.2.1-M2 mode=write ==
+   src_stream_sha256=cab2717fb7c09a9491a275517695f41999342d08542def85fdfb2b647e302900
+   rendered -> /tmp/opencode/m2-a2-repin-repro-20260918T211829Z/scratch/launch.sh.rendered
+   bash -n: OK
+LAUNCHER-AUDIT PASS: /tmp/opencode/m2-a2-repin-repro-20260918T211829Z/scratch/launch.sh.rendered
+   launcher_sha256=675bb1c0f80d229e5b9dbcbc7a439c2c409988b36a14f46c5b0cc32975035ee9
+dry-run negative test FAILED: shared run id should exit 4, got 1
+/tmp/opencode/m2-a2-repin-repro-20260918T211829Z/scratch/launch.sh.rendered: line 36: SGLANG_L3_MODE: FATAL: SGLANG_L3_MODE must be set explicitly to disabled for M2 (no default)

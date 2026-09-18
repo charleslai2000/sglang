@@ -4,7 +4,10 @@ import inspect
 import json
 import time
 import unittest
+from collections import defaultdict
 from types import SimpleNamespace
+
+import torch
 
 from sglang.srt.managers.scheduler import Scheduler
 from sglang.srt.managers.scheduler_components.hicache_restore import (
@@ -17,7 +20,14 @@ from sglang.srt.managers.scheduler_components.hicache_restore import (
     RestoreWaitReason,
 )
 from sglang.srt.mem_cache.hicache_storage import PoolHitPolicy, PoolName, PoolTransfer
-from sglang.srt.mem_cache.unified_radix_cache import _storage_hit_crop_is_safe
+from sglang.srt.mem_cache.unified_cache.component_type import ComponentType
+from sglang.srt.mem_cache.unified_cache.components.mamba_component import (
+    MambaComponent,
+)
+from sglang.srt.mem_cache.unified_radix_cache import (
+    UnifiedRadixCache,
+    _storage_hit_crop_is_safe,
+)
 from sglang.srt.mem_cache.telemetry_context import (
     DEPLOYMENT_MANIFEST_DIGEST,
     SOURCE_HEAD,
@@ -470,6 +480,180 @@ class HostAllocWaitEligibilityTests(unittest.TestCase):
             evict_kv=42942,
         )
         self.assertEqual(scheduler._select_host_alloc_waiter(), "repark")
+
+
+class _NoopHostPoolGroup:
+    """``alloc`` always fails after invoking exactly one reclaim callback.
+
+    Mirrors ``HostPoolGroup.alloc`` (pool_host/group.py:108-127): try the
+    alloc, invoke ``reclaim(need_size)`` on failure, retry.  Here every attempt
+    fails (an exhausted/pinned pool), which is precisely the production
+    ``prepare_prefetch`` alloc-failure path.
+    """
+
+    def __init__(self, host_pool_group):
+        self._group = host_pool_group
+
+    def alloc(self, need_size, *, pool=None, reclaim=None, writeback=False):
+        if reclaim is not None:
+            reclaim(need_size)
+        return None
+
+    def __getattr__(self, name):
+        return getattr(self._group, name)
+
+
+class HostAllocAuxSlotUnitTests(unittest.TestCase):
+    """The failing aux pool's WAIT_CAPACITY requirement must be a HOST SLOT count.
+
+    Discriminators (each added test fails under the pre-fix behaviour):
+
+    * token-vs-slot: a large prefix (``len(prefetch_key)``) must not become the
+      requirement -- the comparison is against ``free + evictable`` slots.
+    * forced 0: the failing pool must never carry a 0 requirement, because
+      ``Scheduler._host_alloc_wait_eligible`` skips ``required <= 0`` and the
+      constraint would be deleted instead of expressed.
+
+    Both are exercised through the real producer seam
+    (``prepare_prefetch`` -> ``HostPoolGroup.alloc`` -> ``evict_host``) rather
+    than by comparing literal dicts to themselves.
+    """
+
+    def _prepare_failing_mamba_prefetch(self, cache, prefetch_tokens=64):
+        """Drive the REAL ``MambaComponent.prepare_prefetch`` to alloc failure.
+
+        The component is instantiated without ``__init__`` (which requires a
+        ``HybridReqToTokenPool``); ``prepare_prefetch`` only touches
+        ``self.cache.host_pool_group.alloc`` and the injected reclaim callback,
+        so this exercises the unmodified production method and the unmodified
+        ``evict_host`` capture together.
+        """
+        component = MambaComponent.__new__(MambaComponent)
+        component.component_type = ComponentType.MAMBA
+        component.cache = cache
+        cache.components = {ComponentType.MAMBA: component}
+        return component.prepare_prefetch(0, prefetch_tokens=prefetch_tokens)
+
+    def _cache_with_mamba_seam(self):
+        cache = UnifiedRadixCache.__new__(UnifiedRadixCache)
+        cache._host_alloc_reclaim_demand = {}
+        cache._host_alloc_evict_depth = {}
+        cache.host_memory_mode = "cache"
+        cache.host_pool_group = _NoopHostPoolGroup(object())
+        cache.tree_core = SimpleNamespace(
+            drive_host_eviction=lambda *a, **k: SimpleNamespace(
+                tracker=defaultdict(int), device_frees={}, host_frees={}
+            )
+        )
+        cache.components = {}
+        return cache
+
+    def _scheduler(self, cache):
+        scheduler = Scheduler.__new__(Scheduler)
+        scheduler.tree_cache = cache
+        scheduler.waiting_queue = []
+        scheduler.server_args = SimpleNamespace(hicache_restore_wait_timeout_s=60.0)
+        scheduler._host_alloc_wake_arbiter = HostAllocWakeArbiter()
+        return scheduler
+
+    def test_failing_pool_requirement_is_real_slot_demand_not_prefix_tokens(self):
+        cache = self._cache_with_mamba_seam()
+
+        # A 64-token prefix.  The old fallback put len(prefetch_key) == 64 into
+        # the requirement; the real allocator asked for exactly 1 host slot.
+        prep = self._prepare_failing_mamba_prefetch(cache, prefetch_tokens=64)
+        self.assertTrue(prep.alloc_failed)
+
+        required_aux_units = cache._host_alloc_required_aux_units(
+            {}, failed_component=ComponentType.MAMBA
+        )
+        self.assertEqual(required_aux_units, {"mamba": 1})
+
+        # Consumer semantics with one free mamba slot.  The real demand (1) is
+        # satisfied; the token quantity (64) would not be.  This is the
+        # token-vs-slot discriminator.
+        req = _request(
+            "slot-unit",
+            _snapshot(free_mamba=0),
+            blocked=("mamba",),
+            aux=dict(required_aux_units),
+        )
+        scheduler = self._scheduler(_SnapshotCache(_snapshot(free_mamba=1)))
+        self.assertTrue(scheduler._host_alloc_wait_eligible(req))
+
+        token_req = _request(
+            "token-unit",
+            _snapshot(free_mamba=0),
+            blocked=("mamba",),
+            aux={"mamba": 64},
+        )
+        self.assertFalse(scheduler._host_alloc_wait_eligible(token_req))
+
+    def test_failing_pool_requirement_is_never_zero(self):
+        cache = self._cache_with_mamba_seam()
+        prep = self._prepare_failing_mamba_prefetch(cache, prefetch_tokens=64)
+        self.assertTrue(prep.alloc_failed)
+
+        required_aux_units = cache._host_alloc_required_aux_units(
+            {}, failed_component=ComponentType.MAMBA
+        )
+        # The 0 fallback wrote 0 here; a 0 requirement is skipped by
+        # _host_alloc_wait_eligible ("not a real constraint").
+        self.assertGreater(required_aux_units["mamba"], 0)
+
+        # Empty mamba pool: the real constraint must block.  A forced 0 would
+        # have skipped it and returned True (a false wake).
+        req = _request(
+            "no-false-wake",
+            _snapshot(free_mamba=0),
+            blocked=("mamba",),
+            aux=dict(required_aux_units),
+        )
+        scheduler = self._scheduler(_SnapshotCache(_snapshot(free_mamba=0)))
+        self.assertFalse(scheduler._host_alloc_wait_eligible(req))
+
+    def test_evict_seam_captures_larger_real_demand_verbatim(self):
+        # A component whose reclaim asks for a multi-slot window must report
+        # that real demand, not 1 and not a token count.
+        cache = self._cache_with_mamba_seam()
+        self._prepare_failing_mamba_prefetch(cache)
+        cache.evict_host(8, ComponentType.MAMBA)
+        self.assertEqual(cache._host_alloc_aux_slot_demand(ComponentType.MAMBA), 8)
+        required_aux_units = cache._host_alloc_required_aux_units(
+            {}, failed_component=ComponentType.MAMBA
+        )
+        self.assertEqual(required_aux_units, {"mamba": 8})
+
+    def test_staged_aux_transfer_uses_slot_count(self):
+        # A successfully staged aux transfer contributes its real host_indices
+        # slot count, and the failing component is still written (never 0).
+        cache = self._cache_with_mamba_seam()
+        staged = PoolTransfer(name=PoolName.SWA, host_indices=torch.arange(3))
+        required_aux_units = cache._host_alloc_required_aux_units(
+            {ComponentType.SWA: [staged]}, failed_component=ComponentType.MAMBA
+        )
+        self.assertEqual(required_aux_units, {"swa": 3, "mamba": 1})
+
+    def test_storage_revoke_key_fallback_is_page_to_slot_converted(self):
+        # Site B (revoke_pending_prefetch) falls back to len(transfer.keys)
+        # when host_indices is gone.  Keys are PAGES; the consumer compares
+        # SLOTS.  With a 4-slot mamba host page, 5 keys must read as 20 slots
+        # (5 with the old bare-page fallback would understate the demand).
+        cache = self._cache_with_mamba_seam()
+        cache.host_pool_group = SimpleNamespace(
+            entry_map={
+                PoolName.MAMBA: SimpleNamespace(
+                    host_pool=SimpleNamespace(page_size=4)
+                )
+            }
+        )
+        keyed = PoolTransfer(name=PoolName.MAMBA, keys=["h0", "h1", "h2", "h3", "h4"])
+        self.assertEqual(
+            cache._host_alloc_aux_transfer_slot_demand(keyed), 5 * 4
+        )
+        # No indices and no keys still yields the real-slot floor, never 0.
+        empty = PoolTransfer(name=PoolName.MAMBA)
+        self.assertEqual(cache._host_alloc_aux_transfer_slot_demand(empty), 1)
 
 
 if __name__ == "__main__":

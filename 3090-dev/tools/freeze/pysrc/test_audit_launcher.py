@@ -18,6 +18,15 @@ Release-governance + owner ruling "Option A" (v1.2.2 production candidate):
     an unknown serving flag and an unapproved value drift still FAIL, and the
     v1.1 reference launcher does not pass the new firewall.
 
+Model-aware launcher profiles (M2-TOOLING-AUDIT-PROFILE-20260918 / design D3):
+  * the OLD (pre-change, no-HiCache) installed M2 launcher FAILS the M2 profile;
+  * a launcher with an injected `--hicache-storage-backend` FAILS closed;
+  * the NEW M2 launcher (D1 HiCache trio) PASSES the M2 profile, by explicit
+    `--profile` and by auto-selection from `--identity`;
+  * a changed `--hicache-size` value FAILS, an unknown profile FAILS, and the
+    installed M1 launcher PASSES the M1 profile (`0.0.0.0`, no
+    `--served-model-name`, extent L3 args preserved).
+
 The positive case renders the repository template exactly like
 ``bin/launcher-repin.sh`` renders it, into a scratch file under /tmp/opencode;
 the real audit functions are then called on real files.  Nothing under /opt is
@@ -44,6 +53,14 @@ V122_LAUNCHER = Path("/opt/sglang/local-prod-v1.2.2-candidate/launcher/launch.sh
 V122_TREE = "/opt/sglang/local-prod-v1.2.2-candidate"
 V122_IDENTITY = "LOCAL-PROD-v1.2.2"
 V122_STREAM = "0" * 64  # substitution value; the audit compares it only if asked
+
+# Model-aware M1/M2 installed launchers (design D3).  Read-only fixtures.
+M1_LAUNCHER = Path("/opt/sglang/local-prod-v1.2.1-candidate/launcher/launch.sh")
+M2_LAUNCHER = Path("/opt/sglang/local-prod-v1.2.1-candidate-M2/launcher/launch.sh")
+M1_TREE = "/opt/sglang/local-prod-v1.2.1-candidate"
+M1_IDENTITY = "LOCAL-PROD-v1.2.1"
+M2_TREE = "/opt/sglang/local-prod-v1.2.1-candidate-M2"
+M2_IDENTITY = "LOCAL-PROD-v1.2.1-M2"
 
 SCRATCH = Path("/tmp/opencode/v122-toolchain-audit-tests")
 
@@ -232,6 +249,138 @@ def main() -> int:
                       ref_launcher=REF_LAUNCHER)
     check("v11_reference_rejected_by_new_firewall", not rep_ref["ok"],
           "v1.1 reference unexpectedly passed the v1.2.x firewall")
+
+    # --- 9. model-aware LAUNCHER_PROFILES (design D3): M1 + M2 ------------
+    # The installed M2 launcher (read-only) is the pre-change ("old") fixture:
+    # it has no HiCache trio.  The NEW M2 text is derived deterministically by
+    # injecting the D1 trio, so this test does not depend on a later re-freeze.
+    if not M2_LAUNCHER.is_file():
+        print(f"SKIP M2 profile tests: installed launcher not present: "
+              f"{M2_LAUNCHER}", file=sys.stderr)
+    else:
+        trio_lines = (
+            "  --enable-hierarchical-cache\n"
+            "  --hicache-write-policy write_back\n"
+            "  --hicache-size 32\n"
+            "  --hicache-host-memory-mode cache\n"
+        )
+        old_m2 = M2_LAUNCHER.read_text()
+        for _line in trio_lines.splitlines(keepends=True):
+            old_m2 = old_m2.replace(_line, "")
+        new_m2 = old_m2.replace(
+            "  --mamba-ssm-dtype float32\n",
+            "  --mamba-ssm-dtype float32\n" + trio_lines, 1)
+
+        # (a) the OLD (pre-change) M2 launcher FAILS the audit.
+        #     NB: the raw text still contains the HiCache token inside the
+        #     GATE 3/3 forbidden-argv loop, so assert against the SERVING flags.
+        old_flags = strip_to_flags(old_m2)
+        check("m2_old_has_no_hicache_serving_flag",
+              "--enable-hierarchical-cache" not in old_flags
+              and "--hicache-size" not in old_flags,
+              f"old serving flags unexpectedly carry HiCache: {old_flags}")
+        old_p = SCRATCH / "m2_old.sh"
+        old_p.write_text(old_m2)
+        rep_old = A.audit(old_p, M2_TREE, M2_IDENTITY, expect_stream=None,
+                          ref_launcher=REF_LAUNCHER, profile=M2_IDENTITY)
+        check("m2_old_launcher_FAILS", not rep_old["ok"],
+              f"old M2 launcher unexpectedly passed: {rep_old['failures']}")
+        check("m2_old_reason_missing_required",
+              any("missing_required_tokens" in f for f in rep_old["failures"]),
+              f"no missing-required reason: {rep_old['failures']}")
+        check("m2_old_reason_unapproved_dropped",
+              any("unapproved_dropped" in f for f in rep_old["failures"]),
+              f"no unapproved-dropped reason: {rep_old['failures']}")
+
+        # (b) an injected --hicache-storage-backend FAILS closed.
+        injected_m2 = new_m2.replace(
+            "  --mamba-ssm-dtype float32\n",
+            "  --mamba-ssm-dtype float32\n  --hicache-storage-backend extent\n", 1)
+        check("m2_injection_applied",
+              "--hicache-storage-backend" in injected_m2)
+        inj_p = SCRATCH / "m2_injected_storage_backend.sh"
+        inj_p.write_text(injected_m2)
+        rep_inj = A.audit(inj_p, M2_TREE, M2_IDENTITY, expect_stream=None,
+                          ref_launcher=REF_LAUNCHER, profile=M2_IDENTITY)
+        check("m2_injected_storage_backend_FAILS", not rep_inj["ok"],
+              "injected --hicache-storage-backend unexpectedly passed")
+        check("m2_injected_storage_backend_reason_is_specific",
+              any("profile-forbidden" in f for f in rep_inj["failures"]),
+              f"no profile-forbidden reason: {rep_inj['failures']}")
+
+        # (c) the NEW M2 launcher PASSES (explicit profile and auto-select).
+        check("m2_new_has_hicache",
+              all(t in new_m2 for t in (
+                  "--enable-hierarchical-cache", "--hicache-write-policy",
+                  "write_back", "--hicache-size", "32")))
+        new_p = SCRATCH / "m2_new.sh"
+        new_p.write_text(new_m2)
+        rep_new = A.audit(new_p, M2_TREE, M2_IDENTITY, expect_stream=None,
+                          ref_launcher=REF_LAUNCHER, profile=M2_IDENTITY)
+        check("m2_new_launcher_PASSES", rep_new["ok"],
+              f"failures={rep_new['failures']}")
+        check("m2_audit_reports_approved_host",
+              rep_new["details"].get("bind_host_approved") is True)
+        check("m2_audit_reports_no_served_model_name",
+              rep_new["details"].get("served_model_names") == []
+              and rep_new["details"].get("served_model_name_required") is False)
+        rep_auto = A.audit(new_p, M2_TREE, M2_IDENTITY, expect_stream=None,
+                           ref_launcher=REF_LAUNCHER, profile=None)
+        check("m2_auto_profile_passes", rep_auto["ok"],
+              f"auto-selected profile failures={rep_auto['failures']}")
+        check("m2_auto_profile_selected",
+              rep_auto["details"].get("profile") == M2_IDENTITY,
+              f"profile={rep_auto['details'].get('profile')}")
+
+        # fail-closed: a changed HiCache value is NOT accepted.
+        bad_value = new_m2.replace("--hicache-size 32", "--hicache-size 64", 1)
+        check("m2_bad_value_mutation_applied", bad_value != new_m2)
+        bad_p = SCRATCH / "m2_bad_hicache_size.sh"
+        bad_p.write_text(bad_value)
+        rep_bad = A.audit(bad_p, M2_TREE, M2_IDENTITY, expect_stream=None,
+                          ref_launcher=REF_LAUNCHER, profile=M2_IDENTITY)
+        check("m2_bad_hicache_size_FAILS", not rep_bad["ok"],
+              "changed --hicache-size unexpectedly passed")
+
+        # fail-closed: an unknown profile name is rejected outright.
+        rep_unknown = A.audit(new_p, M2_TREE, M2_IDENTITY, expect_stream=None,
+                              ref_launcher=REF_LAUNCHER, profile="NOT-A-PROFILE")
+        check("unknown_profile_FAILS", not rep_unknown["ok"],
+              "unknown profile unexpectedly passed")
+        check("unknown_profile_reason_is_specific",
+              any("unknown launcher profile" in f
+                  for f in rep_unknown["failures"]),
+              f"failures={rep_unknown['failures']}")
+
+        # profile table sanity: exact hosts / optional served-model-name.
+        check("m2_profile_hosts_include_0000",
+              "0.0.0.0" in A.M2_PROFILE.approved_bind_hosts
+              and "192.168.20.250" in A.M2_PROFILE.approved_bind_hosts,
+              f"hosts={sorted(A.M2_PROFILE.approved_bind_hosts)!r}")
+        check("m1_profile_hosts_include_0000",
+              "0.0.0.0" in A.M1_PROFILE.approved_bind_hosts
+              and "192.168.20.250" in A.M1_PROFILE.approved_bind_hosts,
+              f"hosts={sorted(A.M1_PROFILE.approved_bind_hosts)!r}")
+        check("m2_profile_served_model_optional",
+              A.M2_PROFILE.served_model_name_required is False)
+        check("m1_profile_served_model_optional",
+              A.M1_PROFILE.served_model_name_required is False)
+
+    # --- 10. installed M1 launcher passes its profile (read-only) ---------
+    if not M1_LAUNCHER.is_file():
+        print(f"SKIP M1 profile test: installed launcher not present: "
+              f"{M1_LAUNCHER}", file=sys.stderr)
+    else:
+        rep_m1 = A.audit(M1_LAUNCHER, M1_TREE, M1_IDENTITY, expect_stream=None,
+                         ref_launcher=REF_LAUNCHER, profile=M1_IDENTITY)
+        check("installed_m1_launcher_passes_profile", rep_m1["ok"],
+              f"failures={rep_m1['failures']}")
+        check("installed_m1_bind_host_is_0000",
+              rep_m1["details"].get("bind_host") == "0.0.0.0",
+              f"bind_host={rep_m1['details'].get('bind_host')!r}")
+        check("installed_m1_has_no_served_model_name",
+              rep_m1["details"].get("served_model_names") == [],
+              f"served_names={rep_m1['details'].get('served_model_names')!r}")
 
     print(f"\n==== test_audit_launcher: {_passed} passed, {_failed} failed ====")
     return 1 if _failed else 0

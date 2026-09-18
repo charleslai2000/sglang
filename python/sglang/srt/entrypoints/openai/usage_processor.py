@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Mapping, Optional, final
 
-from sglang.srt.entrypoints.openai.protocol import PromptTokensDetails, UsageInfo
+from sglang.srt.entrypoints.openai.protocol import (
+    CompletionTokensDetails,
+    PromptTokensDetails,
+    UsageInfo,
+)
 
 
 @final
@@ -44,6 +48,15 @@ class UsageProcessor:
             )
             cached_details = UsageProcessor._details_if_cached(cached_total)
 
+        # reasoning_tokens must be a SUBSET of completion_tokens (OpenAI semantics).
+        # Build completion_tokens_details when reasoning exists; otherwise omit it
+        # entirely to keep the wire payload minimal.
+        completion_tokens_details = None
+        if reasoning_tokens:
+            completion_tokens_details = CompletionTokensDetails(
+                reasoning_tokens=reasoning_tokens
+            )
+
         return UsageProcessor.calculate_token_usage(
             prompt_tokens=prompt_tokens,
             reasoning_tokens=reasoning_tokens,
@@ -81,6 +94,14 @@ class UsageProcessor:
             else None
         )
 
+        # reasoning_tokens must be a SUBSET of completion_tokens (OpenAI semantics).
+        # Build completion_tokens_details only when reasoning exists.
+        completion_tokens_details = None
+        if total_reasoning_tokens:
+            completion_tokens_details = CompletionTokensDetails(
+                reasoning_tokens=total_reasoning_tokens
+            )
+
         return UsageProcessor.calculate_token_usage(
             prompt_tokens=total_prompt_tokens,
             reasoning_tokens=total_reasoning_tokens,
@@ -117,10 +138,19 @@ class UsageProcessor:
             if video_tokens:
                 details.video_tokens = video_tokens
 
+        # Build completion_tokens_details when reasoning_tokens > 0; reasoning_tokens
+        # must be a SUBSET of completion_tokens (OpenAI semantics). When reasoning is
+        # absent, completion_tokens_details is omitted, and reasoning_tokens field is
+        # also absent to keep wire output minimal and satisfy both the new field and
+        # backward compatibility.
+        completion_tokens_details = None
+        if reasoning_tokens:
+            completion_tokens_details = CompletionTokensDetails(reasoning_tokens=reasoning_tokens)
+
         return UsageInfo(
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=prompt_tokens + completion_tokens,
             prompt_tokens_details=details,
-            reasoning_tokens=reasoning_tokens,
+            completion_tokens_details=completion_tokens_details,
         )

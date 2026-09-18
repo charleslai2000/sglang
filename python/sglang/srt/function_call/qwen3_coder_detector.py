@@ -45,18 +45,15 @@ class Qwen3CoderDetector(BaseFormatDetector):
         # Base class already initializes _buffer, we just use it directly
         # No need to check with hasattr - we control the lifecycle through inheritance
 
-        # Index pointing to the next character to be processed in buffer
+        # Index pointing to the next character to be processed in buffer.
+        # Delay-commit framing: a call is only committed once its framing is
+        # complete. Unresolved bytes stay at ``parsed_pos`` in ``_buffer`` (see
+        # ``parse_streaming_increment``) and are released as normal text by
+        # ``finish`` when the stream ends before framing completes.
         self.parsed_pos: int = 0
-        # Parameter count inside the current tool being processed, used to determine whether to add comma
-        self.current_tool_param_count: int = 0
-        # Flag indicating whether current tool has already sent '{'
-        self.json_started: bool = False
 
-        # [FIX] New state flag: mark whether inside tool_call structure block
-        self.is_inside_tool_call: bool = False
-
-        # Initialize attributes that were missing in the original PR
-        self.current_func_name: Optional[str] = None
+        # Locates a complete ``<function=NAME>`` opening tag inside a block.
+        self.function_tag_regex = re.compile(r"<function=([^>]*)>")
 
     def has_tool_call(self, text: str) -> bool:
         return self.tool_call_start_token in text
@@ -175,6 +172,11 @@ class Qwen3CoderDetector(BaseFormatDetector):
                 )
             return param_value
 
+    @staticmethod
+    def _is_well_formed_name(name: str) -> bool:
+        """A committed call's name is non-empty and holds no framing chars."""
+        return bool(name) and not any(ch in name for ch in "<>\t\r\n ")
+
     def detect_and_parse(self, text: str, tools: List[Tool]) -> StreamingParseResult:
         """One-shot parsing for non-streaming scenarios."""
         if self.tool_call_start_token not in text:
@@ -195,12 +197,17 @@ class Qwen3CoderDetector(BaseFormatDetector):
                 # Find function calls
                 funcs = self.tool_call_function_regex.findall(tool_content)
                 for func_match in funcs:
-                    func_body = func_match[0] or func_match[1]
+                    func_body = func_match[0] or func_match[1] or ""
                     if ">" not in func_body:
                         continue
 
                     name_end = func_body.index(">")
                     func_name = func_body[:name_end]
+                    # A malformed/empty name (e.g. an unclosed ``<function=``
+                    # whose body swallowed a later ``>``) must not be emitted
+                    # as a call.
+                    if not self._is_well_formed_name(func_name):
+                        continue
                     params_str = func_body[name_end + 1 :]
 
                     param_config = self._get_arguments_config(func_name, tools)
@@ -243,235 +250,236 @@ class Qwen3CoderDetector(BaseFormatDetector):
             logger.error(f"Error in detect_and_parse: {e}")
             return StreamingParseResult(normal_text=text)
 
+    def _parse_parameter_values(
+        self, body: str, tools: List[Tool], func_name: str
+    ) -> tuple:
+        """Parse ``<parameter=NAME>VALUE`` entries out of a function body.
+
+        Values terminate at ``</parameter>``, the next ``<parameter=``,
+        ``</function>``, or the end of the body (R3). Returns ``(params,
+        leftovers)`` where leftovers are body bytes not part of a usable
+        parameter and must be released as ordinary content.
+        """
+        params = {}
+        leftovers: List[str] = []
+        param_config = self._get_arguments_config(func_name, tools)
+        pos = 0
+        length = len(body)
+
+        while pos < length:
+            tag_idx = body.find(self.parameter_prefix, pos)
+            if tag_idx == -1:
+                leftovers.append(body[pos:])
+                break
+            if tag_idx > pos:
+                leftovers.append(body[pos:tag_idx])
+
+            name_end = body.find(">", tag_idx + len(self.parameter_prefix))
+            if name_end == -1:
+                # Malformed opening tag: no usable value.
+                leftovers.append(body[tag_idx:])
+                break
+
+            param_name = body[tag_idx + len(self.parameter_prefix) : name_end]
+            value_start = name_end + 1
+
+            candidates = []
+            end_param = body.find(self.parameter_end_token, value_start)
+            if end_param != -1:
+                candidates.append((end_param, len(self.parameter_end_token)))
+            next_param = body.find(self.parameter_prefix, value_start)
+            if next_param != -1:
+                candidates.append((next_param, 0))
+            end_func = body.find(self.function_end_token, value_start)
+            if end_func != -1:
+                candidates.append((end_func, 0))
+
+            if candidates:
+                value_end, term_len = min(candidates, key=lambda x: x[0])
+                raw_value = body[value_start:value_end]
+                pos = value_end + term_len
+            else:
+                raw_value = body[value_start:]
+                pos = length
+
+            if not self._is_well_formed_name(param_name):
+                leftovers.append(body[tag_idx:pos])
+                continue
+
+            if raw_value.startswith("\n"):
+                raw_value = raw_value[1:]
+            if raw_value.endswith("\n"):
+                raw_value = raw_value[:-1]
+            params[param_name] = self._convert_param_value(
+                raw_value, param_name, param_config, func_name
+            )
+
+        return params, leftovers
+
+    def _parse_committed_block(
+        self, block: str, tools: List[Tool]
+    ) -> Optional[tuple]:
+        """Parse one completely framed call.
+
+        ``block`` is the text of a closed ``<tool_call>`` block (or a bare
+        ``<function=...>...</function>`` region). Returns
+        ``(name, params, leftovers)`` or ``None`` when the inner framing is not
+        usable, in which case the caller releases the bytes as content.
+        """
+        match = self.function_tag_regex.search(block)
+        if match is None:
+            return None
+
+        func_name = match.group(1)
+        if not self._is_well_formed_name(func_name):
+            return None
+
+        prefix = block[: match.start()]
+        after = block[match.end() :]
+        func_end = after.find(self.function_end_token)
+        if func_end == -1:
+            body, tail = after, ""
+        else:
+            body = after[:func_end]
+            tail = after[func_end + len(self.function_end_token) :]
+
+        params, leftovers = self._parse_parameter_values(body, tools, func_name)
+        # Independently framed bytes around the body must not be dropped.
+        if prefix.strip():
+            leftovers.insert(0, prefix)
+        if tail.strip():
+            leftovers.append(tail)
+        return func_name, params, leftovers
+
     def parse_streaming_increment(
         self, new_text: str, tools: List[Tool]
     ) -> StreamingParseResult:
-        """
-        Robust cursor-based streaming parser.
-        """
-        self._buffer += new_text
+        """Delay-commit streaming parser.
 
-        # Guard against empty buffer
+        A call is only committed once its complete framing has been observed:
+        an enclosed call through ``</tool_call>``, or a bare ``<function=...>``
+        through ``</function>``. Until then the bytes are held in ``_buffer``
+        at ``parsed_pos``. This guarantees every committed call has a
+        non-negative, strictly increasing index, a well-formed name and a
+        complete JSON object, and that malformed/orphan fragments never become
+        calls. Whatever is still held when the stream ends is released as
+        ordinary content by ``finish``.
+        """
+        if new_text:
+            self._buffer += new_text
+
         if not self._buffer:
             return StreamingParseResult()
 
-        calls = []
-        normal_text_chunks = []
+        calls: List[ToolCallItem] = []
+        normal_text_chunks: List[str] = []
+        known_tags = (
+            self.tool_call_start_token,
+            self.tool_call_end_token,
+            self.tool_call_prefix,
+            self.function_end_token,
+            self.parameter_prefix,
+            self.parameter_end_token,
+        )
 
-        while True:
-            # Working text slice
+        while self.parsed_pos < len(self._buffer):
             current_slice = self._buffer[self.parsed_pos :]
 
-            # Optimization: If almost empty, wait for more
-            if not current_slice:
-                break
-
-            # -------------------------------------------------------
-            # 1. Priority detection: check if it's the start of Tool Call
-            # -------------------------------------------------------
+            # 1. Enclosed call: hold until the block's ``</tool_call>``.
             if current_slice.startswith(self.tool_call_start_token):
-                self.parsed_pos += len(self.tool_call_start_token)
-                self.is_inside_tool_call = True
-                continue
-
-            # -------------------------------------------------------
-            # 2. Function Name: <function=name>
-            # -------------------------------------------------------
-            if current_slice.startswith(self.tool_call_prefix):
-                end_angle = current_slice.find(">")
-                if end_angle != -1:
-                    func_name = current_slice[len(self.tool_call_prefix) : end_angle]
-
+                block_start = self.parsed_pos + len(self.tool_call_start_token)
+                block_end = self._buffer.find(self.tool_call_end_token, block_start)
+                if block_end == -1:
+                    break  # framing incomplete: keep holding
+                block_stop = block_end + len(self.tool_call_end_token)
+                parsed = self._parse_committed_block(
+                    self._buffer[block_start:block_end], tools
+                )
+                if parsed is None:
+                    normal_text_chunks.append(
+                        self._buffer[self.parsed_pos:block_stop]
+                    )
+                else:
+                    func_name, params, leftovers = parsed
                     self.current_tool_id += 1
-                    self.current_tool_name_sent = True
-                    self.current_tool_param_count = 0
-                    self.json_started = False
-                    self.current_func_name = func_name
-
                     calls.append(
                         ToolCallItem(
                             tool_index=self.current_tool_id,
                             name=func_name,
-                            parameters="",
+                            parameters=json.dumps(params, ensure_ascii=False),
                         )
                     )
+                    normal_text_chunks.extend(lo for lo in leftovers if lo.strip())
+                self.parsed_pos = block_stop
+                continue
 
-                    self.parsed_pos += end_angle + 1
-                    continue
-                else:
-                    # Incomplete tag
-                    break
-
-            # -------------------------------------------------------
-            # 3. Parameter: <parameter=name>value...
-            # -------------------------------------------------------
-            if current_slice.startswith(self.parameter_prefix):
-                name_end = current_slice.find(">")
-                if name_end != -1:
-                    value_start_idx = name_end + 1
-                    rest_of_slice = current_slice[value_start_idx:]
-
-                    # A parameter can end in multiple ways:
-                    # 1. [Normal] Encounter </parameter>
-                    # 2. [Abnormal] Encounter next <parameter=
-                    # 3. [Abnormal] Encounter </function>
-                    # So we need to find the smallest one as the parameter end position.
-                    cand_end_param = rest_of_slice.find(self.parameter_end_token)
-                    cand_next_param = rest_of_slice.find(self.parameter_prefix)
-                    cand_end_func = rest_of_slice.find(self.function_end_token)
-
-                    candidates = []
-                    if cand_end_param != -1:
-                        candidates.append(
-                            (cand_end_param, len(self.parameter_end_token))
-                        )
-                    if cand_next_param != -1:
-                        candidates.append((cand_next_param, 0))
-                    if cand_end_func != -1:
-                        candidates.append((cand_end_func, 0))
-
-                    if candidates:
-                        best_cand = min(candidates, key=lambda x: x[0])
-                        end_pos = best_cand[0]
-                        end_token_len = best_cand[1]
-
-                        param_name = current_slice[
-                            len(self.parameter_prefix) : name_end
-                        ]
-                        raw_value = rest_of_slice[:end_pos]
-
-                        # Cleanup value
-                        if raw_value.startswith("\n"):
-                            raw_value = raw_value[1:]
-                        if raw_value.endswith("\n"):
-                            raw_value = raw_value[:-1]
-
-                        # JSON Construction
-                        if not self.json_started:
-                            calls.append(
-                                ToolCallItem(
-                                    tool_index=self.current_tool_id, parameters="{"
-                                )
-                            )
-                            self.json_started = True
-
-                        param_config = self._get_arguments_config(
-                            self.current_func_name, tools
-                        )
-                        converted_val = self._convert_param_value(
-                            raw_value, param_name, param_config, self.current_func_name
-                        )
-
-                        # Construct JSON fragment: "key": value
-                        # Note: We must be careful with json.dumps to ensure valid JSON streaming
-                        json_key_val = f"{json.dumps(param_name)}: {json.dumps(converted_val, ensure_ascii=False)}"
-
-                        if self.current_tool_param_count > 0:
-                            fragment = f", {json_key_val}"
-                        else:
-                            fragment = json_key_val
-
-                        calls.append(
-                            ToolCallItem(
-                                tool_index=self.current_tool_id, parameters=fragment
-                            )
-                        )
-                        self.current_tool_param_count += 1
-
-                        # Advance cursor
-                        total_len = (name_end + 1) + end_pos + end_token_len
-                        self.parsed_pos += total_len
-                        continue
-
-                # Incomplete parameter tag or value
-                break
-
-            # -------------------------------------------------------
-            # 4. Function End: </function>
-            # -------------------------------------------------------
-            if current_slice.startswith(self.function_end_token):
-                if not self.json_started:
-                    calls.append(
-                        ToolCallItem(tool_index=self.current_tool_id, parameters="{")
-                    )
-                    self.json_started = True
-
-                calls.append(
-                    ToolCallItem(tool_index=self.current_tool_id, parameters="}")
+            # 2. Bare call fallback (no ``<tool_call>``): hold until
+            # ``</function>``.
+            if current_slice.startswith(self.tool_call_prefix):
+                func_end = self._buffer.find(
+                    self.function_end_token, self.parsed_pos
                 )
-                self.parsed_pos += len(self.function_end_token)
-                self.current_func_name = None
-                continue
-
-            # -------------------------------------------------------
-            # 5. Tool Call End: </tool_call>
-            # -------------------------------------------------------
-            if current_slice.startswith(self.tool_call_end_token):
-                self.parsed_pos += len(self.tool_call_end_token)
-                self.is_inside_tool_call = False  # [FIX] Exit tool call region
-                continue
-
-            # -------------------------------------------------------
-            # 6. Handling content / whitespace / normal text
-            # -------------------------------------------------------
-            # If current position is not the start of a tag (i.e., doesn't start with <), it might be plain text,
-            # or a newline between two tags.
-            # But we need to be careful not to output truncated tags like "<fun" as text.
-
-            next_open_angle = current_slice.find("<")
-
-            if next_open_angle == -1:
-                # This entire segment is plain text
-                if not self.is_inside_tool_call:
-                    normal_text_chunks.append(current_slice)
-                # [FIX] If inside tool call, discard this text (usually \n), don't append
-                self.parsed_pos += len(current_slice)
-                continue
-
-            elif next_open_angle == 0:
-                # Looks like a Tag, but doesn't match any known Tag above
-
-                possible_tags = [
-                    self.tool_call_start_token,
-                    self.tool_call_end_token,
-                    self.tool_call_prefix,
-                    self.function_end_token,
-                    self.parameter_prefix,
-                    self.parameter_end_token,
-                ]
-
-                is_potential_tag = False
-                for tag in possible_tags:
-                    if tag.startswith(current_slice):
-                        is_potential_tag = True
-                        break
-
-                if is_potential_tag:
-                    break  # Wait for more
+                if func_end == -1:
+                    break  # framing incomplete: keep holding
+                func_stop = func_end + len(self.function_end_token)
+                parsed = self._parse_committed_block(
+                    self._buffer[self.parsed_pos:func_stop], tools
+                )
+                if parsed is None:
+                    normal_text_chunks.append(
+                        self._buffer[self.parsed_pos:func_stop]
+                    )
                 else:
-                    # Just a plain '<' symbol
-                    if not self.is_inside_tool_call:
-                        normal_text_chunks.append("<")
-                    self.parsed_pos += 1
-                    continue
+                    func_name, params, leftovers = parsed
+                    self.current_tool_id += 1
+                    calls.append(
+                        ToolCallItem(
+                            tool_index=self.current_tool_id,
+                            name=func_name,
+                            parameters=json.dumps(params, ensure_ascii=False),
+                        )
+                    )
+                    normal_text_chunks.extend(lo for lo in leftovers if lo.strip())
+                self.parsed_pos = func_stop
+                continue
 
-            else:
-                # '<' is in the middle
-                text_segment = current_slice[:next_open_angle]
-                if not self.is_inside_tool_call:
-                    normal_text_chunks.append(text_segment)
-                # [FIX] If inside tool call, discard whitespace/text before Tag
+            # 3. Ordinary content, or a strict prefix of a framing tag.
+            next_open_angle = current_slice.find("<")
+            if next_open_angle == -1:
+                normal_text_chunks.append(current_slice)
+                self.parsed_pos = len(self._buffer)
+                break
+            if next_open_angle > 0:
+                normal_text_chunks.append(current_slice[:next_open_angle])
                 self.parsed_pos += next_open_angle
                 continue
+            if any(
+                len(current_slice) < len(tag) and tag.startswith(current_slice)
+                for tag in known_tags
+            ):
+                break  # wait for the rest of the tag
+            normal_text_chunks.append("<")
+            self.parsed_pos += 1
 
-        # Memory Cleanup: Slice the buffer
-        # Keep unparsed part, discard parsed part
+        # Keep only the unconsumed (held) suffix; drop the consumed prefix.
         if self.parsed_pos > 0:
             self._buffer = self._buffer[self.parsed_pos :]
             self.parsed_pos = 0
 
         normal_text = "".join(normal_text_chunks) if normal_text_chunks else ""
         return StreamingParseResult(calls=calls, normal_text=normal_text)
+
+    def finish(self, tools: List[Tool]) -> StreamingParseResult:
+        """Release uncommitted held text as ordinary content at stream end.
+
+        Because commit is delayed until framing completes, whatever is still
+        held when the stream ends is framing-incomplete and must never be
+        repaired into a call (R4).
+        """
+        held_text = self._buffer[self.parsed_pos :]
+        self._buffer = ""
+        self.parsed_pos = 0
+        return StreamingParseResult(normal_text=held_text)
 
     def supports_structural_tag(self) -> bool:
         return True
