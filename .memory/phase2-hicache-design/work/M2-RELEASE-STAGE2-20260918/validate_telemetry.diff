@@ -1,0 +1,11 @@
+--- /tmp/opencode/v1.2.1-stage/tools/validate_telemetry.py	2026-09-16 17:17:26.128101946 +0000
++++ /tmp/opencode/m2-stage2-20260918/tools/validate_telemetry.py	2026-09-18 20:55:26.024131821 +0000
+@@ -17,7 +17,7 @@
+     "python/sglang/srt/observability/hicache_telemetry.py":
+         "788318d91dc415202737058dedd918f2f822db93f70251d9598689c84fef72aa",
+     "python/sglang/srt/mem_cache/unified_radix_cache.py":
+-        "5b5dc29fa21eefdf44ac660881cab02e9bc6ab1408cd33ca645a4bb326f6bf6f",
++        "4a5128828dc2cf67a214c794984be6f2d5177178d64cda070e35e467ec03fe1b",
+     "python/sglang/srt/managers/tokenizer_manager.py":
+         "9f9d38028008c7f6afe9dc58508ab9e84eb981462beff79e8f874283f69ddf46",
+     "python/sglang/srt/managers/scheduler_components/output_streamer.py":

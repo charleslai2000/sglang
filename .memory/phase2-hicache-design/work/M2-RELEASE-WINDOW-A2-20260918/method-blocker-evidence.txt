@@ -1,0 +1,47 @@
+M2-RELEASE-WINDOW-A2 method pre-validation — 2026-09-18T21:12:41Z
+host=sglang-build
+
+# reproduction: freeze.sh's repin invocation (no --no-dry-run), actual stage tree + actual tools
+cmd: bash 3090-dev/tools/freeze/bin/launcher-repin.sh --write --tree <stage-copy> --identity LOCAL-PROD-v1.2.1-M2 --scratch <scratch>
+REPIN_RC=24
+--- key line ---
+7:dry-run negative test FAILED: shared run id should exit 4, got 1
+8:/tmp/opencode/_a2-repin-repro-20260918/repin/launch.sh.rendered: line 36: SGLANG_L3_MODE: FATAL: SGLANG_L3_MODE must be set explicitly to disabled for M2 (no default)
+
+# freeze.sh invocation (working tree):
+  phase "repin launcher"
+  chmod u+w "$DEST/launcher" 2>/dev/null || true
+  "$REPIN" --write --tree "$DEST" --identity "$IDENTITY" \
+    --scratch "$WORK_DIR/repin" >"$WORK_DIR/launcher-repin.log" 2>&1 \
+    || { echo "launcher repin FAILED; log:" >&2; cat "$WORK_DIR/launcher-repin.log" >&2; exit 5; }
+  ok "launcher repinned: $(sha256sum "$DEST/launcher/launch.sh" | cut -d' ' -f1)"
+
+# launcher-repin.sh step 6 invoke lines:
+  DRY_ROOT="$SCRATCH/dry-run-l3"
+  DRY_LOG="$SCRATCH/dry-run-log-$RUN_ID"
+  rm -rf "$DRY_ROOT" "$DRY_LOG"
+  python3 "$L3LIB" --allocate --task-id "$RUN_ID" --root "$DRY_ROOT" \
+    --expect-tree-digest "$STREAM_SHA" --json >/dev/null
+
+  # 6a. negative: a shared/reserved run id must be refused before any gate work
+  set +e
+  REFUSE_OUT="$(env -i PATH=/usr/bin:/bin HOME="${HOME:-/home/ubuntu}" \
+      SGLANG_RUN_ID="local-prod-v1.1" SGLANG_L3_ROOT="$DRY_ROOT" \
+      SGLANG_LOG_DIR="$DRY_LOG" SGLANG_LAUNCH_DRY_RUN=1 \
+      /bin/bash "$AUDIT_FILE" 2>&1)"
+  REFUSE_RC=$?
+  set -e
+  if [ "$REFUSE_RC" -ne 4 ]; then
+    echo "dry-run negative test FAILED: shared run id should exit 4, got $REFUSE_RC" >&2
+    echo "$REFUSE_OUT" >&2
+    exit 24
+  fi
+  echo "   dry-run negative (shared namespace refused): OK (exit 4)"
+
+  # 6b. positive dry-run
+  set +e
+  DRY_OUT="$(env -i PATH=/usr/bin:/bin HOME="${HOME:-/home/ubuntu}" \
+      SGLANG_RUN_ID="$RUN_ID" SGLANG_L3_ROOT="$DRY_ROOT" \
+      SGLANG_LOG_DIR="$DRY_LOG" SGLANG_LAUNCH_DRY_RUN=1 \
+      /bin/bash "$AUDIT_FILE" 2>&1)"
+  DRY_RC=$?

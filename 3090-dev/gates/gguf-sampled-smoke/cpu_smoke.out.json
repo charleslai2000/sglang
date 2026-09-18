@@ -1,0 +1,326 @@
+{
+  "python": "/opt/sglang/local-prod-v1/env/bin/python",
+  "ok": true,
+  "checks": {
+    "request_body_m4": {
+      "pass": true,
+      "missing_required_fields": [],
+      "temperature_is_1.0": true,
+      "top_p_is_0.95": true,
+      "top_k_is_20": true,
+      "min_p_is_0.0": true,
+      "seed_is_20260916": true,
+      "max_tokens_is_640": true,
+      "thinking_disabled": true,
+      "endpoint": "/v1/chat/completions",
+      "not_raw_generate": true,
+      "not_streaming": true,
+      "m4_repetition_penalty_pinned_1.0": true
+    },
+    "request_body_m3": {
+      "pass": true,
+      "missing_required_fields": [],
+      "temperature_is_1.0": true,
+      "top_p_is_0.95": true,
+      "top_k_is_20": true,
+      "min_p_is_0.0": true,
+      "seed_is_20260916": true,
+      "max_tokens_is_640": true,
+      "thinking_disabled": true,
+      "endpoint": "/v1/chat/completions",
+      "not_raw_generate": true,
+      "not_streaming": true,
+      "m3_repetition_penalty_pinned_neutral": true
+    },
+    "ngram_metric_identical_to_prior": {
+      "pass": true,
+      "n_cases": 7,
+      "cases": {
+        "empty": {
+          "ours": {
+            "max_rep": 0,
+            "repeat_token_frac": 0.0,
+            "max_contiguous_run": 0
+          },
+          "reference": {
+            "max_rep": 0,
+            "repeat_token_frac": 0.0,
+            "max_contiguous_run": 0
+          },
+          "identical": true
+        },
+        "shorter_than_n": {
+          "ours": {
+            "max_rep": 0,
+            "repeat_token_frac": 0.0,
+            "max_contiguous_run": 0
+          },
+          "reference": {
+            "max_rep": 0,
+            "repeat_token_frac": 0.0,
+            "max_contiguous_run": 0
+          },
+          "identical": true
+        },
+        "no_repeat": {
+          "ours": {
+            "max_rep": 1,
+            "repeat_token_frac": 0.0,
+            "max_contiguous_run": 1
+          },
+          "reference": {
+            "max_rep": 1,
+            "repeat_token_frac": 0.0,
+            "max_contiguous_run": 1
+          },
+          "identical": true
+        },
+        "pure_loop": {
+          "ours": {
+            "max_rep": 37,
+            "repeat_token_frac": 1.0,
+            "max_contiguous_run": 37
+          },
+          "reference": {
+            "max_rep": 37,
+            "repeat_token_frac": 1.0,
+            "max_contiguous_run": 37
+          },
+          "identical": true
+        },
+        "period4_loop": {
+          "ours": {
+            "max_rep": 12,
+            "repeat_token_frac": 1.0,
+            "max_contiguous_run": 1
+          },
+          "reference": {
+            "max_rep": 12,
+            "repeat_token_frac": 1.0,
+            "max_contiguous_run": 1
+          },
+          "identical": true
+        },
+        "mixed": {
+          "ours": {
+            "max_rep": 2,
+            "repeat_token_frac": 0.95,
+            "max_contiguous_run": 1
+          },
+          "reference": {
+            "max_rep": 2,
+            "repeat_token_frac": 0.95,
+            "max_contiguous_run": 1
+          },
+          "identical": true
+        },
+        "single_word_heavy": {
+          "ours": {
+            "max_rep": 2,
+            "repeat_token_frac": 0.7273,
+            "max_contiguous_run": 1
+          },
+          "reference": {
+            "max_rep": 2,
+            "repeat_token_frac": 0.7273,
+            "max_contiguous_run": 1
+          },
+          "identical": true
+        }
+      }
+    },
+    "gate_threshold_is_content_w4_0.27": {
+      "pass": true,
+      "gate": {
+        "min_completion_tokens": 512,
+        "max_content_loop_w4_inclusive": 0.27,
+        "reject_replacement_char": true,
+        "min_alpha_words": 30,
+        "reject_all_reasoning_empty_content": true
+      }
+    },
+    "gating_predicate_semantics": {
+      "pass": true,
+      "empty_content_fails": true,
+      "w4_exactly_0.27_passes": true,
+      "w4_0.271_fails": true
+    },
+    "real_send_path_pins_sampled_contract": {
+      "pass": true,
+      "n_requests": 7,
+      "all_endpoints_chat_completions": true,
+      "gating_requests_all_pinned": true,
+      "greedy_diagnostic_requests_are_greedy": true,
+      "thinking_probe_is_on": true,
+      "gating_payload_example": {
+        "model": "default",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Write a Python function that parses a CSV file and returns a dict of column sums, where each value is the sum of the numeric values in that column. Include a docstring and handle missing values by skipping them."
+          }
+        ],
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "top_k": 20,
+        "min_p": 0.0,
+        "seed": 20260916,
+        "repetition_penalty": 1.0,
+        "max_tokens": 640,
+        "chat_template_kwargs": {
+          "enable_thinking": false
+        }
+      }
+    },
+    "per_criterion_reporting": {
+      "pass": true,
+      "all_six_present_and_pass": true,
+      "single_failure_isolated": true,
+      "failures": [
+        "2_semantics"
+      ]
+    },
+    "ngram_identical_to_live_prior_harness": {
+      "pass": true,
+      "path": "/var/log/sglang/local-prod-v1/phase8/m3-m4-normfix-gate-20260916/server_harness_normfix.py",
+      "available": true,
+      "sha256": "7adeb4d6cb141ba6a007027fa6bcf57d177e1340d2bbc9756be837c4d9820f0c",
+      "identical_on_all_cases": true,
+      "cases": {
+        "empty": {
+          "ours": {
+            "max_rep": 0,
+            "repeat_token_frac": 0.0,
+            "max_contiguous_run": 0
+          },
+          "prior": {
+            "max_rep": 0,
+            "repeat_token_frac": 0.0,
+            "max_contiguous_run": 0
+          },
+          "identical": true
+        },
+        "shorter_than_n": {
+          "ours": {
+            "max_rep": 0,
+            "repeat_token_frac": 0.0,
+            "max_contiguous_run": 0
+          },
+          "prior": {
+            "max_rep": 0,
+            "repeat_token_frac": 0.0,
+            "max_contiguous_run": 0
+          },
+          "identical": true
+        },
+        "no_repeat": {
+          "ours": {
+            "max_rep": 1,
+            "repeat_token_frac": 0.0,
+            "max_contiguous_run": 1
+          },
+          "prior": {
+            "max_rep": 1,
+            "repeat_token_frac": 0.0,
+            "max_contiguous_run": 1
+          },
+          "identical": true
+        },
+        "pure_loop": {
+          "ours": {
+            "max_rep": 37,
+            "repeat_token_frac": 1.0,
+            "max_contiguous_run": 37
+          },
+          "prior": {
+            "max_rep": 37,
+            "repeat_token_frac": 1.0,
+            "max_contiguous_run": 37
+          },
+          "identical": true
+        },
+        "period4_loop": {
+          "ours": {
+            "max_rep": 12,
+            "repeat_token_frac": 1.0,
+            "max_contiguous_run": 1
+          },
+          "prior": {
+            "max_rep": 12,
+            "repeat_token_frac": 1.0,
+            "max_contiguous_run": 1
+          },
+          "identical": true
+        },
+        "mixed": {
+          "ours": {
+            "max_rep": 2,
+            "repeat_token_frac": 0.95,
+            "max_contiguous_run": 1
+          },
+          "prior": {
+            "max_rep": 2,
+            "repeat_token_frac": 0.95,
+            "max_contiguous_run": 1
+          },
+          "identical": true
+        },
+        "single_word_heavy": {
+          "ours": {
+            "max_rep": 2,
+            "repeat_token_frac": 0.7273,
+            "max_contiguous_run": 1
+          },
+          "prior": {
+            "max_rep": 2,
+            "repeat_token_frac": 0.7273,
+            "max_contiguous_run": 1
+          },
+          "identical": true
+        }
+      },
+      "large_corpus_identical": true,
+      "prior_module": "/var/log/sglang/local-prod-v1/phase8/m3-m4-normfix-gate-20260916/server_harness_normfix.py"
+    }
+  },
+  "request_bodies": {
+    "m4": {
+      "model": "default",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Write a Python function that parses a CSV file and returns a dict of column sums, where each value is the sum of the numeric values in that column. Include a docstring and handle missing values by skipping them."
+        }
+      ],
+      "temperature": 1.0,
+      "top_p": 0.95,
+      "top_k": 20,
+      "min_p": 0.0,
+      "seed": 20260916,
+      "repetition_penalty": 1.0,
+      "max_tokens": 640,
+      "chat_template_kwargs": {
+        "enable_thinking": false
+      }
+    },
+    "m3": {
+      "model": "default",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Write a Python function that parses a CSV file and returns a dict of column sums, where each value is the sum of the numeric values in that column. Include a docstring and handle missing values by skipping them."
+        }
+      ],
+      "temperature": 1.0,
+      "top_p": 0.95,
+      "top_k": 20,
+      "min_p": 0.0,
+      "seed": 20260916,
+      "repetition_penalty": 1.0,
+      "max_tokens": 640,
+      "chat_template_kwargs": {
+        "enable_thinking": false
+      }
+    }
+  }
+}

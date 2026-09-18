@@ -1,0 +1,51 @@
+M2-RELEASE-WINDOW-A2 pre-window state — 2026-09-18T21:19:53Z
+== :30000 ==
+loopback_health=200
+lan_health=200
+loopback_models=200
+served_id=/data/models/omnicoder-9b-gptq-int4
+== state ==
+role=m2
+pid=1851500
+supervisor_pid=1851473
+port=30000
+tree=/opt/sglang/local-prod-v1.2.1-candidate-M2
+run_id=m2-20260918T190239Z-1851237
+namespace=
+lock_generation=1
+cold_start_s=111.8
+started_at_utc=2026-09-18T19:04:31Z
+m2.pid=1851500
+m2.ready exists: yes
+== gpu-owner.json ==
+{
+  "gpu": "GPU-2e3ed202-3655-d919-0a64-259209bc6587",
+  "role": "m2",
+  "state": "held",
+  "pid": 1851500,
+  "port": 30000,
+  "run_id": "m2-20260918T190239Z-1851237",
+  "l3_namespace": "",
+  "tree": "/opt/sglang/local-prod-v1.2.1-candidate-M2",
+  "identity": "LOCAL-PROD-v1.2.1-M2",
+  "lock_generation": 1,
+  "updated_at_utc": "2026-09-18T19:04:31Z",
+  "note": "serving"
+}
+== listen :30000 ==
+LISTEN 0      2048         0.0.0.0:30000      0.0.0.0:*    users:(("python",pid=1851500,fd=68))         
+== nvidia-smi compute apps ==
+pid, process_name, used_gpu_memory [MiB]
+1851500, /opt/sglang/local-prod-v1.2.1-candidate-M2/env/bin/python, 300 MiB
+1851964, sglang::scheduler, 19170 MiB
+== baseline old-M2-tree sha ==
+9a557d5f06dad5481b8e850c7b9b02ae29db276dc232b6baa1ac7e92d93b21c4  /opt/sglang/local-prod-v1.2.1-candidate-M2/launcher/launch.sh
+e6e8de1cb117e89e7a7477582d41f6408a032c9f0e7e45c7408f0d98677c495a  /opt/sglang/local-prod-v1.2.1-candidate-M2/manifest/TREE-SHA256.txt
+f46e49b8f562040809dff4d081eabaaba52337f4acdc3e2539abf69cdb5fb1bc  /opt/sglang/local-prod-v1.2.1-candidate-M2/manifest/identity.json
+== M1 detector sha ==
+92eeaeaf02ac1c1e966a8b9bbd4393141353ca9177265044fe12e250c0e38089  /opt/sglang/local-prod-v1.1-candidate/src/python/sglang/srt/function_call/qwen3_coder_detector.py
+== stage2 detector sha ==
+848e0690cb80719e70c7ceedb7c1eb253c879d39a1b7be1cb85645f861a9d151  /tmp/opencode/m2-stage2-20260918/src/python/sglang/srt/function_call/qwen3_coder_detector.py
+== move-aside dirs ==
+ls: cannot access '/opt/sglang/.pre-windowA2-*': No such file or directory
+none

@@ -202,12 +202,32 @@ class PromptTokensDetails(BaseModel):
         return data
 
 
+class CompletionTokensDetails(BaseModel):
+    """Detailed breakdown of completion tokens when thinking/reasoning is enabled."""
+
+    reasoning_tokens: int = 0
+
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler):
+        data = handler(self)
+        # When reasoning_tokens is zero, drop the field to keep wire output clean
+        if data.get("reasoning_tokens") == 0:
+            data.pop("reasoning_tokens", None)
+        return data
+
+
 class UsageInfo(BaseModel):
     prompt_tokens: int = 0
     total_tokens: int = 0
     completion_tokens: Optional[int] = 0
     # Used to return cached tokens info when --enable-cache-report is set
     prompt_tokens_details: Optional[PromptTokensDetails] = None
+    # Completion tokens breakdown when reasoning/rethinking (thinking) is enabled.
+    # reasoning_tokens here are a SUBSET of completion_tokens (OpenAI semantics).
+    completion_tokens_details: Optional[CompletionTokensDetails] = None
+    # Kept for backward compatibility with clients reading the previous field;
+    # deprecated and will be ignored in new code. Used only when the above is
+    # absent for legacy reasons.
     reasoning_tokens: Optional[int] = 0
 
 
@@ -868,16 +888,11 @@ class ChatCompletionRequest(BaseModel):
     return_sampling_mask: bool = False
     reasoning_effort: ReasoningEffortType = Field(
         default=None,
-        description="Constrains effort on reasoning for reasoning models. "
-        "Accepts string levels ('none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max') or a "
-        "float in [0.0, 0.99] for fine-grained control. "
-        "'none' disables reasoning entirely, 'low' is the least effort, 'high' is the most effort. "
-        "Reducing reasoning effort can result in faster responses and fewer tokens used on reasoning "
-        "in a response. 'none' defaults thinking and enable_thinking to false in "
-        "chat_template_kwargs (unless explicitly overridden). Not supported in the harmony path."
-        "'max' is an sglang extension to the OpenAI schema for "
-        "models that expose a maximum-effort tier above 'high'; models that don't "
-        "support it treat it the same as 'high'.",
+        description="Constrains effort on reasoning for reasoning models when the model "
+        "exposes a reasoning-effort policy. Honors fixed tiers and the float form "
+        "for models that declare the policy; unsupported values are not guaranteed to yield "
+        "distinct behavior. For models without this policy, the field may be ignored or "
+        "honored with model-specific behavior; supported tiers vary by model family.",
     )
     task: Optional[
         Literal["action", "query", "authority", "domain", "title", "read_url"]
@@ -1521,9 +1536,7 @@ class ResponseReasoningParam(BaseModel):
 
     effort: Optional[ReasoningEffortTier] = Field(
         default="medium",
-        description="Constrains effort on reasoning for reasoning models. "
-        "Accepts the OpenAI string tiers "
-        "('none','minimal','low','medium','high','xhigh','max').",
+        description="Conveys reasoning-effort policy to model-specific providers that honor it; tier recognition is model-policy dependent and varies by model family.",
     )
     summary: Optional[Literal["auto", "concise", "detailed"]] = Field(
         default=None,
