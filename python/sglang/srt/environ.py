@@ -1247,12 +1247,6 @@ class Envs:
     SGLANG_EMBEDDINGS_SPARSE_HEAD = EnvStr(None)
     # Think tokens budget: negative means unlimited, >= 0 caps thinking tokens
     SGLANG_MAX_THINK_TOKENS = EnvInt(-1)
-    # Provisional Qwen3.5 reasoning-effort ladder (JSON object). Keys are effort
-    # tiers (none/minimal/low/medium/high/xhigh/max); values may override
-    # enable_thinking, steering, and max_thinking_tokens. Token counts are
-    # experimental parameters, not a frozen contract. See
-    # sglang/srt/parser/qwen35_reasoning_policy.py.
-    SGLANG_QWEN35_EFFORT_POLICY = EnvJSON(None)
     SGLANG_PATCH_TOKENIZER = EnvBool(True)
     SGLANG_REQUEST_STATE_WAIT_TIMEOUT = EnvInt(4)
     SGLANG_DEFAULT_THINKING = EnvBool(False)
