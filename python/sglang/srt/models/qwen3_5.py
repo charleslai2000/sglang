@@ -398,6 +398,7 @@ class Qwen3_5GatedDeltaNet(nn.Module):
             activation=self.activation,
             A_log=self.A_log,
             dt_bias=self.dt_bias,
+            gdn_v_head_layout=getattr(config, "gdn_v_head_layout", "grouped"),
         )
 
         self.norm = RMSNormGated(

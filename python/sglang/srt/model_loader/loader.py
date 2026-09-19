@@ -3210,6 +3210,19 @@ class GGUFModelLoader(BaseModelLoader):
     ) -> nn.Module:
 
         local_model_path = self._prepare_weights(model_config.model_path)
+        text_config = getattr(
+            model_config.hf_config, "text_config", model_config.hf_config
+        )
+        if getattr(text_config, "model_type", None) == "qwen3_5_text":
+            from sglang.srt.utils.hf_transformers.gguf_native import (
+                read_gguf_architecture,
+            )
+
+            if read_gguf_architecture(local_model_path) != "qwen35":
+                raise ValueError("Qwen3.5 text config requires a qwen35 GGUF")
+            if get_parallel().tp_size != 1 or get_parallel().pp_size != 1:
+                raise ValueError("Tiled qwen35 GGUF currently requires TP=1 and PP=1")
+            text_config.gdn_v_head_layout = "tiled"
         gguf_weights_map = self._get_gguf_weights_map(model_config, local_model_path)
         # we can only know if tie word embeddings after mapping weights
         if "lm_head.weight" in get_gguf_extra_tensor_names(
