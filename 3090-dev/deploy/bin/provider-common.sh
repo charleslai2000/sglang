@@ -253,6 +253,15 @@ provider_build_argv() {
     --tp-size "$TP_SIZE"
     --mem-fraction-static "$MEM_FRACTION_STATIC"
     --max-total-tokens "$MAX_TOTAL_TOKENS"
+    --context-length "$CONTEXT_LENGTH"
+    --max-running-requests "$MAX_RUNNING_REQUESTS"
+    # Size the mamba state pool explicitly for the C8 ceiling.  Left unset, the
+    # ratio-based auto-fit (mamba_full_memory_ratio=0.9 -> ~47% of rest memory)
+    # keeps allocating the old ~5 GB and silently caps max_running_requests.
+    --max-mamba-cache-size "$MAX_MAMBA_CACHE_SIZE"
+    # Decode CUDA graph buckets.  Prefill graph stays disabled (see below).
+    # shellcheck disable=SC2086
+    --cuda-graph-bs-decode $CUDA_GRAPH_BS_DECODE
     --kv-cache-dtype "$KV_CACHE_DTYPE"
     --attention-backend "$ATTENTION_BACKEND"
     --linear-attn-prefill-backend "$LINEAR_ATTN_PREFILL_BACKEND"

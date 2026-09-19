@@ -1104,6 +1104,28 @@ class HybridCacheController(BaseHiCacheController):
         )
         return
 
+    def _fail_backup(self, operation, reason: str, *, exc_info: bool = False) -> bool:
+        """Record why an L3 backup failed and report the failure.
+
+        The reason is stored on the operation so ``backup_thread_func`` can
+        surface it through the existing storage-failure ownership path
+        (``storage_failure_reason`` -> ``_handle_storage_failure``), and is
+        logged here so the failure is never silent. Always returns False: a
+        failed write must never be mistaken for a committed one.
+        """
+        try:
+            operation.backup_failure_reason = reason
+        except Exception:
+            pass
+        logger.error(
+            "Hybrid HiCache backup failed (operation=%s node=%s): %s",
+            getattr(operation, "id", None),
+            getattr(operation, "node_id", None),
+            reason,
+            exc_info=exc_info,
+        )
+        return False
+
     def _page_backup(self, operation):
         # MLA KV is replicated across TP ranks and should still be written only
         # by TP0. Rank-sharded sidecars still need every TP rank.
@@ -1120,11 +1142,11 @@ class HybridCacheController(BaseHiCacheController):
         )
         group_id = None
         committed = False
-        if group_api and (has_kv or has_sidecar):
-            group_id = self.storage_backend.open_group()
-            operation.group_id = group_id
 
         try:
+            if group_api and (has_kv or has_sidecar):
+                group_id = self.storage_backend.open_group()
+                operation.group_id = group_id
             sidecar_ok = True
             if backup_transfers:
                 self._resolve_sidecar_kv_derived_pool_transfers(operation)
@@ -1152,7 +1174,7 @@ class HybridCacheController(BaseHiCacheController):
                         and all(bool(ok) for ok in result)
                     )
                 if not sidecar_ok:
-                    return False
+                    return self._fail_backup(operation, "sidecar_set_failed")
 
             kv_ok = True
             if has_kv:
@@ -1190,13 +1212,21 @@ class HybridCacheController(BaseHiCacheController):
                 )
 
             if not kv_ok:
-                return False
+                return self._fail_backup(operation, "kv_set_failed")
             if group_id is not None:
                 committed = bool(self.storage_backend.commit_group(group_id))
-                return committed
-            return sidecar_ok and (not has_kv or kv_ok)
-        except Exception:
-            return False
+                if not committed:
+                    return self._fail_backup(operation, "group_commit_failed")
+                return True
+            if not sidecar_ok:
+                return self._fail_backup(operation, "sidecar_set_failed")
+            return True
+        except Exception as exc:
+            return self._fail_backup(
+                operation,
+                f"exception:{type(exc).__name__}: {exc}",
+                exc_info=True,
+            )
         finally:
             if group_id is not None and not committed:
                 self.storage_backend.abort_group(group_id)
@@ -1237,7 +1267,20 @@ class HybridCacheController(BaseHiCacheController):
                 if operation is None:
                     continue
                 if not self._page_backup(operation):
-                    continue
+                    # A failed L3 write did NOT commit, so its submit-time
+                    # host pin has no ack coming. Surface the reason through
+                    # the existing storage-failure ownership path: the raise
+                    # is handled below by _storage_thread_fatal, and the
+                    # scheduler's check_hicache_events -> _handle_storage_failure
+                    # then releases every unacked ongoing_backup pin in-run,
+                    # exactly once, and gates further L3 writes for the run.
+                    # The backup thread must stop (it must not retry a
+                    # degraded backend) and must never enqueue an ack for a
+                    # write that did not commit.
+                    reason = getattr(
+                        operation, "backup_failure_reason", "unknown"
+                    )
+                    raise RuntimeError(f"backup did not commit: {reason}")
                 transfers = operation.pool_transfers or []
                 mamba_transfers = [
                     transfer
@@ -1332,6 +1375,14 @@ class HybridCacheController(BaseHiCacheController):
                 self.ack_backup_queue.put(operation)
             except Empty:
                 continue
+            except Exception as exc:
+                # Base-controller semantics (managers/cache_controller.py
+                # backup_thread_func): an unexpected per-op exception is a
+                # terminal storage-thread failure. Without this the hybrid
+                # thread died silently, never set storage_failure_reason, and
+                # left every in-flight ongoing_backup pin held until shutdown.
+                self._storage_thread_fatal("backup_thread_func", exc)
+                return
 
     def _resolve_sidecar_kv_derived_pool_transfers(self, operation):
         for transfer in operation.pool_transfers:

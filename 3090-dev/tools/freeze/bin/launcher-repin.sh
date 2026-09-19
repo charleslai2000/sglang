@@ -28,8 +28,8 @@ set -euo pipefail
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TOOL_DIR="$(cd "$SELF_DIR/.." && pwd)"
 TEMPLATE="$TOOL_DIR/templates/launch.sh.tmpl"
-AUDIT="$TOOL_DIR/lib/audit_launcher.py"
-L3LIB="$TOOL_DIR/lib/l3_namespace.py"
+AUDIT="$TOOL_DIR/pysrc/audit_launcher.py"
+L3LIB="$TOOL_DIR/pysrc/l3_namespace.py"
 
 TREE=""
 IDENTITY=""
@@ -64,6 +64,10 @@ done
 [ -n "$MODE" ] || die "one of --write, --verify-only or --verify-installed is required"
 case "$TREE" in /*) ;; *) die "--tree must be absolute" ;; esac
 [ -d "$TREE/src" ] || die "no such tree src: $TREE/src"
+# M2 has its own launcher shape (HiCache host tier, no L3 backend).
+case "$IDENTITY" in
+  *-M2) TEMPLATE="$TOOL_DIR/templates/launch.sh.m2.tmpl" ;;
+esac
 [ -f "$TEMPLATE" ] || die "template missing: $TEMPLATE"
 
 TREE_NAME="$(basename "$TREE")"
@@ -144,11 +148,26 @@ if [ "$DO_DRY_RUN" = "1" ]; then
   python3 "$L3LIB" --allocate --task-id "$RUN_ID" --root "$DRY_ROOT" \
     --expect-tree-digest "$STREAM_SHA" --json >/dev/null
 
+  # BLOCKER-5: the M2 launcher GATE 3/3 requires the run namespace to be
+  # UNALLOCATED (SGLANG_L3_MODE=disabled => --validate must exit 6), while the
+  # pre-allocated DRY_ROOT above is the correct premise for the M1 launcher.
+  # For an M2 identity the positive dry-run (6b) therefore uses a fresh,
+  # never-allocated root.  The negative dry-run (6a) keeps DRY_ROOT and is
+  # unaffected: its run id is refused (exit 4) before any gate work runs.
+  # The M1 path is byte-for-byte unchanged.
+  DRY_ROOT_POS="$DRY_ROOT"
+  case "$IDENTITY" in
+    *-M2)
+      DRY_ROOT_POS="$SCRATCH/dry-run-l3-pos"
+      rm -rf "$DRY_ROOT_POS"
+      ;;
+  esac
+
   # 6a. negative: a shared/reserved run id must be refused before any gate work
   set +e
   REFUSE_OUT="$(env -i PATH=/usr/bin:/bin HOME="${HOME:-/home/ubuntu}" \
       SGLANG_RUN_ID="local-prod-v1.1" SGLANG_L3_ROOT="$DRY_ROOT" \
-      SGLANG_LOG_DIR="$DRY_LOG" SGLANG_LAUNCH_DRY_RUN=1 \
+      SGLANG_LOG_DIR="$DRY_LOG" SGLANG_LAUNCH_DRY_RUN=1 SGLANG_L3_MODE=disabled \
       /bin/bash "$AUDIT_FILE" 2>&1)"
   REFUSE_RC=$?
   set -e
@@ -159,11 +178,11 @@ if [ "$DO_DRY_RUN" = "1" ]; then
   fi
   echo "   dry-run negative (shared namespace refused): OK (exit 4)"
 
-  # 6b. positive dry-run
+  # 6b. positive dry-run (M2: fresh, never-allocated root; M1: pre-allocated DRY_ROOT)
   set +e
   DRY_OUT="$(env -i PATH=/usr/bin:/bin HOME="${HOME:-/home/ubuntu}" \
-      SGLANG_RUN_ID="$RUN_ID" SGLANG_L3_ROOT="$DRY_ROOT" \
-      SGLANG_LOG_DIR="$DRY_LOG" SGLANG_LAUNCH_DRY_RUN=1 \
+      SGLANG_RUN_ID="$RUN_ID" SGLANG_L3_ROOT="$DRY_ROOT_POS" \
+      SGLANG_LOG_DIR="$DRY_LOG" SGLANG_LAUNCH_DRY_RUN=1 SGLANG_L3_MODE=disabled \
       /bin/bash "$AUDIT_FILE" 2>&1)"
   DRY_RC=$?
   set -e

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # switch.sh — explicit GPU handoff between production and test.
 #
-# Usage: switch.sh <prod|test>
+# Usage: switch.sh <prod|test|m2|m3|m4>
 #
 # THE CENTRAL CONSTRAINT: this host has exactly ONE RTX 3090 (24576 MiB).
 # Production at 64K fp8 needs ~18.7 GiB; test needs a comparable amount.  Two
@@ -23,8 +23,8 @@ set -euo pipefail
 # shellcheck source=/dev/null
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-TARGET="${1:?usage: switch.sh <prod|test>}"
-case "$TARGET" in prod|test) ;; *) die "unknown target '$TARGET' (want prod|test)" 2 ;; esac
+TARGET="${1:?usage: switch.sh <prod|test|m2|m3|m4>}"
+case "$TARGET" in prod|test|m2|m3|m4) ;; *) die "unknown target '$TARGET' (want prod|test|m2|m3|m4)" 2 ;; esac
 
 CURRENT="$(state_read | jq -r '.role // "free"')"
 log "current GPU owner: $CURRENT -> requested: $TARGET"

@@ -129,6 +129,7 @@ class TritonGDNKernel(LinearAttnKernelBase):
             out=out,
             ssm_state_indices=cache_indices,
             use_qk_l2norm_in_kernel=True,
+            **({"tiled_v_heads": True} if kwargs.get("tiled_v_heads", False) else {}),
         )
 
         # Convert [B, 1, HV, V] → [1, B, HV, V] to match existing output
@@ -164,6 +165,7 @@ class TritonGDNKernel(LinearAttnKernelBase):
             use_qk_l2norm_in_kernel=True,
             softplus_beta=1.0,
             softplus_threshold=20.0,
+            **({"tiled_v_heads": True} if kwargs.get("tiled_v_heads", False) else {}),
         )
 
     def extend(
@@ -196,6 +198,7 @@ class TritonGDNKernel(LinearAttnKernelBase):
             head_first=False,
             use_qk_l2norm_in_kernel=True,
             **recurrent_state_indices_args,
+            **({"tiled_v_heads": True} if kwargs.get("tiled_v_heads", False) else {}),
         )
 
     def target_verify(
@@ -238,4 +241,5 @@ class TritonGDNKernel(LinearAttnKernelBase):
             intermediate_state_indices=intermediate_state_indices,
             cache_steps=cache_steps,
             retrieve_parent_token=retrieve_parent_token,
+            **({"tiled_v_heads": True} if kwargs.get("tiled_v_heads", False) else {}),
         )

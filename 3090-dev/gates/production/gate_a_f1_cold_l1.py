@@ -78,6 +78,11 @@ def parse_args():
     ap.add_argument("--extent-size", type=int, default=64 << 20)
     ap.add_argument("--file-size", type=int, default=0)
     ap.add_argument("--slots-margin", type=int, default=8)
+    ap.add_argument("--reloc-reserve-slots", type=int, default=2,
+                    help="bounded spare slots appended to FILE_SIZE so the "
+                         "circular reclaim has a non-victim relocation "
+                         "destination (owner closure 2); small on purpose so "
+                         "the wrapped sweep is not dodged")
     ap.add_argument("--page-bytes", type=int, default=PAGE_BYTES)
     ap.add_argument("--sweep-tokens", type=int, default=2048)
     ap.add_argument("--sweep-requests", type=int, default=160)
@@ -111,10 +116,17 @@ def compute_geometry(args) -> dict:
         raise gc.GateInvalid("extent_size smaller than one page")
     chain_slots = math.ceil(args.chain_tokens / pages_per_slot)
     filler_slots = math.ceil(args.filler_tokens / pages_per_slot)
+    reloc_reserve_slots = max(0, int(getattr(args, "reloc_reserve_slots", 0) or 0))
     # room for the write-back fillers (L2 eviction) plus the measured sweep's
-    # wrap region, so the wrap is reached by the sweep and not by accident.
+    # wrap region, so the wrap is reached by the sweep and not by accident, plus
+    # a bounded relocation-destination reserve (owner closure 2).  The reserve
+    # is deliberately a whole number of EMPTY slots: the circular cursor still
+    # wraps into the oldest full slot (the wrap is not dodged), while the
+    # allocator has a non-victim free tail to relocate the victim's live refs
+    # into.  It is bounded so the store is never padded to avoid the wrap.
     file_size = args.file_size or (
-        (chain_slots + 2 * filler_slots + args.slots_margin) * args.extent_size)
+        (chain_slots + 2 * filler_slots + args.slots_margin
+         + reloc_reserve_slots) * args.extent_size)
     if file_size < args.extent_size or file_size % args.extent_size != 0:
         raise gc.GateInvalid(
             f"file_size {file_size} must be a positive multiple >= "
@@ -125,6 +137,8 @@ def compute_geometry(args) -> dict:
         "pages_per_slot": pages_per_slot,
         "chain_slots": chain_slots,
         "filler_slots": filler_slots,
+        "reloc_reserve_slots": reloc_reserve_slots,
+        "reloc_reserve_bytes": reloc_reserve_slots * args.extent_size,
         "sweep_bytes_per_request": args.sweep_tokens * page_bytes,
     }
 
@@ -271,6 +285,16 @@ def main() -> int:
             gate.invalidate(persist["reason"])
             return _finish(gate)
 
+        # Console node-id evidence for the graded chain (owner closure 1): the
+        # match anchors of requests whose fill_len equals the chain length plus
+        # the restore_backup durable nodes bound the chain's radix node ids.
+        # Read from the whole post-launch window so it is available to the
+        # target-scoped drop predicate at every later stage.
+        target_evidence = gc.target_node_evidence(
+            gc.parse_storage_events(gc.read_new_lines(console_path, off_store)),
+            len(ids_a))
+        gate.report["target_node_evidence"] = target_evidence
+
         # ---- 2. offline victim identification (pre-sweep) ----------------
         pre = _snapshot_membership(
             gate, args, namespace, suffix, run_dir, rid, "pre-sweep", ids_a,
@@ -305,9 +329,14 @@ def main() -> int:
                    detail={"full_target_slots": full_target_slots,
                            "note": "target slots a circular wrap can reclaim; "
                                    "every one of them holds live target refs"})
-        gate.check("pre_no_drop_without_backup",
-                   persist.get("dropped_no_backup_n", 0) == 0,
-                   detail=persist.get("dropped_no_backup_n"))
+        pre_scope = persist.get("dropped_scope")
+        if not pre_scope:
+            pre_scope = {"ok": persist.get("dropped_no_backup_n", 0) == 0,
+                         "n_total": persist.get("dropped_no_backup_n", 0)}
+        gate.check("pre_no_target_drop_without_backup",
+                   pre_scope.get("ok") is True,
+                   detail={"scope": pre_scope,
+                           "events": persist.get("dropped_no_backup_n", 0)})
         if not (gate.checks["pre_target_in_index"]["ok"]
                 and gate.checks["pre_head_present"]["ok"]
                 and gate.checks["pre_target_slots_known"]["ok"]
@@ -318,8 +347,41 @@ def main() -> int:
                 "to reclaim")
             return _finish(gate)
 
+        # ---- 2b. relocation-destination reserve preflight (closure 2) -----
+        # Before the (expensive, GPU) sweep: prove a bounded non-victim
+        # destination capacity exists AND the expected relocation of the
+        # largest target-holding candidate fits into it.  A 100%-live store
+        # with no destination is the product's EXPECTED fail-closed
+        # backpressure -> INVALID geometry, not a relocation-success oracle.
+        reserve_candidates = [target_details[str(s)] for s in full_target_slots
+                              if str(s) in target_details]
+        reserve_candidate = (max(reserve_candidates,
+                                 key=lambda d: int(d.get("live_bytes") or 0))
+                             if reserve_candidates else {})
+        pre_reserve = gc.relocation_reserve_check(reserve_candidate)
+        pre_reserve["allocator_max_free_tail_bytes"] = int(
+            (pre.get("allocator_state") or {}).get("max_free_tail_bytes") or 0)
+        pre_reserve["geometry_reloc_reserve_slots"] = int(
+            geom.get("reloc_reserve_slots") or 0)
+        pre_reserve["geometry_reloc_reserve_bytes"] = int(
+            geom.get("reloc_reserve_bytes") or 0)
+        gate.report["pre_sweep_relocation_reserve"] = pre_reserve
+        if args.expect == "fixed":
+            if not gc.assert_preconditions(gate, "gate-a-f1-reserve-preflight", [
+                ("pre_reloc_victim_holds_target_live_refs",
+                 bool(pre_reserve["holds_target_live_refs"]), pre_reserve),
+                ("pre_reloc_destination_capacity_exists",
+                 bool(pre_reserve["destination_capacity_exists"]), pre_reserve),
+                ("pre_reloc_expected_relocation_fits",
+                 bool(pre_reserve["reclaim_relocatable"]), pre_reserve),
+            ]):
+                return _finish(gate)
+        else:
+            gate.record("pre_reloc_reserve_optional", pre_reserve)
+
         # ---- 3. deterministic unique-prefix sweep ------------------------
-        sweep = _sweep_to_wrap(gate, args, console_path, target_slot_set)
+        sweep = _sweep_to_wrap(gate, args, console_path, target_slot_set,
+                               target_evidence=target_evidence)
         gate.report["sweep"] = sweep
         if sweep.get("abort_reason"):
             gate.invalidate(sweep["abort_reason"])
@@ -364,6 +426,15 @@ def main() -> int:
                    detail={"relocated_count": post_reclaim["relocated_count"],
                            "recycle_count": post_reclaim["recycle_count"],
                            "refused_count": post_reclaim["refused_count"]})
+        if args.expect == "fixed":
+            # Owner closure 3: the measured FIXED oracle requires a real
+            # relocation of the victim's target live refs (>0), not merely a
+            # destructive recycle with a generation bump.
+            gate.check("victim_target_relocation_count_positive",
+                       post_reclaim["relocated_count"] > 0,
+                       detail={"relocated_count":
+                                   post_reclaim["relocated_count"],
+                               "wrap_kind": post_reclaim.get("wrap_kind")})
         gate.check("victim_generation_changed",
                    post_reclaim["generation_changed"],
                    detail={"pre_generation": pre_victim.get("generation"),
@@ -387,9 +458,18 @@ def main() -> int:
                    detail={"batch_exists": (post.get("predicate") or {}).get(
                        "window_from_page0_hits"),
                        "expected": post_reclaim["batch_exists_expected"]})
-        gate.check("post_no_drop_without_backup",
-                   post_reclaim["dropped_no_backup_n"] == 0,
-                   detail=post_reclaim["dropped_no_backup_n"])
+        gate.check("post_no_target_drop_without_backup",
+                   post_reclaim["no_target_drop_without_backup"],
+                   detail={"scope": post_reclaim.get("drop_scope"),
+                           "events": post_reclaim["dropped_no_backup_n"]})
+        # Pre-cold relocation reserve, measured on the victim AS IT WAS before
+        # the reclaim (pre_victim): it must have held target live refs and the
+        # relocation must have fit the non-victim destination capacity.
+        post_reserve = gc.relocation_reserve_check(pre_victim)
+        gate.report["post_sweep_relocation_reserve"] = post_reserve
+        if args.expect == "fixed":
+            gate.check("post_reloc_destination_capacity",
+                       bool(post_reserve["ok"]), detail=post_reserve)
 
         if not (gate.checks["wrap_into_victim_observed"]["ok"]
                 and gate.checks["victim_reclaim_executed"]["ok"]):
@@ -400,17 +480,25 @@ def main() -> int:
                 + (" :: " + post_reclaim["refusal_reason"]
                    if post_reclaim["refusal_reason"] else ""))
             return _finish(gate)
+        # In `fixed` mode both extra checks are always registered above; the
+        # mode test makes their absence fail closed instead of defaulting
+        # permissive through a ``.get(..., True)``.
+        fixed_extra_ok = (
+            args.expect != "fixed"
+            or (gate.checks["victim_target_relocation_count_positive"]["ok"]
+                and gate.checks["post_reloc_destination_capacity"]["ok"]))
         if not (gate.checks["victim_held_live_target_refs"]["ok"]
                 and gate.checks["victim_generation_changed"]["ok"]
                 and gate.checks["head_resolved_after_reclaim"]["ok"]
                 and gate.checks["post_target_in_index"]["ok"]
                 and gate.checks["batch_exists_eq_expected"]["ok"]
-                and gate.checks["post_no_drop_without_backup"]["ok"]):
+                and gate.checks["post_no_target_drop_without_backup"]["ok"]
+                and fixed_extra_ok):
             gate.invalidate(
                 "reclaim executed but its post-state does not satisfy the "
                 "preconditions (live victim refs/generation/head resolution/"
-                "index membership/batch_exists/no-drop) -- measured request "
-                "withheld")
+                "index membership/batch_exists/no-target-drop/relocation-"
+                "reserve) -- measured request withheld")
             return _finish(gate)
 
         # ---- 5. force L1/L2 cold (STRICT flush) --------------------------
@@ -460,12 +548,39 @@ def main() -> int:
                    detail=cold.get("error"))
         gate.check("cold_evidence_present", _evidence_ok(cold),
                    detail="response carried cached_tokens_details/telemetry")
-        gate.check("cold_window_no_drop_without_backup",
-                   not cold_events.get("dropped_no_backup"),
-                   detail={"events": len(cold_events.get("dropped_no_backup", []))})
         if not (gate.checks["cold_request_executed"]["ok"]
                 and gate.checks["cold_evidence_present"]["ok"]):
             gate.invalidate("cold request did not execute / no tier evidence")
+            return _finish(gate)
+        # Post-cold membership (owner fix C3): classify a drop in the cold
+        # window against a snapshot taken AFTER the measured request.  The
+        # pre-request `cold_pre_target_still_indexed` verdict is STALE relative
+        # to cold-window drops and must never be reused as `refs_intact`.
+        cold_post = _snapshot_membership(
+            gate, args, namespace, suffix, run_dir, rid, "cold-post", ids_a,
+            str(prompt_json), victim_slot=victim_slot)
+        if cold_post is None:
+            return _finish(gate)
+        cold_post_mem = cold_post.get("membership") or {}
+        gate.report["cold_post_membership"] = _slim_membership(cold_post)
+        cold_refs, cold_scope = _cold_window_drop_scope(
+            cold_events, target_evidence, cold_pre_mem, cold_post_mem)
+        gate.report["cold_window_drop_scope"] = {
+            "scope": cold_scope, "refs_intact": cold_refs,
+            "baseline": _delta_slim(cold_pre_mem),
+            "now": _delta_slim(cold_post_mem)}
+        gate.check("cold_window_no_target_drop_without_backup",
+                   cold_scope["ok"],
+                   detail={"scope": cold_scope,
+                           "events": len(cold_events.get("dropped_no_backup",
+                                                         []))})
+        if not cold_scope["ok"]:
+            gate.invalidate(
+                "a graded-target (or unattributable) kv subtree was dropped "
+                "without backup during the measured cold window "
+                f"(target_roots={cold_scope['target_roots']}, "
+                f"unknown_roots={cold_scope['unknown_roots']}, "
+                f"refs_intact={cold_refs}); the cold oracle is unestablishable")
             return _finish(gate)
         cold_miss = gc.revoke_miss(cold_events)
         cold_hit = gc.revoke_storage_hit(cold_events)
@@ -516,6 +631,9 @@ def _persist_chain(gate, args, console_path, namespace, suffix, ids_a,
     filler_total = 0
     ev = {}
     last_mem = None
+    # Pre-drop durable baseline for the chain: best membership seen while no
+    # dropped-without-backup event was in the cumulative window.
+    baseline = {}
     off = gc.console_size(console_path)
     for i in range(args.max_fillers):
         resp = gc.generate(args.port, _filler_ids(i, args.filler_tokens), 1)
@@ -525,21 +643,71 @@ def _persist_chain(gate, args, console_path, namespace, suffix, ids_a,
             return None
         filler_total += args.filler_tokens
         ev = gc.parse_storage_events(gc.read_new_lines(console_path, off))
-        if ev.get("dropped_no_backup"):
-            gate.report["persist_console_evidence"] = gc.slim_storage_events(ev)
-            return {"ok": False, "dropped_no_backup_n":
-                    len(ev["dropped_no_backup"]),
-                    "reason": "kv subtree dropped without backup due to host "
-                              "memory pressure during write-back; host pool "
-                              "still mis-sized for the graded chain"}
         written = gc.extent_write_bytes(ev)
+        pre = None
+        if written > 0 or ev.get("dropped_no_backup"):
+            pre = _snapshot_membership(gate, args, namespace, suffix, run_dir,
+                                       rid, f"persist-{i}", ids_a, ids_json)
+            if pre is None:
+                return None
+            last_mem = pre.get("membership") or {}
+        drops_present = bool(ev.get("dropped_no_backup"))
+        if pre is not None and not drops_present:
+            if (_int_or_zero(last_mem.get("n_present"))
+                    > _int_or_zero(baseline.get("n_present"))):
+                baseline = last_mem
+        # Target-scoped drop predicate (owner closure 1, tightened D1):
+        # FOREIGN requires a no-decrease delta proof of the chain's durable refs
+        # measured against a COMPLETE (full-window) drop-free baseline and
+        # confirmed by a re-snapshot consumed immediately after the drop lines.
+        # No complete baseline, a missing proxy, or any decrease =>
+        # target/unknown => INVALID.  The node-id ordering bound is NOT used
+        # (its invariant is false; see gate_common).
+        refs_intact = None
+        recheck_mem = None
+        if pre is not None:
+            post_snaps = [last_mem]
+            if drops_present:
+                # D1(ii): re-snapshot immediately around the drop window.  The
+                # verdict must hold for BOTH post-drop snapshots, so a drop
+                # landing between them cannot be hidden.
+                recheck = _snapshot_membership(
+                    gate, args, namespace, suffix, run_dir, rid,
+                    f"persist-{i}-recheck", ids_a, ids_json)
+                if recheck is None:
+                    return None
+                recheck_mem = recheck.get("membership") or {}
+                post_snaps.append(recheck_mem)
+            refs_intact = gc.combine_delta_status([
+                gc.delta_status_with_rechecks(baseline, post_snaps)])
+        drop_evidence = gc.target_node_evidence(ev, target_n)
+        scoped = gc.scope_drop_events(ev, drop_evidence, refs_intact=refs_intact)
+        scoped_ok = gc.drop_scope_ok(scoped)
+        if ev.get("dropped_no_backup"):
+            gate.report["persist_drop_scope"] = {
+                "evidence": drop_evidence, "summary": scoped_ok,
+                "refs_intact": refs_intact, "filler_tokens_total": filler_total,
+                "baseline": _delta_slim(baseline),
+                "now": _delta_slim(last_mem),
+                "recheck": (_delta_slim(recheck_mem)
+                            if recheck_mem is not None else None),
+                "scoped_tail": scoped[-8:],
+            }
+        if not scoped_ok["ok"]:
+            gate.report["persist_console_evidence"] = gc.slim_storage_events(ev)
+            return {"ok": False, "dropped_no_backup_n": scoped_ok["n_total"],
+                    "dropped_scope": scoped_ok,
+                    "reason": "graded-target (or unattributable) kv subtree "
+                              "dropped without backup due to host memory "
+                              f"pressure during write-back (target_roots="
+                              f"{scoped_ok['target_roots']}, unknown_roots="
+                              f"{scoped_ok['unknown_roots']}, refs_intact="
+                              f"{refs_intact}); only drops with a no-decrease "
+                              "delta proof against a COMPLETE full-window "
+                              "baseline, confirmed by the immediately-following "
+                              "re-snapshot, are disposable"}
         if written <= 0:
             continue
-        pre = _snapshot_membership(gate, args, namespace, suffix, run_dir, rid,
-                                   f"persist-{i}", ids_a, ids_json)
-        if pre is None:
-            return None
-        last_mem = pre.get("membership") or {}
         done = ((last_mem.get("n_present") or 0) >= min_present
                 and filler_total >= host_evict_target)
         gate.log(f"write-back filler {i}: extent_write_bytes={written} "
@@ -556,7 +724,9 @@ def _persist_chain(gate, args, console_path, namespace, suffix, ids_a,
                 "reclaim_relocated_n": len(ev.get("reclaim_relocated", [])),
                 "reclaim_refused_n": len(ev.get("reclaim_refused", [])),
                 "extent_recycle_n": gc.extent_recycle_count(ev),
-                "dropped_no_backup_n": 0,
+                "dropped_no_backup_n": scoped_ok["n_total"],
+                "dropped_scope": scoped_ok,
+                "drop_evidence": drop_evidence,
                 "membership": {"n_present": last_mem.get("n_present"),
                                "query_window_len": target_n - 1,
                                "required": min_present,
@@ -572,13 +742,17 @@ def _persist_chain(gate, args, console_path, namespace, suffix, ids_a,
                        filler_total >= host_evict_target,
                        detail={"filler_tokens_total": filler_total,
                                "host_evict_target": host_evict_target})
-            gate.check("persist_no_drop_without_backup", True,
-                       detail={"events": 0, "filler_tokens_total": filler_total})
+            gate.check("persist_no_target_drop_without_backup",
+                       scoped_ok["ok"],
+                       detail={"scope": scoped_ok,
+                               "events": scoped_ok["n_total"],
+                               "filler_tokens_total": filler_total})
             gate.report["persist_console_evidence"] = gc.slim_storage_events(ev)
             return out
     return {
         "ok": False, "fillers": records, "filler_tokens_total": filler_total,
         "dropped_no_backup_n": len(ev.get("dropped_no_backup", [])),
+        "dropped_scope": gc.drop_scope_ok(ev.get("dropped_scopes") or []),
         "membership": last_mem,
         "reason": (
             f"chain not fully written back to L3 after {len(records)} unrelated "
@@ -627,7 +801,41 @@ def _slim_membership(mem) -> dict:
     }
 
 
-def _sweep_to_wrap(gate, args, console_path, target_slots):
+def _int_or_zero(value) -> int:
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _delta_slim(mem) -> dict:
+    """Membership fields that carry the durable no-decrease proof."""
+    mem = mem or {}
+    return {k: mem.get(k) for k in
+            ("n_present", "n_absent", "first_absent_index", "n_runs",
+             "longest_run_len", "query_window_len")}
+
+
+def _cold_window_drop_scope(cold_events, target_evidence, pre_mem, post_mem):
+    """Classify cold-window drops against the POST-request membership (C3).
+
+    ``pre_mem`` is the membership snapshot taken immediately before the measured
+    cold request and ``post_mem`` the snapshot taken after it.  A no-decrease
+    delta between them measured against a COMPLETE (full-window) ``pre_mem`` is
+    the ONLY way a cold-window drop becomes ``foreign`` (D1); a partial
+    ``pre_mem``, a missing proxy, a decrease, or any missing snapshot is
+    target/unknown -> INVALID.  The pre-request verdict alone is never used as
+    ``refs_intact``.
+    """
+    refs_intact = gc.combine_delta_status(
+        [gc.durable_delta_status(pre_mem, post_mem)])
+    return refs_intact, gc.drop_scope_ok(
+        gc.scope_drop_events(cold_events, target_evidence,
+                             refs_intact=refs_intact))
+
+
+def _sweep_to_wrap(gate, args, console_path, target_slots,
+                   target_evidence=None):
     """Send UNRELATED UNIQUE prefixes until the cursor reclaims a TARGET slot.
 
     The victim is whatever target-holding slot the circular cursor wraps into
@@ -638,6 +846,7 @@ def _sweep_to_wrap(gate, args, console_path, target_slots):
     off_sweep = gc.console_size(console_path)
     out = {"requests_done": 0, "recycle_count": 0, "relocated_count": 0,
            "refused_count": 0, "dropped_no_backup_n": 0,
+           "drop_scope": None,
            "first_wrap_request": None, "victim_slot": None,
            "abort_reason": None, "extent_recycle_total": 0,
            "consecutive_refusals": 0, "max_consecutive_refusals":
@@ -655,10 +864,24 @@ def _sweep_to_wrap(gate, args, console_path, target_slots):
         ev = gc.parse_storage_events(gc.read_new_lines(console_path, off_sweep))
         out["sweep_written_bytes"] = gc.extent_write_bytes(ev)
         out["dropped_no_backup_n"] = len(ev.get("dropped_no_backup", []))
+        # Target-scoped (owner closure 1).  A sweep round cannot cheaply re-run
+        # the offline replay every request, so no positive delta proof exists
+        # here and refs_intact is None: ANY drop in the sweep window is
+        # therefore unknown -> INVALID (fail closed).  The node-id ordering
+        # bound is NOT used (its invariant is false; see gate_common).
+        scoped = gc.scope_drop_events(ev, target_evidence, refs_intact=None)
+        scoped_ok = gc.drop_scope_ok(scoped)
+        out["drop_scope"] = scoped_ok
         if out["dropped_no_backup_n"]:
+            out["drop_scope_tail"] = scoped[-8:]
+        if not scoped_ok["ok"]:
             out["abort_reason"] = (
-                "kv subtree dropped without backup due to host memory pressure "
-                f"during the sweep ({out['dropped_no_backup_n']} events)")
+                "graded-target (or unattributable) kv subtree dropped without "
+                "backup due to host memory pressure during the sweep "
+                f"(target_roots={scoped_ok['target_roots']}, unknown_roots="
+                f"{scoped_ok['unknown_roots']}, total={scoped_ok['n_total']}); "
+                "no positive no-decrease delta proof is available per sweep "
+                "round, so this fails closed")
             return out
         out["extent_recycle_total"] = gc.extent_recycle_count(ev)
         hits = gc.reclaim_hits_for_slots(ev, target_slots)
@@ -759,6 +982,18 @@ def _reclaim_evidence(sweep, post, victim_slot, pre_generation,
         expected is not None and ev["batch_exists"] == expected
         and expected > 0)
     ev["dropped_no_backup_n"] = sweep.get("dropped_no_backup_n", 0)
+    scope = sweep.get("drop_scope")
+    if scope is None:
+        # Backward-compatible shape for synthetic callers/tests.
+        scope = {"n_total": sweep.get("dropped_no_backup_n", 0),
+                 "ok": sweep.get("dropped_no_backup_n", 0) == 0}
+    ev["drop_scope"] = scope
+    if ev["dropped_no_backup_n"]:
+        # L5: a non-None scope without an explicit ``ok is True`` is
+        # fail-closed (a row exists but the scope cannot vouch for it).
+        ev["no_target_drop_without_backup"] = scope.get("ok") is True
+    else:
+        ev["no_target_drop_without_backup"] = True
     return ev
 
 

@@ -56,6 +56,7 @@ class RadixLinearAttention(nn.Module):
         A_log: Optional[torch.Tensor] = None,
         dt_bias: Optional[torch.Tensor] = None,
         lower_bound: Optional[float] = None,
+        gdn_v_head_layout: str = "grouped",
     ):
         super().__init__()
         self.layer_id = layer_id
@@ -76,6 +77,9 @@ class RadixLinearAttention(nn.Module):
         self.A_log = A_log
         self.dt_bias = dt_bias
         self.lower_bound = lower_bound
+        if gdn_v_head_layout not in ("grouped", "tiled"):
+            raise ValueError(f"Unknown GDN V-head layout: {gdn_v_head_layout}")
+        self.gdn_v_head_layout = gdn_v_head_layout
 
     def forward(
         self,
