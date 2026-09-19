@@ -37,12 +37,16 @@ log "m3m4-preflight: tree=$TREE role=$ROLE src_default=$SRC_DEFAULT"
                                                 || fail "M1 identity.json has no .name"
 [ "${#FAILS[@]}" -eq 0 ] || { printf 'REFUSE: %s\n' "${FAILS[@]}" >&2; exit 2; }
 
-# ---- M2 worktree pin (commit + clean python/) -------------------------------
+# ---- M2 worktree pin (loaded python/ content + clean tree) ------------------
+# The pin names a commit whose python/ content is the intended loaded source.
+# Comparing the worktree python/ against that commit (not HEAD) keeps the gate
+# a fixed point under commits that do not touch loaded source -- HEAD==pin would
+# self-invalidate because the pinned value lives in a tracked file.
 GOT_COMMIT="$(git -C "$SRC_DEFAULT" rev-parse HEAD 2>/dev/null || true)"
-if [ "$GOT_COMMIT" != "$M3M4_SRC_PIN_COMMIT" ]; then
-  fail "M2 worktree commit mismatch: got=$GOT_COMMIT want=$M3M4_SRC_PIN_COMMIT"
+if ! git -C "$SRC_DEFAULT" diff --quiet "$M3M4_SRC_PIN_COMMIT" -- python/ 2>/dev/null; then
+  fail "M2 worktree python/ differs from pin=$M3M4_SRC_PIN_COMMIT (HEAD=$GOT_COMMIT)"
 else
-  log "M2 worktree commit OK: $GOT_COMMIT"
+  log "M2 worktree python/ matches pin: $M3M4_SRC_PIN_COMMIT"
 fi
 DIRTY="$(git -C "$SRC_DEFAULT" status --porcelain -- python/ 2>/dev/null || true)"
 if [ -n "$DIRTY" ]; then
