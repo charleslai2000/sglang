@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # stop.sh — stop a service we own and release the GPU.
 #
-# Usage: stop.sh <prod|test|all>
+# Usage: stop.sh <prod|test|m2|m3|m4|all>
 #
 # Safety: the server pid is identity-checked (must be a launch_server for this
 # tree on this port) before any signal.  A pid we do not recognise is NOT
@@ -11,7 +11,7 @@ set -euo pipefail
 # shellcheck source=/dev/null
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-TARGET="${1:?usage: stop.sh <prod|test|all>}"
+TARGET="${1:?usage: stop.sh <prod|test|m2|m3|m4|all>}"
 RC=0
 
 stop_one() {
@@ -21,7 +21,7 @@ stop_one() {
   local pid; pid="$(cat "$pidfile")"
   local tree=""; [ -f "$PID_DIR/$role.tree" ] && tree="$(cat "$PID_DIR/$role.tree")"
   local port
-  case "$role" in prod) port="$PROD_PORT" ;; test) port="$TEST_PORT" ;; *) port="-" ;; esac
+  case "$role" in prod) port="$PROD_PORT" ;; test) port="$TEST_PORT" ;; m2) port="$M2_PORT" ;; m3) port="$M3_PORT" ;; m4) port="$M4_PORT" ;; *) port="-" ;; esac
 
   # Supervisor holds the lock; stop it first so it releases the flock, then
   # ensure the server is gone.
@@ -56,8 +56,11 @@ stop_one() {
 case "$TARGET" in
   prod) stop_one prod ;;
   test) stop_one test ;;
-  all)  stop_one test; stop_one prod ;;
-  *) die "unknown target '$TARGET' (want prod|test|all)" 2 ;;
+  m2) stop_one m2 ;;
+  m3) stop_one m3 ;;
+  m4) stop_one m4 ;;
+  all) stop_one m2; stop_one m3; stop_one m4; stop_one test; stop_one prod ;;
+  *) die "unknown target '$TARGET' (want prod|test|m2|m3|m4|all)" 2 ;;
 esac
 
 # If nothing is left running, publish a free state.
