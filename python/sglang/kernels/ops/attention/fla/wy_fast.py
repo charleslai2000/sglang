@@ -39,6 +39,7 @@ def recompute_w_u_fwd_kernel(
     BK: tl.constexpr,
     BV: tl.constexpr,
     IS_VARLEN: tl.constexpr,
+    TILED_V_HEADS: tl.constexpr = False,
 ):
     i_t, i_bh = tl.program_id(0), tl.program_id(1)
     i_b, i_h = i_bh // H, i_bh % H
@@ -87,7 +88,7 @@ def recompute_w_u_fwd_kernel(
 
     for i_k in range(tl.cdiv(K, BK)):
         p_k = tl.make_block_ptr(
-            k + (bos * Hg + i_h // (H // Hg)) * K,
+            k + (bos * Hg + (i_h % Hg if TILED_V_HEADS else i_h // (H // Hg))) * K,
             (T, K),
             (Hg * K, 1),
             (i_t * BT, i_k * BK),
@@ -116,6 +117,7 @@ def recompute_w_u_fwd(
     A: torch.Tensor,
     cu_seqlens: Optional[torch.LongTensor],
     chunk_indices: torch.LongTensor | None = None,
+    tiled_v_heads: bool = False,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     B, T, Hg, K, V = *k.shape, v.shape[-1]
     H = v.shape[-2]
@@ -149,6 +151,7 @@ def recompute_w_u_fwd(
         IS_VARLEN=cu_seqlens is not None,
         num_warps=4,
         num_stages=3,
+        TILED_V_HEADS=tiled_v_heads,
     )
     return w, u
 

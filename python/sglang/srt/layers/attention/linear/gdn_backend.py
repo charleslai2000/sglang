@@ -396,6 +396,22 @@ class GDNAttnBackend(MambaAttnBackendBase):
         self.kernel_dispatcher = GDNKernelDispatcher(
             backends.decode, backends.prefill, backends.verify
         )
+        config = hybrid_gdn_config(model_runner.model_config)
+        if getattr(config, "gdn_v_head_layout", "grouped") == "tiled":
+            pool = model_runner.req_to_token_pool.mamba_pool
+            if not is_cuda() or any(
+                not isinstance(kernel, TritonGDNKernel)
+                for kernel in (
+                    self.kernel_dispatcher.decode_kernel,
+                    self.kernel_dispatcher.extend_kernel,
+                    self.kernel_dispatcher.verify_kernel,
+                )
+            ):
+                raise ValueError("Tiled qwen35 GGUF requires CUDA Triton GDN backends")
+            if getattr(pool, "enable_linear_replayssm", False) or getattr(
+                pool, "enable_linear_replayssm_spec", False
+            ):
+                raise ValueError("Tiled qwen35 GGUF does not yet support ReplaySSM")
         # Sized past the pool for attn_tp-padded warmup/MLP-sync batches (see helper).
         self.verify_intermediate_state_indices = (
             build_verify_intermediate_state_indices(
@@ -482,6 +498,7 @@ class GDNAttnBackend(MambaAttnBackendBase):
                 replayssm_g=replayssm_g,
                 replayssm_write_pos=replayssm_write_pos,
                 replayssm_force_flush=replayssm_force_flush,
+                tiled_v_heads=layer.gdn_v_head_layout == "tiled",
             )
             self._track_mamba_state_decode(
                 forward_batch, conv_states, ssm_states, cache_indices, layer.layer_id
@@ -510,6 +527,7 @@ class GDNAttnBackend(MambaAttnBackendBase):
             ssm_states=ssm_states,
             cache_indices=cache_indices,
             query_start_loc=query_start_loc,
+            tiled_v_heads=layer.gdn_v_head_layout == "tiled",
         )
 
         self._track_mamba_state_decode(
@@ -716,6 +734,7 @@ class GDNAttnBackend(MambaAttnBackendBase):
                     intermediate_state_indices=intermediate_state_indices,
                     cache_steps=forward_batch.spec_info.draft_token_num,
                     retrieve_parent_token=retrieve_parent_token,
+                    tiled_v_heads=layer.gdn_v_head_layout == "tiled",
                 )
         else:
             g, beta = fused_gdn_gating(layer.A_log, a, b, layer.dt_bias)
@@ -735,6 +754,7 @@ class GDNAttnBackend(MambaAttnBackendBase):
                 state_checkpoint_every_n_tokens=(
                     forward_metadata.state_checkpoint_every_n_tokens
                 ),
+                tiled_v_heads=layer.gdn_v_head_layout == "tiled",
             )
 
             if is_npu() and last_recurrent_state is not None:
