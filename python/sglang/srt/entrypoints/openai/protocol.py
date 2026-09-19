@@ -862,6 +862,11 @@ class ChatCompletionRequest(BaseModel):
         description="The maximum number of completion tokens for a chat completion request, "
         "including visible output tokens and reasoning tokens. Input tokens are not included. ",
     )
+    max_thinking_tokens: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="Per-request cap for reasoning tokens. Requires --enable-strict-thinking.",
+    )
     n: int = 1
     presence_penalty: float = 0.0
     response_format: Optional[Union[ResponseFormat, StructuralTagResponseFormat]] = None

@@ -1012,24 +1012,10 @@ class OpenAIServingChat(OpenAIServingBase):
         # Process messages and apply chat template
         processed_messages = self._process_messages(request, is_multimodal)
 
-        # Narrow Qwen3.5 reasoning budget. The prompt-level policy was applied
-        # in _process_messages; here we attach the thinking budget through the
-        # existing mechanism this launch actually supports. When no mechanism
-        # is enabled, the plan is all-None and the request is unchanged apart
-        # from the prompt-level policy (never a fail-closed 400).
-        qwen35_policy = getattr(request, "_qwen35_policy", None)
-        (
-            qwen35_max_thinking_tokens,
-            qwen35_processor_str,
-            qwen35_custom_params,
-        ) = self._plan_qwen35_budget(qwen35_policy)
-        if qwen35_custom_params:
-            request.custom_params = {
-                **(request.custom_params or {}),
-                **qwen35_custom_params,
-            }
-        if qwen35_processor_str and not request.custom_logit_processor:
-            request.custom_logit_processor = qwen35_processor_str
+        # ``max_thinking_tokens`` is an explicit request-level strict-thinking
+        # control. It is not derived from reasoning effort and does not alter the
+        # rendered prompt.
+        max_thinking_tokens = request.max_thinking_tokens
 
         # Build sampling parameters
         sampling_params = request.to_sampling_params(
@@ -1108,7 +1094,7 @@ class OpenAIServingChat(OpenAIServingBase):
             routing_key=self.extract_routing_key(raw_request),
             custom_labels=custom_labels,
             custom_logit_processor=request.custom_logit_processor,
-            max_thinking_tokens=qwen35_max_thinking_tokens,
+            max_thinking_tokens=max_thinking_tokens,
             images_config=getattr(request, "images_config", None),
             video_config=_build_video_config(request),
             image_max_dynamic_patch=img_max_dynamic_patch,
@@ -1268,10 +1254,6 @@ class OpenAIServingChat(OpenAIServingBase):
             normalize_assistant_tool_call_arguments(
                 message, strict=self.chat_encoding_spec != "kimi_k3"
             )
-
-        qwen35_policy = getattr(request, "_qwen35_policy", None)
-        if qwen35_policy is not None:
-            messages = self._merge_qwen35_steering(messages, qwen35_policy.steering)
 
         prompt_ids = self._encode_messages(
             copy.deepcopy(messages),
@@ -2571,36 +2553,6 @@ class OpenAIServingChat(OpenAIServingBase):
             effort=request.reasoning_effort,
         )
 
-    def _qwen35_budget_route(self) -> Optional[str]:
-        """Which existing budget mechanism can be enforced on this launch.
-
-        Both mechanisms are opt-in server flags. When neither is enabled the
-        prompt-level policy still applies; the budget is simply not enforceable
-        on that launch (the caller is warned once, see callers). Reading the
-        resolved config leaves keeps this correct for overlay/control-plane
-        changes.
-        """
-        strict = False
-        processor = False
-        try:
-            strict = (
-                self.tokenizer_manager.config_value("enable_strict_thinking") is True
-            )
-        except Exception:
-            strict = False
-        try:
-            processor = (
-                self.tokenizer_manager.config_value("enable_custom_logit_processor")
-                is True
-            )
-        except Exception:
-            processor = False
-        if strict:
-            return "strict"
-        if processor:
-            return "processor"
-        return None
-
     def _apply_qwen35_policy_to_request(
         self,
         request: ChatCompletionRequest,
@@ -2608,12 +2560,8 @@ class OpenAIServingChat(OpenAIServingBase):
     ) -> None:
         """Make the resolved policy real for this request.
 
-        ``none`` is binding: it forces thinking off. For graded tiers the
-        template toggle is only defaulted, matching the protocol validator's
-        documented "unless explicitly overridden" contract for
-        ``chat_template_kwargs``. Gradation itself never depends on the toggle
-        (all graded tiers are thinking-on); tiers are distinguished by the
-        steering prompt and the thinking budget.
+        ``none`` forces thinking off. Graded values select a native template
+        effort and default thinking on without mutating messages.
         """
         ctk = dict(request.chat_template_kwargs or {})
         if policy.enable_thinking:
@@ -2621,71 +2569,7 @@ class OpenAIServingChat(OpenAIServingBase):
         else:
             ctk["enable_thinking"] = False
         request.chat_template_kwargs = ctk
-
-        request._qwen35_policy = policy  # type: ignore[attr-defined]
-        request._qwen35_max_thinking_tokens = policy.max_thinking_tokens  # type: ignore[attr-defined]
-
-    @staticmethod
-    def _merge_qwen35_steering(
-        messages: List[Dict[str, Any]], steering: str
-    ) -> List[Dict[str, Any]]:
-        """Append the runtime steering prompt to the system turn.
-
-        The Qwen3.5 template has no steering variable, so the instruction is
-        merged into the first system message (or a new leading system message
-        is inserted when none exists). Multimodal/list content is left alone
-        and a separate system message is inserted instead.
-        """
-        if not steering:
-            return messages
-        for message in messages:
-            if message.get("role") in ("system", "developer"):
-                content = message.get("content")
-                if isinstance(content, str):
-                    message["content"] = (
-                        f"{content}\n\n{steering}" if content else steering
-                    )
-                else:
-                    messages.insert(0, {"role": "system", "content": steering})
-                return messages
-        return [{"role": "system", "content": steering}, *messages]
-
-    def _plan_qwen35_budget(
-        self,
-        policy: Optional[Qwen35ReasoningPolicy],
-    ) -> tuple[Optional[int], Optional[str], Optional[Dict[str, Any]]]:
-        """Return ``(max_thinking_tokens, processor_str, custom_params)``.
-
-        Prefers the strict-thinking per-request budget when that launch flag is
-        on, otherwise the existing ``ThinkingBudgetLogitProcessor`` route. When
-        neither flag is enabled, returns all-None so the request is unchanged
-        apart from the prompt-level policy (never a fail-closed 400).
-        """
-        if policy is None or not policy.enable_thinking:
-            return None, None, None
-        budget = policy.max_thinking_tokens
-        if budget is None:
-            return None, None, None
-        route = self._qwen35_budget_route()
-        if route == "strict":
-            return budget, None, None
-        if route == "processor":
-            from sglang.srt.sampling.custom_logit_processor import (
-                Qwen35ThinkingBudgetLogitProcessor,
-            )
-
-            custom_params = {"thinking_budget": budget}
-            return None, Qwen35ThinkingBudgetLogitProcessor.to_str(), custom_params
-        if not OpenAIServingChat._qwen35_budget_unenforceable_warned:
-            OpenAIServingChat._qwen35_budget_unenforceable_warned = True
-            logger.warning(
-                "Qwen3.5 reasoning-effort policy: thinking budget %d cannot be "
-                "enforced on this launch (neither --enable-strict-thinking nor "
-                "--enable-custom-logit-processor is set); the steering prompt "
-                "and enable_thinking still apply. Prompt-level policy only.",
-                budget,
-            )
-        return None, None, None
+        request.reasoning_effort = policy.tier
 
     async def _process_tool_call_stream(
         self,
