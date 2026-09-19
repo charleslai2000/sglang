@@ -1,0 +1,33 @@
+
+### preconditions
+   ok: destination /tmp/opencode/m2-a2-freeze-e2e-20260918T211829Z/dest, venv /home/ubuntu/venvs/sglang-3090 (mode 775)
+   ok: source quiescent
+   ok: top-level layout allowlisted
+
+### stage (rsync -a, manifest/ excluded)
+   ok: staged 2.0G into /tmp/opencode/m2-a2-freeze-e2e-20260918T211829Z/dest
+
+### install identity tools
+   ok: tools/preflight_identity.py 29a5a11bc8f1bef402a6a4b10ac62240798eca1a1a2e288c30b650208ac858de
+   ok: tools/l3_namespace.py 40e65e04b1daabbd9248aa273dc5ceaa55343e50050d46daa0e5df4dce880b44
+
+### repoint tools/validate_telemetry.py
+repoint OK: /tmp/opencode/m2-a2-freeze-e2e-20260918T211829Z/dest/tools/validate_telemetry.py -> /tmp/opencode/m2-a2-freeze-e2e-20260918T211829Z/dest/src (src x1, identity x1, bindings 10/10 verified)
+   ok: telemetry tool repointed + hash bindings verified
+
+### provisional manifest (launcher dry-run gate input)
+   ok: provisional manifest: 14790 entries
+
+### env symlink
+   ok: env -> /home/ubuntu/venvs/sglang-3090 (created)
+
+### repin launcher
+launcher repin FAILED; log:
+== launcher-repin: tree=/tmp/opencode/m2-a2-freeze-e2e-20260918T211829Z/dest identity=LOCAL-PROD-v1.2.1-M2 mode=write ==
+   src_stream_sha256=cab2717fb7c09a9491a275517695f41999342d08542def85fdfb2b647e302900
+   rendered -> /tmp/opencode/m2-a2-freeze-e2e-20260918T211829Z/work/repin/launch.sh.rendered
+   bash -n: OK
+LAUNCHER-AUDIT PASS: /tmp/opencode/m2-a2-freeze-e2e-20260918T211829Z/work/repin/launch.sh.rendered
+   launcher_sha256=d9fde44551cec05f63d4edac602183c08c06633a64f80aceba56ae073a8ebb09
+dry-run negative test FAILED: shared run id should exit 4, got 1
+/tmp/opencode/m2-a2-freeze-e2e-20260918T211829Z/work/repin/launch.sh.rendered: line 36: SGLANG_L3_MODE: FATAL: SGLANG_L3_MODE must be set explicitly to disabled for M2 (no default)

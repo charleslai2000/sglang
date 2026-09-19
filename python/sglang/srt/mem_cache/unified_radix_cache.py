@@ -1772,6 +1772,18 @@ class UnifiedRadixCache(BasePrefixCache):
         self._host_allocability_telemetry_last_emitted = {}
         self._host_allocability_telemetry_total_emitted = 0
 
+        # Real host-slot demand of an auxiliary pool's most recent failed
+        # staging alloc, captured at the ``evict_host`` reclaim seam.  The
+        # allocator invokes the component's reclaim callback with exactly the
+        # slot count ``prepare_prefetch`` requested, so this is the
+        # authoritative slot demand the WAIT_CAPACITY consumer compares against
+        # ``free + evictable`` (never a prefix-token count, never 0).  The
+        # depth map keeps a nested evict triggered from inside the reclaim walk
+        # (e.g. a deferred mamba L3 flush) from overwriting the outer request's
+        # true demand.
+        self._host_alloc_reclaim_demand: dict[ComponentType, int] = {}
+        self._host_alloc_evict_depth: dict[ComponentType, int] = {}
+
         self.reset()
         logger.info(
             f"Init Unified Radix Cache. Components: {self.tree_components}. "
@@ -2653,6 +2665,8 @@ class UnifiedRadixCache(BasePrefixCache):
         self._host_allocability_telemetry_emitted = {}
         self._host_allocability_telemetry_last_emitted = {}
         self._host_allocability_telemetry_total_emitted = 0
+        getattr(self, "_host_alloc_reclaim_demand", {}).clear()
+        getattr(self, "_host_alloc_evict_depth", {}).clear()
         getattr(self, "_storage_prefetch_terminal", {}).clear()
         getattr(self, "_storage_prefetch_completion", {}).clear()
         self.tree_core.reset()
@@ -3680,6 +3694,128 @@ class UnifiedRadixCache(BasePrefixCache):
     def _host_allocability_pool_for_component(component_type: ComponentType) -> str:
         return _COMPONENT_POOL_LABEL.get(component_type, str(component_type))
 
+    def _note_host_alloc_reclaim_enter(
+        self, component_type: ComponentType, num_tokens: int
+    ) -> None:
+        """Record an auxiliary component's reclaim request slot size.
+
+        ``HostPoolGroup.alloc`` (pool_host/group.py) invokes the component's
+        reclaim callback with exactly the slot count the failed
+        ``prepare_prefetch`` requested, so ``num_tokens`` here is the
+        component's REAL host-slot demand.  Only the outermost eviction for a
+        component is recorded: a nested evict (e.g. a deferred mamba L3 flush)
+        must not overwrite the outer request's demand.
+        """
+        if component_type == BASE_COMPONENT_TYPE:
+            return
+        if component_type not in getattr(self, "components", {}):
+            return
+        demand = getattr(self, "_host_alloc_reclaim_demand", None)
+        depth = getattr(self, "_host_alloc_evict_depth", None)
+        if demand is None or depth is None:
+            return
+        if depth.get(component_type, 0) == 0:
+            demand[component_type] = int(num_tokens)
+        depth[component_type] = depth.get(component_type, 0) + 1
+
+    def _note_host_alloc_reclaim_exit(self, component_type: ComponentType) -> None:
+        depth = getattr(self, "_host_alloc_evict_depth", None)
+        if depth is None:
+            return
+        current = depth.get(component_type)
+        if current is None:
+            return
+        if current <= 1:
+            depth.pop(component_type, None)
+        else:
+            depth[component_type] = current - 1
+
+    def _host_alloc_aux_slot_demand(
+        self, component_type: Optional[ComponentType]
+    ) -> int:
+        """Real host-slot demand of an auxiliary component's failed staging alloc.
+
+        Captured at the ``evict_host`` reclaim seam (see
+        ``_note_host_alloc_reclaim_enter``).  Never returns 0: a failing
+        auxiliary alloc always needs at least one slot, and a 0 is treated by
+        ``Scheduler._host_alloc_wait_eligible`` as "not a real constraint",
+        which would delete the constraint rather than express it.  When the
+        capture is unavailable (an allocator that fails without routing through
+        the reclaim seam), the conservative real-slot floor of 1 is returned --
+        a host-slot count, never a prefix-token count.  This value only gates
+        the wake/retry decision; the allocator remains the final authority.
+        """
+        demand = None
+        if component_type is not None:
+            demand = getattr(self, "_host_alloc_reclaim_demand", {}).get(
+                component_type
+            )
+        if demand is None:
+            return 1
+        return max(1, int(demand))
+
+    def _host_alloc_aux_transfer_slot_demand(self, transfer: PoolTransfer) -> int:
+        """Host SLOT demand of one auxiliary transfer.
+
+        The primary staging allocation is the authoritative slot count.  The
+        key-count fallback is a PAGE count (``transfer.keys``), which is the
+        wrong unit for the ``free + evictable`` slot comparison; convert it
+        through the owning host pool's page size when that is available.  When
+        neither is available, return the real host-slot floor of 1 (never 0 and
+        never a token count): a 0 would delete the constraint in
+        ``Scheduler._host_alloc_wait_eligible``.
+        """
+        host_indices = getattr(transfer, "host_indices", None)
+        if host_indices is not None:
+            return max(1, int(len(host_indices)))
+        keys = getattr(transfer, "keys", None)
+        pages = len(keys) if keys else 0
+        if pages <= 0:
+            return 1
+        page_size = 0
+        group = getattr(self, "host_pool_group", None)
+        entry_map = getattr(group, "entry_map", None)
+        if entry_map:
+            entry = entry_map.get(getattr(transfer, "name", None))
+            if entry is not None:
+                page_size = int(getattr(entry.host_pool, "page_size", 0) or 0)
+        return max(1, pages * max(1, page_size))
+
+    def _host_alloc_required_aux_units(
+        self,
+        comp_xfers: dict[ComponentType, list[PoolTransfer]],
+        *,
+        failed_component: Optional[ComponentType],
+    ) -> dict[str, int]:
+        """Per-aux-pool HOST SLOT requirements for a failed prefetch.
+
+        Successfully staged components contribute their real ``host_indices``
+        slot count.  The failing component broke out before its transfers
+        entered ``comp_xfers``, so its demand comes from the ``evict_host``
+        reclaim-seam capture.  Every aux pool with a positive demand is
+        written; no pool is ever assigned 0, because the consumer treats
+        ``required <= 0`` as "not a real constraint" and would delete the
+        constraint rather than express it.  This result only gates the
+        wake/retry decision; the allocator remains the final authority.
+        """
+        required_aux_units: dict[str, int] = {}
+        for transfers in comp_xfers.values():
+            for transfer in transfers:
+                if transfer.host_indices is None:
+                    continue
+                pool = getattr(transfer.name, "value", transfer.name)
+                required_aux_units[pool] = self._host_alloc_aux_transfer_slot_demand(
+                    transfer
+                )
+        if failed_component is not None:
+            failed_pool = self._host_allocability_pool_for_component(
+                failed_component
+            )
+            required_aux_units[failed_pool] = max(
+                1, self._host_alloc_aux_slot_demand(failed_component)
+            )
+        return required_aux_units
+
     def _host_evictable_signature(self, pool: str) -> tuple[int, frozenset[int]]:
         """Return the tree-owned evictable summary for one host pool."""
         component_type = {
@@ -3978,13 +4114,21 @@ class UnifiedRadixCache(BasePrefixCache):
         self, num_tokens: int, component_type: ComponentType = BASE_COMPONENT_TYPE
     ) -> int:
         """Evict host resources for a specific component to free host pool space."""
-        if self.host_memory_mode == "buffer_only":
-            # The tree never holds host values in buffer mode, and staging
-            # is operation-owned (freed at each ack): nothing is evictable.
-            return 0
-        result = self.tree_core.drive_host_eviction(component_type, num_tokens)
-        self._free_values(result.device_frees, result.host_frees)
-        return result.tracker.get(component_type, 0)
+        # Capture before the buffer-mode early return: ``num_tokens`` is the
+        # real slot demand the failing ``prepare_prefetch`` passed to
+        # ``HostPoolGroup.alloc`` regardless of whether the tree can actually
+        # evict anything.
+        self._note_host_alloc_reclaim_enter(component_type, num_tokens)
+        try:
+            if self.host_memory_mode == "buffer_only":
+                # The tree never holds host values in buffer mode, and staging
+                # is operation-owned (freed at each ack): nothing is evictable.
+                return 0
+            result = self.tree_core.drive_host_eviction(component_type, num_tokens)
+            self._free_values(result.device_frees, result.host_frees)
+            return result.tracker.get(component_type, 0)
+        finally:
+            self._note_host_alloc_reclaim_exit(component_type)
 
     # ---- Decode retraction ----
 
@@ -5448,13 +5592,9 @@ class UnifiedRadixCache(BasePrefixCache):
                     len(prefetch_key)
                 )
             failed_pool = self._host_allocability_pool_for_component(ct)
-            required_aux_units = {
-                getattr(transfer.name, "value", transfer.name): len(transfer.host_indices)
-                for transfers in comp_xfers.values()
-                for transfer in transfers
-                if transfer.host_indices is not None
-            }
-            required_aux_units.setdefault(failed_pool, len(prefetch_key))
+            required_aux_units = self._host_alloc_required_aux_units(
+                comp_xfers, failed_component=ct
+            )
             self._release_aux_transfers_before_host_alloc_snapshot(
                 comp_xfers, causal_rid=req_id
             )
@@ -6691,10 +6831,13 @@ class UnifiedRadixCache(BasePrefixCache):
                 pool = getattr(transfer.name, "value", transfer.name)
                 if pool == PoolName.KV.value or transfer.indices_from_pool is not None:
                     continue
+                # Same host-slot unit as site A: the real staging slot count,
+                # never a bare page count and never 0.  The primary
+                # ``transfer.host_indices`` branch is the authoritative slot
+                # count; the key-count fallback is converted through the owning
+                # host pool's page size.
                 required_aux_units_before_cleanup[pool] = (
-                    len(transfer.host_indices)
-                    if transfer.host_indices is not None
-                    else len(transfer.keys or ())
+                    self._host_alloc_aux_transfer_slot_demand(transfer)
                 )
         if revoke_reason == "alloc_failed":
             self._release_aux_transfers_before_host_alloc_snapshot(

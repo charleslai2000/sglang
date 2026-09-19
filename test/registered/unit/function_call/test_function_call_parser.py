@@ -2505,6 +2505,193 @@ class TestQwen3CoderDetector(unittest.TestCase):
         self.assertTrue(full_text.startswith("Let me"))
         self.assertGreater(len(all_calls), 0)
 
+    # ==================== Delay-commit framing ====================
+    # The streaming parser must not emit a call before its complete framing
+    # (``</tool_call>``, or ``</function>`` for a bare call) is observed, and
+    # ``finish()`` must release held text as ordinary content. Covers the
+    # E4 acceptance rows of QWEN3CODER-SCOPE-ADJUDICATE-20260918.
+
+    def _stream(self, text, chunk_size=5):
+        """Feed ``text`` in small chunks, flush, return (normal_text, calls)."""
+        detector = Qwen3CoderDetector()
+        calls = []
+        normal_text = ""
+        for i in range(0, len(text), chunk_size):
+            result = detector.parse_streaming_increment(
+                text[i : i + chunk_size], self.tools
+            )
+            normal_text += result.normal_text
+            calls.extend(result.calls)
+        result = detector.finish(self.tools)
+        normal_text += result.normal_text
+        calls.extend(result.calls)
+        return normal_text, calls
+
+    def test_streaming_clean_call_commits_at_close(self):
+        text = (
+            "<tool_call><function=get_current_weather>"
+            "<parameter=location>Paris</parameter>"
+            "</function></tool_call>"
+        )
+        normal_text, calls = self._stream(text)
+
+        self.assertEqual(normal_text, "")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0].tool_index, 0)
+        self.assertEqual(calls[0].name, "get_current_weather")
+        self.assertEqual(json.loads(calls[0].parameters), {"location": "Paris"})
+
+    def test_streaming_name_withheld_until_close(self):
+        # A partial block yields nothing until framed, and the held bytes are
+        # released as content -- not repaired into a call -- at EOS.
+        text = (
+            "<tool_call><function=get_current_weather>"
+            "<parameter=location>Paris</parameter>"
+        )
+        detector = Qwen3CoderDetector()
+        emitted = []
+        for i in range(0, len(text), 7):
+            result = detector.parse_streaming_increment(text[i : i + 7], self.tools)
+            emitted.extend(result.calls)
+        self.assertEqual(emitted, [])
+
+        end = detector.finish(self.tools)
+        self.assertEqual(end.calls, [])
+        self.assertIn("Paris", end.normal_text)
+
+    def test_streaming_duplicate_function_end_emits_one_json_object(self):
+        text = (
+            "<tool_call><function=get_current_weather>"
+            "<parameter=location>Paris</parameter>"
+            "</function></function></tool_call>"
+        )
+        _, calls = self._stream(text)
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(json.loads(calls[0].parameters), {"location": "Paris"})
+
+    def test_streaming_unclosed_envelope_released_as_content(self):
+        # E4 row 11: a fully decoded call inside an unclosed <tool_call> is
+        # never repaired into a structured call, but released as content.
+        text = (
+            "<tool_call><function=get_current_weather>"
+            "<parameter=location>Paris</parameter></function>"
+        )
+        normal_text, calls = self._stream(text)
+
+        self.assertEqual(calls, [])
+        self.assertIn("Paris", normal_text)
+
+    def test_streaming_orphan_parameter_yields_no_negative_index(self):
+        text = (
+            "<tool_call><parameter=location>Paris</parameter></tool_call>"
+        )
+        normal_text, calls = self._stream(text)
+
+        self.assertEqual(calls, [])
+        self.assertIn("Paris", normal_text)
+
+    def test_streaming_malformed_function_name_yields_no_call(self):
+        text = (
+            '<tool_call><function=get_current_weather unit="c">'
+            "<parameter=location>Paris</parameter>"
+            "</function></tool_call>"
+        )
+        normal_text, calls = self._stream(text)
+
+        self.assertEqual(calls, [])
+        self.assertIn("Paris", normal_text)
+
+    def test_streaming_empty_name_yields_no_call(self):
+        text = "<tool_call><function=></function></tool_call>"
+        _, calls = self._stream(text)
+
+        self.assertEqual(calls, [])
+
+    def test_streaming_stray_parameter_after_function_end(self):
+        text = (
+            "<tool_call><function=sql_interpreter>"
+            "<parameter=query>SELECT 1</parameter></function>"
+            "<parameter=extra>x</parameter></tool_call>"
+        )
+        _, calls = self._stream(text)
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0].tool_index, 0)
+        self.assertEqual(json.loads(calls[0].parameters), {"query": "SELECT 1"})
+
+    def test_streaming_missing_function_end_commits_closed_block(self):
+        # E4 row 13: the outer framing is complete and all argument bytes are
+        # present, so the call commits with a complete JSON object.
+        text = (
+            "<tool_call><function=get_current_weather>"
+            "<parameter=location>Paris</parameter></tool_call>"
+        )
+        _, calls = self._stream(text)
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0].tool_index, 0)
+        self.assertEqual(json.loads(calls[0].parameters), {"location": "Paris"})
+
+    def test_streaming_two_calls_get_increasing_indices(self):
+        text = (
+            "<tool_call><function=get_current_weather>"
+            "<parameter=location>Paris</parameter></function></tool_call>"
+            "<tool_call><function=sql_interpreter>"
+            "<parameter=query>SELECT 1</parameter></function></tool_call>"
+        )
+        _, calls = self._stream(text)
+
+        self.assertEqual([c.tool_index for c in calls], [0, 1])
+        self.assertEqual(
+            [json.loads(c.parameters) for c in calls],
+            [{"location": "Paris"}, {"query": "SELECT 1"}],
+        )
+
+    def test_streaming_undeclared_name_is_passed_through(self):
+        text = (
+            "<tool_call><function=cat>"
+            "<parameter=command>ls</parameter></function></tool_call>"
+        )
+        _, calls = self._stream(text)
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0].name, "cat")
+        self.assertEqual(json.loads(calls[0].parameters), {"command": "ls"})
+
+    def test_streaming_active_call_across_chunks_no_partial_json(self):
+        # A call's parameters arrive as one complete object only at commit.
+        text = (
+            "<tool_call><function=get_current_weather>"
+            "<parameter=location>Paris</parameter>"
+            "<parameter=days>3</parameter>"
+            "</function></tool_call>"
+        )
+        detector = Qwen3CoderDetector()
+        for i in range(0, len(text) - 1, 1):
+            result = detector.parse_streaming_increment(text[i : i + 1], self.tools)
+            self.assertEqual(result.calls, [])
+        result = detector.parse_streaming_increment(text[-1:], self.tools)
+        result = result.calls + list(detector.finish(self.tools).calls)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(
+            json.loads(result[0].parameters), {"location": "Paris", "days": 3}
+        )
+
+    def test_non_streaming_malformed_and_empty_names_yield_no_call(self):
+        malformed = (
+            '<tool_call><function=get_current_weather unit="c">'
+            "<parameter=location>Paris</parameter>"
+            "</function></tool_call>"
+        )
+        empty = "<tool_call><function=></function></tool_call>"
+
+        malformed_result = self.detector.detect_and_parse(malformed, self.tools)
+        empty_result = self.detector.detect_and_parse(empty, self.tools)
+
+        self.assertTrue(all(c.name for c in malformed_result.calls))
+        self.assertTrue(all(c.name for c in empty_result.calls))
+
     # ==================== Parameter Type Tests ====================
 
     def test_integer_parameter_conversion(self):

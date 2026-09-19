@@ -96,7 +96,13 @@ _PRE_TOKENIZER_REGEX = {
     ),
 }
 
+# llama.cpp token types (``llama_vocab_type`` in ggml): 1 = NORMAL, 3 = CONTROL,
+# 4 = USER_DEFINED. CONTROL tokens are the chat/turn delimiters (``<|im_start|>``,
+# ``<|endoftext|>``, ...); USER_DEFINED tokens are the ones the runtime parses
+# back out of the text (``<think>``, ``</think>``, ``<tool_call>``, ...).
 _GGML_TOKEN_TYPE_CONTROL = 3
+_GGML_TOKEN_TYPE_USER_DEFINED = 4
+_GGML_SPECIAL_TOKEN_TYPES = (_GGML_TOKEN_TYPE_CONTROL, _GGML_TOKEN_TYPE_USER_DEFINED)
 
 
 def build_gguf_generation_config(gguf_path: str):
@@ -166,8 +172,16 @@ def build_gguf_tokenizer(gguf_path: str, **kwargs: Any):
     control_ids = [
         i for i, t in enumerate(token_types) if t == _GGML_TOKEN_TYPE_CONTROL
     ]
-    control = set(control_ids)
-    vocab = {tok: i for i, tok in enumerate(tokens) if i not in control}
+    special_ids = [
+        i for i, t in enumerate(token_types) if t in _GGML_SPECIAL_TOKEN_TYPES
+    ]
+    # The BPE model keeps EVERY GGUF id, including the CONTROL/USER_DEFINED rows,
+    # so the vocabulary owns each token's canonical id. ``tokenizers`` assigns
+    # added-token ids sequentially from ``len(model.vocab)`` and ignores the
+    # declared ``id`` (verified against tokenizers 0.22.2), so the ids can only be
+    # honoured by already serving that exact id from the base vocab. Removing the
+    # CONTROL rows here is what previously shifted them onto the ``[PAD*]`` rows.
+    vocab = {tok: i for i, tok in enumerate(tokens)}
 
     def token_of(key):
         idx = meta.get(f"tokenizer.ggml.{key}")
@@ -187,9 +201,13 @@ def build_gguf_tokenizer(gguf_path: str, **kwargs: Any):
                 "lstrip": False,
                 "rstrip": False,
                 "normalized": False,
-                "special": True,
+                # CONTROL tokens are true specials: they are stripped from
+                # decoded output. USER_DEFINED markers must stay in the text --
+                # the reasoning/tool parsers split on the literal
+                # ``<think>``/``</think>``/``<tool_call>`` strings.
+                "special": token_types[i] == _GGML_TOKEN_TYPE_CONTROL,
             }
-            for i in control_ids
+            for i in special_ids
         ],
         "normalizer": None,
         "pre_tokenizer": {

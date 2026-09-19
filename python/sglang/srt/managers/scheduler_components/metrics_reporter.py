@@ -932,6 +932,7 @@ class SchedulerMetricsReporter:
             self.stats.gen_throughput = self.last_gen_throughput
             self.stats.cache_hit_rate = cache_hit_rate
             self.stats.decode_sum_seq_lens = _decode_total_seq_lens(batch)
+            self.stats.decode_batch_size = num_running_reqs
 
             # Memory pool usage ratios / Absolute token counts
             pool_stats.update_scheduler_stats(self.stats)

@@ -208,10 +208,11 @@ def fused_recurrent_gated_delta_rule_packed_decode_kernel(
     BV: tl.constexpr,
     SOFTPLUS_THRESHOLD: tl.constexpr,
     USE_QK_L2NORM_IN_KERNEL: tl.constexpr,
+    TILED_V_HEADS: tl.constexpr = False,
 ):
     i_v, i_nh = tl.program_id(0), tl.program_id(1)
     i_n, i_hv = i_nh // HV, i_nh % HV
-    i_h = i_hv // (HV // H)
+    i_h = i_hv % H if TILED_V_HEADS else i_hv // (HV // H)
 
     o_k = tl.arange(0, BK)
     o_v = i_v * BV + tl.arange(0, BV)
@@ -276,6 +277,7 @@ def fused_recurrent_gated_delta_rule_packed_decode(
     out: torch.Tensor,
     ssm_state_indices: torch.Tensor,
     use_qk_l2norm_in_kernel: bool = False,
+    tiled_v_heads: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     if mixed_qkv.ndim != 2:
         raise ValueError(
@@ -398,6 +400,7 @@ def fused_recurrent_gated_delta_rule_packed_decode(
         USE_QK_L2NORM_IN_KERNEL=use_qk_l2norm_in_kernel,
         num_warps=num_warps,
         num_stages=num_stages,
+        TILED_V_HEADS=tiled_v_heads,
     )
     return out, initial_state
 

@@ -313,14 +313,6 @@ def phase_primer(args) -> int:
         # ---- L3 persistence + index proof (preconditions for F2) --------
         ev = gc.parse_storage_events(gc.read_new_lines(console_path, off))
         gate.report["primer_console_evidence"] = gc.slim_storage_events(ev)
-        gate.check("primer_no_drop_without_backup",
-                   not ev.get("dropped_no_backup"),
-                   detail={"events": len(ev.get("dropped_no_backup", []))})
-        if ev.get("dropped_no_backup"):
-            gate.invalidate(
-                "kv subtree dropped without backup due to host memory pressure "
-                "during the F2 primer; host pool mis-sized for the chain")
-            return _finish(gate, tag)
         snap = str(run_dir / f"store-snapshot-primer-{rid}")
         min_present = math.ceil(args.min_index_fraction * (len(ids_a) - 1))
         try:
@@ -338,6 +330,36 @@ def phase_primer(args) -> int:
             "predicate": mem.get("predicate"),
             "snapshot": snap_meta,
         }
+        # Target-scoped drop predicate (owner closure 1).  The primer takes a
+        # single, post-write-back membership snapshot, so no PRE-drop durable
+        # baseline exists to prove a no-decrease delta; refs_intact stays None
+        # and ANY drop in the primer window is unknown -> INVALID (fail closed).
+        # The node-id ordering bound is NOT used (its invariant is false; see
+        # gate_common).  This is conservative by design: a drop during the F2
+        # primer cannot be proven foreign from the available evidence.
+        refs_intact = None
+        drop_evidence = gc.target_node_evidence(ev, len(ids_a))
+        scoped = gc.scope_drop_events(ev, drop_evidence,
+                                      refs_intact=refs_intact)
+        scoped_ok = gc.drop_scope_ok(scoped)
+        gate.report["primer_drop_scope"] = {
+            "evidence": drop_evidence, "summary": scoped_ok,
+            "refs_intact": refs_intact, "scoped_tail": scoped[-8:],
+        }
+        gate.check("primer_no_target_drop_without_backup",
+                   scoped_ok["ok"],
+                   detail={"scope": scoped_ok,
+                           "events": len(ev.get("dropped_no_backup", [])),
+                           "max_target_node_id":
+                               drop_evidence.get("max_node_id")})
+        if not scoped_ok["ok"]:
+            gate.invalidate(
+                "graded-target (or unattributable) kv subtree dropped without "
+                "backup due to host memory pressure during the F2 primer "
+                f"(target_roots={scoped_ok['target_roots']}, unknown_roots="
+                f"{scoped_ok['unknown_roots']}); only provably-foreign filler "
+                "drops are disposable")
+            return _finish(gate, tag)
         gate.check("primer_target_in_extent_index",
                    (pm.get("n_present") or 0) >= min_present,
                    detail={"n_present": pm.get("n_present"),

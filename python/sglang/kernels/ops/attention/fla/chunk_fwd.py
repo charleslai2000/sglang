@@ -33,7 +33,7 @@ else:
         for BK in [32, 64]
         for num_warps in [1, 2, 4]
     ],
-    key=["H", "Hg", "K", "BC"],
+    key=["H", "Hg", "K", "BC", "TILED_V_HEADS"],
     **autotune_cache_kwargs,
 )
 @triton.jit(do_not_specialize=["T"])
@@ -53,6 +53,7 @@ def chunk_gated_delta_rule_fwd_kkt_solve_kernel(
     BK: tl.constexpr,
     USE_G: tl.constexpr,
     IS_VARLEN: tl.constexpr,
+    TILED_V_HEADS: tl.constexpr = False,
 ):
     """
     Fused kernel: compute beta * K @ K^T (lower triangular) + solve_tril (I+A)^{-1} in one pass.
@@ -89,7 +90,7 @@ def chunk_gated_delta_rule_fwd_kkt_solve_kernel(
     i_tc2 = i_t * BT + 2 * BC
     i_tc3 = i_t * BT + 3 * BC
 
-    k += (bos * Hg + i_h // (H // Hg)) * K
+    k += (bos * Hg + (i_h % Hg if TILED_V_HEADS else i_h // (H // Hg))) * K
     A += (bos * H + i_h) * BT
 
     o_i = tl.arange(0, BC)
@@ -344,6 +345,7 @@ def chunk_gated_delta_rule_fwd_intra(
     cu_seqlens: torch.LongTensor | None = None,
     chunk_size: int = 64,
     chunk_indices: torch.LongTensor | None = None,
+    tiled_v_heads: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     r"""
     GDN intra-chunk forward: fused kkt + solve_tril + recompute_w_u.
@@ -401,6 +403,7 @@ def chunk_gated_delta_rule_fwd_intra(
         K=K,
         BT=BT,
         BC=BC,
+        TILED_V_HEADS=tiled_v_heads,
     )
 
     # Step 2: recompute_w_u
@@ -412,5 +415,6 @@ def chunk_gated_delta_rule_fwd_intra(
         g_cumsum=g,
         cu_seqlens=cu_seqlens,
         chunk_indices=chunk_indices,
+        tiled_v_heads=tiled_v_heads,
     )
     return w, u, A

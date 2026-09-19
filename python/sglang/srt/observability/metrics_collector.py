@@ -81,6 +81,7 @@ class SchedulerStats:
     gen_throughput: float = 0.0
     cache_hit_rate: float = 0.0
     decode_sum_seq_lens: int = 0
+    decode_batch_size: int = 0
 
     # Memory pool usage ratios (0.0–1.0).
     # Each pool tracks: used = total - available - evictable, usage = used / total.
@@ -328,6 +329,12 @@ class SchedulerMetricsCollector(_StatLoggerDIMixin):
         self.decode_sum_seq_lens = Gauge(
             name="sglang:decode_sum_seq_lens",
             documentation="The sum of all sequence lengths in decode.",
+            labelnames=labels.keys(),
+            multiprocess_mode="mostrecent",
+        )
+        self.decode_batch_size = Gauge(
+            name="sglang:decode_batch_size",
+            documentation="Number of running requests in the current decode batch.",
             labelnames=labels.keys(),
             multiprocess_mode="mostrecent",
         )
@@ -1508,6 +1515,7 @@ class SchedulerMetricsCollector(_StatLoggerDIMixin):
         self._log_gauge(self.gen_throughput, stats.gen_throughput)
         self._log_gauge(self.cache_hit_rate, stats.cache_hit_rate)
         self._log_gauge(self.decode_sum_seq_lens, stats.decode_sum_seq_lens)
+        self._log_gauge(self.decode_batch_size, stats.decode_batch_size)
 
         # Memory pool usage ratios
         self._log_gauge(self.token_usage, stats.token_usage)

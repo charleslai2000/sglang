@@ -21,6 +21,7 @@ from torch import nn
 
 from sglang.srt.distributed import get_pp_group
 from sglang.srt.eplb.expert_location import ModelConfigForExpertLocation
+from sglang.srt.layers.layernorm import GemmaRMSNorm
 from sglang.srt.layers.logits_processor import LogitsProcessor
 from sglang.srt.layers.quantization.base_config import QuantizationConfig
 from sglang.srt.layers.utils import PPMissingLayer
@@ -49,6 +50,61 @@ def _gguf_ssm_a_to_a_log(raw: torch.Tensor) -> torch.Tensor:
     if not torch.all(raw < 0):
         raise ValueError("qwen35 GGUF ssm_a must contain only -exp(A_log) values")
     return torch.log(-raw)
+
+
+def _gguf_runtime_param_name(name: str) -> str:
+    """Normalize an incoming GGUF name to this port's runtime parameter name.
+
+    ``Qwen3_5ForCausalLM.load_weights`` (``models/qwen3_5.py``) drops the HF
+    ``.self_attn`` segment before it resolves the destination parameter, so an
+    incoming GGUF name must be compared on that same normalized form.
+    """
+    return name.replace(".self_attn", "")
+
+
+def _gemma_norm_param_names(module: nn.Module) -> Set[str]:
+    """Runtime parameter names whose destination module is ``GemmaRMSNorm``.
+
+    ``GemmaRMSNorm`` (``sglang/srt/layers/layernorm.py``) is the runtime norm
+    whose contract is the *offset* form: it stores ``w_hf`` and applies the
+    scale ``1 + w_hf``.  That is the norm family whose GGUF->runtime contract
+    needs the inverse fold, so the fold's scope is derived from the destination
+    module type rather than from a per-model name list.
+
+    Because the scope is the module contract, every Gemma-style norm is covered
+    and plain norms such as ``linear_attn.norm`` (``RMSNormGated``, no ``+1``
+    contract) are excluded structurally -- there is no exclusion list.
+
+    LIMITATION: GGUF carries no metadata flag declaring the writer convention
+    (neither candidate file exposes ``norms_are_absolute``/``norm_offset``), so
+    this keys on ``(source format == GGUF) AND (destination module contract ==
+    GemmaRMSNorm)`` and rests on the llama.cpp convention, not on a per-file
+    declaration.  A converter that emitted the offset form would not be
+    detectable from metadata.
+    """
+    names: Set[str] = set()
+    for mod_name, mod in module.named_modules():
+        if isinstance(mod, GemmaRMSNorm):
+            for param_name, _ in mod.named_parameters(recurse=False):
+                name = f"{mod_name}.{param_name}" if mod_name else param_name
+                names.add(_gguf_runtime_param_name(name))
+    return names
+
+
+def _gguf_fold_absolute_norms(
+    name: str, loaded_weight: torch.Tensor, offset_param_names: Set[str]
+) -> torch.Tensor:
+    """Undo llama.cpp's GGUF-time absolute-scale storage for a Gemma-style norm.
+
+    llama.cpp writes this norm family to GGUF as the *absolute* scale
+    ``1 + w_hf``, while the runtime ``GemmaRMSNorm`` contract expects the offset
+    form ``w_hf`` and derives ``1 + w_hf`` itself.  Loading GGUF directly would
+    therefore apply the scale twice, so the loader subtracts the embedded ``1``
+    for exactly the parameters whose destination module is ``GemmaRMSNorm``.
+    """
+    if _gguf_runtime_param_name(name) in offset_param_names:
+        return loaded_weight - 1.0
+    return loaded_weight
 
 
 class Qwen3_5ForCausalLM(nn.Module):
@@ -180,6 +236,11 @@ class Qwen3_5ForCausalLM(nn.Module):
     def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]) -> Set[str]:
         params_dict = dict(self.named_parameters())
         loaded_params: Set[str] = set()
+        # Resolved once from the runtime module tree: the GGUF inverse fold is
+        # scoped by the destination module contract, not by a model name list.
+        offset_norm_params = (
+            _gemma_norm_param_names(self) if self._is_gguf else frozenset()
+        )
 
         body_weights = []
         for name, loaded_weight in weights:
@@ -188,6 +249,10 @@ class Qwen3_5ForCausalLM(nn.Module):
                 # runtime A_log parameter expects the un-transformed log decay.
                 if self._is_gguf and name.endswith(".linear_attn.A_log"):
                     loaded_weight = _gguf_ssm_a_to_a_log(loaded_weight)
+                if self._is_gguf:
+                    loaded_weight = _gguf_fold_absolute_norms(
+                        name, loaded_weight, offset_norm_params
+                    )
                 body_weights.append((name[len(_MODEL_PREFIX) :], loaded_weight))
             elif name in _LM_HEAD_PARAM_NAMES:
                 if self.config.tie_word_embeddings:
