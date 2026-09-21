@@ -5211,6 +5211,27 @@ class ServerArgs:
         if (Phase.PREFILL, "backend") in self._cuda_graph_config_locked:
             return
 
+        # Falcon-H1 combines paged attention with stateful Mamba/linear-attention
+        # layers.  On SM86 its default breakable prefill graph is not validated:
+        # BF16 and GPTQ both reproduce replay failures, while eager prefill with
+        # a full decode graph is semantically correct.  Keep an explicit per-phase
+        # user choice authoritative, but make the safe split the architecture
+        # default rather than silently requiring --disable-cuda-graph.
+        arch = self.get_model_config().hf_config.architectures[0]
+        if arch == "FalconH1ForCausalLM":
+            logger.warning(
+                "Falcon-H1: disabling unvalidated prefill CUDA graph; "
+                "decode CUDA graph remains enabled. Set "
+                "--cuda-graph-backend-prefill explicitly to override."
+            )
+            self._declare(
+                "_apply_cuda_graph_compatibility",
+                cuda_graph_config=with_phase(
+                    cfg.cuda_graph_config, Phase.PREFILL, backend=Backend.DISABLED
+                ),
+            )
+            return
+
         # Breakable is the CUDA default but not multimodal-compatible;
         # piecewise-allowlisted archs run their validated decoder prefill
         # there instead. Archs also on the breakable allowlist keep it --

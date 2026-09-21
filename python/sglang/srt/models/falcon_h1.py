@@ -151,7 +151,11 @@ class FalconH1HybridAttentionDecoderLayer(nn.Module):
             self.total_num_heads,
             self.total_num_kv_heads,
             bias=False,
-            quant_config=quant_config,
+            # The official Falcon-H1 GPTQ checkpoint quantizes FFN projections
+            # only. Attention q/k/v/o tensors are BF16 and must use the
+            # unquantized linear topology even when the global model quant_config
+            # selects GPTQ-Marlin for the FFN.
+            quant_config=None,
             tp_rank=self.attn_tp_rank,
             tp_size=self.attn_tp_size,
         )
@@ -160,7 +164,8 @@ class FalconH1HybridAttentionDecoderLayer(nn.Module):
             self.total_num_heads * self.head_dim,
             config.hidden_size,
             bias=False,
-            quant_config=quant_config,
+            # Attention output is BF16 in the official mixed-GPTQ checkpoint.
+            quant_config=None,
             reduce_results=False,
             tp_rank=self.attn_tp_rank,
             tp_size=self.attn_tp_size,
@@ -531,24 +536,32 @@ class FalconH1ForCausalLM(nn.Module):
             if "A_log" in name:
                 name = name.replace("A_log", "A")
 
+            original_name = name
             for param_name, weight_name, shard_id in stacked_params_mapping:
-                if weight_name not in name:
+                if weight_name not in original_name:
                     continue
 
-                name = name.replace(weight_name, param_name)
+                # Do not mutate the checkpoint name while probing a mapping.
+                # A missing candidate (e.g. a quantized qkv_proj.qweight when
+                # the checkpoint supplies BF16 q_proj.weight) must not cause a
+                # later mapping to match the already-mutated candidate and turn
+                # qkv_proj into qkqkv_proj.
+                candidate_name = original_name.replace(weight_name, param_name)
                 # Skip loading extra bias for GPTQ models.
-                if name.endswith(".bias") and name not in params_dict:
+                if candidate_name.endswith(".bias") and candidate_name not in params_dict:
                     continue
                 # Skip layers on other devices.
-                # if is_pp_missing_parameter(name, self):
+                # if is_pp_missing_parameter(candidate_name, self):
                 #     continue
-                if name not in params_dict:
+                if candidate_name not in params_dict:
                     continue
-                param = params_dict[name]
+                param = params_dict[candidate_name]
                 weight_loader = getattr(param, "weight_loader")
                 weight_loader(param, loaded_weight, shard_id)
+                name = candidate_name
                 break
             else:
+                name = original_name
                 # Skip loading extra bias for GPTQ models.
                 if name.endswith(".bias") and name not in params_dict:
                     continue
