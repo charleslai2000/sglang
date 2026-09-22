@@ -1,9 +1,0 @@
-captured_at=2026-09-11T23:02:01+08:00
-server_log=/mnt/data/neuron/sglang-3090-r112-20260911/sglang-server-r112.log
-server_log_start_line=1056603
-server_log_start_bytes=143171442
-probe_log=/tmp/t38c-probe.log
-probe_log_start_bytes=10685747
-probe_log_start_lines=6972
-server_pid=48746 scheduler_pid=48806
-git_head=4f41f5bab562b99562f30c67540eb05344d13637

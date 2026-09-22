@@ -1,4 +1,0 @@
-c6085655e51dd9667c879f5b543d63482e6a0c1954223619b225d538d9f705cb  /home/dev-codex/workspaces/.memory/phase2-hicache-design/work/P0-C-PROFILE-FREEZE-20260911-R60.artifacts/r60_evidence.txt
-01bc764229cec59a271b74f127375fd047f51ce831e473cbbc8486bfef5877a5  /home/dev-codex/workspaces/.memory/phase2-hicache-design/work/P0-C-PROFILE-FREEZE-20260911-R60.artifacts/r60_model_info.json
-1854d8ff2c549b764a6ae45e7e1b293209796826c874da53985d76b1e307dc19  /home/dev-codex/workspaces/.memory/phase2-hicache-design/work/P0-C-PROFILE-FREEZE-20260911-R60.artifacts/r60_server_info.json
-01bcfa12bf2868722702b9de6a373f9f50ca8fc68502cdc9c3a88ea4b05a9ff3  /home/dev-codex/workspaces/.memory/phase2-hicache-design/work/P0-C-PROFILE-FREEZE-20260911-R60.artifacts/sglang3060-rh-clean-env-20260910.log

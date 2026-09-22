@@ -1,4 +1,0 @@
-server_slice_lines=2051152..2107393 count=56242
-server_total_lines=2107393
-server_start_bytes=256762570 end_bytes=263388854
-probe_start_bytes=33890204 end_bytes=34931684 count=1041480
