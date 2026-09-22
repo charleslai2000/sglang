@@ -10,4 +10,10 @@ phase2-hicache-design
   - task: phase2-hicache-design/tasks/T004-correctness-and-production-readiness.md
   - unblock/reopen: 修复并重跑 correctness gate
 
+c64r-deterministic-l3-restart
+- E001 C6.4R deterministic L3 fixture and restart restore — BLOCKED
+  - frontier: 当前/data文件系统仅32 GiB空闲，低于frozen 50 GiB min-free watermark；需经授权恢复容量或提供production-approved存储挂载后再运行
+  - task: experiments/E001-c64r-deterministic-l3-restart/experiment.md
+  - unblock/reopen: 可用空间达到50 GiB以上，且新root、精确token/key capture及运行前检查满足实验条件
+
 其他已迁移 Goal：无 active/deferred frontier。
