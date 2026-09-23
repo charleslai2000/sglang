@@ -20,6 +20,7 @@ If an exact request is preserved and the matching live allocator entry is confir
 - Runtime: canonical Python `/home/ubuntu/venvs/sglang-3090/bin/python -m sglang.launch_server`
 - Production cache flags: `--enable-hierarchical-cache --hicache-host-memory-mode cache --hicache-write-policy write_back --hicache-storage-backend extent --hicache-storage-prefetch-policy wait_complete --hicache-size 32 --kv-cache-dtype fp8_e4m3 --tp-size 1`; retain the C5 frozen Qwen model/runtime flags and `/data/l3` max-size/min-free contract.
 - Isolated endpoint: 127.0.0.1:30004 unless occupied; select and record another free local port rather than interrupting unrelated services.
+- Use `/v1/chat/completions` with `return_meta_info=true` to retain actual prompt token IDs and `return_cached_tokens_details=true` for response tier evidence. `return_prompt_token_ids=true` alone is not reliable on this branch's response model; verify actual response field before proceeding. Existing `/generate` accepts exact `input_ids` and returns `meta_info`; use only after deriving IDs from the exact saved chat-template request and confirming parity with the chat server tokenizer/template.
 
 ## Controlled inputs
 
