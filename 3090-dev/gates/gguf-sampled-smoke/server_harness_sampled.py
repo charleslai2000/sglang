@@ -61,7 +61,7 @@ PY = os.environ.get("GGUF_GATE_PY", "/opt/sglang/local-prod-v1/env/bin/python")
 # (the fixed norm-inverse-fold commit is in it by the time this runs).
 SRC = os.environ.get(
     "GGUF_GATE_SRC",
-    "/home/ubuntu/workspaces/3rdparty/sglang-3090-24g-opt/python",
+    "/home/ubuntu/workspaces/3rdparty/sglang/python",
 )
 GPU = "GPU-2e3ed202-3655-d919-0a64-259209bc6587"
 HOST = "127.0.0.1"

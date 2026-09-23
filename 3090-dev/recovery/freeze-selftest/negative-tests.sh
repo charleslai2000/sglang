@@ -109,7 +109,7 @@ expect "byte-copy guard" 23 "$rc"
 # ---------------------------------------------------------------- N8
 echo "== N8: launcher whose PYTHONPATH points at the WIP workspace -> dry-run gate refuses =="
 # This is exactly the editable-install landmine.  The launcher must NOT pass.
-sed 's#^export PYTHONPATH="\$SRC/python"$#export PYTHONPATH=/home/ubuntu/workspaces/3rdparty/sglang-3090-24g-opt/python#' \
+sed 's#^export PYTHONPATH="\$SRC/python"$#export PYTHONPATH=/home/ubuntu/workspaces/3rdparty/sglang/python#' \
     "$CAND/launcher/launch.sh" > "$SCRATCH/launch.wrongpath.sh"
 chmod 0755 "$SCRATCH/launch.wrongpath.sh"
 grep -q '^export PYTHONPATH=/home/ubuntu/workspaces' "$SCRATCH/launch.wrongpath.sh" \

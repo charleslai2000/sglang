@@ -149,7 +149,7 @@ Runtime:
 
 ## 9. 与既有资产/规范的出处（逐条 file:line）
 
-以下路径均相对于仓库根 `/home/ubuntu/workspaces/3rdparty/sglang-3090-24g-opt/`，且均已存在并只读核对。
+以下路径均相对于仓库根 `/home/ubuntu/workspaces/3rdparty/sglang/`，且均已存在并只读核对。
 
 ### 9.1 权威规范
 

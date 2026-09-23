@@ -22,7 +22,7 @@ set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PY="${GGUF_GATE_PY:-/opt/sglang/local-prod-v1/env/bin/python}"
-SRC="${GGUF_GATE_SRC:-/home/ubuntu/workspaces/3rdparty/sglang-3090-24g-opt/python}"
+SRC="${GGUF_GATE_SRC:-/home/ubuntu/workspaces/3rdparty/sglang/python}"
 PORT="${GGUF_GATE_PORT:-30165}"
 RUNROOT="${GGUF_GATE_RUNROOT:-/mnt/data/nerun-dev/gguf-sampled-smoke-20260917/runs}"
 

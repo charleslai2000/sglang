@@ -1,9 +1,14 @@
 # E001 results
 
-Status: BLOCKED — target liveness remains unproven; the proposed concurrent source-native verifier was rejected before use because canonical backend recovery takes an exclusive namespace lock.
+Status: CLOSED — final consolidation superseded the unfinished HiCache acceptance line; no production observer or persistent-L3 defect was established.
 
 ## OBSERVED
 
+- Added `ExtentFileBackend.inspect_storage_key(storage_key)` as a read-only snapshot API. It accepts the already-scoped exact runtime key, reads the allocator index under the backend lock, validates generation without calling mutating `allocator.lookup`, and does not touch LRU recency. It returns the existing immutable `ExtentRef` (slot, generation, offset, length) or `None`. No writer/eviction/retention/restore code changed.
+- Added a unit contract test for live entries, absent key, unchanged LRU order, and canonical backend close/reopen recovering identical refs. Directly ran that single unittest case: PASS (0.030 s).
+- V3 explicit experiment-local Scheduler.__init__ around-hook bootstrapped successfully in the real serving process. It captured `scheduler.tree_cache`, its HiCacheController, and that controller's actual `ExtentFileBackend` (`backend_id=139533679544176`, controller/cache identities recorded in `live-progress.json`). The observer used the controller's `get_hash_str` and backend `_storage_key`, then called `inspect_storage_key` twice on the same one-page tail key; exact output was internally stable. `RUNTIME_OBSERVER=PASS` for object/key/ref plumbing. The test-only loopback observer did not open a second backend and was not reachable except on 127.0.0.1.
+
+- Run 014 ordinary shutdown checkpointed a manifest (20,604 bytes) and WAL; fresh canonical backend recovery read UUID `777933381592a4ad09081d4da9f712bf`, namespace epoch `016acab5d71fb13ee482f4d21091b466`, and reported target key absent with WAL generation 0. No recovery loss is inferred because the same key had already been absent in the live observer.
 - C6.4R-V review of `ExtentFileBackend._acquire_backend_meta_lock` and `extent_metadata.acquire_meta_lock` confirmed that a second backend instance cannot safely open the same namespace while the serving backend is live: recovery uses an exclusive flock and fails closed on lock contention. An in-process same-writer lookup is the only viable live query; no unvalidated alternate lock-free recovery was used.
 - A draft test-only scheduler plugin and driver were removed before runtime launch. They must not be treated as a verifier or authority. The failed `run.py` was removed. No production source semantics changed and no new runtime root/server was started for C6.4R-V.
 
@@ -16,18 +21,21 @@ Status: BLOCKED — target liveness remains unproven; the proposed concurrent so
 - User authorized deletion of runtime HiCache data beneath `/data/l3`. All 37 immediate child roots other than protected `/data/l3/c61-qwen-20260922-220343` were checked unlocked with no active SGLang/GPU process and removed. No data outside `/data/l3` was touched. Space rose from 32 GiB to 215 GiB. Historical C6.1 root remains intact.
 - `/mnt/data` is not a separate mount in this namespace; `/data/l3` is on `/dev/sda1` mounted at `/`.
 - Current production contract retained: Qwen3.5-9B W4A16, TP=1, fp8_e4m3, host cache, `write_back`, extent, `wait_complete`, hicache-size 32, max 100Gi, min-free 50Gi, 64MiB extent and 64GiB sparse file.
-- Exact runtime root `/data/l3/c64r-qwen-20260923-002`, run ID `c64r-qwen-20260923-002`. Correct process identity in the successful runtime was canonical Python `/home/ubuntu/venvs/sglang-3090/bin/python` importing `/home/ubuntu/workspaces/3rdparty/sglang-3090-24g-opt/python/sglang`; the unresolved frozen `launch.sh.tmpl` was not used as an identity authority.
+- Earlier run 002 process identity: canonical Python `/home/ubuntu/venvs/sglang-3090/bin/python` importing `/home/ubuntu/workspaces/3rdparty/sglang/python/sglang`; frozen launch template was not used as authority.
 - Exact current fixture HTTP body is `/data/l3/c64r-qwen-20260923-002-request.json`, SHA256 `3bc05ba7dd516616315cc083ce8f8f5d49b76e4b9a82e028f1f5da29680e574c`. It is a 254-token neutral document plus exact instruction to return `FIXTURE_OK`, temperature 0, max_tokens 64, non-thinking template option, and metadata request. Earlier 26-token test body is superseded for the fixture.
-- `return_prompt_token_ids=true` was requested but prompt IDs did not appear in the chat response, despite `return_meta_info=true`; response serialization confirms this branch can omit these fields. Do not claim token IDs captured from responses so far.
+- In earlier run 002, `return_prompt_token_ids=true` was requested but prompt IDs did not appear; this was superseded by run 014 where exact target IDs were returned and matched.
 - A short response was not a correctness pass: one returned a partial prompt excerpt instead of `FIXTURE_OK`; another exact answer passed on the older 26-token body only. Longer input attempt while server had exited returned connection failure and did not change cache state.
-- No valid cache population was observed in the prior process attempt: Host metric remained zero, no extent write/persist events, manifest `entries=0`, sparse data actual usage ~36KiB. The fresh process reopened same empty root, so its storage miss says nothing about persistence correctness.
+- Earlier run 002 had no valid cache population (Host metric zero, no extent writes, empty manifest); its miss was not persistence evidence. This is superseded by run 014, which did log extent writes but did not establish the exact target page as live.
 - The prior runtime was stopped and GPU returned to 4MiB used / 24121MiB free. Root was retained. No live key was lost.
 - Existing production gate `3090-dev/gates/production/f2_restart_recovery.py` already implements real-process restart and extent membership, but its default 62K-token prompt/pressure is substantially larger than C6.4R's desired minimum; reuse only after reducing to the smallest bounded chain/fillers and retaining existing semantics. Its `gate_common.py` can capture exact tier details and snapshots.
 - Backend `close()` always checkpoints current allocator (`extent_file_backend.py` around lines 2758–2785); with a nonempty valid index it should leave manifest entries after graceful stop. This is useful for direct before-shutdown and after-reopen proof.
 
 ## INFERRED
 
-- Extent writes prove some cache keys reached L3, but do not identify the designated target key or prove that it stayed live. The lack of target matches could be a different token/hash window, incomplete WAL interpretation, or target eviction; available evidence does not distinguish these.
+- First V3 fixture (run 014, root `/data/l3/c64r-qwen-20260923-014`) served the exact 60,006-token target; server prompt IDs matched local template reconstruction and output was the expected marker `C64R-V2-EXACT-7C`. Two distinct ~60k-token filler completions completed and logs showed extent writes. After population, the same-runtime observer derived final target page hash `577dbe97517342b5c458f8bd0aa14ee441c24d3edf3b655d287a2922fbe164d7` and scoped key `577dbe97517342b5c458f8bd0aa14ee441c24d3edf3b655d287a2922fbe164d7_qwen35-9b-w4a16_0_1`; `inspect_storage_key` returned `None` (live_count=0). Thus `LIVE_L3_KEY_BEFORE_SHUTDOWN=NO`; fixture correctly stopped before restart replay.
+- Runner failure cleanup sent SIGTERM to the writer. A separate fresh process opened the root through canonical `ExtentFileBackend` recovery: same key absent (live_count=0), WAL generation 0. Because the key was absent before close, this does not establish a recovery defect.
+
+- Extent writes prove some keys reached L3 but not this exact target-tail key. Run 014's observer used the serving controller's hash method, page size, backend key transform, and suffix; the exact final target page was absent after two completed fillers. Evidence localizes the first failed gate to target-page live publication/retention before shutdown; it does not distinguish never-backed-up from later evicted/replaced.
 - The repeated eight-filler workload is not the desired minimum. Further pressure runs are unjustified until the target's runtime hash sequence and allocator state can be read correctly during the live process.
 
 - 50GiB is the LRU free-space watermark, not the fixture's required allocation. Capacity is resolved and not a blocker.
@@ -37,23 +45,25 @@ Status: BLOCKED — target liveness remains unproven; the proposed concurrent so
 
 ## UNRESOLVED
 
-- Runtime-generated target cache-key sequence, suffix-scoped live extent reference, and exact allocator liveness before shutdown.
-- Why the current manifest parser produced no target evidence despite observed L3 writes; WAL replay must start from the actual checkpoint state and include every valid segment, or inspect the live backend allocator under its lock.
-- Smallest natural pressure workload that preserves one exact target entry through graceful shutdown.
-- Fresh-process replay with direct storage hit/read/restore evidence and response correctness.
+- Why the exact target final-page key was absent after two completed fillers despite extent writes; determine whether that page's backup was acknowledged and whether its runtime hash chain matches the observer's whole-request chain.
+- A bounded population pattern that makes the designated target page live before shutdown without changing retention or cache semantics.
+- Fresh-process replay with direct storage hit/read/restore evidence and response correctness; not reached because pre-shutdown liveness failed.
 
 ## Current gate
 
 ```text
-STORAGE_CAPACITY_GATE=PASS
-EXACT_CHAT_TEMPLATE_IDS=RECONSTRUCTED_AND_MATCHED_FOR_SUCCESSFUL_REQUESTS
-L3_EXTENT_WRITES=OBSERVED
-LIVE_L3_KEY_BEFORE_SHUTDOWN=NOT_PROVEN
-LIVE_L3_KEY_AFTER_REOPEN=NOT_TESTED
+RUNTIME_OBSERVER=PASS
+EXACT_TARGET_KEY_CAPTURED=YES
+LIVE_L3_KEY_BEFORE_SHUTDOWN=NO
+LIVE_L3_KEY_AFTER_WRITER_EXIT=NO
 HICACHE_STORAGE_REUSE=NOT_TESTED
 HICACHE_STORAGE_RESTORE=NOT_TESTED
-HICACHE_CORRECTNESS=NOT_ACCEPTED
-CANONICAL_TREE_CLEAN=YES (excluding this experiment's tracked evidence edits before commit)
+PERSISTENT_L3_ACROSS_RESTART=NOT_TESTED
+HICACHE_CORRECTNESS=NOT_TESTED
+STORAGE_CAPACITY_GATE=PASS
+EXACT_CHAT_TEMPLATE_IDS=SERVER_RETURNED_AND_MATCHED_FOR_TARGET
+L3_EXTENT_WRITES=OBSERVED
+CANONICAL_TREE_CLEAN=NO (changes remain uncommitted)
 ```
 
 No persistent-L3 defect is declared: no exact target key has been confirmed live before shutdown. The immediate blocker is sound runtime allocator/key evidence. Preserve the 005, 009–012 roots and evidence; never delete or overwrite C6.1. Before any additional workload, repair the external harness using the backend's actual live allocator state or correct checkpoint-plus-WAL replay, and reduce filler count. The current `run.py` must not be used as-is.

@@ -1,6 +1,6 @@
 # E001 — C6.4R deterministic L3 fixture and restart restore
 
-Status: BLOCKED — runs 005–012 failed exact target proof; the manifest/WAL verifier was invalid and no validated read-only live allocator interface is currently available
+Status: CLOSED — final consolidation ended the HiCache acceptance thread without establishing a persistent-L3 defect
 
 ## Question
 
@@ -12,11 +12,11 @@ If an exact request is preserved and the matching live allocator entry is confir
 
 ## Object and identity
 
-- Canonical source worktree: `/home/ubuntu/workspaces/3rdparty/sglang-3090-24g-opt`
+- Canonical source worktree: `/home/ubuntu/workspaces/3rdparty/sglang`
 - Branch/starting authority: `3090-24g-opt` / `dde7bb697b6743c690d580d37568217b769a30e3`
 - Model: `/data/models/qwen35-9b-w4a16`
 - Historical C6.1 root: `/data/l3/c61-qwen-20260922-220343` (preserve, do not use)
-- New isolated root: `/data/l3/c64r-qwen-20260923-<unique>` (do not create until preflight is unblocked)
+- New isolated root for run 014: `/data/l3/c64r-qwen-20260923-014` (preserve as failed-run evidence; never overwrite)
 - Runtime: canonical Python `/home/ubuntu/venvs/sglang-3090/bin/python -m sglang.launch_server`
 - Production cache flags: `--enable-hierarchical-cache --hicache-host-memory-mode cache --hicache-write-policy write_back --hicache-storage-backend extent --hicache-storage-prefetch-policy wait_complete --hicache-size 32 --kv-cache-dtype fp8_e4m3 --tp-size 1`; retain the C5 frozen Qwen model/runtime flags and `/data/l3` max-size/min-free contract.
 - Isolated endpoint: 127.0.0.1:30004 unless occupied; select and record another free local port rather than interrupting unrelated services.
@@ -35,7 +35,7 @@ If an exact request is preserved and the matching live allocator entry is confir
 1. Before launch, verify the selected unique root does not exist, historical C6.1 root remains untouched, endpoint is free, no server owns the selected GPU, and sufficient disk space exists. Do not delete/overwrite any existing root.
 2. Start canonical Qwen runtime with the frozen production HiCache flags and isolated root. Record full argv, relevant environment, source HEAD, model identity, server info, storage geometry, and startup log.
 3. Save exact HTTP JSON body and deliver the designated request. Preserve bytes and SHA256 plus returned server prompt IDs.
-4. Associate the exact runtime-generated query keys with suffix and allocator refs via a validated source-native read-only interface. Do not use the manifest/WAL self-parser or add production behavior changes. Until such a verifier passes its own canonical reopen contract test, do not claim target liveness or repeat cache pressure.
+4. Use `ExtentFileBackend.inspect_storage_key` on exact keys returned by the same runtime controller/backend. The API checks generation validity under the backend index lock without touching recency or removing stale index records. Require all queried target page keys live; after normal close, use a fresh process opening the same root through canonical backend recovery and query those exact keys again.
 5. Ensure all writes/acks are durable, verify exact key remains live immediately before shutdown, then stop normally and record exit status and final metadata/WAL state.
 6. Start a new process using the identical root and contract. Prove startup recovered the exact entry/generation and that GPU/Host pools are empty before the replay request.
 7. Replay the saved exact request bytes. Collect direct runtime evidence for storage_hit, storage cached tokens, prefetch/read completion, restore state, output correctness, and absence of errors. Do not infer reuse from latency.
@@ -49,15 +49,14 @@ Required artifacts: exact request JSON bytes/hash; server-side templated token s
 Pass only if all are directly observed:
 
 ```text
-LIVE_L3_KEY_BEFORE_SHUTDOWN=YES
-LIVE_L3_KEY_AFTER_REOPEN=YES
-HICACHE_STORAGE_REUSE=PASS
-HICACHE_STORAGE_RESTORE=PASS
-storage_hit>0
-cached_tokens_details.storage>0
-restore_state!=MISS_RECOMPUTE
-HICACHE_CORRECTNESS=PASS
-CANONICAL_TREE_CLEAN=YES
+RUNTIME_OBSERVER=PASS (run 014)
+EXACT_TARGET_KEY_CAPTURED=YES
+LIVE_L3_KEY_BEFORE_SHUTDOWN=NO
+LIVE_L3_KEY_AFTER_REOPEN=NO
+HICACHE_STORAGE_REUSE=NOT_TESTED
+HICACHE_STORAGE_RESTORE=NOT_TESTED
+PERSISTENT_L3_ACROSS_RESTART=NOT_TESTED
+HICACHE_CORRECTNESS=NOT_TESTED
 ```
 
-A restart miss following confirmed-live exact identity is a persistent-L3 defect; preserve first-break evidence and fix only canonical source with a minimal change.
+The run stopped at the required pre-shutdown liveness gate. The target page key was absent in the live serving backend and remained absent after graceful writer exit plus fresh canonical recovery. This is not evidence of a persistent-L3 recovery defect.

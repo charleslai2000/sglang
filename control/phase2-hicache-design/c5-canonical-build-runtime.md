@@ -74,9 +74,9 @@ This matches the M2 launcher’s actual model path and host-memory configuration
 * wheel: `/home/ubuntu/c5-artifacts/sglang-0.5.21.dev114+g578da7967-cp312-cp312-linux_x86_64.whl`
 * canonical editable install: `/home/ubuntu/venvs/sglang-c5-canonical`
 * runtime environment: `/home/ubuntu/venvs/sglang-3090` with canonical editable SGLang source, used only after confirming its editable project location is the canonical worktree
-* `sglang.__file__`: `/home/ubuntu/workspaces/3rdparty/sglang-3090-24g-opt/python/sglang/__init__.py`
+* `sglang.__file__`: `/home/ubuntu/workspaces/3rdparty/sglang/python/sglang/__init__.py`
 * Rust native extensions:
-  * `_server`: `/home/ubuntu/workspaces/3rdparty/sglang-3090-24g-opt/python/sglang/srt/rust_extensions/_server.cpython-312-x86_64-linux-gnu.so`
+  * `_server`: `/home/ubuntu/workspaces/3rdparty/sglang/python/sglang/srt/rust_extensions/_server.cpython-312-x86_64-linux-gnu.so`
   * `_grpc`: same canonical `python/sglang/srt/rust_extensions/` directory
   * `_multimodal`: same canonical directory
 * `sgl_kernel`: `/home/ubuntu/venvs/sglang-3090/lib/python3.12/site-packages/sgl_kernel/__init__.py`; this is an installed binary dependency, not an `/opt` source import
