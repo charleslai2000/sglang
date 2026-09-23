@@ -1,8 +1,16 @@
 # E001 results
 
-Status: ACTIVE — live L3 fixture design identified; no confirmed key population yet.
+Status: BLOCKED — target liveness remains unproven; the proposed concurrent source-native verifier was rejected before use because canonical backend recovery takes an exclusive namespace lock.
 
 ## OBSERVED
+
+- C6.4R-V review of `ExtentFileBackend._acquire_backend_meta_lock` and `extent_metadata.acquire_meta_lock` confirmed that a second backend instance cannot safely open the same namespace while the serving backend is live: recovery uses an exclusive flock and fails closed on lock contention. An in-process same-writer lookup is the only viable live query; no unvalidated alternate lock-free recovery was used.
+- A draft test-only scheduler plugin and driver were removed before runtime launch. They must not be treated as a verifier or authority. The failed `run.py` was removed. No production source semantics changed and no new runtime root/server was started for C6.4R-V.
+
+- Follow-up runs 005–012 used exact HTTP chat bodies and server-equivalent template rendering/tokenization. Each successful 50,000-token target request matched the locally reconstructed chat-template token IDs; each run then sent eight unique ~60,000-token fillers. These were larger than the originally intended minimal filler workload and are retained as failed runs, not treated as acceptance.
+- Direct logs from run 012 show successful KV extent writes (e.g. `keys_n=1024`, `bytes=16777216`) and metadata/WAL growth. Startup confirms the actual extent root `/data/l3/c64r-qwen-20260923-012`, 64 MiB extents, 1024 slots, 100Gi max and 50Gi minimum-free watermark. The target membership check nevertheless found no manifest before cleanup; its probe is not sufficient because it reads only the manifest and its fallback WAL replay incorrectly used a post-replay index as a pre-replay checkpoint.
+- Five completed roots (005, 009–012; 007/008 were aborted during harness integration) remain under `/data/l3`; roots 005, 009–012 contain large WALs and sparse data files. All servers exited, GPU returned to 4MiB used / 24121MiB free. C6.1 remains untouched. Do not interpret these non-live manifest snapshots as proof of no L3 publication: WAL may contain SET records not checkpointed.
+- The earlier `run.py` was removed; it used a known-invalid manifest/WAL inspection path and cannot prove membership. No fresh-process replay was attempted.
 
 - Canonical branch `3090-24g-opt` reached `937946bf975635cb29bbf9fc57461a5b33b611c3`. Experiment procedure/result changes are being recorded here; source code is unchanged.
 - User authorized deletion of runtime HiCache data beneath `/data/l3`. All 37 immediate child roots other than protected `/data/l3/c61-qwen-20260922-220343` were checked unlocked with no active SGLang/GPU process and removed. No data outside `/data/l3` was touched. Space rose from 32 GiB to 215 GiB. Historical C6.1 root remains intact.
@@ -19,6 +27,9 @@ Status: ACTIVE — live L3 fixture design identified; no confirmed key populatio
 
 ## INFERRED
 
+- Extent writes prove some cache keys reached L3, but do not identify the designated target key or prove that it stayed live. The lack of target matches could be a different token/hash window, incomplete WAL interpretation, or target eviction; available evidence does not distinguish these.
+- The repeated eight-filler workload is not the desired minimum. Further pressure runs are unjustified until the target's runtime hash sequence and allocator state can be read correctly during the live process.
+
 - 50GiB is the LRU free-space watermark, not the fixture's required allocation. Capacity is resolved and not a blocker.
 - A target prefix ~254 tokens remains within GPU cache and is not automatically demoted; one short unrelated filler (~299 tokens) only showed device hit. Need minimal natural LRU eviction to move target to Host, then ensure write-back from Host to L3 without changing cache semantics.
 - Runtime chat token IDs should be captured using the production ChatCompletionRequest's effective template arguments and compared against server `/generate` behavior; exact body alone is insufficient to certify template/hash identity.
@@ -26,20 +37,23 @@ Status: ACTIVE — live L3 fixture design identified; no confirmed key populatio
 
 ## UNRESOLVED
 
-- Exact server-side token sequence, native prefix hash sequence, storage key suffix, and live extent slot/generation for target.
-- Smallest filler sequence that evicts the target from GPU and Host while successfully publishing it to L3.
-- Fresh-process replay with `storage_hit>0`, storage cached tokens, read success, non-MISS_RECOMPUTE state, and correct `FIXTURE_OK` response.
+- Runtime-generated target cache-key sequence, suffix-scoped live extent reference, and exact allocator liveness before shutdown.
+- Why the current manifest parser produced no target evidence despite observed L3 writes; WAL replay must start from the actual checkpoint state and include every valid segment, or inspect the live backend allocator under its lock.
+- Smallest natural pressure workload that preserves one exact target entry through graceful shutdown.
+- Fresh-process replay with direct storage hit/read/restore evidence and response correctness.
 
 ## Current gate
 
 ```text
 STORAGE_CAPACITY_GATE=PASS
-LIVE_L3_KEY_BEFORE_SHUTDOWN=NO
-LIVE_L3_KEY_AFTER_REOPEN=NO (previous manifest entries=0)
+EXACT_CHAT_TEMPLATE_IDS=RECONSTRUCTED_AND_MATCHED_FOR_SUCCESSFUL_REQUESTS
+L3_EXTENT_WRITES=OBSERVED
+LIVE_L3_KEY_BEFORE_SHUTDOWN=NOT_PROVEN
+LIVE_L3_KEY_AFTER_REOPEN=NOT_TESTED
 HICACHE_STORAGE_REUSE=NOT_TESTED
 HICACHE_STORAGE_RESTORE=NOT_TESTED
-HICACHE_CORRECTNESS=NOT_ACCEPTED (latest designated long fixture not yet successfully executed end-to-end)
-CANONICAL_TREE_CLEAN=YES (except experiment procedure/result changes when uncommitted)
+HICACHE_CORRECTNESS=NOT_ACCEPTED
+CANONICAL_TREE_CLEAN=YES (excluding this experiment's tracked evidence edits before commit)
 ```
 
-No persistent-L3 defect is declared: a confirmed live entry was never created. Next is a bounded experiment design using exact server tokenization and the existing F2 gate machinery with reduced workload, then execute only after the key/ref capture and correctness assertions are ready.
+No persistent-L3 defect is declared: no exact target key has been confirmed live before shutdown. The immediate blocker is sound runtime allocator/key evidence. Preserve the 005, 009–012 roots and evidence; never delete or overwrite C6.1. Before any additional workload, repair the external harness using the backend's actual live allocator state or correct checkpoint-plus-WAL replay, and reduce filler count. The current `run.py` must not be used as-is.

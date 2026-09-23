@@ -1,6 +1,6 @@
 # E001 — C6.4R deterministic L3 fixture and restart restore
 
-Status: BLOCKED before runtime launch
+Status: BLOCKED — runs 005–012 failed exact target proof; the manifest/WAL verifier was invalid and no validated read-only live allocator interface is currently available
 
 ## Question
 
@@ -20,7 +20,7 @@ If an exact request is preserved and the matching live allocator entry is confir
 - Runtime: canonical Python `/home/ubuntu/venvs/sglang-3090/bin/python -m sglang.launch_server`
 - Production cache flags: `--enable-hierarchical-cache --hicache-host-memory-mode cache --hicache-write-policy write_back --hicache-storage-backend extent --hicache-storage-prefetch-policy wait_complete --hicache-size 32 --kv-cache-dtype fp8_e4m3 --tp-size 1`; retain the C5 frozen Qwen model/runtime flags and `/data/l3` max-size/min-free contract.
 - Isolated endpoint: 127.0.0.1:30004 unless occupied; select and record another free local port rather than interrupting unrelated services.
-- Use `/v1/chat/completions` with `return_meta_info=true` to retain actual prompt token IDs and `return_cached_tokens_details=true` for response tier evidence. `return_prompt_token_ids=true` alone is not reliable on this branch's response model; verify actual response field before proceeding. Existing `/generate` accepts exact `input_ids` and returns `meta_info`; use only after deriving IDs from the exact saved chat-template request and confirming parity with the chat server tokenizer/template.
+- Use `/v1/chat/completions` with `return_prompt_token_ids=true`, `return_meta_info=true`, and `return_cached_tokens_details=true`; verify the returned `choices[0].prompt_token_ids` field. The later run-012 did return exact IDs, correcting earlier runs where they were absent.
 
 ## Controlled inputs
 
@@ -34,8 +34,8 @@ If an exact request is preserved and the matching live allocator entry is confir
 
 1. Before launch, verify the selected unique root does not exist, historical C6.1 root remains untouched, endpoint is free, no server owns the selected GPU, and sufficient disk space exists. Do not delete/overwrite any existing root.
 2. Start canonical Qwen runtime with the frozen production HiCache flags and isolated root. Record full argv, relevant environment, source HEAD, model identity, server info, storage geometry, and startup log.
-3. Save exact HTTP JSON request body and deliver the designated request. Preserve the request artifact and SHA256. Save actual server-side templated token IDs and the runtime-generated KV cache key sequence through existing runtime records/debuggable exact values; do not infer them from approximate prompt text. Avoid adding production instrumentation if existing runtime output/interfaces can export this identity; a narrowly scoped external observer is permitted only if it records already exposed request/token/key data and never changes cache behavior.
-4. Associate the exact queried key with its storage suffix, allocator reference (extent id, slot, offset, length, generation), and manifest live entry. Confirm by a read-only manifest/index inspection and backend lookup before shutdown. If the request is still Host/GPU-only, apply only the minimum bounded natural eviction needed to move this one designated entry to L3; do not modify retention policy.
+3. Save exact HTTP JSON body and deliver the designated request. Preserve bytes and SHA256 plus returned server prompt IDs.
+4. Associate the exact runtime-generated query keys with suffix and allocator refs via a validated source-native read-only interface. Do not use the manifest/WAL self-parser or add production behavior changes. Until such a verifier passes its own canonical reopen contract test, do not claim target liveness or repeat cache pressure.
 5. Ensure all writes/acks are durable, verify exact key remains live immediately before shutdown, then stop normally and record exit status and final metadata/WAL state.
 6. Start a new process using the identical root and contract. Prove startup recovered the exact entry/generation and that GPU/Host pools are empty before the replay request.
 7. Replay the saved exact request bytes. Collect direct runtime evidence for storage_hit, storage cached tokens, prefetch/read completion, restore state, output correctness, and absence of errors. Do not infer reuse from latency.
