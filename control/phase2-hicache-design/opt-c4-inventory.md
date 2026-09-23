@@ -165,4 +165,4 @@ This is intentional: every candidate `/opt` delta was either historical/generate
 
 ## Boundary compliance
 
-`/opt/sglang/opencodex-provider-2d4e33a832` was not deleted or modified. No branch/worktree was deleted, no push was performed, `main` was not modified, and no model/runtime acceptance was started.
+At the time of this inventory, `/opt/sglang/opencodex-provider-2d4e33a832` was preserved as an active deploy artifact. On 2026-09-23 it was confirmed down/unreferenced and removed; see `ops/records/O003-swift-canonical-service-and-opt-cleanup.md`. No branch/worktree was deleted by this inventory, no `main` rewrite occurred, and no model/runtime acceptance was part of this inventory.

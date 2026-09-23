@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+UNIT=sglang-swift.service
+case "${1:-}" in
+  start) sudo systemctl start "$UNIT" ;;
+  stop) sudo systemctl stop "$UNIT" ;;
+  restart) sudo systemctl restart "$UNIT" ;;
+  status) systemctl status "$UNIT" --no-pager ;;
+  *) echo "usage: $0 {start|stop|restart|status}" >&2; exit 2 ;;
+esac

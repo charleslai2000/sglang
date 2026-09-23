@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT=/home/ubuntu/workspaces/3rdparty/sglang
+VENV=/home/ubuntu/venvs/sglang-3090
+MODEL=/data/models/swift-qwen38-27b-q3_k_m/Swift-Qwen3.8-27B-Q3_K_M.gguf
+RUN=/var/lib/sglang-swift
+mkdir -p "$RUN"
+export CUDA_HOME=/usr/local/cuda-12.9
+export PATH="$CUDA_HOME/bin:$PATH"
+export CUDA_VISIBLE_DEVICES=GPU-2e3ed202-3655-d919-0a64-259209bc6587
+export PYTHONPATH="$ROOT/python"
+cd /tmp
+exec "$VENV/bin/python" -u -m sglang.launch_server \
+  --model-path "$MODEL" \
+  --served-model-name ukisai/Swift-Qwen3.8-27b \
+  --host 0.0.0.0 --port 30000 --tp-size 1 \
+  --mem-fraction-static 0.85 --max-total-tokens 8192 \
+  --kv-cache-dtype fp8_e4m3 --attention-backend flashinfer \
+  --linear-attn-prefill-backend triton --linear-attn-decode-backend triton \
+  --mamba-radix-cache-strategy extra_buffer --mamba-ssm-dtype float32 \
+  --cuda-graph-backend-decode full --cuda-graph-max-bs-decode 8 \
+  --disable-prefill-cuda-graph --max-running-requests 8 \
+  --reasoning-parser qwen3 --tool-call-parser qwen3_coder \
+  --enable-metrics --export-metrics-to-file \
+  --export-metrics-to-file-dir "$RUN/metrics"
