@@ -13,13 +13,14 @@ import datetime as dt
 import hashlib
 import json
 import math
+import os
 import pathlib
 import re
 import statistics
 from collections import Counter
 
 
-ROOT = pathlib.Path("/var/log/sglang/local-prod-v1")
+ROOT = pathlib.Path(os.environ.get("SGLANG_SCORECARD_ROOT", "/var/log/sglang"))
 PHASE7 = ROOT / "phase7"
 REPO = pathlib.Path(__file__).resolve().parents[1]
 REPORT_DIR = REPO / ".memory" / "work"

@@ -1,0 +1,7 @@
+Status: DONE
+Work area: experiments
+Objective: Re-establish the frozen Falcon-H1 decode-heavy baseline at B=1/2/4/8/12/16 (optionally 20/24), distinguish client concurrency from actual scheduler decode batch, and profile B=8/12/16 without changing execution behavior.
+Inputs: `control/G004-falcon-h1-decode-saturation/goal.md`; `control/G004-falcon-h1-decode-saturation/plan.md`; prior Phase 2A report and artifacts; frozen Falcon-H1 serving configuration.
+Completion: Three measured repetitions plus warmup for the requested baseline points; output tok/s, TPOT, actual decode-batch distribution, and B=8/12/16 steady-window GPU/kernel/scheduler attribution or an explicit unresolved classification; no optimization patch.
+Result: Baseline completed with fixed ~405-token prompts, 256 output tokens, 32 requests, one warmup and three measured reps at B=1/2/4/8/12/16. All 18 measured runs completed 32/32 with zero client errors. Mean aggregate tok/s: B1 68.69, B2 118.68, B4 226.93, B8 397.04, B12 432.48, B16 459.53. Existing timestamped gauges were sufficient: B1/2/4/8/16 stayed at full actual batch; B12 had initial/final partial batch 8 around a contiguous full batch 12, matching the 32-request `12 + 12 + 8` lifecycle. B16 showed no underfill in the sampled window. No source telemetry patch, attribution, or optimization was performed. Report: `control/G004-falcon-h1-decode-saturation/T001-BASELINE-REPORT.md`.
+Remaining: Owner review; next authorized step is GPU/kernel attribution for B8/B12/B16.

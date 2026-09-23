@@ -14,8 +14,8 @@ Date: 2026-09-23
 ## Legacy cleanup
 
 - Confirmed DEV provider was DOWN, its state was role=free, no process referenced the provider tree/run root, and port 30001 was not bound. Removed `/opt/sglang/opencodex-provider-2d4e33a832` (full source snapshot) and `/opt/sglang/opencodex-provider-run` (old logs/metrics/state). Removed 248 MiB stale `/tmp/opencode/prod-service-20260917/logs` and `/state` after verifying stale PIDs were absent and the shared flock was free; cleared stale owner JSON under flock, preserving the lock inode.
-- Retained `/opt/sglang/local-prod-m3m4-20260918` minimal M3/M4 launcher/identity envelopes. They remain part of existing M3/M4 launch contract; symlinked `src` resolves to canonical repository. Retained six ~2 GiB frozen prod/test/M2 trees because service configuration and identity gates still name/use them. Falcon/model files and configs/secrets untouched.
-- Thus `LEGACY_PROVIDER_SOURCE_REMOVED=YES` and `LEGACY_RUNTIME_OUTPUT_REMOVED=YES` for the obsolete DEV provider source/runtime. `/opt/sglang` still contains intentional existing frozen service snapshots; do not claim the directory has no complete source snapshots until those services are explicitly migrated.
+- At initial cleanup time, M3/M4 envelopes and six frozen prod/test/M2 snapshots were retained because active contracts referenced them. Phase D1 later retired those contracts and removed all six snapshots plus the envelopes; `/opt/sglang` is now empty.
+- `LEGACY_PROVIDER_SOURCE_REMOVED=YES` and `LEGACY_RUNTIME_OUTPUT_REMOVED=YES` for the obsolete DEV provider source/runtime. Falcon/model files and configs/secrets were untouched.
 
 ## Verification and limits
 
