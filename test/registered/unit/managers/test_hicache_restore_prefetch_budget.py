@@ -9,10 +9,43 @@ from sglang.srt.managers.scheduler import Scheduler
 from sglang.srt.managers.scheduler_components.hicache_restore import (
     RestoreState,
     RestoreWaitReason,
+    promotion_budget_fits,
 )
 
 
 class PrefetchBudgetWakeTests(unittest.TestCase):
+    def test_promotion_budget_inclusive_and_overflow_boundaries(self):
+        # Production contract: locked + reserved + restore <= capacity - margin.
+        # Keep the default 2048-token reclaim floor; test both inclusive
+        # admission and a one-token overflow instead of weakening the guard.
+        self.assertTrue(
+            promotion_budget_fits(
+                locked=100,
+                reserved=200,
+                new_restore=500,
+                capacity=2048 + 800,
+                margin=2048,
+            )
+        )
+        self.assertFalse(
+            promotion_budget_fits(
+                locked=100,
+                reserved=200,
+                new_restore=501,
+                capacity=2048 + 800,
+                margin=2048,
+            )
+        )
+        self.assertFalse(
+            promotion_budget_fits(
+                locked=100,
+                reserved=200,
+                new_restore=500,
+                capacity=2048 + 799,
+                margin=2048,
+            )
+        )
+
     def _scheduler(self):
         allocator = SimpleNamespace(
             size_full=0,
@@ -33,6 +66,7 @@ class PrefetchBudgetWakeTests(unittest.TestCase):
             supports_mamba=lambda: False,
             evictable_size=lambda: 0,
             prefetch_threshold=1,
+            prompt_can_qualify_for_prefetch=lambda *_args: True,
         )
         scheduler = Scheduler.__new__(Scheduler)
         scheduler.server_args = SimpleNamespace(
@@ -56,6 +90,7 @@ class PrefetchBudgetWakeTests(unittest.TestCase):
             hicache_restore_miss_generation=None,
             hicache_restore_miss_anchor=None,
             full_untruncated_fill_ids=[0],
+            _compute_max_prefix_len=lambda fill_len: fill_len,
             prefix_indices=[],
             host_hit_length=0,
             output_ids=[],
@@ -76,7 +111,7 @@ class PrefetchBudgetWakeTests(unittest.TestCase):
         self.assertTrue(scheduler._restore_wait_capacity_fits(request))
 
         scheduler.waiting_queue = [request]
-        scheduler._prefetch_kvcache = lambda req, *, demand_restore=False: None
+        scheduler._prefetch_kvcache = lambda req, **_kwargs: None
         scheduler.tree_cache.pop_storage_prefetch_terminal = lambda rid: None
         scheduler.tree_cache.pop_storage_prefetch_miss = lambda rid: False
         scheduler.tree_cache.pop_frontier_ready = lambda rid: False

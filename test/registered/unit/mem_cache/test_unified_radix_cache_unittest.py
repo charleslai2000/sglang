@@ -2752,7 +2752,17 @@ class UnifiedRadixCacheSuite:
         storage_dir = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, storage_dir, ignore_errors=True)
 
-        cache, allocator, req_to_token_pool = build_fixture(self.cfg)
+        # The production admission guard retains its default 2048-token
+        # reclaim margin. Size only this test's FULL pool for that floor plus
+        # the restore span; never relax the product guard for a tiny fixture.
+        l3_cfg = replace(
+            self.cfg,
+            kv_size=max(self.cfg.kv_size, 2048 + 4 * self.cfg.page_size),
+            max_context_len=max(
+                self.cfg.max_context_len, 2048 + 4 * self.cfg.page_size
+            ),
+        )
+        cache, allocator, req_to_token_pool = build_fixture(l3_cfg)
         self._init_hicache(
             cache,
             storage_backend="file",
@@ -2777,6 +2787,51 @@ class UnifiedRadixCacheSuite:
         self.assertEqual(len(page_hashes), len(seq) // self.cfg.page_size)
         self.assertEqual(backend.batch_exists(page_hashes), len(page_hashes))
         cache.sanity_check()
+
+    def test_unified_mamba_component_specs_use_persisted_final_hash(self):
+        """Unified Mamba emits one trailing checkpoint keyed by the KV tail."""
+        if not self.cfg.has_mamba or self.cfg.has_swa:
+            self.skipTest("requires Unified FULL+MAMBA")
+
+        cache, allocator, req_pool = build_fixture(self.cfg)
+        self._insert(cache, allocator, req_pool, [1, 2, 3, 4])
+        node = cache.match_prefix(
+            MatchPrefixParams(key=RadixKey(array("q", [1, 2, 3, 4])))
+        ).last_device_node
+        cache.enable_storage = True
+        cache.tree_core.backfill_missing_hash_values()
+        hashes = self._all_page_hashes(cache, node)
+        self.assertEqual(len(hashes), 4)
+
+        component = cache.components[ComponentType.MAMBA]
+        tree_node = cache.tree_core.node_by_id(node)
+        # BACKUP_STORAGE requires the preceding D->H checkpoint commit. Use
+        # inspector-only host state here; the real D<->H transfer is separately
+        # CUDA-only and is not claimed by this CPU transfer-spec test.
+        mamba_host_slot = torch.tensor([0], dtype=torch.int64)
+        cache.tree_core.set_component_host_value_raw(
+            node, ComponentType.MAMBA, mamba_host_slot
+        )
+        cache.tree_core.insert_node_into_host_lru(node, ComponentType.MAMBA)
+        backup = component.build_hicache_transfers(
+            tree_node, CacheTransferPhase.BACKUP_STORAGE
+        )
+        self.assertEqual(len(backup), 1)
+        self.assertEqual(backup[0].name, PoolName.MAMBA)
+        self.assertEqual(backup[0].keys, [hashes[-1]])
+        self.assertIs(backup[0].hit_policy, PoolHitPolicy.TRAILING_PAGES)
+
+        host_slot = torch.tensor([0], dtype=torch.int64)
+        prefetch = component.build_hicache_transfers(
+            tree_node,
+            CacheTransferPhase.PREFETCH,
+            host_indices=host_slot,
+            token_ids=[1, 2, 3, 4],
+            prefetch_tokens=4,
+        )
+        self.assertEqual(prefetch[0].name, PoolName.MAMBA)
+        self.assertEqual(prefetch[0].keys, ["__placeholder__"])
+        self.assertIs(prefetch[0].hit_policy, PoolHitPolicy.TRAILING_PAGES)
 
     def test_hicache_l3_prefetch(self):
         """L3 round trip: write with one tree, prefetch into a fresh tree.
@@ -2803,7 +2858,12 @@ class UnifiedRadixCacheSuite:
         seq = self._make_seq(1, num_pages)
 
         # --- Producer tree: fill KV, backup D->H, offload H->L3. ---
-        prod, prod_alloc, prod_rtp = build_fixture(self.cfg)
+        l3_cfg = replace(
+            self.cfg,
+            kv_size=max(self.cfg.kv_size, 2048 + len(seq)),
+            max_context_len=max(self.cfg.max_context_len, 2048 + len(seq)),
+        )
+        prod, prod_alloc, prod_rtp = build_fixture(l3_cfg)
         self._init_hicache(
             prod,
             storage_backend="file",
@@ -2820,7 +2880,7 @@ class UnifiedRadixCacheSuite:
         self._flush_l3_backups(prod)
 
         # --- Consumer tree: prefetch the same tokens straight from L3. ---
-        cons, cons_alloc, cons_rtp = build_fixture(self.cfg)
+        cons, cons_alloc, cons_rtp = build_fixture(l3_cfg)
         self._init_hicache(
             cons,
             storage_backend="file",
@@ -4497,7 +4557,23 @@ class UnifiedRadixCacheSuite:
         """Loading back an evicted node restores the backed-up cache data."""
         if self._skip_unsupported_hicache_test():
             return
-        cache, allocator, req_to_token_pool = self._build_hicache_fixture()
+        # The production admission floor is 2048 tokens. The standard
+        # FULL fixture is intentionally much smaller; this test needs a
+        # realistic pool plus headroom rather than a disabled/relaxed guard.
+        load_cfg = replace(
+            self.cfg,
+            kv_size=max(self.cfg.kv_size, 2048 + 2 * self.cfg.page_size),
+            max_context_len=max(
+                self.cfg.max_context_len, 2048 + 2 * self.cfg.page_size
+            ),
+        )
+        original_cfg = self.cfg
+        self.cfg = load_cfg
+        try:
+            cache, allocator, req_to_token_pool = build_fixture(load_cfg)
+            self._init_hicache(cache)
+        finally:
+            self.cfg = original_cfg
         base = self._make_seq(1, 2)
         self._insert(cache, allocator, req_to_token_pool, base)
 

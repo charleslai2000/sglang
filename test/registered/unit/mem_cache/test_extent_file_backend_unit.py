@@ -1340,6 +1340,97 @@ class TestExtentV2(ExtentBackendTestBase):
             hit_policy=hit_policy,
         )
 
+    def test_unified_kv_mamba_extent_group_atomicity_and_restore(self):
+        """Real Extent storage: KV+MAMBA commit together and restore bytes.
+
+        This is the CPU storage half of Unified MAMBA integration. It uses
+        genuine bytearray-backed registered pools and the production extent
+        index/WAL/group/read paths; CUDA D<->H transfer remains a separate gate.
+        """
+        kv, mamba = self._register_pools(page_bytes=1024)
+        kv_key, mamba_key, missing_key = self._make_keys(3)
+        kv_bytes = self._page_bytes(41, page_bytes=1024)
+        mamba_bytes = self._page_bytes(99, page_bytes=1024)
+        kv._pages[0][:] = kv_bytes
+        mamba._pages[0][:] = mamba_bytes
+
+        group_id = self.backend.open_group()
+        self.assertEqual(
+            self.backend.batch_set_v2(
+                [self._transfer(PoolName.KV, [kv_key])], group_id=group_id
+            ),
+            {PoolName.KV: [True]},
+        )
+        self.assertEqual(
+            self.backend.batch_set_v2(
+                [self._transfer(PoolName.MAMBA, [mamba_key])], group_id=group_id
+            ),
+            {PoolName.MAMBA: [True]},
+        )
+        # Neither key is visible before the combined KV+sidecar group commit.
+        self.assertFalse(self.backend.exists(kv_key))
+        self.assertFalse(self.backend.exists(mamba_key))
+        self.assertTrue(self.backend.commit_group(group_id))
+        self.assertTrue(self.backend.exists(kv_key))
+        self.assertIsNotNone(
+            self.backend._allocator.lookup(
+                self.backend._component_key(PoolName.MAMBA, mamba_key)
+            )
+        )
+
+        # A KV prefix without the required MAMBA checkpoint is not a usable
+        # restore prefix; logical KV presence alone must fail closed.
+        missing_result = self.backend.batch_exists_v2(
+            [missing_key], [self._transfer(PoolName.MAMBA, [missing_key])]
+        )
+        self.assertEqual(missing_result.kv_hit_pages, 0)
+
+        # Read into fresh CPU staging slots through the real backend pread path.
+        restore_kv = _PagePool(page_bytes=1024)
+        restore_mamba = _PagePool(page_bytes=1024)
+        self.backend.register_mem_host_pool_v2(restore_kv, PoolName.KV)
+        self.backend.register_mem_host_pool_v2(restore_mamba, PoolName.MAMBA)
+        restored = self.backend.batch_get_v2(
+            [
+                self._transfer(PoolName.KV, [kv_key]),
+                self._transfer(PoolName.MAMBA, [mamba_key]),
+            ]
+        )
+        self.assertEqual(restored[PoolName.KV], [True])
+        self.assertEqual(restored[PoolName.MAMBA], [True])
+        self.assertEqual(bytes(restore_kv._pages[0]), bytes(kv_bytes))
+        self.assertEqual(bytes(restore_mamba._pages[0]), bytes(mamba_bytes))
+        stats = self.backend.stats_snapshot()
+        self.assertGreaterEqual(stats["preads"], 1)
+        self.assertGreaterEqual(stats["bytes_read"], 2 * len(kv_bytes))
+
+    def test_unified_kv_mamba_extent_group_commit_failure_is_atomic(self):
+        kv, mamba = self._register_pools(page_bytes=1024)
+        kv_key, mamba_key = self._make_keys(2)
+        kv._pages[0][:] = self._page_bytes(17, page_bytes=1024)
+        mamba._pages[0][:] = self._page_bytes(23, page_bytes=1024)
+        group_id = self.backend.open_group()
+        self.assertEqual(
+            self.backend.batch_set_v2(
+                [self._transfer(PoolName.KV, [kv_key])], group_id=group_id
+            ),
+            {PoolName.KV: [True]},
+        )
+        self.assertEqual(
+            self.backend.batch_set_v2(
+                [self._transfer(PoolName.MAMBA, [mamba_key])], group_id=group_id
+            ),
+            {PoolName.MAMBA: [True]},
+        )
+
+        with mock.patch(
+            "os.pwrite", side_effect=OSError("injected extent commit failure")
+        ):
+            with self.assertRaisesRegex(OSError, "injected extent commit failure"):
+                self.backend.commit_group(group_id)
+        self.assertFalse(self.backend.exists(kv_key))
+        self.assertFalse(self.backend.exists(mamba_key))
+
     def test_v2_round_trip_kv_pool(self):
         kv, _ = self._register_pools()
         keys = self._make_keys(4)
