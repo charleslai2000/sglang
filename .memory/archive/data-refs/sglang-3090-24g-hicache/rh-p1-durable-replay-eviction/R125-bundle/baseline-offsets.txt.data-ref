@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=rh-p1-durable-replay-eviction/R125-bundle/baseline-offsets.txt
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=16
+sha256=28f9719151f97090995165eb1f9183e7064e3c7ad1aad34357d41d68142c4779
+stored_path=data/sglang-3090-24g-hicache/28/28f9719151f97090995165eb1f9183e7064e3c7ad1aad34357d41d68142c4779.txt

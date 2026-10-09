@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=rh-p0c-runtime-provenance/P0-C-BIND-20260911-R68.artifacts/03_marker_and_mtimes.txt
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=2682
+sha256=2c223c33774616a52a38fa3d6c11c13396a67988ae4d19ebc1fcb093bbcfe392
+stored_path=data/sglang-3090-24g-hicache/2c/2c223c33774616a52a38fa3d6c11c13396a67988ae4d19ebc1fcb093bbcfe392.txt

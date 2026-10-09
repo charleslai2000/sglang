@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=rh-p0c-runtime-provenance/P0-C-F4-CAPTURE-20260911-R66.artifacts/SHA256SUMS.txt
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=949
+sha256=c3b30932679c1407b7b72fc98eb9c47e3bdb94ff1432fedee7d2ea919c389bf4
+stored_path=data/sglang-3090-24g-hicache/c3/c3b30932679c1407b7b72fc98eb9c47e3bdb94ff1432fedee7d2ea919c389bf4.txt

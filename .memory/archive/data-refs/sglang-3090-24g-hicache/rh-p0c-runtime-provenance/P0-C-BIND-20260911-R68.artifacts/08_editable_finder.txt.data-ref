@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=rh-p0c-runtime-provenance/P0-C-BIND-20260911-R68.artifacts/08_editable_finder.txt
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=48600
+sha256=240df5a096db46162fd7f811052c264c078cea7f7b1e4a67d9a0a585bfda14be
+stored_path=data/sglang-3090-24g-hicache/24/240df5a096db46162fd7f811052c264c078cea7f7b1e4a67d9a0a585bfda14be.txt

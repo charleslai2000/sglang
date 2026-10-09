@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=rh-p0c-runtime-provenance/P0-C-RECONCILE-RESTART-20260911-R72.artifacts/10_local_python_sglang.sha256
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=611203
+sha256=262a9362e345df15d93049301d2b0e60990ba65d80c3bbc5209fb4cdab140e2d
+stored_path=data/sglang-3090-24g-hicache/26/262a9362e345df15d93049301d2b0e60990ba65d80c3bbc5209fb4cdab140e2d.sha256

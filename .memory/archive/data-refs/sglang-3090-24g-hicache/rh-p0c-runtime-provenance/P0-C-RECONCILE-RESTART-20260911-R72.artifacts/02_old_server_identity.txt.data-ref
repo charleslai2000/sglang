@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=rh-p0c-runtime-provenance/P0-C-RECONCILE-RESTART-20260911-R72.artifacts/02_old_server_identity.txt
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=3338
+sha256=16eda040e5fe56285d3b449fd113661e90e2e05c95998114a16bd15c506531ef
+stored_path=data/sglang-3090-24g-hicache/16/16eda040e5fe56285d3b449fd113661e90e2e05c95998114a16bd15c506531ef.txt

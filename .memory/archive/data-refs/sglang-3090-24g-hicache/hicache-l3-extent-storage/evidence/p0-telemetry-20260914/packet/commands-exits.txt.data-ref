@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=hicache-l3-extent-storage/evidence/p0-telemetry-20260914/packet/commands-exits.txt
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=67461
+sha256=70e785f67b5b4cf3b4fa788916b1b74f209e6f2e558454e8fcca9dbad07d9b67
+stored_path=data/sglang-3090-24g-hicache/70/70e785f67b5b4cf3b4fa788916b1b74f209e6f2e558454e8fcca9dbad07d9b67.txt

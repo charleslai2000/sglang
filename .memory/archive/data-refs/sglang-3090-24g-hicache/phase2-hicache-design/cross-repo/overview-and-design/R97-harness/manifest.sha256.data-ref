@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=phase2-hicache-design/cross-repo/overview-and-design/R97-harness/manifest.sha256
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=402
+sha256=0da705f9ae885fcf9e59a23bd04d9aac5255405ae218e9b7530b72cee44257f9
+stored_path=data/sglang-3090-24g-hicache/0d/0da705f9ae885fcf9e59a23bd04d9aac5255405ae218e9b7530b72cee44257f9.sha256

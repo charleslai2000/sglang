@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=hicache-l3-extent-storage/evidence/p0-telemetry-20260914/authority/P0-telemetry-design.sha256
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=274
+sha256=23128d6059377eeccf370987d07d80887202b6e7a98d3c83457a82a5d154f6d9
+stored_path=data/sglang-3090-24g-hicache/23/23128d6059377eeccf370987d07d80887202b6e7a98d3c83457a82a5d154f6d9.sha256

@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=phase2-hicache-design/cross-repo/test-runtime-evidence/R32-artifacts/focused-tests-transcript.txt
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=38092
+sha256=ff35fce15086296765cd659d1a2a86f33e10a4833c22751e79a56197eb1f65ca
+stored_path=data/sglang-3090-24g-hicache/ff/ff35fce15086296765cd659d1a2a86f33e10a4833c22751e79a56197eb1f65ca.txt

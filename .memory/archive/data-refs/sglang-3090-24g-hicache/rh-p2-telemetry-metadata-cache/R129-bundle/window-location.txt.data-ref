@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=rh-p2-telemetry-metadata-cache/R129-bundle/window-location.txt
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=495
+sha256=917e3c9e0716882462b527d5c4d7add55d3f953a919960ca075f05e9e05121fa
+stored_path=data/sglang-3090-24g-hicache/91/917e3c9e0716882462b527d5c4d7add55d3f953a919960ca075f05e9e05121fa.txt

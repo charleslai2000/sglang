@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=hicache-l3-extent-storage/evidence/p0-telemetry-20260914/authority/telemetry-availability.sha256
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=295
+sha256=ac130f06c82405c241b327b47291e4c4b1a18252b00e729280ee0c87d14ca8a4
+stored_path=data/sglang-3090-24g-hicache/ac/ac130f06c82405c241b327b47291e4c4b1a18252b00e729280ee0c87d14ca8a4.sha256

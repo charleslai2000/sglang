@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=rh-p1-durable-replay-eviction/R120-bundle/freeze-offsets.txt
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=184
+sha256=4edfd83370577e636fa4f0d1616dcc4ad86803e3acf0254e250875735d48e310
+stored_path=data/sglang-3090-24g-hicache/4e/4edfd83370577e636fa4f0d1616dcc4ad86803e3acf0254e250875735d48e310.txt

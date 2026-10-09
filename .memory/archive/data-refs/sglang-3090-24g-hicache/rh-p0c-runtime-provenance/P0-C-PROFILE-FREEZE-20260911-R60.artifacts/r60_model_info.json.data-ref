@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=rh-p0c-runtime-provenance/P0-C-PROFILE-FREEZE-20260911-R60.artifacts/r60_model_info.json
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=1164
+sha256=01bc764229cec59a271b74f127375fd047f51ce831e473cbbc8486bfef5877a5
+stored_path=data/sglang-3090-24g-hicache/01/01bc764229cec59a271b74f127375fd047f51ce831e473cbbc8486bfef5877a5.json

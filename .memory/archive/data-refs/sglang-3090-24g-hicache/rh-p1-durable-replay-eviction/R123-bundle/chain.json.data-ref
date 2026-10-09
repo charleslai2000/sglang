@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=rh-p1-durable-replay-eviction/R123-bundle/chain.json
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=8551
+sha256=237720920b355c6dd1a186cc6db913cd1dfc5e63c8ae76f97f4c3d04b33c6f7f
+stored_path=data/sglang-3090-24g-hicache/23/237720920b355c6dd1a186cc6db913cd1dfc5e63c8ae76f97f4c3d04b33c6f7f.json

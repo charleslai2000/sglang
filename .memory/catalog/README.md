@@ -4,6 +4,7 @@
 
 - `hicache-{docs,files}.md`、`opt-{docs,files}.md`、`qwen-{docs,files}.md`：逐条来源路径及实际归集位置。
 - `*-workstreams.md`：按工作目的提供导航。
+- `hicache-recovered-files.md`：快照后工作树中发现的 703 个未映射候选文件位置索引；不把文件数量当作工作项数量。
 - `.memory/archive/MANIFEST.tsv`：权威逐文件映射，含来源仓、分支、commit、Git state、哈希、类别和目标路径。
 - `.memory/data/`：本地大型/raw数据，保持忽略，不纳入提交。
 

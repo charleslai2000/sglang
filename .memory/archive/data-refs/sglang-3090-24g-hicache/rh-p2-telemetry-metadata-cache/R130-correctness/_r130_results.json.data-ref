@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=rh-p2-telemetry-metadata-cache/R130-correctness/_r130_results.json
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=5420
+sha256=dbcba266e656c874594f4094ee5bc8a0ed96452a2e6d5853b04ebee246b25182
+stored_path=data/sglang-3090-24g-hicache/db/dbcba266e656c874594f4094ee5bc8a0ed96452a2e6d5853b04ebee246b25182.json

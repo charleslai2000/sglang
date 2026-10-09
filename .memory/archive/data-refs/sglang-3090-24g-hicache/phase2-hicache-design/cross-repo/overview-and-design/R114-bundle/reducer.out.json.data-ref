@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=phase2-hicache-design/cross-repo/overview-and-design/R114-bundle/reducer.out.json
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=219212
+sha256=c4c5512ec91d1c4c6231d9b30a141e9984c073760e1fb532d4619115b7ef05b9
+stored_path=data/sglang-3090-24g-hicache/c4/c4c5512ec91d1c4c6231d9b30a141e9984c073760e1fb532d4619115b7ef05b9.json

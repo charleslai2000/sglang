@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=rh-p0b-harness-durability/R113-bundle/run-offsets.txt
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=248
+sha256=202d0bec78e93ac7aa2f78cf68860ae4f6466eebf07b27b78df06c365f117518
+stored_path=data/sglang-3090-24g-hicache/20/202d0bec78e93ac7aa2f78cf68860ae4f6466eebf07b27b78df06c365f117518.txt

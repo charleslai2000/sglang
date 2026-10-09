@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=rh-p0b-harness-durability/R113-bundle/manifest.json
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=1848
+sha256=897864e74ebf285ccc25d5eea5bd745de18f54e6dd639db0b54d49bda06be20f
+stored_path=data/sglang-3090-24g-hicache/89/897864e74ebf285ccc25d5eea5bd745de18f54e6dd639db0b54d49bda06be20f.json

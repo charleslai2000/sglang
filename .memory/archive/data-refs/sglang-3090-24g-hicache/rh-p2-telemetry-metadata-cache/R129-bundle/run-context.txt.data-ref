@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=rh-p2-telemetry-metadata-cache/R129-bundle/run-context.txt
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=629
+sha256=5cbe9ec1bf1b3b35841f0dd33df24e41217daf4c546ec47a34ea5be400cda5d9
+stored_path=data/sglang-3090-24g-hicache/5c/5cbe9ec1bf1b3b35841f0dd33df24e41217daf4c546ec47a34ea5be400cda5d9.txt

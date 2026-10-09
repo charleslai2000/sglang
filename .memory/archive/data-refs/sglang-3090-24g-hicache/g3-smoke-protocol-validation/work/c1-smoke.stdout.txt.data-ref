@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=g3-smoke-protocol-validation/work/c1-smoke.stdout.txt
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=0
+sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+stored_path=data/sglang-3090-24g-hicache/e3/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855.txt

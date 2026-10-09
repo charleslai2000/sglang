@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=rh-p0b-harness-durability/R111-reducer/test-r111.out.txt
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=4604
+sha256=28df940921496f0b8229e638bfb1f765a180e95a42afb17135418adc861fbaca
+stored_path=data/sglang-3090-24g-hicache/28/28df940921496f0b8229e638bfb1f765a180e95a42afb17135418adc861fbaca.txt

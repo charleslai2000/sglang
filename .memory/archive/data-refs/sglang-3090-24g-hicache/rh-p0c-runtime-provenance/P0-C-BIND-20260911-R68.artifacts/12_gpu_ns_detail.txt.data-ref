@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=rh-p0c-runtime-provenance/P0-C-BIND-20260911-R68.artifacts/12_gpu_ns_detail.txt
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=1578
+sha256=afd901c69950c7842ff2f6b64bfe94597d6a8f7dfbdf19a69b697257c2cca0d8
+stored_path=data/sglang-3090-24g-hicache/af/afd901c69950c7842ff2f6b64bfe94597d6a8f7dfbdf19a69b697257c2cca0d8.txt

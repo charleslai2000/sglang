@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=hicache-l3-extent-storage/R39-artifacts/remote-backup-inspection.txt
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=208
+sha256=abfc836e87a4511a81d042307145896a31057b8f37b6dc542ff82995db92930e
+stored_path=data/sglang-3090-24g-hicache/ab/abfc836e87a4511a81d042307145896a31057b8f37b6dc542ff82995db92930e.txt

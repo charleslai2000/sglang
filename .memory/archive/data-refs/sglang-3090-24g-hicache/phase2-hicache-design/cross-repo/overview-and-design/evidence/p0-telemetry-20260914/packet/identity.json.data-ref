@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=phase2-hicache-design/cross-repo/overview-and-design/evidence/p0-telemetry-20260914/packet/identity.json
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=3545
+sha256=222742e4aa5ee63937ab3cd0f0fcf285a1c3564a21a432bab8048b196000d262
+stored_path=data/sglang-3090-24g-hicache/22/222742e4aa5ee63937ab3cd0f0fcf285a1c3564a21a432bab8048b196000d262.json

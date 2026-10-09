@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=hicache-l3-extent-storage/evidence/p0-telemetry-20260914/authority/P0-TELEMETRY-EXPERT-GATE-20260914.json
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=8625
+sha256=1e8277e9762cafc7336156479973d725d9bce973d245d1f62974ad407795e374
+stored_path=data/sglang-3090-24g-hicache/1e/1e8277e9762cafc7336156479973d725d9bce973d245d1f62974ad407795e374.json

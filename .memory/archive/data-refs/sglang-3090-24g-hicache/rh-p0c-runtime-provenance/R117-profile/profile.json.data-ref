@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=rh-p0c-runtime-provenance/R117-profile/profile.json
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=12960
+sha256=9301f95955a72a7643ebb274497e40db9a88b2fc2dffe02f88c1c1fe995a2e10
+stored_path=data/sglang-3090-24g-hicache/93/9301f95955a72a7643ebb274497e40db9a88b2fc2dffe02f88c1c1fe995a2e10.json

@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=rh-p2-telemetry-metadata-cache/R130-bundle/attempt1-killed-at-0856.sha256
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=197
+sha256=4d0396e476be3087be6cf67d09ecc8293a2a3429752ae6385e2f14a37123a090
+stored_path=data/sglang-3090-24g-hicache/4d/4d0396e476be3087be6cf67d09ecc8293a2a3429752ae6385e2f14a37123a090.sha256

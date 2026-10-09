@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=rh-p2-telemetry-metadata-cache/R130-correctness/_r130_microbench.json
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=2763
+sha256=a45bee02c5c8b9ee508f9a46d2aabd7c3113ff70f215cbcf432f9dd9b49ec0b2
+stored_path=data/sglang-3090-24g-hicache/a4/a45bee02c5c8b9ee508f9a46d2aabd7c3113ff70f215cbcf432f9dd9b49ec0b2.json

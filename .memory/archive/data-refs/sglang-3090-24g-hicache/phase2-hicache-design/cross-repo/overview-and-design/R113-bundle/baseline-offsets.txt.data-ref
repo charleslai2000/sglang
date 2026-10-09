@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=phase2-hicache-design/cross-repo/overview-and-design/R113-bundle/baseline-offsets.txt
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=109
+sha256=1365804ee3412bf19b2167eba11a9cdda1a2a58e34915ee76a67fb8dfbf9ba34
+stored_path=data/sglang-3090-24g-hicache/13/1365804ee3412bf19b2167eba11a9cdda1a2a58e34915ee76a67fb8dfbf9ba34.txt

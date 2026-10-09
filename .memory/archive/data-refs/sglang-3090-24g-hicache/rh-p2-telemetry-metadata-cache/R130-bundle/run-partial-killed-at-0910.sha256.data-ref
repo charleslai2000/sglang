@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=rh-p2-telemetry-metadata-cache/R130-bundle/run-partial-killed-at-0910.sha256
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=200
+sha256=a33c438365f5758082a1dd85c21ebe007731bbdc95d230767b6a807718e385bb
+stored_path=data/sglang-3090-24g-hicache/a3/a33c438365f5758082a1dd85c21ebe007731bbdc95d230767b6a807718e385bb.sha256

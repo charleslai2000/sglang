@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=phase2-hicache-design/cross-repo/p0-b-harness-durability/P0-B-FOCUSED-RERUN-20260911-R52.transcript
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=300
+sha256=3ee76f2a0a233b2952245c6d021bee29da0a0516d78821c52deae61ba63808f4
+stored_path=data/sglang-3090-24g-hicache/3e/3ee76f2a0a233b2952245c6d021bee29da0a0516d78821c52deae61ba63808f4.transcript

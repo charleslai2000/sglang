@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=rh-p1-durable-replay-eviction/R119-bundle/manifest.json
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=2461
+sha256=257d96725dda168a8403c8ecbe529df26840d233fd87bc01c36470914bec8123
+stored_path=data/sglang-3090-24g-hicache/25/257d96725dda168a8403c8ecbe529df26840d233fd87bc01c36470914bec8123.json

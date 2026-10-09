@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=phase2-hicache-design/cross-repo/test-runtime-evidence/R32-artifacts/exact-host-alloc-unit-transcript.txt
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=7387
+sha256=c644f585e83e7d94c7640c3560f038279ad4659e4d99440ac13cffb0a63ddb42
+stored_path=data/sglang-3090-24g-hicache/c6/c644f585e83e7d94c7640c3560f038279ad4659e4d99440ac13cffb0a63ddb42.txt

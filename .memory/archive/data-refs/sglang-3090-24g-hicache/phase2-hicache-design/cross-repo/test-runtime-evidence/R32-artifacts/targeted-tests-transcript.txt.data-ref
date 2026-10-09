@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=phase2-hicache-design/cross-repo/test-runtime-evidence/R32-artifacts/targeted-tests-transcript.txt
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=4609
+sha256=e50582039e4ac028b92c1a9a355ab0db32fa9bc75dd3de1d9460fceca87e9814
+stored_path=data/sglang-3090-24g-hicache/e5/e50582039e4ac028b92c1a9a355ab0db32fa9bc75dd3de1d9460fceca87e9814.txt

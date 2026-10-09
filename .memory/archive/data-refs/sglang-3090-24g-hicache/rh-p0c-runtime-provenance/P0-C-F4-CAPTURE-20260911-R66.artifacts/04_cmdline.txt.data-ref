@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=rh-p0c-runtime-provenance/P0-C-F4-CAPTURE-20260911-R66.artifacts/04_cmdline.txt
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=1091
+sha256=265c2174cc9ed45a39f714e534d64e0497c96f7fd2bca2b768a9f4d09e325932
+stored_path=data/sglang-3090-24g-hicache/26/265c2174cc9ed45a39f714e534d64e0497c96f7fd2bca2b768a9f4d09e325932.txt

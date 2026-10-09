@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=hicache-l3-extent-storage/R32-artifacts/post-test-safety.txt
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=26768
+sha256=0e48674d454386aeff4f4df1986f1f915ae3b99cf3bb42c6254d9d5cce4439fb
+stored_path=data/sglang-3090-24g-hicache/0e/0e48674d454386aeff4f4df1986f1f915ae3b99cf3bb42c6254d9d5cce4439fb.txt
