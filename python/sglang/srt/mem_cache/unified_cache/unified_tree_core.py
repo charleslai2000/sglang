@@ -17,6 +17,7 @@ cache for cache-level logic, but the TreeCore itself never touches it.
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from array import array
 from collections import defaultdict
@@ -25,6 +26,11 @@ from typing import TYPE_CHECKING, Any, Callable, NamedTuple, Optional, Sequence
 
 import msgspec
 import torch
+
+# Snapshot the profiling marker once at module import. Normal serving pays no
+# per-node filesystem check; the launcher creates the marker before workers
+# import this module and removes it after the profiling service exits.
+_T38C_DURABLE_TRACE_ENABLED = os.path.exists("/tmp/t38c-durable-trace")
 
 from sglang.srt.disaggregation.kv_events import StorageMedium
 from sglang.srt.mem_cache.base_prefix_cache import (
@@ -1197,7 +1203,7 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         new_node.component_data[BASE_COMPONENT_TYPE].value = value.clone()
         parent.children[key.child_key(self.page_size)] = new_node
         self.component_evictable_size_[BASE_COMPONENT_TYPE] += len(value)
-        if self.enable_storage:
+        if self.enable_storage or _T38C_DURABLE_TRACE_ENABLED:
             new_node.hash_value = compute_node_hash_values(new_node, self.page_size)
 
         self._update_evictable_leaf_sets(new_node)

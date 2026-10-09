@@ -227,6 +227,37 @@ class TestUnifiedRadixComponentRegistryOverride(CustomTestCase):
 
 
 class TestUnifiedTreeNodeGetPrefixHashValues(CustomTestCase):
+    def test_profiling_marker_computes_hash_without_enabling_storage(self):
+        from sglang.srt.mem_cache.unified_cache.unified_tree_core import UnifiedTreeCore
+
+        component_types = (ComponentType.FULL,)
+        root = UnifiedTreeNode(component_types)
+        params = CacheInitParams(
+            req_to_token_pool=ReqToTokenPool(
+                size=2, max_context_len=8, device="cpu", enable_memory_saver=False
+            ),
+            token_to_kv_pool_allocator=None,
+            page_size=1,
+            disable=True,
+            tree_components=(ComponentType.FULL,),
+        )
+        tree = UnifiedTreeCore(
+            params, {ComponentType.FULL: mock.Mock(component_type=ComponentType.FULL)}
+        )
+        with mock.patch(
+            "sglang.srt.mem_cache.unified_cache.unified_tree_core._T38C_DURABLE_TRACE_ENABLED",
+            True,
+        ):
+            node = UnifiedTreeCore._add_new_node(
+                tree,
+                tree.root_node,
+                RadixKey([17, 23, 41]),
+                torch.tensor([1, 2, 3], dtype=torch.int64),
+            )
+        self.assertFalse(tree.enable_storage)
+        self.assertEqual(len(node.hash_value), 3)
+        self.assertTrue(all(len(value) == 64 for value in node.hash_value))
+
     def test_get_prefix_hash_values_not_shared_across_calls(self):
         """Regression guard for cached mutable prefix hash lists (#26177)."""
 
