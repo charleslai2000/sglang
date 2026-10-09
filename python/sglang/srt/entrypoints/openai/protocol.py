@@ -339,6 +339,13 @@ class CompletionRequest(BaseModel):
     logit_bias: Optional[Dict[str, float]] = None
     logprobs: Optional[int] = None
     max_tokens: int = 16
+    max_thinking_tokens: Optional[int] = Field(
+        default=None,
+        description="Per-request reasoning (thinking) token budget. Requires the server to be "
+        "launched with --enable-strict-thinking. When the model reaches this budget while in the "
+        "thinking phase, the runtime forces it to emit the response marker and continue generating "
+        "the final answer instead of stopping the whole completion.",
+    )
     n: int = 1
     presence_penalty: float = 0.0
     seed: Optional[int] = None
@@ -841,6 +848,13 @@ class ChatCompletionRequest(BaseModel):
         default=None,
         description="The maximum number of completion tokens for a chat completion request, "
         "including visible output tokens and reasoning tokens. Input tokens are not included. ",
+    )
+    max_thinking_tokens: Optional[int] = Field(
+        default=None,
+        description="Per-request reasoning (thinking) token budget. Requires the server to be "
+        "launched with --enable-strict-thinking. When the model reaches this budget while in the "
+        "thinking phase, the runtime forces it to emit the response marker and continue generating "
+        "the final answer instead of stopping the whole completion.",
     )
     n: int = 1
     presence_penalty: float = 0.0

@@ -24,6 +24,7 @@ from sglang.srt.sampling.custom_logit_processor import (
     DisallowedTokensLogitsProcessor,
     InklingThinkingBudgetLogitProcessor,
     Qwen3ThinkingBudgetLogitProcessor,
+    Qwen35ThinkingBudgetLogitProcessor,
     _cache_from_str,
 )
 from sglang.test.test_utils import CustomTestCase
@@ -244,6 +245,47 @@ class TestThinkingBudgetLogitProcessor(CustomTestCase):
         original = logits.clone()
         result = self.processor(logits, params)
         self.assertTrue(torch.equal(result, original))
+
+    def test_qwen35_uses_correct_token_ids(self):
+        """Qwen3.5/3.8 use token IDs 248068/248069, not the old Qwen3 151667/151668."""
+        self.assertEqual(
+            Qwen35ThinkingBudgetLogitProcessor.THINKING_START_TOKEN_ID, 248068
+        )
+        self.assertEqual(
+            Qwen35ThinkingBudgetLogitProcessor.THINKING_END_TOKEN_ID, 248069
+        )
+        self.assertEqual(Qwen35ThinkingBudgetLogitProcessor.NEW_LINE_TOKEN_ID, 198)
+
+    def test_qwen35_budget_exceeded_forces_newline_then_end(self):
+        """Qwen35 variant forces newline then the response end token on budget exceeded."""
+        proc = Qwen35ThinkingBudgetLogitProcessor()
+        start = proc.THINKING_START_TOKEN_ID
+        end = proc.THINKING_END_TOKEN_ID
+        nl = proc.NEW_LINE_TOKEN_ID
+        vocab = 248070
+
+        # Within budget: no change.
+        req = _make_req(origin_input_ids=[start], output_ids=[100, 101])
+        params = [{"thinking_budget": 10, "__req__": req}]
+        logits = torch.zeros(1, vocab)
+        result = proc(logits, params)
+        self.assertEqual(result[0, 0].item(), 0.0)
+
+        # Budget exceeded, last token not newline -> force newline only.
+        req = _make_req(origin_input_ids=[start], output_ids=[100] * 5)
+        params = [{"thinking_budget": 5, "__req__": req}]
+        logits = torch.zeros(1, vocab)
+        result = proc(logits, params)
+        self.assertEqual(result[0, nl].item(), 0.0)
+        self.assertTrue(torch.isinf(result[0, 0]) and result[0, 0] < 0)
+
+        # Budget exceeded, last token is newline -> force response end token.
+        req = _make_req(origin_input_ids=[start], output_ids=[100] * 5 + [nl])
+        params = [{"thinking_budget": 5, "__req__": req}]
+        logits = torch.zeros(1, vocab)
+        result = proc(logits, params)
+        self.assertEqual(result[0, end].item(), 0.0)
+        self.assertTrue(torch.isinf(result[0, 0]) and result[0, 0] < 0)
 
     def test_inkling_end_token_in_prompt_does_not_disable_budget(self):
         proc = InklingThinkingBudgetLogitProcessor()
