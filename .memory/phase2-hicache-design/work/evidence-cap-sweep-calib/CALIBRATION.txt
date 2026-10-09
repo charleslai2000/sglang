@@ -1,0 +1,4 @@
+rest_mem T=10.78 GiB (calibrated)
+C0 r=0.9 kv=376091 mamba=106 kvdev=5.74 mamba_dev=5.14 kv_host=9.24 mamba_host=8.24 -> mamba host FAIL (budget 7.53)
+C3 r=0.33 kv=536435 mamba=55 kvdev=8.18 mamba_dev=2.68 kv_host=13.18 mamba_host=4.28 -> mamba host FAIL (budget 3.53)
+host-RAM wall ratio-invariant: total_host ~17.2GB > pre-kv budget ~16.7GB, all ratios

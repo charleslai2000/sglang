@@ -1,0 +1,29 @@
+$ date -u +%Y%m%dT%H%M%SZ
+20260910T194635Z
+
+$ sha256sum current local files
+bd87b5b1165ae2e21d3c652f908af37b18ce3714fb6ff1d30b09221362f83e64  /home/dev-codex/workspaces/3rdparty/sglang-3090-24g-hicache/3090-dev/test_ready_horizon_unit.py
+59da7cb4d706585e41cd5d9d81849601f8b91bb1f76135f1a635a0ba8eeb6ee0  /home/dev-codex/workspaces/3rdparty/sglang-3090-24g-hicache/3090-dev/test_prefetch_budget_split_unit.py
+e725e9730ad4a22de8add159bf7e22cc0bf6b0c19614f240329d51b1c44b219d  /home/dev-codex/workspaces/3rdparty/sglang-3090-24g-hicache/3090-dev/test_hicache_restore_scheduler_feed.py
+
+$ remote backup
+BACKUP=/root/sglang-3060-12g-hicache/3090-dev/.p0a-remote-final-r16-backup-20260910T194635Z
+backup_files
+test_hicache_restore_scheduler_feed.py
+test_prefetch_budget_split_unit.py
+test_ready_horizon_unit.py
+
+$ scp (three explicit absolute destinations)
+completed with exit 0
+
+$ separate SSH gate: remote sha256sum
+bd87b5b1165ae2e21d3c652f908af37b18ce3714fb6ff1d30b09221362f83e64  3090-dev/test_ready_horizon_unit.py
+59da7cb4d706585e41cd5d9d81849601f8b91bb1f76135f1a635a0ba8eeb6ee0  3090-dev/test_prefetch_budget_split_unit.py
+e725e9730ad4a22de8add159bf7e22cc0bf6b0c19614f240329d51b1c44b219d  3090-dev/test_hicache_restore_scheduler_feed.py
+
+$ symbol gate
+SYMBOLS_READY_BUDGET
+_t38c_node_context_index ready=0
+exit=1 (set -e); pytest intentionally not executed
+
+Result: BLOCKED at required symbol gate. No eight regression commands were run.

@@ -1,0 +1,101 @@
+Exception ignored in: <function BaseEvictionResult.__del__ at 0x706717c837e0>
+Traceback (most recent call last):
+  File "/home/charles/Workspaces/3rdparty/sglang-3090-24g-hicache/python/sglang/srt/mem_cache/unified_cache/unified_tree_core_interface.py", line 39, in __del__
+    not self.device_frees and not self.host_frees
+AssertionError: BaseEvictionResult dropped with undrained values
+Exception ignored in: <function BaseEvictionResult.__del__ at 0x706717c837e0>
+Traceback (most recent call last):
+  File "/home/charles/Workspaces/3rdparty/sglang-3090-24g-hicache/python/sglang/srt/mem_cache/unified_cache/unified_tree_core_interface.py", line 39, in __del__
+    not self.device_frees and not self.host_frees
+AssertionError: BaseEvictionResult dropped with undrained values
+.Exception ignored in: <function BaseEvictionResult.__del__ at 0x706717c837e0>
+Traceback (most recent call last):
+  File "/home/charles/Workspaces/3rdparty/sglang-3090-24g-hicache/python/sglang/srt/mem_cache/unified_cache/unified_tree_core_interface.py", line 39, in __del__
+    not self.device_frees and not self.host_frees
+AssertionError: BaseEvictionResult dropped with undrained values
+.Exception ignored in: <function BaseEvictionResult.__del__ at 0x706717c837e0>
+Traceback (most recent call last):
+  File "/home/charles/Workspaces/3rdparty/sglang-3090-24g-hicache/python/sglang/srt/mem_cache/unified_cache/unified_tree_core_interface.py", line 39, in __del__
+    not self.device_frees and not self.host_frees
+AssertionError: BaseEvictionResult dropped with undrained values
+Exception ignored in: <function BaseEvictionResult.__del__ at 0x706717c837e0>
+Traceback (most recent call last):
+  File "/home/charles/Workspaces/3rdparty/sglang-3090-24g-hicache/python/sglang/srt/mem_cache/unified_cache/unified_tree_core_interface.py", line 39, in __del__
+    not self.device_frees and not self.host_frees
+AssertionError: BaseEvictionResult dropped with undrained values
+.Exception ignored in: <function BaseEvictionResult.__del__ at 0x706717c837e0>
+Traceback (most recent call last):
+  File "/home/charles/Workspaces/3rdparty/sglang-3090-24g-hicache/python/sglang/srt/mem_cache/unified_cache/unified_tree_core_interface.py", line 39, in __del__
+    not self.device_frees and not self.host_frees
+AssertionError: BaseEvictionResult dropped with undrained values
+Exception ignored in: <function BaseEvictionResult.__del__ at 0x706717c837e0>
+Traceback (most recent call last):
+  File "/home/charles/Workspaces/3rdparty/sglang-3090-24g-hicache/python/sglang/srt/mem_cache/unified_cache/unified_tree_core_interface.py", line 39, in __del__
+    not self.device_frees and not self.host_frees
+AssertionError: BaseEvictionResult dropped with undrained values
+.Exception ignored in: <function BaseEvictionResult.__del__ at 0x706717c837e0>
+Traceback (most recent call last):
+  File "/home/charles/Workspaces/3rdparty/sglang-3090-24g-hicache/python/sglang/srt/mem_cache/unified_cache/unified_tree_core_interface.py", line 39, in __del__
+    not self.device_frees and not self.host_frees
+AssertionError: BaseEvictionResult dropped with undrained values
+.Exception ignored in: <function BaseEvictionResult.__del__ at 0x706717c837e0>
+Traceback (most recent call last):
+  File "/home/charles/Workspaces/3rdparty/sglang-3090-24g-hicache/python/sglang/srt/mem_cache/unified_cache/unified_tree_core_interface.py", line 39, in __del__
+    not self.device_frees and not self.host_frees
+AssertionError: BaseEvictionResult dropped with undrained values
+...................Sanity check FAILED (2 violations across 2 nodes):
+  node 95 mamba host present but Full.host_value=None
+  node 95 dead: no Full device, no Full host, not L3-persisted
+.Sanity check FAILED (2 violations across 2 nodes):
+  node 105 mamba host present but Full.host_value=None
+  node 105 dead: no Full device, no Full host, not L3-persisted
+................................P2-1c promotion reservation underflow: release 100 > held 0 (node 42, cause=test)
+P2-1c promotion reservation underflow on transfer: 100 > held 0 (node 42)
+...................HiCache hybrid prefetch discarded req=test-rid completed=4 requested=4 kv_beliefs_kept_pages=2
+............HiCache storage failure: prefetch_io_aux_func: ValueError: io boom. Degrading: L3 queries/prefetches/writes are disabled for the rest of this run; requests fall back to recompute.
+.HiCache storage failure: prefetch_io_aux_func: ValueError: io boom. Degrading: L3 queries/prefetches/writes are disabled for the rest of this run; requests fall back to recompute.
+......HiCache storage thread backup_thread_func died (reason=backup_thread_func: RuntimeError: backup boom); storage is degraded: L3 prefetch/backup disabled until restart.
+Traceback (most recent call last):
+  File "/home/charles/Workspaces/3rdparty/sglang-3090-24g-hicache/python/sglang/srt/managers/cache_controller.py", line 1418, in backup_thread_func
+    self._page_backup(operation)
+  File "/home/charles/Workspaces/3rdparty/sglang-3090-24g-hicache/3090-dev/test_storage_regression.py", line 930, in boom
+    raise RuntimeError("backup boom")
+RuntimeError: backup boom
+..HiCache storage thread prefetch_io_aux_func died (reason=prefetch_io_aux_func: ValueError: io boom); storage is degraded: L3 prefetch/backup disabled until restart.
+Traceback (most recent call last):
+  File "/home/charles/Workspaces/3rdparty/sglang-3090-24g-hicache/python/sglang/srt/managers/cache_controller.py", line 1245, in prefetch_io_aux_func
+    n_pages = self._page_transfer(operation)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/charles/Workspaces/3rdparty/sglang-3090-24g-hicache/3090-dev/test_storage_regression.py", line 913, in boom
+    raise ValueError("io boom")
+ValueError: io boom
+........................................................................................[P2A] partial backup ack: node 42 got 8/16 tokens; will rewrite
+...skipping re-entered _drain_write_through_acks; the enclosing drain owns this round
+..........................HiCache hybrid prefetch discarded req=r1 completed=4 requested=4 kv_beliefs_kept_pages=2
+.............................................................................................Unsupported element_size = 16 for JIT HiCache kernel
+.Unsupported element_size = 16 for JIT HiCache kernel
+.Unsupported element_size = 16 for JIT HiCache kernel
+.Unsupported element_size = 16 for JIT HiCache kernel
+...Unsupported element_size = 16 for JIT HiCache kernel
+Unsupported element_size = 16 for JIT HiCache kernel
+.Unsupported element_size = 16 for JIT HiCache kernel
+Unsupported element_size = 16 for JIT HiCache kernel
+.Unsupported element_size = 16 for JIT HiCache kernel
+Unsupported element_size = 16 for JIT HiCache kernel
+.Unsupported element_size = 16 for JIT HiCache kernel
+.Unsupported element_size = 16 for JIT HiCache kernel
+...Unsupported element_size = 16 for JIT HiCache kernel
+.Unsupported element_size = 16 for JIT HiCache kernel
+.Unsupported element_size = 16 for JIT HiCache kernel
+Unsupported element_size = 16 for JIT HiCache kernel
+.Unsupported element_size = 16 for JIT HiCache kernel
+.Unsupported element_size = 16 for JIT HiCache kernel
+.
+----------------------------------------------------------------------
+Ran 325 tests in 0.116s
+
+OK
+ [86] 0 full_lock=1 full=yes mamba=no
+   [95] 2 full_lock=0 full=no mamba=no
+ [96] 0 full_lock=1 full=yes mamba=no
+   [105] 2 full_lock=0 full=no mamba=no

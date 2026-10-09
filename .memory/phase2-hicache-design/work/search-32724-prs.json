@@ -1,0 +1,85 @@
+{
+  "total_count": 1,
+  "incomplete_results": false,
+  "items": [
+    {
+      "url": "https://api.github.com/repos/sgl-project/sglang/issues/32725",
+      "repository_url": "https://api.github.com/repos/sgl-project/sglang",
+      "labels_url": "https://api.github.com/repos/sgl-project/sglang/issues/32725/labels{/name}",
+      "comments_url": "https://api.github.com/repos/sgl-project/sglang/issues/32725/comments",
+      "events_url": "https://api.github.com/repos/sgl-project/sglang/issues/32725/events",
+      "html_url": "https://github.com/sgl-project/sglang/pull/32725",
+      "id": 5005471479,
+      "node_id": "PR_kwDOLCAjRs73yZeh",
+      "number": 32725,
+      "title": "perf(hicache): proactively finalize completed prefetch at scheduler safe point",
+      "user": {
+        "login": "cfbdsirlijun-maker",
+        "id": 266610134,
+        "node_id": "U_kgDOD-Ql1g",
+        "avatar_url": "https://avatars.githubusercontent.com/u/266610134?v=4",
+        "gravatar_id": "",
+        "url": "https://api.github.com/users/cfbdsirlijun-maker",
+        "html_url": "https://github.com/cfbdsirlijun-maker",
+        "followers_url": "https://api.github.com/users/cfbdsirlijun-maker/followers",
+        "following_url": "https://api.github.com/users/cfbdsirlijun-maker/following{/other_user}",
+        "gists_url": "https://api.github.com/users/cfbdsirlijun-maker/gists{/gist_id}",
+        "starred_url": "https://api.github.com/users/cfbdsirlijun-maker/starred{/owner}{/repo}",
+        "subscriptions_url": "https://api.github.com/users/cfbdsirlijun-maker/subscriptions",
+        "organizations_url": "https://api.github.com/users/cfbdsirlijun-maker/orgs",
+        "repos_url": "https://api.github.com/users/cfbdsirlijun-maker/repos",
+        "events_url": "https://api.github.com/users/cfbdsirlijun-maker/events{/privacy}",
+        "received_events_url": "https://api.github.com/users/cfbdsirlijun-maker/received_events",
+        "type": "User",
+        "user_view_type": "public",
+        "site_admin": false
+      },
+      "labels": [
+
+      ],
+      "state": "open",
+      "locked": false,
+      "assignees": [
+
+      ],
+      "milestone": null,
+      "comments": 2,
+      "created_at": "2026-07-29T04:35:46Z",
+      "updated_at": "2026-07-29T05:49:44Z",
+      "closed_at": null,
+      "assignee": null,
+      "author_association": "NONE",
+      "issue_field_values": [
+
+      ],
+      "type": null,
+      "active_lock_reason": null,
+      "draft": false,
+      "pull_request": {
+        "url": "https://api.github.com/repos/sgl-project/sglang/pulls/32725",
+        "html_url": "https://github.com/sgl-project/sglang/pull/32725",
+        "diff_url": "https://github.com/sgl-project/sglang/pull/32725.diff",
+        "patch_url": "https://github.com/sgl-project/sglang/pull/32725.patch",
+        "merged_at": null
+      },
+      "body": "# perf(hicache): proactively finalize completed prefetch at scheduler safe point\n\n## Motivation\n\nFixes #32724\n\nWith HiCache + a storage backend (L3, e.g. Mooncake), a storage prefetch is only finalized when the scheduler's FCFS waiting-queue scan reaches that request and calls `check_prefetch_progress(rid)`. When the prefill token budget is saturated by requests at the head of the queue, an IO-completed prefetch deep in the queue is not confirmed until the scan finally reaches its rid — the *scheduler_ready* confirmation lags IO completion by up to seconds (observed: IO ~91 ms vs. ~2.4 s scheduler-side delay under high concurrency, see the linked issue). The stale `ongoing_prefetch` entries also keep host memory and `prefetch_tokens_occupied` budget pinned longer than necessary.\n\nThis PR decouples the finalization confirmation from the FCFS waiting-queue position by proactively finalizing ready prefetches at an existing scheduler safe point. Scheduling semantics are unchanged: admission into the prefill batch is still governed by waiting queue order, batch size, token budget, and chunked prefill exactly as before.\n\n## Modifications\n\nAll changes are in `python/sglang/srt/mem_cache/hiradix_cache.py` (+44 lines, no behavior change outside the storage-enabled path):\n\n1. New `_can_check_prefetch_progress_proactively(operation)` — a cheap, local readiness check that mirrors the states `can_terminate_prefetch()` already treats as terminal:\n   - `operation.host_indices is None` or `operation.is_terminated()`;\n   - IO complete: `completed_tokens == len(hash_value) * page_size` (same completion\n     predicate as `can_terminate_prefetch`);\n   - under `prefetch_stop_policy == \"timeout\"`, `is_prefetch_timeout(operation)`.\n\n2. New `check_ready_prefetch_progress()` — at the scheduler safe point, scans `ongoing_prefetch` and calls the existing `check_prefetch_progress(req_id)` for requests that are ready on **all** ranks:\n   - candidates are sorted by `req_id` so every rank evaluates them in the same order;\n   - the per-candidate local readiness vector is combined with a\n     `ReduceOp.MIN` all-reduce over the ATTN TP/CP groups\n     (`_all_reduce_attn_groups`), so a request is only finalized when every rank\n     agrees it is ready — no rank can diverge on the finalized set;\n   - the actual finalization still goes through `check_prefetch_progress()` /\n     `can_terminate_prefetch()`, which performs its own cross-rank synchronization,\n     so this proactive path adds no new termination semantics.\n\n3. Call site: in `check_hicache_events()`, inside the `if self.enable_storage:` branch, `check_ready_prefetch_progress()` is invoked right after `drain_storage_control_queues()`. All ranks reach this point together, making it a safe point for the collective above.\n\nThe proactive path only moves the *scheduler_ready* confirmation earlier; it does not admit any request into the prefill batch, reorder the waiting queue, or change any prefetch termination policy.\n\n## Checklist\n\n- [x] Format your code according to the [Code Formatting with Pre-Commit](https://docs.sglang.ai/developer_guide/contribution_guide.html#code-formatting-with-pre-commit).\n- [ ] Add unit tests as outlined in the [Running Unit Tests](https://docs.sglang.ai/developer_guide/contribution_guide.html#running-unit-tests-adding-to-ci).\n      (The change is exercised by existing hierarchical-cache storage tests, e.g.\n      `test/registered/hicache/`; a targeted unit test for\n      `check_ready_prefetch_progress` can be added on request.)\n- [x] Update documentation / docstrings as needed (new method carries a docstring; no\n      user-facing behavior change, so no doc update required).\n- [x] Provide throughput / latency benchmark results and accuracy evaluation results as\n      needed (io-done → scheduler-ready gap reduced from ~2.4 s to the next\n      `check_hicache_events()` round in our 4P1D Mooncake deployment; details in the\n      linked issue).\n",
+      "reactions": {
+        "url": "https://api.github.com/repos/sgl-project/sglang/issues/32725/reactions",
+        "total_count": 0,
+        "+1": 0,
+        "-1": 0,
+        "laugh": 0,
+        "hooray": 0,
+        "confused": 0,
+        "heart": 0,
+        "rocket": 0,
+        "eyes": 0
+      },
+      "timeline_url": "https://api.github.com/repos/sgl-project/sglang/issues/32725/timeline",
+      "performed_via_github_app": null,
+      "state_reason": null,
+      "score": 1.0
+    }
+  ],
+  "search_type": "lexical"
+}

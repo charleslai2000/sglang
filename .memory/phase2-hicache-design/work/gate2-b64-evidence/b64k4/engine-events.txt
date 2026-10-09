@@ -1,0 +1,60 @@
+[2026-09-04 16:14:17] [P2A] ts_ms=1788509657228 evt=restore_disposition rid=f66f3539f1414f74aae11e440e11c399 disposition=RECOMPUTE requested=79 granted=0 reason=too_short
+[2026-09-04 16:14:24] [P2A] ts_ms=1788509664850 evt=restore_disposition rid=HEALTH_CHECK_2fe143b7a74243da8580329da872a992 disposition=RECOMPUTE requested=0 granted=0 reason=too_short
+[2026-09-04 16:14:27] [P2A] ts_ms=1788509667239 evt=restore_disposition rid=142aa8e96731424184e956e181651090 disposition=RECOMPUTE requested=20910 granted=0 reason=revoked:miss
+[2026-09-04 16:14:29] [P2A] ts_ms=1788509669163 evt=restore_disposition rid=7b66e3bc8c4f492bb2e06ae6cb147a4a disposition=RECOMPUTE requested=20910 granted=0 reason=revoked:miss
+[2026-09-04 16:14:29] [P2A] ts_ms=1788509669648 evt=restore_disposition rid=28a18a5377834152947292f27c3877e3 disposition=RECOMPUTE requested=20910 granted=0 reason=revoked:miss
+[2026-09-04 16:14:31] [P2A] ts_ms=1788509671162 evt=restore_disposition rid=7ecd7b8e746c4a978ed3bf8d88b4cc4e disposition=RECOMPUTE requested=20910 granted=0 reason=revoked:miss
+[2026-09-04 16:14:43] [P2A] ts_ms=1788509683356 evt=restore_disposition rid=7ecd7b8e746c4a978ed3bf8d88b4cc4e disposition=RECOMPUTE requested=20910 granted=0 reason=revoked:miss
+[2026-09-04 16:14:43] [P3] ts_ms=1788509683856 evt=extent_write node=None component=kv keys_n=3 bytes=98304
+[2026-09-04 16:14:43] [P3] ts_ms=1788509683952 evt=extent_write node=None component=mamba keys_n=1 bytes=51511296
+[2026-09-04 16:14:43] [P3] ts_ms=1788509683961 evt=extent_write node=None component=kv keys_n=61 bytes=1998848
+[2026-09-04 16:14:44] [P3] ts_ms=1788509684084 evt=extent_write node=None component=kv keys_n=6 bytes=196608
+[2026-09-04 16:14:44] [P3] ts_ms=1788509684176 evt=extent_write node=None component=mamba keys_n=1 bytes=51511296
+[2026-09-04 16:14:44] [P3] ts_ms=1788509684216 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 16:14:44] [P3] ts_ms=1788509684248 evt=extent_write node=None component=kv keys_n=1015 bytes=33259520
+[2026-09-04 16:14:44] [P3] ts_ms=1788509684328 evt=extent_write node=None component=mamba keys_n=1 bytes=51511296
+[2026-09-04 16:14:44] [P3] ts_ms=1788509684360 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 16:14:44] [P3] ts_ms=1788509684390 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 16:14:44] [P3] ts_ms=1788509684470 evt=extent_write node=None component=mamba keys_n=1 bytes=51511296
+[2026-09-04 16:14:44] [P3] ts_ms=1788509684501 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 16:14:44] [P3] ts_ms=1788509684533 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 16:14:44] [P3] ts_ms=1788509684618 evt=extent_write node=None component=mamba keys_n=1 bytes=51511296
+[2026-09-04 16:14:44] [P3] ts_ms=1788509684650 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 16:14:44] [P2A] ts_ms=1788509684670 evt=restore_disposition rid=ce6b0e58da904572aa5fc1c658722646 disposition=RECOMPUTE requested=11427 granted=0 reason=revoked:miss
+[2026-09-04 16:14:44] [P3] ts_ms=1788509684681 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 16:14:44] [P3] ts_ms=1788509684763 evt=extent_write node=None component=mamba keys_n=1 bytes=51511296
+[2026-09-04 16:14:44] [P3] ts_ms=1788509684794 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 16:14:44] [P3] ts_ms=1788509684825 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 16:14:44] [P3] ts_ms=1788509684901 evt=extent_write node=None component=mamba keys_n=1 bytes=51511296
+[2026-09-04 16:14:44] [P3] ts_ms=1788509684934 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 16:14:44] [P3] ts_ms=1788509684967 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 16:14:45] [P3] ts_ms=1788509685042 evt=extent_write node=None component=mamba keys_n=1 bytes=51511296
+[2026-09-04 16:14:45] [P3] ts_ms=1788509685074 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 16:14:45] [P3] ts_ms=1788509685106 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 16:14:45] [P3] ts_ms=1788509685197 evt=extent_write node=None component=mamba keys_n=1 bytes=51511296
+[2026-09-04 16:14:45] [P3] ts_ms=1788509685231 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 16:14:45] [P3] ts_ms=1788509685261 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 16:14:45] [P2A] ts_ms=1788509685348 evt=restore_disposition rid=d10df731f56a4a95b300a227f86d7b76 disposition=RECOMPUTE requested=11858 granted=0 reason=revoked:miss
+[2026-09-04 16:14:45] [P3] ts_ms=1788509685359 evt=extent_write node=None component=mamba keys_n=1 bytes=51511296
+[2026-09-04 16:14:45] [P3] ts_ms=1788509685395 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 16:14:45] [P3] ts_ms=1788509685427 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 16:14:45] [P3] ts_ms=1788509685497 evt=extent_write node=None component=mamba keys_n=1 bytes=51511296
+[2026-09-04 16:14:45] [P3] ts_ms=1788509685527 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 16:14:45] [P3] ts_ms=1788509685556 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 16:14:45] [P3] ts_ms=1788509685630 evt=extent_write node=None component=mamba keys_n=1 bytes=51511296
+[2026-09-04 16:14:45] [P3] ts_ms=1788509685643 evt=extent_write node=None component=kv keys_n=384 bytes=12582912
+[2026-09-04 16:14:45] [P3] ts_ms=1788509685715 evt=extent_write node=None component=mamba keys_n=1 bytes=51511296
+[2026-09-04 16:14:45] [P3] ts_ms=1788509685748 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 16:14:45] [P3] ts_ms=1788509685752 evt=extent_write node=None component=kv keys_n=119 bytes=3899392
+[2026-09-04 16:14:45] [P3] ts_ms=1788509685827 evt=extent_write node=None component=mamba keys_n=1 bytes=51511296
+[2026-09-04 16:14:45] [P3] ts_ms=1788509685860 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 16:14:45] [P3] ts_ms=1788509685893 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 16:14:45] [P3] ts_ms=1788509685895 evt=extent_write node=None component=kv keys_n=34 bytes=1114112
+[2026-09-04 16:14:45] [P3] ts_ms=1788509685975 evt=extent_write node=None component=mamba keys_n=1 bytes=51511296
+[2026-09-04 16:14:46] [P3] ts_ms=1788509686009 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 16:14:46] [P3] ts_ms=1788509686041 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 16:14:46] [P3] ts_ms=1788509686130 evt=extent_write node=None component=mamba keys_n=1 bytes=51511296
+[2026-09-04 16:14:46] [P3] ts_ms=1788509686163 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 16:14:46] [P3] ts_ms=1788509686196 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432
+[2026-09-04 16:14:46] [P3] ts_ms=1788509686269 evt=extent_write node=None component=mamba keys_n=1 bytes=51511296
+[2026-09-04 16:14:46] [P3] ts_ms=1788509686308 evt=extent_write node=None component=kv keys_n=1024 bytes=33554432

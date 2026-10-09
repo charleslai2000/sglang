@@ -1,0 +1,82 @@
+{
+  "url": "https://api.github.com/repos/sgl-project/sglang/issues/32724",
+  "repository_url": "https://api.github.com/repos/sgl-project/sglang",
+  "labels_url": "https://api.github.com/repos/sgl-project/sglang/issues/32724/labels{/name}",
+  "comments_url": "https://api.github.com/repos/sgl-project/sglang/issues/32724/comments",
+  "events_url": "https://api.github.com/repos/sgl-project/sglang/issues/32724/events",
+  "html_url": "https://github.com/sgl-project/sglang/issues/32724",
+  "id": 5005464418,
+  "node_id": "I_kwDOLCAjRs8AAAABKllTYg",
+  "number": 32724,
+  "title": "[Perf] HiCache storage prefetch finalization delay can cause long TTFT under load",
+  "user": {
+    "login": "cfbdsirlijun-maker",
+    "id": 266610134,
+    "node_id": "U_kgDOD-Ql1g",
+    "avatar_url": "https://avatars.githubusercontent.com/u/266610134?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/cfbdsirlijun-maker",
+    "html_url": "https://github.com/cfbdsirlijun-maker",
+    "followers_url": "https://api.github.com/users/cfbdsirlijun-maker/followers",
+    "following_url": "https://api.github.com/users/cfbdsirlijun-maker/following{/other_user}",
+    "gists_url": "https://api.github.com/users/cfbdsirlijun-maker/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/cfbdsirlijun-maker/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/cfbdsirlijun-maker/subscriptions",
+    "organizations_url": "https://api.github.com/users/cfbdsirlijun-maker/orgs",
+    "repos_url": "https://api.github.com/users/cfbdsirlijun-maker/repos",
+    "events_url": "https://api.github.com/users/cfbdsirlijun-maker/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/cfbdsirlijun-maker/received_events",
+    "type": "User",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "labels": [
+
+  ],
+  "state": "open",
+  "locked": false,
+  "assignees": [
+
+  ],
+  "milestone": null,
+  "comments": 0,
+  "created_at": "2026-07-29T04:34:35Z",
+  "updated_at": "2026-07-29T05:49:44Z",
+  "closed_at": null,
+  "assignee": null,
+  "author_association": "NONE",
+  "issue_field_values": [
+
+  ],
+  "type": null,
+  "active_lock_reason": null,
+  "sub_issues_summary": {
+    "total": 0,
+    "completed": 0,
+    "percent_completed": 0
+  },
+  "issue_dependencies_summary": {
+    "blocked_by": 0,
+    "total_blocked_by": 0,
+    "blocking": 0,
+    "total_blocking": 0
+  },
+  "body": "# [Perf] HiCache storage prefetch finalization delay can cause long TTFT under load\n\n## Describe the bug / problem\n\nWhen HiCache is enabled with a storage backend (L3), a storage prefetch for a waiting request is only finalized inside the scheduler's waiting-queue scan: the scheduler walks the waiting queue in FCFS order and calls `check_prefetch_progress(rid)` when it reaches that request. This means the *confirmation* that a prefetch has finished (\"scheduler ready\") is coupled to the request's FCFS position in the waiting queue.\n\nUnder load, this coupling introduces a large artificial delay:\n\n- The prefetch IO from the storage backend completes quickly (all pages transferred to host memory).\n- But the scheduler is busy admitting earlier requests; once the token budget of the current prefill rounds is saturated, the waiting-queue scan stops before reaching the later rids.\n- As a result, a prefetch whose IO has been done for a long time is not finalized (host radix tree insertion, host memory release, `ongoing_prefetch` cleanup) until the FCFS scan finally reaches it — often seconds later.\n\n## User-visible impact\n\nThis delay is directly visible as long TTFT for affected requests. Even though the KV pages have already been loaded from the storage backend, the request is still treated as not scheduler-ready because `check_prefetch_progress()` has not been called for its rid. The request therefore cannot benefit from the completed prefetch and remains blocked behind earlier waiting-queue entries until the scheduler scan reaches it. In practice, the TTFT includes this artificial scheduler-side waiting time in addition to the real storage IO time.\n\nIn our measurements (4P1D disaggregated deployment, Mooncake storage backend, high concurrency), the storage IO itself took ~91 ms while the scheduler-side finalization lagged ~2.4 s behind IO completion. For the affected requests, this means TTFT can be extended by seconds even though the actual storage transfer already finished. In this case, >95% of the end-to-end prefetch latency was spent waiting for the FCFS scan, not on actual data transfer. Besides inflating TTFT and the apparent prefetch latency, the un-finalized operations also keep host memory and `prefetch_tokens_occupied` budget pinned longer than necessary, which can throttle subsequent prefetches.\n\nOne trace from the same run shows the split between storage/query/IO time and the scheduler-side waiting time:\n\n| rid (short) | op_id | hit tokens | storage query (ms) | IO queue wait (ms) | storage IO (ms) | IO done -> scheduler ready (ms) | prefetch start -> scheduler ready (ms) | P queue_duration (ms) | P forward_duration (ms) |\n| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n| `f9becbf3` | 65 | 134,464 | 23.701 | 0.225 | 641.211 | 1,990.629 | 2,663.365 | 10,012.44 | 4,297.36 |\n| `c918d9d2` | 68 | 6,080 | 3.170 | 614.232 | 66.730 | 9,273.597 | 10,010.314 | 10,012.20 | 4,350.68 |\n| `6064d18e` | 69 | 1,408 | 2.426 | 670.596 | 12.031 | 9,271.086 | 10,019.635 | 10,012.16 | 4,350.69 |\n\nFor op_id 68/69, the storage IO had already finished in tens of milliseconds, but the requests were not marked scheduler-ready for another ~9.27 s. Their P-side `queue_duration` was ~10.0 s, so this delayed scheduler-ready confirmation was a major contributor to the observed long TTFT.\n\n## Additional 4P2D observation\n\nWe also reproduced the same pattern in a 4P2D deployment on three NVIDIA B300 nodes (4 prefill workers + 2 decode workers, Mooncake transfer backend, HiCache storage backend enabled on the prefill side). The server-side logs contained 72,567 real prefill `ReqTimeStats`, 67,876 real decode `ReqTimeStats`, and 42,168 HiCache `scheduler_ready` traces.\n\nThe high-level time split shows that decode-side `transfer_duration` is the largest component, while prefill-side queueing is a large contributor to TTFT tail latency:\n\n| Side | Stage | Weighted share | p50 | p90 | p95 | p99 | max |\n| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |\n| Decode | `transfer_duration` | 55.1% | 2.97 s | 11.39 s | 18.87 s | 33.30 s | 70.99 s |\n| Decode | `forward_duration` | 39.6% | 1.32 s | 6.53 s | 11.21 s | 42.09 s | 1798.72 s |\n| Decode | `alloc_wait_duration` | 5.2% | 3 ms | 1.33 s | 2.83 s | 8.48 s | 29.20 s |\n| Prefill | `forward_duration` | 51.1% | 1.90 s | 6.35 s | 7.39 s | 11.11 s | 21.43 s |\n| Prefill | `queue_duration` | 40.7% | 95 ms | 6.53 s | 13.42 s | 27.26 s | 64.50 s |\n| Prefill | `bootstrap_duration` | 8.3% | 8 ms | 1.11 s | 2.56 s | 8.25 s | 29.23 s |\n\nThe HiCache trace breaks the prefetch completion path down further:\n\n| HiCache stage | p50 | p90 | p95 | p99 | max |\n| --- | ---: | ---: | ---: | ---: | ---: |\n| `query_total_ms` | 13 ms | 26 ms | 31 ms | 43 ms | 263 ms |\n| `io_queue_wait_ms` | 0.38 ms | 2.04 s | 4.83 s | 12.22 s | 23.21 s |\n| `io_ms` | 26.7 ms | 950 ms | 1.76 s | 3.20 s | 7.47 s |\n| `io_done_to_scheduler_ready_ms` | 261 ms | 3.68 s | 8.53 s | 22.16 s | 51.70 s |\n| `finalize_ms` | 3.36 ms | 4.62 ms | 5.46 ms | 12.61 ms | 49.97 ms |\n\nWeighted by the total HiCache scheduler-ready time, the `io_done_to_scheduler_ready_ms` gap alone accounts for 56.2% of the time, `io_queue_wait_ms` accounts for 27.4%, and the actual storage IO (`io_ms`) accounts for only 11.0%. In this run, `io_done_to_scheduler_ready_ms` exceeded 1 s for 9,433 requests, 5 s for 3,360 requests, 10 s for 1,775 requests, and 30 s for 147 requests.\n\nThis delay is also reflected in decode-side `transfer_duration`: the decode worker is waiting for the disaggregated prefill/KV transfer path to complete, so a prefill request whose storage IO is already done but not yet marked scheduler-ready can still show up as a long decode `transfer_duration`. In the 4P2D run, decode `transfer_duration` had p95 18.87 s and p99 33.30 s, which is the same order as the HiCache `io_done_to_scheduler_ready_ms` tail (p95 8.53 s, p99 22.16 s).\n\n## Reproduction\n\nNo special code is needed; the behavior follows from the scheduling structure:\n\n1. Launch a server with hierarchical cache + a storage backend, e.g. `--enable-hierarchical-cache --hicache-storage-backend mooncake` (any L3 backend reproduces it; `--hicache-storage-prefetch-policy timeout` or `wait_complete` makes it most visible).\n2. Drive high concurrency with long prompts so that the waiting queue stays deep and each scheduling round's prefill token budget is fully consumed by the head of the queue (e.g. hundreds of concurrent requests with tens-of-K-token prompts).\n3. Compare, for requests sitting deep in the waiting queue, the time when the storage backend finishes transferring all pages vs. the time when `check_prefetch_progress()` is actually called for that rid. The gap grows with queue depth and can reach seconds, while the IO time stays roughly constant.\n\n## Related issues\n\n- https://github.com/sgl-project/sglang/issues/28047 — reports the same symptom in a Mooncake-backed deployment: storage IO ~91 ms vs. ~2.4 s scheduler-side delay before the prefetch result is consumed.\n- https://github.com/sgl-project/sglang/issues/21880 — HiCache prefetch lifecycle / termination-policy discussion; the finalization point discussed there is the same waiting-queue scan this issue is about.\n- https://github.com/vllm-project/vllm/issues/41784 — the analogous problem in vLLM's KV-connector-based prefetch path (async KV loading completion is observed late by the scheduler), showing this is a general scheduler-coupling issue rather than a backend-specific one.\n\n## Proposed fix\n\nDecouple *finalization confirmation* from the FCFS waiting-queue position:\n\n- At the existing scheduler safe point `check_hicache_events()` (right after `drain_storage_control_queues()`), proactively scan `ongoing_prefetch` and, for operations that are locally ready — IO completed (`completed_tokens == len(hash_value) * page_size`), already terminated, host indices not yet committed, or timed out under the `timeout` policy — call the existing `check_prefetch_progress(req_id)`.\n- Cross-rank consistency: candidates are sorted by `req_id` and the local readiness vector is combined with a MIN all-reduce over the ATTN TP/CP groups, so all ranks finalize exactly the same set of requests in the same order. The actual finalization still goes through `check_prefetch_progress()` / `can_terminate_prefetch()`, which performs its own synchronization.\n- Scheduling semantics are unchanged: this only moves the *scheduler_ready* confirmation earlier. Admission into the prefill batch is still governed by the waiting queue order, batch size, token budget, and chunked prefill exactly as before.\n\nA PR implementing this will be attached to this issue.\n",
+  "closed_by": null,
+  "reactions": {
+    "url": "https://api.github.com/repos/sgl-project/sglang/issues/32724/reactions",
+    "total_count": 0,
+    "+1": 0,
+    "-1": 0,
+    "laugh": 0,
+    "hooray": 0,
+    "confused": 0,
+    "heart": 0,
+    "rocket": 0,
+    "eyes": 0
+  },
+  "timeline_url": "https://api.github.com/repos/sgl-project/sglang/issues/32724/timeline",
+  "performed_via_github_app": null,
+  "state_reason": null,
+  "pinned_comment": null
+}

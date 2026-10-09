@@ -1,0 +1,11 @@
+{
+ "status": "done",
+ "agents": 8,
+ "write_turns": 4,
+ "read_turns": 400,
+ "requests_total": 2127,
+ "run_dir": "/root/evidence-gate3-rhon/run-20260904-211848",
+ "ts_start": 1788527928.646,
+ "ts_end": 1788535197.085,
+ "elapsed_s": 7268.4
+}
