@@ -1,0 +1,1 @@
+Transcript artifact is recorded at `/tmp/P0-B-FOCUSED-RERUN-20260911-R52-20260910T230735Z.transcript` by the execution wrapper. The complete stdout/stderr includes the exact preparation, backup, transfer, hash verification, three pytest sessions, pass IDs, warnings, counts, exits, and final hashes.

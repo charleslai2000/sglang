@@ -1,0 +1,5 @@
+wall_s: 1.4
+finish: stop
+content: '\n\npong'
+reasoning_len: 64
+usage: {"prompt_tokens": 29, "total_tokens": 48, "completion_tokens": 19}

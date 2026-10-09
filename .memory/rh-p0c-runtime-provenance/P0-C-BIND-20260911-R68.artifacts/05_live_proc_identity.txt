@@ -1,0 +1,154 @@
+## R68 item(2) live process loaded module paths / cwd / cmdline; PID 218072
+## utc: 2026-09-11T05:47:54Z
+=== sanity: pid alive ===
+alive
+=== /proc/218072/status (Name,Pid,PPid) ===
+Name:	python
+Pid:	218072
+PPid:	218071
+Uid:	0	0	0	0
+=== /proc/218072/exe ===
+/usr/bin/python3.11
+=== /proc/218072/cwd ===
+/root/sglang-3060-12g-hicache
+=== /proc/218072/cmdline (NUL -> newline) ===
+python
+-m
+sglang.launch_server
+--model-path
+/hy-tmp/models/Qwen3.5-4B-AWQ
+--tokenizer-path
+/hy-tmp/models/Qwen3.5-4B-AWQ
+--host
+127.0.0.1
+--port
+30000
+--tp-size
+1
+--mem-fraction-static
+0.82
+--max-running-requests
+1
+--max-total-tokens
+65536
+--chunked-prefill-size
+2048
+--max-prefill-tokens
+16384
+--kv-cache-dtype
+fp8_e4m3
+--enable-hierarchical-cache
+--hicache-host-memory-mode
+cache
+--hicache-ratio
+2.0
+--hicache-write-policy
+write_through
+--hicache-io-backend
+kernel
+--hicache-mem-layout
+page_first
+--hicache-storage-backend
+file
+--hicache-storage-prefetch-policy
+wait_complete
+--hicache-storage-backend-extra-config
+{"hicache_storage_pass_prefix_keys":true}
+--hicache-prefetch-speculative-fraction
+0.6
+--cuda-graph-backend-decode
+full
+--cuda-graph-backend-prefill
+breakable
+--cuda-graph-bs-decode
+1
+--cuda-graph-bs-prefill
+4
+8
+16
+32
+--enable-ready-horizon
+--ready-horizon-frontier-n
+8
+--ready-host-watermark-low
+55000
+--ready-host-watermark-high
+110000
+=== maps entries whose path contains sglang/ (unique paths) ===
+/root/.cache/sglang/triton/q4oIpkjOtdHHfi8xBkm4jC4JWIk5AjKtN8WRkZb8MD8/cuda_utils.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/aiohttp/_http_parser.cpython-311-x86_64-linux-gnu.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/aiohttp/_http_writer.cpython-311-x86_64-linux-gnu.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/aiohttp/_websocket/mask.cpython-311-x86_64-linux-gnu.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/aiohttp/_websocket/reader_c.cpython-311-x86_64-linux-gnu.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/cuda/bindings/_bindings/cydriver.cpython-311-x86_64-linux-gnu.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/cuda/bindings/_bindings/cynvrtc.cpython-311-x86_64-linux-gnu.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/cuda/bindings/cydriver.cpython-311-x86_64-linux-gnu.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/cuda/bindings/cynvrtc.cpython-311-x86_64-linux-gnu.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/cuda/bindings/cyruntime.cpython-311-x86_64-linux-gnu.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/cuda/bindings/driver.cpython-311-x86_64-linux-gnu.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/cuda/bindings/_lib/cyruntime/cyruntime.cpython-311-x86_64-linux-gnu.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/cuda/bindings/_lib/cyruntime/utils.cpython-311-x86_64-linux-gnu.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/cuda/bindings/_lib/utils.cpython-311-x86_64-linux-gnu.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/cuda/bindings/nvrtc.cpython-311-x86_64-linux-gnu.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/cuda/bindings/runtime.cpython-311-x86_64-linux-gnu.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/cuda/cudart.cpython-311-x86_64-linux-gnu.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/cuda/nvrtc.cpython-311-x86_64-linux-gnu.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/cusparselt/lib/libcusparseLt.so.0
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/frozenlist/_frozenlist.cpython-311-x86_64-linux-gnu.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/msgspec/_core.cpython-311-x86_64-linux-gnu.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/multidict/_multidict.cpython-311-x86_64-linux-gnu.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/orjson/orjson.cpython-311-x86_64-linux-gnu.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/propcache/_helpers_c.cpython-311-x86_64-linux-gnu.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/pybase64/_pybase64.cpython-311-x86_64-linux-gnu.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/pydantic_core/_pydantic_core.cpython-311-x86_64-linux-gnu.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/regex/_regex.cpython-311-x86_64-linux-gnu.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/safetensors/_safetensors_rust.abi3.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/sentencepiece/_sentencepiece.cpython-311-x86_64-linux-gnu.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/setproctitle/_setproctitle.cpython-311-x86_64-linux-gnu.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/sgl_kernel/sm86/common_ops.abi3.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/_soundfile_data/libsndfile_x86_64.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/tokenizers/tokenizers.abi3.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/torchaudio/lib/libtorchaudio.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/torchaudio/lib/_torchaudio.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/torch/_C.cpython-311-x86_64-linux-gnu.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/torch/lib/libc10_cuda.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/torch/lib/libc10.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/torch/lib/libgomp-a34b3233.so.1
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/torch/lib/libshm.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/torch/lib/libtorch_cuda.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/torch/lib/libtorch_global_deps.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/torch/lib/libtorch_python.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/torch/lib/libtorch.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/torchvision/_C.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/torchvision/image.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/torchvision.libs/libcudart.41118559.so.12
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/torchvision.libs/libjpeg.1c1c4b09.so.8
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/torchvision.libs/libnvjpeg.02b6d700.so.12
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/torchvision.libs/libpng16.0364a1db.so.16
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/torchvision.libs/libsharpyuv.5c41a003.so.0
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/torchvision.libs/libwebp.54a0d02a.so.7
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/torchvision.libs/libz.d13a2644.so.1
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/triton/_C/libtriton.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/tvm_ffi/core.cpython-311-x86_64-linux-gnu.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/tvm_ffi/lib/libtvm_ffi.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/tvm_ffi/lib/libtvm_ffi_testing.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/uvloop/loop.cpython-311-x86_64-linux-gnu.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/xgrammar/libxgrammar_bindings.so
+/root/sglang-env-3060-4b/lib/python3.11/site-packages/yarl/_quoting_c.cpython-311-x86_64-linux-gnu.so
+=== maps count by checkout prefix ===
+    322 /root/sglang-env-3060-4b/lib
+      5 /root/.cache/tvm-ffi
+      5 /root/.cache/sglang
+=== maps: all distinct .py file paths (unique) ===
+=== does the process map the 7 files? (basename grep) ===
+schedule_batch.py -> 0
+scheduler.py -> 0
+hicache_restore.py -> 0
+hybrid_cache_controller.py -> 0
+hybrid_pool_assembler.py -> 0
+group.py -> 0
+unified_radix_cache.py -> 0
+=== resolved module file for sglang (sys.path probe via /proc/218072/root) ===
+/root/sglang-3060-12g-hicache
+## remote_ssh_exit=0

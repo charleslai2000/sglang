@@ -1,0 +1,58 @@
+{
+  "format": "p0b.raw-bundle.v3",
+  "task_id": "P1-SPEC-BUDGET-CONTROLLED-EVICTION-20260911-R121",
+  "invocation": "ses-p1-controlled-eviction-r121-20260911",
+  "epoch": "2026-09-11",
+  "runtime": {
+    "process_id": 48806,
+    "run_id": "run-48806-4187756182262",
+    "profile_id": "profile-97ee3d5d3bfdca6237dc746e",
+    "source_build": "4f41f5bab562b99562f30c67540eb05344d13637:03750d8519fdae277a0d04938c53c73ff2d5400be8c6f9f51a3d2bc7b3338d07",
+    "deployment_manifest_digest": "262a9362e345df15d93049301d2b0e60990ba65d80c3bbc5209fb4cdab140e2d",
+    "git_head": "4f41f5bab562b99562f30c67540eb05344d13637"
+  },
+  "target": {
+    "rid": "r121-p3-R-T",
+    "session_id": "r121-s-R-p3",
+    "session_generation": 60,
+    "build_rid": "r121-p3-build-T",
+    "build_session": "r121-s-T-p3",
+    "lifecycle_key": "r121-p3-R-T:60",
+    "note": "parked and woken; restore not finalized (host revoke -> recompute)"
+  },
+  "contract": {
+    "path": "P1-R121-CONTROLLED-EVICTION-CONTRACT.md",
+    "sha256": "2ac86b5a54264fad46d049e2c32e3cc37c125f8c778a38dfb14e840a37be3b3b"
+  },
+  "raw_files": {
+    "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/.memory/phase2-hicache-design/work/R121-bundle/raw.log": "2bdca1c2e605ec3463bcdac9501a6e8b52a836a5fe99aac3b908db880b80cca9",
+    "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/.memory/phase2-hicache-design/work/R121-bundle/probe.log": "424a1ec95cf9c2cee94d075fd0dbb59ddf7b7d4a083403e2b45225fea1018630"
+  },
+  "request_files": {
+    "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/.memory/phase2-hicache-design/work/R121-bundle/requests.jsonl": "f886dfad319738481f05388da8cfada382649448af8701b7bbc7cf9577316b15",
+    "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/.memory/phase2-hicache-design/work/R121-bundle/state.jsonl": "77fb536f8770e2e59c575aabe977566e6f13cf5784678f5b9d42a5f092fb817a"
+  },
+  "source_files": {
+    "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/python/sglang/srt/managers/scheduler.py": "daf32da48b2d084976a19280b5b8eff2d232dfc1df2db9b2f4641a8f0ed9dd1d",
+    "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/python/sglang/srt/mem_cache/unified_radix_cache.py": "5d3db1528638dd1c593b9cd62fc1b380d278cac4cc1b4e1319e6bf89c0ac375b",
+    "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/python/sglang/srt/mem_cache/telemetry_context.py": "d55b057c98a4941c307bb138002340c3e8a5a5361f58417f84a3ea176658f948",
+    "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/python/sglang/srt/managers/scheduler_components/hicache_restore.py": "1cc9d2b8277039e271ce65a1e4aa7b128781b378367346edd438daee42bb3604",
+    "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/python/sglang/srt/mem_cache/hybrid_cache/hybrid_cache_controller.py": "a71acb88d886af1b5ba888828b55aae57156ceb43cd37ef7480da6ffcad06669",
+    "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/python/sglang/srt/managers/scheduler_components/ready_horizon.py": "954161ce4d32ef2d376a735ccc4315b4300e1874792e4dd11ef467dfc705aeda"
+  },
+  "baseline_offsets": "baseline-offsets-attempt2.txt (server_log_start_line=2312756, probe_log_start_lines=25948)",
+  "baseline_files": {
+    "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/.memory/phase2-hicache-design/work/R121-bundle/baseline-offsets.txt": "8418e2dabc78d944648d9305a3e78c850a4456a1f815984789442f70cbf9247d",
+    "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/.memory/phase2-hicache-design/work/R121-bundle/baseline-offsets-attempt2.txt": "68abead6c34466ed9a4b9b18569c6be4d31385c271e018f72b7b4b11951bce3a"
+  },
+  "harness": {
+    "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/.memory/phase2-hicache-design/work/R121-bundle/driver121.py": "9ae5320efe699dfc36d91aa968d150d625e8968479603c96e956635e9947cc6d"
+  },
+  "evidence_refs": {
+    "raw_line_offset": 2312756,
+    "probe_line_offset": 25948,
+    "chain_json": "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/.memory/phase2-hicache-design/work/R121-bundle/chain.json",
+    "condition_evidence": "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/.memory/phase2-hicache-design/work/R121-bundle/condition-evidence.md"
+  },
+  "verdict": "NOT_VERIFIED"
+}

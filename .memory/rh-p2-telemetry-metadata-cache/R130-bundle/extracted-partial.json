@@ -1,0 +1,558 @@
+{
+ "window": "/mnt/data/nerun-dev/r130/window-754-41749.log",
+ "counts_raw": {
+  "M1": 4,
+  "M2": 4,
+  "M3": 3,
+  "admission.v2": 3,
+  "ready_host": 3,
+  "ready_stage": 4
+ },
+ "Q1": {
+  "dist": {
+   "p50": {
+    "ns": 5839704109.0,
+    "us": 5839704.109,
+    "ms": 5839.704
+   },
+   "p95": {
+    "ns": 6652348516.0,
+    "us": 6652348.516,
+    "ms": 6652.349
+   },
+   "p99": {
+    "ns": 6724583574.4,
+    "us": 6724583.574,
+    "ms": 6724.584
+   },
+   "max": {
+    "ns": 6742642339,
+    "us": 6742642.339,
+    "ms": 6742.642
+   },
+   "min": {
+    "ns": 5002697038,
+    "us": 5002697.038,
+    "ms": 5002.697
+   },
+   "mean": {
+    "ns": 5861681162.0,
+    "us": 5861681.162,
+    "ms": 5861.681
+   },
+   "count": 3
+  },
+  "samples": [
+   {
+    "rid": "r129-s0-cold-091027",
+    "q1_ns": 5002697038
+   },
+   {
+    "rid": "r129-s1-cold-091027",
+    "q1_ns": 5839704109
+   },
+   {
+    "rid": "r129-s2-cold-091027",
+    "q1_ns": 6742642339
+   }
+  ],
+  "gaps": {
+   "no_admission_v2": [
+    "r129-s3-cold-091027"
+   ],
+   "admission_not_after_enqueue": [],
+   "duplicate_M1_rid": [],
+   "duplicate_admission_v2_rid": []
+  }
+ },
+ "Q2": {
+  "dist": {
+   "p50": {
+    "ns": 5836863793.0,
+    "us": 5836863.793,
+    "ms": 5836.864
+   },
+   "p95": {
+    "ns": 6649534921.9,
+    "us": 6649534.922,
+    "ms": 6649.535
+   },
+   "p99": {
+    "ns": 6721772355.6,
+    "us": 6721772.356,
+    "ms": 6721.772
+   },
+   "max": {
+    "ns": 6739831714,
+    "us": 6739831.714,
+    "ms": 6739.832
+   },
+   "min": {
+    "ns": 4998837803,
+    "us": 4998837.803,
+    "ms": 4998.838
+   },
+   "mean": {
+    "ns": 5858511103.3,
+    "us": 5858511.103,
+    "ms": 5858.511
+   },
+   "count": 3
+  },
+  "samples": [
+   {
+    "attempt_id": "r129-s0-cold-091027:prefetch:1",
+    "rid": "r129-s0-cold-091027",
+    "issue": 44434119621324,
+    "ready": 44439118459127,
+    "q2_ns": 4998837803,
+    "issue_origin": "READY_HORIZON",
+    "finalize_result": "accepted"
+   },
+   {
+    "attempt_id": "r129-s1-cold-091027:prefetch:1",
+    "rid": "r129-s1-cold-091027",
+    "issue": 44439275676987,
+    "ready": 44445112540780,
+    "q2_ns": 5836863793,
+    "issue_origin": "READY_HORIZON",
+    "finalize_result": "accepted"
+   },
+   {
+    "attempt_id": "r129-s2-cold-091027:prefetch:1",
+    "rid": "r129-s2-cold-091027",
+    "issue": 44445264430283,
+    "ready": 44452004261997,
+    "q2_ns": 6739831714,
+    "issue_origin": "READY_HORIZON",
+    "finalize_result": "accepted"
+   }
+  ],
+  "gaps": {
+   "issue_without_ready_host": [
+    "r129-s3-cold-091027:prefetch:1"
+   ],
+   "ready_host_without_issue": [],
+   "duplicate_M2_attempt": []
+  }
+ },
+ "Q3": {
+  "all": {
+   "p50": {
+    "ns": 1347515938.0,
+    "us": 1347515.938,
+    "ms": 1347.516
+   },
+   "p95": {
+    "ns": 1519729863.4,
+    "us": 1519729.863,
+    "ms": 1519.73
+   },
+   "p99": {
+    "ns": 1535037767.9,
+    "us": 1535037.768,
+    "ms": 1535.038
+   },
+   "max": {
+    "ns": 1538864744,
+    "us": 1538864.744,
+    "ms": 1538.865
+   },
+   "min": {
+    "ns": 1023888374,
+    "us": 1023888.374,
+    "ms": 1023.888
+   },
+   "mean": {
+    "ns": 1303423018.7,
+    "us": 1303423.019,
+    "ms": 1303.423
+   },
+   "count": 3
+  },
+  "by_caller": {
+   "async_prefetch": {
+    "p50": {
+     "ns": 1347515938.0,
+     "us": 1347515.938,
+     "ms": 1347.516
+    },
+    "p95": {
+     "ns": 1519729863.4,
+     "us": 1519729.863,
+     "ms": 1519.73
+    },
+    "p99": {
+     "ns": 1535037767.9,
+     "us": 1535037.768,
+     "ms": 1535.038
+    },
+    "max": {
+     "ns": 1538864744,
+     "us": 1538864.744,
+     "ms": 1538.865
+    },
+    "min": {
+     "ns": 1023888374,
+     "us": 1023888.374,
+     "ms": 1023.888
+    },
+    "mean": {
+     "ns": 1303423018.7,
+     "us": 1303423.019,
+     "ms": 1303.423
+    },
+    "count": 3
+   }
+  },
+  "by_caller_backend_lookup": {
+   "async_prefetch": {
+    "p50": {
+     "ns": 1345438149.0,
+     "us": 1345438.149,
+     "ms": 1345.438
+    },
+    "p95": {
+     "ns": 1517692241.4,
+     "us": 1517692.241,
+     "ms": 1517.692
+    },
+    "p99": {
+     "ns": 1533003716.3,
+     "us": 1533003.716,
+     "ms": 1533.004
+    },
+    "max": {
+     "ns": 1536831585,
+     "us": 1536831.585,
+     "ms": 1536.832
+    },
+    "min": {
+     "ns": 1021307753,
+     "us": 1021307.753,
+     "ms": 1021.308
+    },
+    "mean": {
+     "ns": 1301192495.7,
+     "us": 1301192.496,
+     "ms": 1301.192
+    },
+    "count": 3
+   }
+  },
+  "by_query_len_bucket": {
+   "5k-20k": {
+    "p50": {
+     "ns": 1347515938.0,
+     "us": 1347515.938,
+     "ms": 1347.516
+    },
+    "p95": {
+     "ns": 1519729863.4,
+     "us": 1519729.863,
+     "ms": 1519.73
+    },
+    "p99": {
+     "ns": 1535037767.9,
+     "us": 1535037.768,
+     "ms": 1535.038
+    },
+    "max": {
+     "ns": 1538864744,
+     "us": 1538864.744,
+     "ms": 1538.865
+    },
+    "min": {
+     "ns": 1023888374,
+     "us": 1023888.374,
+     "ms": 1023.888
+    },
+    "mean": {
+     "ns": 1303423018.7,
+     "us": 1303423.019,
+     "ms": 1303.423
+    },
+    "count": 3
+   }
+  },
+  "by_caller_and_bucket": {
+   "async_prefetch|5k-20k": {
+    "p50": {
+     "ns": 1347515938.0,
+     "us": 1347515.938,
+     "ms": 1347.516
+    },
+    "p95": {
+     "ns": 1519729863.4,
+     "us": 1519729.863,
+     "ms": 1519.73
+    },
+    "p99": {
+     "ns": 1535037767.9,
+     "us": 1535037.768,
+     "ms": 1535.038
+    },
+    "max": {
+     "ns": 1538864744,
+     "us": 1538864.744,
+     "ms": 1538.865
+    },
+    "min": {
+     "ns": 1023888374,
+     "us": 1023888.374,
+     "ms": 1023.888
+    },
+    "mean": {
+     "ns": 1303423018.7,
+     "us": 1303423.019,
+     "ms": 1303.423
+    },
+    "count": 3
+   }
+  },
+  "kv_hit_pages": {
+   "hit": 3,
+   "miss": 0
+  },
+  "n_a_fields": {
+   "lock_wait_ns": [
+    "N/A"
+   ],
+   "syscall_wait_ns": [
+    "N/A"
+   ],
+   "all_reduce_ns": [
+    "N/A"
+   ]
+  },
+  "samples": [
+   {
+    "caller": "async_prefetch",
+    "rid": "r129-s0-cold-091027",
+    "attempt_id": "r129-s0-cold-091027:prefetch:1",
+    "query_len": 6024,
+    "kv_hit_pages": 6016,
+    "q3_ns": 1023888374,
+    "backend_ns": 1021307753,
+    "probe_ns": 2440,
+    "lock_wait_ns": "N/A",
+    "syscall_wait_ns": "N/A",
+    "all_reduce_ns": "N/A"
+   },
+   {
+    "caller": "async_prefetch",
+    "rid": "r129-s1-cold-091027",
+    "attempt_id": "r129-s1-cold-091027:prefetch:1",
+    "query_len": 7420,
+    "kv_hit_pages": 7360,
+    "q3_ns": 1347515938,
+    "backend_ns": 1345438149,
+    "probe_ns": 1690,
+    "lock_wait_ns": "N/A",
+    "syscall_wait_ns": "N/A",
+    "all_reduce_ns": "N/A"
+   },
+   {
+    "caller": "async_prefetch",
+    "rid": "r129-s2-cold-091027",
+    "attempt_id": "r129-s2-cold-091027:prefetch:1",
+    "query_len": 8583,
+    "kv_hit_pages": 8576,
+    "q3_ns": 1538864744,
+    "backend_ns": 1536831585,
+    "probe_ns": 2280,
+    "lock_wait_ns": "N/A",
+    "syscall_wait_ns": "N/A",
+    "all_reduce_ns": "N/A"
+   }
+  ]
+ },
+ "coverage": [
+  {
+   "attempt_id": "r129-s0-cold-091027:prefetch:1",
+   "rid": "r129-s0-cold-091027",
+   "q2_ns": 4998837803,
+   "issue_origin": "READY_HORIZON",
+   "admission_minus_ready_ns": 2334711,
+   "admission_minus_issue_ns": 5001172514,
+   "covered": true,
+   "q1_ns": 5002697038
+  },
+  {
+   "attempt_id": "r129-s1-cold-091027:prefetch:1",
+   "rid": "r129-s1-cold-091027",
+   "q2_ns": 5836863793,
+   "issue_origin": "READY_HORIZON",
+   "admission_minus_ready_ns": 1536874,
+   "admission_minus_issue_ns": 5838400667,
+   "covered": true,
+   "q1_ns": 5839704109
+  },
+  {
+   "attempt_id": "r129-s2-cold-091027:prefetch:1",
+   "rid": "r129-s2-cold-091027",
+   "q2_ns": 6739831714,
+   "issue_origin": "READY_HORIZON",
+   "admission_minus_ready_ns": 1541724,
+   "admission_minus_issue_ns": 6741373438,
+   "covered": true,
+   "q1_ns": 6742642339
+  }
+ ],
+ "overhead": {
+  "M1": {
+   "count": 4,
+   "p50": 5525.0,
+   "p95": 6761.5,
+   "p99": 6784.3,
+   "max": 6790,
+   "min": 4010,
+   "mean": 5462.5
+  },
+  "M2": {
+   "count": 4,
+   "p50": 4285.0,
+   "p95": 4468.5,
+   "p99": 4469.7,
+   "max": 4470,
+   "min": 3410,
+   "mean": 4112.5
+  },
+  "M3": {
+   "count": 3,
+   "p50": 2280.0,
+   "p95": 2424.0,
+   "p99": 2436.8,
+   "max": 2440,
+   "min": 1690,
+   "mean": 2136.6666666666665
+  }
+ },
+ "overhead_human": {
+  "M1": {
+   "p50": {
+    "ns": 5525.0,
+    "us": 5.525,
+    "ms": 0.006
+   },
+   "p95": {
+    "ns": 6761.5,
+    "us": 6.761,
+    "ms": 0.007
+   },
+   "p99": {
+    "ns": 6784.3,
+    "us": 6.784,
+    "ms": 0.007
+   },
+   "max": {
+    "ns": 6790,
+    "us": 6.79,
+    "ms": 0.007
+   },
+   "min": {
+    "ns": 4010,
+    "us": 4.01,
+    "ms": 0.004
+   },
+   "mean": {
+    "ns": 5462.5,
+    "us": 5.463,
+    "ms": 0.005
+   },
+   "count": 4
+  },
+  "M2": {
+   "p50": {
+    "ns": 4285.0,
+    "us": 4.285,
+    "ms": 0.004
+   },
+   "p95": {
+    "ns": 4468.5,
+    "us": 4.468,
+    "ms": 0.004
+   },
+   "p99": {
+    "ns": 4469.7,
+    "us": 4.47,
+    "ms": 0.004
+   },
+   "max": {
+    "ns": 4470,
+    "us": 4.47,
+    "ms": 0.004
+   },
+   "min": {
+    "ns": 3410,
+    "us": 3.41,
+    "ms": 0.003
+   },
+   "mean": {
+    "ns": 4112.5,
+    "us": 4.112,
+    "ms": 0.004
+   },
+   "count": 4
+  },
+  "M3": {
+   "p50": {
+    "ns": 2280.0,
+    "us": 2.28,
+    "ms": 0.002
+   },
+   "p95": {
+    "ns": 2424.0,
+    "us": 2.424,
+    "ms": 0.002
+   },
+   "p99": {
+    "ns": 2436.8,
+    "us": 2.437,
+    "ms": 0.002
+   },
+   "max": {
+    "ns": 2440,
+    "us": 2.44,
+    "ms": 0.002
+   },
+   "min": {
+    "ns": 1690,
+    "us": 1.69,
+    "ms": 0.002
+   },
+   "mean": {
+    "ns": 2136.7,
+    "us": 2.137,
+    "ms": 0.002
+   },
+   "count": 3
+  }
+ },
+ "overhead_marks_over_1ms": [
+  {
+   "event": "M1",
+   "count": 0
+  },
+  {
+   "event": "M2",
+   "count": 0
+  },
+  {
+   "event": "M3",
+   "count": 0
+  }
+ ],
+ "ready_stage": {
+  "count": 4,
+  "by_origin": {
+   "READY_HORIZON": 4
+  },
+  "by_result": {
+   "issued": 4
+  },
+  "by_reason": {
+   "issued": 4
+  }
+ }
+}

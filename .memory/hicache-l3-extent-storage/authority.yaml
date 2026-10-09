@@ -1,0 +1,181 @@
+# Run authority manifest — task G1-RESTART-REBUILD (sglang-3090-24g-opt HiCache L3)
+#
+# Owner: orchestrator. This manifest is the pinned authority record for the G1 gate.
+# It resolves the earlier gap "no run authority-manifest path exists to pin the intake
+# by digest". It records authority; implementation authorization is granted ONLY after
+# the D1/D3/D7 write-back into the bundle and the digest repin (user precondition).
+#
+# Pin discipline: when the design bundle changes (repair/review), the intake and the
+# affected digests below MUST be repinned to the new revision before any gate movement.
+
+schema_version: 1.0.0-proposed
+run_epoch: G1-20260912
+owner: orchestrator
+status: frozen-implementing   # pending-decisions | decided-pending-writeback | frozen-implementing | implemented
+
+design_target:
+  repo: /home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt
+  branch: 3060-12g-qwen35-4b
+  head: 4f41f5bab562b99562f30c67540eb05344d13637
+  worktree_note: >
+    Intentional dirty worktree (do NOT reset/clean). extent/ sources are CLEAN at HEAD.
+    Dirty anchor files (A-01): hybrid_cache/hybrid_cache_controller.py
+    sha256 64e933f490884b74f0d38655a8f5a75157bab530dd0ea0688323c9780f1ce4d5 (+34),
+    managers/cache_controller.py
+    sha256 a41e623a2d6e462720d6584af992da290ba54e0cb3766df794117b87678b656f (+2).
+
+corpus:
+  repo: /home/dev-codex/workspaces/nerun-dev/storage
+  repo_head_at_authoring: 1953397436683219e543e19dff89560d07fa3c6f   # E436 pin used by recon
+  repo_head_now: a6d97c12e17e98db7922053fbbe600d71aa1e70c
+  note: >
+    pattern/ and testing/ cards are byte-identical between 1953397436683219e543e19dff89560d07fa3c6f
+    and a6d97c12e17e98db7922053fbbe600d71aa1e70c (only a sibling workstream's intake file was
+    added under review/gates/pattern-intake/). The G1 corpus evidence base is therefore unchanged;
+    the 1953397 pin stands as the G1 evaluated corpus revision.
+  boundary: CLOSED to FoundationDB, RocksDB, TiKV/fail-rs/raft-engine. CockroachDB deferred.
+  gate_contract:
+    root: review/gates/pattern-intake/
+    version: 1.0.0-proposed
+    digests:
+      README.md: 70b8bed23c30cbc3f85bff25f4a97f6aadb417e3bf6dea09ba2b72b207f16b04
+      intake-template.md: 01e6b4a7cec146760dbbfef82ae3a2db2202fa619f445549f5ad9777b967012c
+      novel-mechanism-template.md: 6cf1e6330a7c90a3759e4398d3de428db843f19bcacf6614cf1bcecd21d612ab
+      traceability-schema.md: 52177fd3cc0b0852e8e2d231853f344c6fc23915d4d6058e2fea0d694b0536f2
+    contract_acceptance: used under the binding standing instruction to discharge the
+      Pattern Intake + Novel Mechanism gate before any non-exempt implementation.
+
+# Pinned artifacts for THIS run (repin on every design revision change).
+pins:
+  pattern_intake:
+    path: .memory/phase2-hicache-design/work/G1-bundle/G1-RESTART-REBUILD-PATTERN-INTAKE-01.md
+    digest: 4ad6e46012a132fd2dd07c02975c10f449126e9fe359bce9c2653f539364630c
+    revision: R5-ruled
+    status_field: complete
+  novel_declaration:
+    path: .memory/phase2-hicache-design/work/G1-bundle/G1-RESTART-REBUILD-NOVEL-MECHANISM-01.md
+    digest: 3d0a88c4332775f25ac0fb84be9ef863c92aebc2d6bdfed1b1aaf1f743e0e940
+    revision: R5-ruled
+    mechanism_id: NM-EXTENT-RESTART-REBUILD-01
+    classification: NOVEL_MECHANISM
+    declaration_status: accepted
+    acceptance_decision_id: USER-RULING-20260912-G1
+  crash_consistency_contract:
+    path: .memory/phase2-hicache-design/work/G1-bundle/G1-CRASH-CONSISTENCY-CONTRACT-01.md
+    digest: 50bdee72a54a751903b5c4fb72c60a55c3ed99313a09ead663a92fe12d9bdd66
+    revision: R5-ruled
+  repair_response:
+    path: .memory/phase2-hicache-design/work/G1-bundle/G1-GATE-REPAIR-RESPONSE-01.md
+    digest: ca88f1df6c6b5fef8dc82d7df4f686bc87da112c6bc2e53adeb2ef3dcf94cf6b
+    revision: R5-ruled
+  reviews:
+    - path: .memory/phase2-hicache-design/work/G1-bundle/G1-GATE-INDEPENDENT-REVIEW-01.md
+      verdict: BLOCKED
+      finding_ids: [D-01, D-02, D-03, D-04, D-05, D-06, D-07, D-08, D-09, D-10, D-11, A-01, A-02]
+    - path: .memory/phase2-hicache-design/work/G1-bundle/G1-GATE-INDEPENDENT-REREVIEW-01.md
+      verdict: BLOCKED
+      finding_ids: [NEW-1, NEW-2, NEW-3, NEW-4, NEW-5, NEW-6, NEW-7, NEW-8, NEW-9, NEW-10]
+    - path: .memory/phase2-hicache-design/work/G1-bundle/G1-GATE-INDEPENDENT-REREVIEW-R2-01.md
+      verdict: BLOCKED
+      finding_ids: [NEW-11, NEW-12]
+    - path: .memory/phase2-hicache-design/work/G1-bundle/G1-GATE-INDEPENDENT-REREVIEW-R3-01.md
+      verdict: ACCEPT-WITH-CONDITIONS
+      finding_ids: [N-1, N-2, N-3, N-4]
+      note: >
+        reviewer: "mechanism safe to freeze"; independent 19-scenario ACKed-loss/resurrection
+        interleaving search found none. N-1/N-2 applied to the bundle (R4-docalign); N-3/N-4
+        applied to this manifest (D5 added; code_freeze_requires names R3). Conditions satisfied
+        by documentation-only edits; no mechanism change.
+      writeback_note: >
+        R5-ruled write-back applied the user ruling (D1(b) hard invariant NM-INV-20 / NM-F-22,
+        D3(a), D7(a), D2(a), D4(b), D6(a), novel accepted, 8 acceptance points in contract §12.3).
+        This is a decision-record write-back, not a mechanism change; no re-review required for the
+        write-back itself (the R3 review froze the mechanism).
+
+# Authority decisions. Until the blocking set is decided, the gate cannot reach
+# terminal acceptance and no implementation is authorized.
+# Decisions RULED by the user 2026-09-12 (binding, final; not revisited for "stricter fsync").
+decided_by: user
+decided_on: 2026-09-12
+decisions:
+  D1_allowed_recovered_prefix:
+    blocking: true
+    status: DECIDED
+    chosen: "(b) process-crash semantics"
+    frozen_meaning: >
+      For SIGKILL/process crash: every operation that completed a WAL-durable commit AND was ACKed
+      to the upper layer MUST be recoverable after restart. For power loss/kernel crash: extent
+      DATA BYTES are explicitly NOT promised on stable media (a separate, stronger tier this design
+      does not claim).
+    hard_invariant: >
+      The extent data write must complete to kernel/page-cache BEFORE the WAL GROUP_COMMIT becomes
+      durable AND BEFORE the upper-layer ACK. `WAL durable -> ACK -> data write not yet complete` is
+      FORBIDDEN. G1 crash oracle tests ONLY SIGKILL/process restart; never packaged as power-loss
+      durability.
+  D2_power_loss_data_durability:
+    blocking: false
+    status: DECIDED
+    chosen: "(a) WAL fdatasync only"
+  D3_fail_closed_vs_salvage:
+    blocking: true
+    status: DECIDED
+    chosen: "(a) fail closed"
+    frozen_meaning: >
+      Committed manifest/WAL corruption -> refuse to start that cache namespace (fail closed). The
+      designed torn ACTIVE tail/frame repair is retained. Committed-region corruption is NOT
+      auto-truncated/salvaged and served; no silent cold-start pretending durability. Rationale:
+      wrong resurrection of KV+Mamba state is far worse than a cache miss.
+  D4_sidecar_ack_semantics:
+    blocking: false
+    status: DECIDED
+    chosen: "(b) sidecar ACK deferred to GROUP_COMMIT"
+    note: must hold because KV+Mamba are one hybrid restore unit
+  D5_open_design_choice:
+    blocking: false
+    status: DECIDED
+    chosen: "dispositioned in the contract §15 text alongside the ruling; no mechanism change"
+  D6_metadata_io_accounting:
+    blocking: false
+    status: DECIDED
+    chosen: "(a) separate metadata counters"
+  D7_durable_group_id_identity:
+    blocking: true
+    status: DECIDED
+    chosen: "(a) 128-bit random namespace_epoch + per-run group_seq"
+    frozen_meaning: >
+      group_id = (namespace_epoch[16B], group_seq); epoch from a CSPRNG per writer/runtime
+      incarnation; group_seq monotonic within the epoch; epoch persisted in WAL/group metadata so
+      old/new runs never collide; KV and Mamba sidecar use the IDENTICAL group_id; (0,0) is ONLY the
+      explicit ungrouped sentinel; all-zero epoch FORBIDDEN for any normal grouped operation.
+  novel_declaration:
+    blocking: false
+    status: DECIDED
+    chosen: "NM-EXTENT-RESTART-REBUILD-01 ACCEPTED"
+    acceptance_decision_id: USER-RULING-20260912-G1
+    scope: >
+      the frozen mechanism only: compact manifest/checkpoint + append-only WAL -> restart rebuild
+      RAM-authoritative index. No open-ended mechanism expansion.
+
+# User precondition satisfied: D1/D3/D7 written back into the bundle and digests repinned.
+implementation_authorized: true
+authorized_implementation_paths:
+  product:
+    - python/sglang/srt/mem_cache/storage/extent/extent_file_backend.py
+    - python/sglang/srt/mem_cache/storage/extent/extent_allocator.py
+    - python/sglang/srt/mem_cache/storage/extent/extent_metadata.py   # NEW (manifest + WAL + recovery)
+    - python/sglang/srt/mem_cache/hybrid_cache/hybrid_cache_controller.py
+    - python/sglang/srt/managers/cache_controller.py
+  test:
+    - test/registered/unit/mem_cache/test_extent_file_backend_unit.py
+    - test/registered/unit/mem_cache/test_extent_g1_allocator_unit.py   # NEW
+    - test/registered/unit/mem_cache/test_extent_g1_metadata_unit.py    # NEW
+    - test/registered/hicache/test_hicache_spec_file_storage.py
+    - python/sglang/test/hicache_spec_storage_common.py
+implementation_plan: .memory/phase2-hicache-design/work/G1-IMPLEMENTATION-PLAN-20260912.md
+code_freeze_requires:
+  - R3 independent re-review ACCEPT (satisfied)
+  - D1, D3, D7 decided by user authority (satisfied: USER-RULING-20260912-G1)
+  - intake/novel/contract digests repinned at the frozen revision (satisfied: R5-ruled)
+stop_rule: >
+  Implementation must not change D1/D3/D7 semantics. If implementation finds it must, return to
+  the authority gate instead of silently deviating.

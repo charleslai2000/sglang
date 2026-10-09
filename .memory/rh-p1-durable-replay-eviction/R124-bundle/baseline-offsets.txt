@@ -1,0 +1,12 @@
+captured_at=2026-09-12T02:01:18+08:00
+server_log=/mnt/data/neuron/sglang-3090-r112-20260911/sglang-server-r124.log
+server_log_start_line=769
+server_log_start_bytes=80141
+probe_log=/tmp/t38c-probe.log
+probe_log_start_bytes=60652459
+probe_log_start_lines=40960
+server_pid=3082643
+scheduler_pid=3086752
+git_head=4f41f5bab562b99562f30c67540eb05344d13637
+scheduler_py_sha256=892efc25e2a9ef7c5ebb4afa09cf6914182b1467981d14cd76c53eea5d8de9d7
+health=200

@@ -1,0 +1,268 @@
+{
+  "schema": "p0_telemetry_design.v1",
+  "task_id": "LOCAL-P0-TELEMETRY-DESIGN-AUDIT-20260914",
+  "date": "2026-09-14",
+  "role": "architect",
+  "status": "recommend_implementation_packet",
+  "source": {
+    "path": "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt",
+    "head": "993ef8e5c3a6448aff2e752cf66cc45deadab59a",
+    "branch": "3060-12g-qwen35-4b",
+    "dirty_at_entry": true,
+    "preexisting_changes": [
+      "python/sglang/srt/models/qwen3_5_text.py",
+      "test/registered/unit/mem_cache/test_extent_g1_metadata_unit.py",
+      ".memory/"
+    ]
+  },
+  "decision": {
+    "recommendation": "bounded_p0_option_a",
+    "authority": "orchestrator_acceptance_required",
+    "option_a": "Add versioned hicache_telemetry to meta_info only when existing request file export is enabled; reuse current exporter.",
+    "option_b": "Preserve response meta_info bytes; requires fresh architecture dispatch for a private exporter-only envelope.",
+    "blocked_if": "Option B is mandatory inside the current bounded P0."
+  },
+  "invariants": [
+    "Telemetry never influences RH, admission, transfer, restore, eviction, or retry.",
+    "No request or attempt identity is a Prometheus label.",
+    "All subtractable timestamps use time.monotonic_ns in one scheduler process.",
+    "l1_tokens + l2_tokens + l3_tokens + newly_prefilled_tokens == prompt_tokens.",
+    "Mamba and other sidecar units are not added to logical prompt-token tiers.",
+    "avoidable_recompute_tokens is null when durable reusable coverage is unknown.",
+    "0 <= avoidable_recompute_tokens <= newly_prefilled_tokens when known.",
+    "A successful joined RH restore satisfies issue <= ready <= admission <= prefill_finish."
+  ],
+  "formulas": {
+    "l3_tokens": "min(host_hit_length, storage_hit_length)",
+    "l2_tokens": "host_hit_length - l3_tokens",
+    "l1_tokens": "max(0, prefix_len_after_loadback - host_hit_length)",
+    "newly_prefilled_tokens": "max(0, prompt_tokens - l1_tokens - l2_tokens - l3_tokens)",
+    "avoidable_recompute_tokens": "max(0, min(prompt_tokens, durable_reusable_prefix_tokens) - (l1_tokens + l2_tokens + l3_tokens)); null if durable_reusable_prefix_tokens is not authoritative",
+    "rh_prefetch_lead_seconds": "(admission_mono_ns - prefetch_issue_mono_ns) / 1e9",
+    "rh_ready_slack_seconds": "(admission_mono_ns - ready_mono_ns) / 1e9",
+    "storage_query_seconds": "(storage_query_end_mono_ns - storage_query_start_mono_ns) / 1e9",
+    "prefetch_to_ready_seconds": "(ready_mono_ns - prefetch_issue_mono_ns) / 1e9",
+    "ready_to_admission_seconds": "(admission_mono_ns - ready_mono_ns) / 1e9",
+    "admission_to_prefill_finish_seconds": "(prefill_finish_mono_ns - admission_mono_ns) / 1e9"
+  },
+  "units": {
+    "raw_timestamps": "monotonic nanoseconds",
+    "latencies": "seconds",
+    "tier_counts": "logical prompt tokens",
+    "aux_completion": "native pool units"
+  },
+  "prometheus": {
+    "forbidden_labels": [
+      "rid",
+      "request_id",
+      "session_id",
+      "build_id",
+      "attempt_id",
+      "node_id",
+      "cache_key",
+      "storage_key"
+    ],
+    "metrics": [
+      {
+        "name": "sglang:hicache_prompt_tokens_total",
+        "type": "counter",
+        "unit": "tokens",
+        "owner": "SchedulerMetricsCollector",
+        "labels_added": {
+          "source": [
+            "l1",
+            "l2",
+            "l3",
+            "newly_prefilled",
+            "avoidable_recompute"
+          ]
+        },
+        "reset": "process_restart_only"
+      },
+      {
+        "name": "sglang:hicache_rh_prefetch_lead_seconds",
+        "type": "histogram",
+        "unit": "seconds",
+        "owner": "SchedulerMetricsCollector",
+        "labels_added": {},
+        "reset": "process_restart_only"
+      },
+      {
+        "name": "sglang:hicache_rh_ready_slack_seconds",
+        "type": "histogram",
+        "unit": "seconds",
+        "owner": "SchedulerMetricsCollector",
+        "labels_added": {},
+        "reset": "process_restart_only"
+      },
+      {
+        "name": "sglang:hicache_stage_latency_seconds",
+        "type": "histogram",
+        "unit": "seconds",
+        "owner": "SchedulerMetricsCollector",
+        "labels_added": {
+          "stage": [
+            "storage_query",
+            "prefetch_to_ready",
+            "ready_to_admission",
+            "admission_to_prefill_finish"
+          ]
+        },
+        "reset": "process_restart_only"
+      },
+      {
+        "name": "sglang:hicache_telemetry_records_total",
+        "type": "counter",
+        "unit": "records",
+        "owner": "SchedulerMetricsCollector",
+        "labels_added": {
+          "outcome": [
+            "complete",
+            "partial",
+            "invalid"
+          ]
+        },
+        "reset": "process_restart_only"
+      }
+    ],
+    "histogram_buckets_seconds": [
+      0.0005,
+      0.001,
+      0.0025,
+      0.005,
+      0.01,
+      0.025,
+      0.05,
+      0.1,
+      0.25,
+      0.5,
+      1,
+      2.5,
+      5,
+      10,
+      20,
+      40,
+      80
+    ],
+    "percentiles": {
+      "published_as_gauges": false,
+      "quantiles": [
+        0.5,
+        0.95,
+        0.99
+      ],
+      "method": "histogram_quantile over range rate"
+    }
+  },
+  "jsonl": {
+    "owner": "FileRequestMetricsExporter",
+    "record_cardinality": "one terminal record per non-health-check request",
+    "rotation": "existing hourly append files",
+    "schema": "hicache_request.v1",
+    "identity_allowed": true,
+    "fields": [
+      "schema",
+      "rh_eligible",
+      "prefetch_origin",
+      "prefetch_attempt_id",
+      "enqueue_mono_ns",
+      "prefetch_issue_mono_ns",
+      "storage_query_start_mono_ns",
+      "storage_query_end_mono_ns",
+      "ready_mono_ns",
+      "admission_mono_ns",
+      "prefill_finish_mono_ns",
+      "prompt_tokens",
+      "l1_tokens",
+      "l2_tokens",
+      "l3_tokens",
+      "newly_prefilled_tokens",
+      "durable_reusable_prefix_tokens",
+      "avoidable_recompute_tokens",
+      "completed_kv_tokens",
+      "required_aux_pools",
+      "completed_aux_units",
+      "hybrid_restore_complete",
+      "rh_prefetch_lead_seconds",
+      "rh_ready_slack_seconds",
+      "stage_latency_seconds",
+      "invalid_reason"
+    ],
+    "forbidden_payload": [
+      "prompt_text",
+      "token_ids",
+      "cache_hash",
+      "storage_key",
+      "node_id"
+    ]
+  },
+  "ownership": {
+    "scheduler": [
+      "attempt/generation join",
+      "enqueue mark",
+      "READY mark",
+      "admission mark",
+      "Prometheus observation"
+    ],
+    "hybrid_cache_controller_operation": [
+      "storage query start/end",
+      "contiguous query result"
+    ],
+    "unified_radix_cache_finalizer": [
+      "accepted KV and sidecar completion",
+      "terminal handoff"
+    ],
+    "schedule_batch": [
+      "exclusive tier split",
+      "first-chunk freeze"
+    ],
+    "output_streamer": [
+      "pure per-request object assembly"
+    ],
+    "file_request_metrics_exporter": [
+      "JSONL persistence and rotation"
+    ]
+  },
+  "required_source_closure": [
+    "python/sglang/srt/managers/schedule_batch.py",
+    "python/sglang/srt/mem_cache/hybrid_cache/hybrid_cache_controller.py",
+    "python/sglang/srt/mem_cache/unified_radix_cache.py",
+    "python/sglang/srt/managers/scheduler.py",
+    "python/sglang/srt/observability/metrics_collector.py",
+    "python/sglang/srt/managers/scheduler_components/output_streamer.py",
+    "python/sglang/srt/observability/request_metrics_exporter.py"
+  ],
+  "conditional_source_closure": [
+    "python/sglang/srt/observability/req_time_stats.py",
+    "python/sglang/srt/managers/io_struct.py",
+    "python/sglang/srt/managers/tokenizer_manager.py"
+  ],
+  "focused_tests": [
+    "pure formula/join/clock/idempotence test",
+    "accepted and discarded hybrid finalizer handoff test",
+    "metrics registration, bounded labels, and one-observation test",
+    "request JSONL nested-schema and health-check exclusion test"
+  ],
+  "structural_na": [
+    "GPU kernel timing",
+    "GPU/server e2e for schema and formula validation",
+    "distributed cross-host clock subtraction",
+    "new transaction/recovery protocol",
+    "new telemetry thread/lock/shared registry",
+    "Mamba slot-to-token conversion"
+  ],
+  "risk": {
+    "public_behavior": "conditional_material_opt_in_meta_info_change",
+    "persistence_format": "additive_versioned_jsonl",
+    "authority": "none_new",
+    "concurrency": "none_new_if_operation_local",
+    "failure_semantics": "must_remain_best_effort_non_authoritative",
+    "reversibility": "high"
+  },
+  "verification": {
+    "gpu_or_server_started": false,
+    "source_modification_authorized": false,
+    "source_modified_by_audit": false,
+    "artifact_hash_manifest": "P0-telemetry-design.sha256"
+  }
+}

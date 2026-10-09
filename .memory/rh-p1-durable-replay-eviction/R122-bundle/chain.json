@@ -1,0 +1,284 @@
+{
+  "task_id": "P1-SPEC-BUDGET-CONTROLLED-EVICTION-20260911-R122",
+  "invocation": "ses-p1-controlled-eviction-r122-20260911",
+  "contract": {
+    "path": "P1-R121-CONTROLLED-EVICTION-CONTRACT.md",
+    "sha256": "2ac86b5a54264fad46d049e2c32e3cc37c125f8c778a38dfb14e840a37be3b3b"
+  },
+  "target_identity": {
+    "rid": "r122-r122-R-T",
+    "session_id": "r122-s-R-r122",
+    "session_generation": 63,
+    "build_rid": "r122-r122-build-T",
+    "build_session": "r122-s-T-r122"
+  },
+  "measurement_window": {
+    "server_start_line": 2636642,
+    "raw_start_line": 53626,
+    "wall": "2026-09-12 00:50:31",
+    "batch": [
+      "r122-r122-R-F1",
+      "r122-r122-R-T"
+    ],
+    "batch_http": 200,
+    "batch_elapsed_s": 72.277
+  },
+  "hard_precondition": {
+    "FULL_DURABLE": {
+      "verdict": "NOT_ESTABLISHED_IN_WINDOW",
+      "evidence": {
+        "build_durability": {
+          "T_storage_persisted_events": 12,
+          "T_max_kv_completed_tokens_per_event": 2048,
+          "note": "T build wrote 24186 tokens to L3 in 2048-token chunks; probe.log storage_persisted for session r122-s-T-r122; durability barrier observed by driver",
+          "ref": "requests.jsonl build-T; probe.log storage_persisted (r122-s-T-r122)"
+        },
+        "no_storage_query": {
+          "note": "T restored from host L2 (host_hit_tokens=22080); no pc_storage_query for r122-r122-R-T exists, so kv_hit_pages / D_req cannot be read in this window",
+          "ref": "raw.log:53628"
+        }
+      }
+    },
+    "NOT_DEVICE_RESIDENT": {
+      "verdict": "FAIL",
+      "evidence": {
+        "target_match": {
+          "ref": "raw.log:53628 (server 2636644, wall 00:50:31)",
+          "fill_len": 24186,
+          "device_hit_tokens": 2048,
+          "host_hit_tokens": 22080,
+          "note": "T was device-resident (2048 tokens) and host-resident (22080 tokens) at window start; the controlled pressure did NOT evict T from L1/L2"
+        }
+      }
+    },
+    "HOST_HEADROOM_SUFFICIENT": {
+      "verdict": "FAIL",
+      "evidence": {
+        "fresh_window_snapshot": {
+          "ref": "raw.log:73694 (server 2656710, wall 00:50:49)",
+          "free_units": {
+            "kv": 994,
+            "mamba": 43
+          },
+          "evictable_units": {
+            "kv": 1792,
+            "mamba": 36
+          },
+          "host_allocable_kv": 2786,
+          "F1_requested_primary_tokens": 41472,
+          "F1_sidecar_hit_pages": {
+            "kv": 41472,
+            "mamba": 0
+          }
+        },
+        "gate_poll_used_stale_evictable": {
+          "gate_poll_ref": "gate_evidence.jsonl attempt 1; state.jsonl gate_result",
+          "host_free": 994,
+          "host_free_ref": "server 2636636 (raw 53620)",
+          "host_evictable": 42942,
+          "host_evictable_ref": "server 2582830 (raw 1? ) stale: R121 event wall 00:34:09, ~16 min before the window",
+          "host_allocable_computed": 43936,
+          "gate_required_peak": 43540,
+          "defect": "the evictable source (latest kv host_allocability_change) was 16 minutes stale because telemetry is coalesced; the asserted allocable did not reflect the real host state"
+        },
+        "device_headroom_ample": {
+          "T_promotion_reserve_ref": "raw.log:53635 (server 2636651)",
+          "T_full_free": 287,
+          "T_full_evictable": 63201,
+          "T_full_locked": 2048,
+          "F1_promotion_reserve_ref": "raw.log:178471 (server 2761487)",
+          "F1_full_free": 415,
+          "F1_full_evictable": 65119,
+          "F1_full_locked": 2,
+          "note": "device/full pool allocable ~63-65k; the binding constraint was the HOST (L2) pool"
+        }
+      }
+    }
+  },
+  "C1_full_durable": {
+    "verdict": "NOT_ESTABLISHED",
+    "evidence": {
+      "pc_storage_query_present": false,
+      "D_req": null,
+      "note": "T matched a host-resident prefix (host_hit_tokens=22080) so no L3 storage query was issued; the contract C1 gate (kv_hit_pages==storage_hit_count==D_req) cannot be evaluated in this window. Build-side L3 persistence for T exists (12 storage_persisted events)."
+    }
+  },
+  "C2_park_spec_budget": {
+    "verdict": "FAIL",
+    "evidence": {
+      "spec_budget_occurrences_in_raw": 0,
+      "note": "T never parked. It was scheduled first (cache hit), promoted from host L2 at raw.log:53635 (promotion_reserve n=22080), and admitted (raw.log:53637). No SPEC_BUDGET epoch/park event exists for r122-r122-R-T."
+    }
+  },
+  "C3_release_wake": {
+    "verdict": "FAIL",
+    "evidence": {
+      "F1_first_prefetch_issued": {
+        "ref": "raw.log:53629",
+        "prefetch_length": 41506
+      },
+      "T_park": null,
+      "F1_release": null,
+      "T_wake": null,
+      "note": "no SPEC_BUDGET park so there is no release->wake leg; the batch ordering was T (host hit) before F1 (L3 miss), the reverse of the R121 chain ordering"
+    }
+  },
+  "C4_full_restore_gate": {
+    "verdict": "FAIL",
+    "evidence": {
+      "T_restore_path": "L2->L1 promotion only (promotion_reserve n=22080, raw.log:53635); no L3->L2 restore, no pc_storage_query",
+      "F1_disposition": {
+        "ref": "raw.log:178460 (server 2761476)",
+        "disposition": "PARTIAL",
+        "requested": 41506,
+        "granted": 41472,
+        "reason": "shortfall"
+      },
+      "F1_restore_success": {
+        "ref": "raw.log:178470 (server 2761486)",
+        "n_tokens": 41470
+      },
+      "note": "the contract C4 gate is defined for T at the durable restore boundary; T was never restored from L3, so the gate is not met"
+    }
+  },
+  "C5_host_headroom": {
+    "verdict": "FAIL",
+    "evidence": {
+      "host_kv_pool_tokens": 131073,
+      "F1_required": 41472,
+      "T_required_estimate": 24174,
+      "sum_required_with_margin_2048": 67714,
+      "window_start_allocable": {
+        "ref": "raw.log:73694 (server 2656710)",
+        "free": 994,
+        "evictable": 1792,
+        "allocable": 2786
+      },
+      "basis": "host_allocable := free_units.kv + evictable_units.kv from host_alloc.v1",
+      "margin": 2048,
+      "note": "fresh allocable 2786 << F1_required 41472; the gate's 43936 figure came from a 16-minute-stale evictable and is superseded by the fresh in-window snapshot"
+    }
+  },
+  "D_req_derivation": {
+    "D_req": null,
+    "source": "no pc_storage_query for r122-r122-R-T (T restored from host L2, host_hit_tokens=22080); D_req not derivable in this window",
+    "raw_requested_primary_tokens": 41506,
+    "external_tail": 34,
+    "note": "F1 disposition PARTIAL requested=41506 granted=41472 (tail 34)"
+  },
+  "pressure_drain_evidence": {
+    "pressure_requests": [
+      "r122-r122-q1",
+      "r122-r122-q2",
+      "r122-r122-q3",
+      "r122-r122-q4"
+    ],
+    "pressure_session_id": null,
+    "all_pressure_http_200": true,
+    "pressure_tokens": [
+      42861,
+      42826,
+      42769,
+      42697
+    ],
+    "loads_at_gate": {
+      "num_running_reqs": 0,
+      "num_waiting_reqs": 0,
+      "queues": {
+        "waiting": 0
+      }
+    },
+    "no_pressure_in_window": true,
+    "eviction_goal_achieved": false,
+    "note": "pressure fully drained (idle, no HOST_ALLOC waiter from pressure) but it did NOT evict the session-held T from device/host; T was still device_hit=2048/host_hit=22080 at the window"
+  },
+  "host_headroom_evidence": {
+    "fresh_allocable_kv": 2786,
+    "fresh_ref": "raw.log:73694 (server 2656710)",
+    "free_ref": "server 2636636 (raw 53620)",
+    "stale_evictable_used_by_gate": {
+      "value": 42942,
+      "ref": "server 2582830"
+    },
+    "corrected_gate_verdict": "FAIL (2786 < 43540)"
+  },
+  "gate_enforcement": {
+    "implemented": true,
+    "method": "poll /health host_headroom (free) + latest host_alloc.v1 / host_allocability_change evictable until free+evictable >= peak_stage_required+margin",
+    "passed": true,
+    "attempts": 1,
+    "defect": "FAILED to enforce: evictable source was stale (telemetry coalescing); window was opened on a saturated host; fresh snapshot was 2786",
+    "required_peak_stage": 43540,
+    "required_sum": 67714
+  },
+  "unmet_conditions": [
+    "contract addendum Gate A/Gate B ordering (sequential chain not exhibited)",
+    "HOST_HEADROOM_SUFFICIENT (fresh allocable 2786 < 41472)",
+    "NOT_DEVICE_RESIDENT (T device_hit=2048, host_hit=22080)",
+    "C1_full_durable (no L3 storage query / D_req in window)",
+    "C2_park_spec_budget",
+    "C3_release_wake",
+    "C4_full_restore_gate",
+    "C5_host_headroom"
+  ],
+  "missing_legs": [
+    "L3 durable coverage / D_req for T",
+    "T SPEC_BUDGET park",
+    "F1 exactly-once release -> T wake (epoch+1)",
+    "full L3->L2->L1 restore (durable boundary)",
+    "terminal generation via the SPEC_BUDGET chain"
+  ],
+  "failure_classification": {
+    "harness_defect": [
+      "Gate evictable reading was 16 min stale (host_allocability_change telemetry coalesced); the gate passed on 43936 instead of the real 2786.",
+      "Controlled pressure was run without session ids, so it did not evict the session-held T from device/host; the drain was clean but the eviction goal was not met.",
+      "Batch contained only [F1,T]; T (host-resident) scheduled before F1 (L3 miss) so T never parked on SPEC_BUDGET.",
+      "The run did not implement the binding addendum's two-moment sequential Gate A/Gate B; it used a single pre-window host_alloc.v1 gate with a stale evictable reading.",
+      "The frozen addendum's host_allocable basis (device full_free+full_evictable) is not the pool the HOST_ALLOC predicate blocks on (L2 host pool); contract-level defect, requires user/orchestrator ruling."
+    ],
+    "product_observation": "F1's HOST_ALLOC park with genuine host allocable 2786 does not contradict R121; no new product defect is demonstrated."
+  },
+  "verdict": "NOT_VERIFIED",
+  "contract_addendum": {
+    "path": "P1-R122-HEADROOM-GATE-ADDENDUM.md",
+    "sha256": "92ad1c29f4749be9fc4056a5e8d9dbb89d7800f652ccccdc2959651401faea25",
+    "binding": "additive to the R121 contract; governs the host-capacity gates",
+    "defines": "host_allocable := full_free + full_evictable (publish full_locked); requires a SEQUENTIAL chain with Gate A before F1 stage and Gate B before T stage after the wake; explicitly forbids requiring an F1+T pre-window gate",
+    "note": "discovered in the R122 bundle after the run; the R122 gate should have used this two-moment design"
+  },
+  "gate_A_device": {
+    "required": "F1_D_req + margin (41472 + 2048 = 43520)",
+    "observed_ref": "raw.log:53635 (server 2636651)",
+    "source": "T promotion_reserve (device full pool)",
+    "full_free": 287,
+    "full_evictable": 63201,
+    "allocable": 63488,
+    "verdict": "PASS_on_device_basis"
+  },
+  "gate_B_device": {
+    "required": "T_D_req + margin (24174 + 2048 = 26222)",
+    "observed_ref": "raw.log:178471 (server 2761487)",
+    "source": "F1 promotion_reserve (device full pool, after F1 restore)",
+    "full_free": 415,
+    "full_evictable": 65119,
+    "allocable": 65534,
+    "verdict": "PASS_on_device_basis_but_ordering_violated",
+    "note": "this reading is AFTER T had already restored (T promoted at raw 53635, before F1)"
+  },
+  "basis_discrepancy": {
+    "addendum_basis": "full_free + full_evictable on the DEVICE/full pool (size 65536)",
+    "addendum_source_of_truth": "R121 raw.log:270084 is a [P2A] promotion_reserve line (full_free=2077 full_evictable=63457), i.e. the DEVICE pool, yet the addendum calls it 'post-drain host allocable'.",
+    "observed_blocking_pool": "host_alloc.v1 free_units.kv + evictable_units.kv on the L2 HOST pool (size 131073) = 2786",
+    "source_device_pool": [
+      "python/sglang/srt/mem_cache/unified_radix_cache.py:4366-4368 _promotion_pool_observation full_free/full_evictable/full_locked",
+      "python/sglang/srt/mem_cache/unified_radix_cache.py:3018-3021 _component_available_size(FULL) -> token_to_kv_pool_allocator.available_size() [DEVICE]"
+    ],
+    "source_host_pool": [
+      "python/sglang/srt/mem_cache/unified_radix_cache.py:3838-3876 host_allocability_snapshot free_units -> controller.mem_pool_host.available_size(pool=...) [HOST]",
+      "python/sglang/srt/mem_cache/unified_radix_cache.py:3861 evictable_units -> _host_evictable_signature(pool)",
+      "python/sglang/srt/managers/scheduler.py:3856-3862 restore_host_alloc_wait publishes failure.allocability_snapshot.free_units/evictable_units (the HOST snapshot)"
+    ],
+    "conclusion": "restore_host_alloc_wait reason=HOST_ALLOC blocks on the HOST pool, which the addendum's Gate A/B never measures. A literal device-basis Gate A/B PASSES (63488/65534) while the HOST pool is 2786 -> the window opens on a saturated host. R121 chain.json independently states host pool=131073 and basis=free_units.kv+evictable_units.kv.",
+    "observability_blocker": "No read-only fresh HOST evictable source: /metrics=404 (enable_metrics false), /get_server_info.kv_events=null; host_allocability_change is heavily coalesced (last kv event server 2582830, ~16 min stale)."
+  }
+}

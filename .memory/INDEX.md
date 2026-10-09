@@ -1,5 +1,8 @@
 # SGLang 工作线主题索引
 
+跨仓工作的目标、结论、代码关联、来源快照和接续边界先看 [WORKSTREAMS.md](WORKSTREAMS.md)；本页与 catalog 用于回查原始记录，不以文件目录代替工作综合。
+逐个独立原始工作项（含多轮修复/复审合并）见 [work-items/README.md](work-items/README.md)，具体来源路径与 SHA 以 Manifest 为准。
+
 本页索引 `/home/dev-codex/workspaces/3rdparty` 下 SGLang 相关仓库的原始工作记录。文件路径均相对于仓库根；仓库分支/commit 快照见 [REPOS.md](REPOS.md)。先读 [README.md](README.md) 了解状态语义和边界。
 
 ## 快速路由
@@ -21,7 +24,7 @@
 
 ## 逐文件目录
 
-需要按路径查某份报告、raw bundle 或来源文件状态时，使用 [catalog/README.md](catalog/README.md)：`catalog/{hicache,opt,qwen}-files.md` 是逐路径 Git/file catalogue，`catalog/{hicache,opt,qwen}-docs.md` 是非 raw Markdown/text 标题提示目录，`catalog/hicache-work-groups.md` 按 R 编号 bundle/工作子目录归组。清单区分 source HEAD 中 tracked 与仅本地存在的 local-only 项，并尽可能记录 blob OID；其生成时快照不自动更新。
+需要按工作流/目的查找归集全文，先看 `catalog/{hicache,opt,qwen}-workstreams.md`；逐文件来源映射、完整branch/commit、tracked/local-only、SHA和目标路径见 `archive/MANIFEST.tsv`。文档全文在 `archive/documents/<source-repo>/<workstream>/`，大/raw payload 在忽略的 `.memory/data/`，每个原路径引用在 `archive/data-refs/`。详见 `archive/README.md`。
 
 ## 按 repo 的原始目录导航
 

@@ -1,0 +1,6 @@
+ARCHIVE_PATH=data/sglang-qwen3-27b-iq3s/ae/aebcfccbef54bde795793bdf4db52a8ee626fbcd2e96b714ae6d2ac9f0a2ae13.pid
+SHA256=aebcfccbef54bde795793bdf4db52a8ee626fbcd2e96b714ae6d2ac9f0a2ae13
+SIZE=7
+SOURCE_STATE=local-only
+SOURCE_HEAD=4d3068316e21d4c5a2b86ad0e0efdff7f05850c2
+SOURCE_WORKTREE_DIRTY=0

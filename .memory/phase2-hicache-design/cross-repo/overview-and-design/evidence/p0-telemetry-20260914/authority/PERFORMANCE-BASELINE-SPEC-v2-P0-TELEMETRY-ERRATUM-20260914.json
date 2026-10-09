@@ -1,0 +1,29 @@
+{
+  "schema": "performance-baseline-spec-v2-p0-telemetry-erratum",
+  "task_id": "LOCAL-P0-TELEMETRY-FINAL-FIX-20260914",
+  "status": "NORMATIVE_ERRATUM",
+  "supersedes": "PERFORMANCE-BASELINE-SPEC-v2.json cache_prompt_accounting only",
+  "preserves": [
+    "PERFORMANCE-BASELINE-SPEC-v2.md",
+    "PERFORMANCE-BASELINE-SPEC-v2.json",
+    "PERFORMANCE-BASELINE-SPEC-v2.sha256"
+  ],
+  "binding_expert_gate": "P0-TELEMETRY-EXPERT-GATE-20260914.json",
+  "cache_prompt_conservation": "prompt_tokens=L1+L2+L3+newly_prefilled",
+  "cache_optimization_opportunity": "avoidable_recompute=max(0,min(prompt_tokens,durable_reusable_prefix_tokens)-cached_coverage); null_without_authority; subset_of_newly_prefilled",
+  "prometheus": {
+    "source_labels": ["l1", "l2", "l3", "newly_prefilled"],
+    "avoidable_metric": "sglang:hicache_avoidable_recompute_tokens_total"
+  },
+  "jsonl": {
+    "schema": "hicache_request.v1",
+    "outcomes": ["complete", "partial", "invalid"],
+    "partial_reasons": ["lifecycle_inapplicable", "lifecycle_missing", "durable_unknown"],
+    "invalid_reasons": ["attempt_mismatch", "generation_mismatch", "clock_order", "tier_nonconservation", "durable_contradiction"]
+  },
+  "execution": {
+    "gpu_started": false,
+    "server_started": false,
+    "performance_rerun": false
+  }
+}

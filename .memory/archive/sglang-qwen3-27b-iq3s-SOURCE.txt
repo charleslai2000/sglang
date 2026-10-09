@@ -1,0 +1,5 @@
+repo=sglang-qwen3-27b-iq3s
+branch=qwen3-27b-iq3s
+head=4d3068316e21d4c5a2b86ad0e0efdff7f05850c2
+memory_worktree_dirty=0
+source_path=/home/dev-codex/workspaces/3rdparty/sglang-qwen3-27b-iq3s

@@ -1,49 +1,849 @@
-# HiCache work report groups
+# HiCache workstream catalogue
 
-Source repo `sglang-3090-24g-hicache`, catalogue generated from `.memory` work paths present at this snapshot. This is a navigation/group inventory: it does not interpret each report or validate its conclusions. For individual rows with complete blob IDs, see `hicache-files.md`; for readable Markdown first-line hints, see `hicache-docs.md`.
+Generated from `../archive/MANIFEST.tsv`; groups every source file by original workstream. This is navigational, not a semantic verdict.
 
-| Work group / bundle directory | File count | Tracked at HEAD | Local-only | Size | Example paths |
+| Workstream | Source paths | Tracked | Local-only | Total MiB | Examples |
 |---|---:|---:|---:|---:|---|
-| `top-level` | 751 | 751 | 0 | 5.20 MiB | `.memory/phase2-hicache-design/work/P0-A-RH-REGRESSION-FIXED-20260911.md`, `.memory/phase2-hicache-design/work/OPS-20260909-RESTART-NINJA.md`, `.memory/phase2-hicache-design/work/COD-20260908-P0-SESSION-BARRIER-VEHICLE.md` |
-| `P0-C-BIND-20260911-R68.artifacts` | 12 | 12 | 0 | 0.08 MiB | `.memory/phase2-hicache-design/work/P0-C-BIND-20260911-R68.artifacts/12_gpu_ns_detail.txt`, `.memory/phase2-hicache-design/work/P0-C-BIND-20260911-R68.artifacts/11_local_blob_hunt.txt`, `.memory/phase2-hicache-design/work/P0-C-BIND-20260911-R68.artifacts/04_local_worktree_sha256.txt` |
-| `P0-C-F4-CAPTURE-20260911-R66.artifacts` | 12 | 12 | 0 | 0.07 MiB | `.memory/phase2-hicache-design/work/P0-C-F4-CAPTURE-20260911-R66.artifacts/06_config_queries.txt`, `.memory/phase2-hicache-design/work/P0-C-F4-CAPTURE-20260911-R66.artifacts/00_identity.txt`, `.memory/phase2-hicache-design/work/P0-C-F4-CAPTURE-20260911-R66.artifacts/05_versions.txt` |
-| `R126-bundle` | 11 | 11 | 0 | 0.01 MiB | `.memory/phase2-hicache-design/work/R126-bundle/sha256sums.txt`, `.memory/phase2-hicache-design/work/R126-bundle/P1-R126-FAITHFUL-REPLAY-REPLICATION-CONTRACT.md`, `.memory/phase2-hicache-design/work/R126-bundle/run2/sha256sums.txt` |
-| `M2-RELEASE-STAGE2-20260918` | 10 | 10 | 0 | 0.08 MiB | `.memory/phase2-hicache-design/work/M2-RELEASE-STAGE2-20260918/repoint-dryrun-stage2.json`, `.memory/phase2-hicache-design/work/M2-RELEASE-STAGE2-20260918/source-scope.json`, `.memory/phase2-hicache-design/work/M2-RELEASE-STAGE2-20260918/scope-allow-joined-withtools.txt` |
-| `M2-RELEASE-WINDOW-A-20260918` | 9 | 9 | 0 | 0.11 MiB | `.memory/phase2-hicache-design/work/M2-RELEASE-WINDOW-A-20260918/_synthetic_scope.json`, `.memory/phase2-hicache-design/work/M2-RELEASE-WINDOW-A-20260918/_stage_scope_allow.json`, `.memory/phase2-hicache-design/work/M2-RELEASE-WINDOW-A-20260918/_gate_none.json` |
-| `R120-bundle` | 9 | 9 | 0 | 0.03 MiB | `.memory/phase2-hicache-design/work/R120-bundle/condition-evidence.md`, `.memory/phase2-hicache-design/work/R120-bundle/sha256-initial.txt`, `.memory/phase2-hicache-design/work/R120-bundle/evidence-refs.txt` |
-| `gate2-b64-evidence` | 9 | 9 | 0 | 0.43 MiB | `.memory/phase2-hicache-design/work/gate2-b64-evidence/b64k4-verdict.json`, `.memory/phase2-hicache-design/work/gate2-b64-evidence/b64k16-verdict.json`, `.memory/phase2-hicache-design/work/gate2-b64-evidence/b64k8-verdict.json` |
-| `G1-bundle` | 8 | 8 | 0 | 0.24 MiB | `.memory/phase2-hicache-design/work/G1-bundle/G1-GATE-REPAIR-RESPONSE-01.md`, `.memory/phase2-hicache-design/work/G1-bundle/G1-CRASH-CONSISTENCY-CONTRACT-01.md`, `.memory/phase2-hicache-design/work/G1-bundle/G1-RESTART-REBUILD-NOVEL-MECHANISM-01.md` |
-| `R122-bundle` | 8 | 8 | 0 | 0.04 MiB | `.memory/phase2-hicache-design/work/R122-bundle/P1-R122-HEADROOM-GATE-ADDENDUM.md`, `.memory/phase2-hicache-design/work/R122-bundle/condition-evidence.md`, `.memory/phase2-hicache-design/work/R122-bundle/sha256sums.txt` |
-| `R125-bundle` | 7 | 7 | 0 | 0.03 MiB | `.memory/phase2-hicache-design/work/R125-bundle/condition-evidence.md`, `.memory/phase2-hicache-design/work/R125-bundle/sha256sums.txt`, `.memory/phase2-hicache-design/work/R125-bundle/manifest.json` |
-| `R32-artifacts` | 7 | 7 | 0 | 0.19 MiB | `.memory/phase2-hicache-design/work/R32-artifacts/post-test-safety.txt`, `.memory/phase2-hicache-design/work/R32-artifacts/remote-server-log.txt`, `.memory/phase2-hicache-design/work/R32-artifacts/focused-tests-transcript.txt` |
-| `R113-bundle` | 6 | 6 | 0 | 0.24 MiB | `.memory/phase2-hicache-design/work/R113-bundle/reducer.out.json`, `.memory/phase2-hicache-design/work/R113-bundle/reducer.exit.txt`, `.memory/phase2-hicache-design/work/R113-bundle/manifest.json` |
-| `R121-bundle` | 6 | 6 | 0 | 0.03 MiB | `.memory/phase2-hicache-design/work/R121-bundle/condition-evidence.md`, `.memory/phase2-hicache-design/work/R121-bundle/baseline-offsets-attempt2.txt`, `.memory/phase2-hicache-design/work/R121-bundle/P1-R121-CONTROLLED-EVICTION-CONTRACT.md` |
-| `R124-bundle` | 6 | 6 | 0 | 0.02 MiB | `.memory/phase2-hicache-design/work/R124-bundle/condition-evidence.md`, `.memory/phase2-hicache-design/work/R124-bundle/sha256sums.txt`, `.memory/phase2-hicache-design/work/R124-bundle/R124-ORCHESTRATOR-CORRECTION.md` |
-| `R129-bundle` | 6 | 6 | 0 | 0.03 MiB | `.memory/phase2-hicache-design/work/R129-bundle/extracted.json`, `.memory/phase2-hicache-design/work/R129-bundle/run2-context.txt`, `.memory/phase2-hicache-design/work/R129-bundle/sha256sums.txt` |
-| `R111-reducer` | 5 | 5 | 0 | 0.03 MiB | `.memory/phase2-hicache-design/work/R111-reducer/r109-rerun.err.txt`, `.memory/phase2-hicache-design/work/R111-reducer/r109-rerun.out.json`, `.memory/phase2-hicache-design/work/R111-reducer/test-r111.out.txt` |
-| `R114-bundle` | 5 | 5 | 0 | 0.21 MiB | `.memory/phase2-hicache-design/work/R114-bundle/reducer.out.json`, `.memory/phase2-hicache-design/work/R114-bundle/reducer.exit.txt`, `.memory/phase2-hicache-design/work/R114-bundle/manifest.json` |
-| `R119-bundle` | 5 | 5 | 0 | 0.02 MiB | `.memory/phase2-hicache-design/work/R119-bundle/source-hashes.txt`, `.memory/phase2-hicache-design/work/R119-bundle/manifest.json`, `.memory/phase2-hicache-design/work/R119-bundle/chain-primary.json` |
-| `R123-bundle` | 5 | 5 | 0 | 0.02 MiB | `.memory/phase2-hicache-design/work/R123-bundle/condition-evidence.md`, `.memory/phase2-hicache-design/work/R123-bundle/sha256sums.txt`, `.memory/phase2-hicache-design/work/R123-bundle/manifest.json` |
-| `M2-RELEASE-WINDOW-A2-20260918` | 4 | 4 | 0 | 0.01 MiB | `.memory/phase2-hicache-design/work/M2-RELEASE-WINDOW-A2-20260918/prewindow-state.txt`, `.memory/phase2-hicache-design/work/M2-RELEASE-WINDOW-A2-20260918/repin-repro.stdout.txt`, `.memory/phase2-hicache-design/work/M2-RELEASE-WINDOW-A2-20260918/freeze-e2e.stdout.txt` |
-| `P0-C-PROFILE-FREEZE-20260911-R60.artifacts` | 4 | 4 | 0 | 0.04 MiB | `.memory/phase2-hicache-design/work/P0-C-PROFILE-FREEZE-20260911-R60.artifacts/r60_server_info.json`, `.memory/phase2-hicache-design/work/P0-C-PROFILE-FREEZE-20260911-R60.artifacts/r60_model_info.json`, `.memory/phase2-hicache-design/work/P0-C-PROFILE-FREEZE-20260911-R60.artifacts/SHA256SUMS.txt` |
-| `R109-bundle` | 4 | 4 | 0 | 0.02 MiB | `.memory/phase2-hicache-design/work/R109-bundle/reducer.out.json`, `.memory/phase2-hicache-design/work/R109-bundle/manifest.json`, `.memory/phase2-hicache-design/work/R109-bundle/reducer.err.txt` |
-| `R118-bundle` | 4 | 4 | 0 | 0.01 MiB | `.memory/phase2-hicache-design/work/R118-bundle/source-hashes.txt`, `.memory/phase2-hicache-design/work/R118-bundle/manifest.json`, `.memory/phase2-hicache-design/work/R118-bundle/chain.json` |
-| `R130-bundle` | 4 | 4 | 0 | 0.01 MiB | `.memory/phase2-hicache-design/work/R130-bundle/sha256sums.txt`, `.memory/phase2-hicache-design/work/R130-bundle/extracted-partial.json`, `.memory/phase2-hicache-design/work/R130-bundle/run-context-pre.txt` |
-| `E4-bundle` | 2 | 2 | 0 | 0.07 MiB | `.memory/phase2-hicache-design/work/E4-bundle/extracted-e4.json`, `.memory/phase2-hicache-design/work/E4-bundle/extracted-e4b.json` |
-| `P0-C-RECONCILE-RESTART-20260911-R72.artifacts` | 2 | 2 | 0 | 0.01 MiB | `.memory/phase2-hicache-design/work/P0-C-RECONCILE-RESTART-20260911-R72.artifacts/01_preflight.txt`, `.memory/phase2-hicache-design/work/P0-C-RECONCILE-RESTART-20260911-R72.artifacts/02_old_server_identity.txt` |
-| `P2B0-bundle` | 2 | 2 | 0 | 0.01 MiB | `.memory/phase2-hicache-design/work/P2B0-bundle/dry-run/cell-summary.json`, `.memory/phase2-hicache-design/work/P2B0-bundle/dry-run/cell.json` |
-| `R107-reducer` | 2 | 2 | 0 | 0.01 MiB | `.memory/phase2-hicache-design/work/R107-reducer/FREEZE-11-PREDICATES.md`, `.memory/phase2-hicache-design/work/R107-reducer/README.md` |
-| `R115-coverage` | 2 | 2 | 0 | 0.01 MiB | `.memory/phase2-hicache-design/work/R115-coverage/R113-control.out.json`, `.memory/phase2-hicache-design/work/R115-coverage/README.md` |
-| `R116-storage-durability` | 2 | 2 | 0 | 0.01 MiB | `.memory/phase2-hicache-design/work/R116-storage-durability/R114-control.out.json`, `.memory/phase2-hicache-design/work/R116-storage-durability/README.md` |
-| `R117-profile` | 2 | 2 | 0 | 0.02 MiB | `.memory/phase2-hicache-design/work/R117-profile/profile.json`, `.memory/phase2-hicache-design/work/R117-profile/README.md` |
-| `R130-correctness` | 2 | 2 | 0 | 0.01 MiB | `.memory/phase2-hicache-design/work/R130-correctness/_r130_microbench.json`, `.memory/phase2-hicache-design/work/R130-correctness/_r130_results.json` |
-| `R39-artifacts` | 2 | 2 | 0 | 0.00 MiB | `.memory/phase2-hicache-design/work/R39-artifacts/remote-backup-inspection.txt`, `.memory/phase2-hicache-design/work/R39-artifacts/remote-preflight.txt` |
-| `gate3-rhon-evidence` | 2 | 2 | 0 | 0.09 MiB | `.memory/phase2-hicache-design/work/gate3-rhon-evidence/metrics-final.txt`, `.memory/phase2-hicache-design/work/gate3-rhon-evidence/run-20260904-211848/verdict.json` |
-| `R116-l3-evidence` | 1 | 1 | 0 | 0.00 MiB | `.memory/phase2-hicache-design/work/R116-l3-evidence/l3-evidence.json` |
-| `R124-profile` | 1 | 1 | 0 | 0.00 MiB | `.memory/phase2-hicache-design/work/R124-profile/P0-C-3090-PROFILE-REFREEZE-20260912.md` |
-| `R128-profile` | 1 | 1 | 0 | 0.01 MiB | `.memory/phase2-hicache-design/work/R128-profile/P0-C-3090-PROFILE-REFREEZE-20260912.md` |
-| `R76-harness` | 1 | 1 | 0 | 0.00 MiB | `.memory/phase2-hicache-design/work/R76-harness/README.md` |
-| `R89-harness` | 1 | 1 | 0 | 0.00 MiB | `.memory/phase2-hicache-design/work/R89-harness/README.md` |
-| `R94-harness` | 1 | 1 | 0 | 0.00 MiB | `.memory/phase2-hicache-design/work/R94-harness/README.md` |
-| `R97-harness` | 1 | 1 | 0 | 0.00 MiB | `.memory/phase2-hicache-design/work/R97-harness/README.md` |
-| `evidence-cap-sweep-calib` | 1 | 1 | 0 | 0.00 MiB | `.memory/phase2-hicache-design/work/evidence-cap-sweep-calib/CALIBRATION.txt` |
+| `phase2/agents` | 108 | 108 | 0 | 1.38 | `phase2-hicache-design/agents/AUDIT-QWEN3CODER-ADJUDICATION-20260918.md`, `phase2-hicache-design/agents/C4-CAMPAIGN-IGNITION-RECON-20260917.md`, `phase2-hicache-design/agents/EXPERT-BRIEFING-FINALIZE-20260918.md` |
+| `phase2/evidence` | 28 | 28 | 0 | 0.22 | `phase2-hicache-design/evidence/p0-telemetry-20260914/README.md`, `phase2-hicache-design/evidence/p0-telemetry-20260914/authority/P0-TELEMETRY-DESIGN-20260914.md`, `phase2-hicache-design/evidence/p0-telemetry-20260914/authority/P0-TELEMETRY-EXPERT-GATE-20260914.commands-exits` |
+| `protocol-subagent-smoke-20260917` | 22 | 22 | 0 | 0.29 | `protocol-subagent-smoke-20260917/agents/SMOKE-ARCHITECT-20260917-01.md`, `protocol-subagent-smoke-20260917/agents/SMOKE-AUDIT-MODELS-PROTOCOL-20260917-01.md`, `protocol-subagent-smoke-20260917/agents/SMOKE-AUDIT-VARIANT-EXT-20260917-01.md` |
+| `phase2/work/P0-C-BIND-20260911-R68.artifacts` | 14 | 14 | 0 | 0.09 | `phase2-hicache-design/work/P0-C-BIND-20260911-R68.artifacts/01_remote_7file_sha256.txt`, `phase2-hicache-design/work/P0-C-BIND-20260911-R68.artifacts/02_local_rev9213_sha256.txt`, `phase2-hicache-design/work/P0-C-BIND-20260911-R68.artifacts/03_marker_and_mtimes.txt` |
+| `phase2/work/P0-C-F4-CAPTURE-20260911-R66.artifacts` | 12 | 12 | 0 | 0.07 | `phase2-hicache-design/work/P0-C-F4-CAPTURE-20260911-R66.artifacts/00_identity.txt`, `phase2-hicache-design/work/P0-C-F4-CAPTURE-20260911-R66.artifacts/01_config.json`, `phase2-hicache-design/work/P0-C-F4-CAPTURE-20260911-R66.artifacts/02_model_dir.txt` |
+| `phase2/work/M2-RELEASE-STAGE2-20260918` | 11 | 11 | 0 | 0.08 | `phase2-hicache-design/work/M2-RELEASE-STAGE2-20260918/gate-corrected.json`, `phase2-hicache-design/work/M2-RELEASE-STAGE2-20260918/gate-literal.json`, `phase2-hicache-design/work/M2-RELEASE-STAGE2-20260918/overlay-table.txt` |
+| `phase2/work/R126-bundle` | 11 | 11 | 0 | 0.01 | `phase2-hicache-design/work/R126-bundle/P1-R126-FAITHFUL-REPLAY-REPLICATION-CONTRACT.md`, `phase2-hicache-design/work/R126-bundle/run1/baseline-offsets.txt`, `phase2-hicache-design/work/R126-bundle/run1/run-context.txt` |
+| `phase2/work/gate2-b64-evidence` | 11 | 9 | 2 | 0.79 | `phase2-hicache-design/work/gate2-b64-evidence/analyze-b64-all.txt`, `phase2-hicache-design/work/gate2-b64-evidence/b64k16-verdict.json`, `phase2-hicache-design/work/gate2-b64-evidence/b64k4/engine-events.txt` |
+| `phase2/work/R120-bundle` | 10 | 10 | 0 | 0.04 | `phase2-hicache-design/work/R120-bundle/P1-ACCEPTANCE-CONDITIONS.md`, `phase2-hicache-design/work/R120-bundle/baseline-offsets.txt`, `phase2-hicache-design/work/R120-bundle/chain.json` |
+| `phase2/work/R122-bundle` | 10 | 10 | 0 | 0.07 | `phase2-hicache-design/work/R122-bundle/P1-R122-GATE-V1-INVALIDATION.md`, `phase2-hicache-design/work/R122-bundle/P1-R122-HEADROOM-GATE-ADDENDUM-v2-CORRECTION.md`, `phase2-hicache-design/work/R122-bundle/P1-R122-HEADROOM-GATE-ADDENDUM.md` |
+| `phase2/work/M2-RELEASE-WINDOW-A-20260918` | 9 | 9 | 0 | 0.11 | `phase2-hicache-design/work/M2-RELEASE-WINDOW-A-20260918/_gate_none.json`, `phase2-hicache-design/work/M2-RELEASE-WINDOW-A-20260918/_repro_A2.json`, `phase2-hicache-design/work/M2-RELEASE-WINDOW-A-20260918/_repro_B.json` |
+| `phase2/work/R116-l3-evidence` | 9 | 9 | 0 | 0.13 | `phase2-hicache-design/work/R116-l3-evidence/l3-evidence.json`, `phase2-hicache-design/work/R116-l3-evidence/objects/0b079ac3f70cb269dda556812979b24868f5f9fe6d82c15c1289e0783109659b.bin`, `phase2-hicache-design/work/R116-l3-evidence/objects/11c32b12b8ae15e127a8db0b7d118f9359ef9936223cade8bd460fcd892a56c4.bin` |
+| `phase2/work/R76-harness` | 9 | 6 | 3 | 0.05 | `phase2-hicache-design/work/R76-harness/README.md`, `phase2-hicache-design/work/R76-harness/__pycache__/p0b_driver.cpython-312.pyc`, `phase2-hicache-design/work/R76-harness/__pycache__/p0b_reducer.cpython-312.pyc` |
+| `phase2/work/G1-bundle` | 8 | 8 | 0 | 0.24 | `phase2-hicache-design/work/G1-bundle/G1-CRASH-CONSISTENCY-CONTRACT-01.md`, `phase2-hicache-design/work/G1-bundle/G1-GATE-INDEPENDENT-REREVIEW-01.md`, `phase2-hicache-design/work/G1-bundle/G1-GATE-INDEPENDENT-REREVIEW-R2-01.md` |
+| `phase2/work/R111-reducer` | 8 | 8 | 0 | 0.12 | `phase2-hicache-design/work/R111-reducer/FREEZE-11-PREDICATES.md`, `phase2-hicache-design/work/R111-reducer/README.md`, `phase2-hicache-design/work/R111-reducer/manifest.sha256` |
+| `phase2/work/R125-bundle` | 8 | 8 | 0 | 0.05 | `phase2-hicache-design/work/R125-bundle/P1-R125-DURABLE-PREFIX-REPLAY-CONTRACT.md`, `phase2-hicache-design/work/R125-bundle/baseline-offsets.txt`, `phase2-hicache-design/work/R125-bundle/chain.json` |
+| `phase2/work/R129-bundle` | 8 | 8 | 0 | 0.05 | `phase2-hicache-design/work/R129-bundle/P2A-ORCHESTRATOR-VERIFICATION.md`, `phase2-hicache-design/work/R129-bundle/driver129.py`, `phase2-hicache-design/work/R129-bundle/extract129.py` |
+| `phase2/work/R121-bundle` | 7 | 7 | 0 | 0.05 | `phase2-hicache-design/work/R121-bundle/P1-R121-CONTROLLED-EVICTION-CONTRACT.md`, `phase2-hicache-design/work/R121-bundle/baseline-offsets-attempt2.txt`, `phase2-hicache-design/work/R121-bundle/baseline-offsets.txt` |
+| `phase2/work/R124-bundle` | 7 | 7 | 0 | 0.04 | `phase2-hicache-design/work/R124-bundle/R124-ORCHESTRATOR-CORRECTION.md`, `phase2-hicache-design/work/R124-bundle/baseline-offsets.txt`, `phase2-hicache-design/work/R124-bundle/chain.json` |
+| `phase2/work/R32-artifacts` | 7 | 7 | 0 | 0.19 | `phase2-hicache-design/work/R32-artifacts/exact-host-alloc-unit-transcript.txt`, `phase2-hicache-design/work/R32-artifacts/focused-tests-transcript.txt`, `phase2-hicache-design/work/R32-artifacts/post-test-safety.txt` |
+| `phase2/work/P2B0-bundle` | 6 | 6 | 0 | 0.11 | `phase2-hicache-design/work/P2B0-bundle/dry-run/cell-summary.json`, `phase2-hicache-design/work/P2B0-bundle/dry-run/cell.json`, `phase2-hicache-design/work/P2B0-bundle/p2b0_analyze.py` |
+| `phase2/work/R113-bundle` | 6 | 6 | 0 | 0.24 | `phase2-hicache-design/work/R113-bundle/baseline-offsets.txt`, `phase2-hicache-design/work/R113-bundle/manifest.json`, `phase2-hicache-design/work/R113-bundle/reducer.err.txt` |
+| `phase2/work/R119-bundle` | 6 | 6 | 0 | 0.04 | `phase2-hicache-design/work/R119-bundle/baseline-offsets.txt`, `phase2-hicache-design/work/R119-bundle/chain-primary.json`, `phase2-hicache-design/work/R119-bundle/chain.json` |
+| `phase2/work/R123-bundle` | 6 | 6 | 0 | 0.04 | `phase2-hicache-design/work/R123-bundle/P1-R123-TEMPORAL-WAKE-GATE-CONTRACT.md`, `phase2-hicache-design/work/R123-bundle/chain.json`, `phase2-hicache-design/work/R123-bundle/condition-evidence.md` |
+| `phase2/work/R130-bundle` | 6 | 6 | 0 | 0.01 | `phase2-hicache-design/work/R130-bundle/attempt1-killed-at-0856.sha256`, `phase2-hicache-design/work/R130-bundle/extracted-partial.json`, `phase2-hicache-design/work/R130-bundle/run-context-pre.txt` |
+| `phase2/work/R89-harness` | 6 | 6 | 0 | 0.03 | `phase2-hicache-design/work/R89-harness/README.md`, `phase2-hicache-design/work/R89-harness/manifest.sha256`, `phase2-hicache-design/work/R89-harness/p0b_driver.py` |
+| `phase2/work/R94-harness` | 6 | 6 | 0 | 0.05 | `phase2-hicache-design/work/R94-harness/README.md`, `phase2-hicache-design/work/R94-harness/manifest.sha256`, `phase2-hicache-design/work/R94-harness/p0b_driver.py` |
+| `phase2/work/R97-harness` | 6 | 6 | 0 | 0.05 | `phase2-hicache-design/work/R97-harness/README.md`, `phase2-hicache-design/work/R97-harness/manifest.sha256`, `phase2-hicache-design/work/R97-harness/p0b_driver.py` |
+| `phase2/work/TEST3060-RH-REALPATH-VERIFY-20260909-logs` | 6 | 0 | 6 | 0.04 | `phase2-hicache-design/work/TEST3060-RH-REALPATH-VERIFY-20260909-logs/focused_oracles.log`, `phase2-hicache-design/work/TEST3060-RH-REALPATH-VERIFY-20260909-logs/gate_skip_regression.log`, `phase2-hicache-design/work/TEST3060-RH-REALPATH-VERIFY-20260909-logs/hicache_restore.log` |
+| `phase2/work/gate3-rhon-evidence` | 6 | 3 | 3 | 1.16 | `phase2-hicache-design/work/gate3-rhon-evidence/driver.log`, `phase2-hicache-design/work/gate3-rhon-evidence/gpu-util.csv`, `phase2-hicache-design/work/gate3-rhon-evidence/metrics-final.txt` |
+| `phase2/work/R107-reducer` | 5 | 5 | 0 | 0.08 | `phase2-hicache-design/work/R107-reducer/FREEZE-11-PREDICATES.md`, `phase2-hicache-design/work/R107-reducer/README.md`, `phase2-hicache-design/work/R107-reducer/manifest.sha256` |
+| `phase2/work/R114-bundle` | 5 | 5 | 0 | 0.21 | `phase2-hicache-design/work/R114-bundle/baseline-offsets.txt`, `phase2-hicache-design/work/R114-bundle/manifest.json`, `phase2-hicache-design/work/R114-bundle/reducer.err.txt` |
+| `phase2/work/R118-bundle` | 5 | 5 | 0 | 0.02 | `phase2-hicache-design/work/R118-bundle/baseline-offsets.txt`, `phase2-hicache-design/work/R118-bundle/chain.json`, `phase2-hicache-design/work/R118-bundle/driver118.py` |
+| `phase2/work/R130-correctness` | 5 | 5 | 0 | 0.04 | `phase2-hicache-design/work/R130-correctness/_r130_microbench.json`, `phase2-hicache-design/work/R130-correctness/_r130_results.json`, `phase2-hicache-design/work/R130-correctness/r130_microbench.py` |
+| `phase2/work/evidence-cap-sweep-calib` | 5 | 1 | 4 | 0.15 | `phase2-hicache-design/work/evidence-cap-sweep-calib/CALIBRATION.txt`, `phase2-hicache-design/work/evidence-cap-sweep-calib/c0-engine.log`, `phase2-hicache-design/work/evidence-cap-sweep-calib/c3-engine.log` |
+| `phase2/archive` | 4 | 4 | 0 | 0.02 | `phase2-hicache-design/archive/phase2-pc1/ENGINE_SYNC.md`, `phase2-hicache-design/archive/phase2-pc1/SOAK_EVIDENCE_INDEX.md`, `phase2-hicache-design/archive/phase2-pc1/TESTS.md` |
+| `phase2/work/E4-bundle` | 4 | 4 | 0 | 0.10 | `phase2-hicache-design/work/E4-bundle/driver_e4.py`, `phase2-hicache-design/work/E4-bundle/extract_e4.py`, `phase2-hicache-design/work/E4-bundle/extracted-e4.json` |
+| `phase2/work/M2-RELEASE-WINDOW-A2-20260918` | 4 | 4 | 0 | 0.01 | `phase2-hicache-design/work/M2-RELEASE-WINDOW-A2-20260918/freeze-e2e.stdout.txt`, `phase2-hicache-design/work/M2-RELEASE-WINDOW-A2-20260918/method-blocker-evidence.txt`, `phase2-hicache-design/work/M2-RELEASE-WINDOW-A2-20260918/prewindow-state.txt` |
+| `phase2/work/P0-C-PROFILE-FREEZE-20260911-R60.artifacts` | 4 | 4 | 0 | 0.04 | `phase2-hicache-design/work/P0-C-PROFILE-FREEZE-20260911-R60.artifacts/SHA256SUMS.txt`, `phase2-hicache-design/work/P0-C-PROFILE-FREEZE-20260911-R60.artifacts/r60_evidence.txt`, `phase2-hicache-design/work/P0-C-PROFILE-FREEZE-20260911-R60.artifacts/r60_model_info.json` |
+| `phase2/work/P0-C-RECONCILE-RESTART-20260911-R72.artifacts` | 4 | 4 | 0 | 1.17 | `phase2-hicache-design/work/P0-C-RECONCILE-RESTART-20260911-R72.artifacts/01_preflight.txt`, `phase2-hicache-design/work/P0-C-RECONCILE-RESTART-20260911-R72.artifacts/02_old_server_identity.txt`, `phase2-hicache-design/work/P0-C-RECONCILE-RESTART-20260911-R72.artifacts/10_local_python_sglang.sha256` |
+| `phase2/work/R109-bundle` | 4 | 4 | 0 | 0.02 | `phase2-hicache-design/work/R109-bundle/key-lines.txt`, `phase2-hicache-design/work/R109-bundle/manifest.json`, `phase2-hicache-design/work/R109-bundle/reducer.err.txt` |
+| `phase2/work/R115-coverage` | 4 | 4 | 0 | 0.04 | `phase2-hicache-design/work/R115-coverage/R113-control.out.json`, `phase2-hicache-design/work/R115-coverage/README.md`, `phase2-hicache-design/work/R115-coverage/coverage_gate.py` |
+| `phase2/work/R116-storage-durability` | 4 | 4 | 0 | 0.06 | `phase2-hicache-design/work/R116-storage-durability/R114-control.out.json`, `phase2-hicache-design/work/R116-storage-durability/README.md`, `phase2-hicache-design/work/R116-storage-durability/storage_durability.py` |
+| `phase2/work/R117-profile` | 3 | 3 | 0 | 0.02 | `phase2-hicache-design/work/R117-profile/README.md`, `phase2-hicache-design/work/R117-profile/profile.json`, `phase2-hicache-design/work/R117-profile/verify_profile.sh` |
+| `cache` | 2 | 2 | 0 | 0.02 | `cache/external/sglang/batch-is-full-latch.md`, `cache/external/sglang/hicache-upstream.md` |
+| `phase2/escalations` | 2 | 2 | 0 | 0.01 | `phase2-hicache-design/escalations/ESC-20260910-RH-MATCH-RUNTIME-MISMATCH.md`, `phase2-hicache-design/escalations/ESC-20260910-RH-SPEC-BUDGET-RETRIGGER.md` |
+| `phase2/work/R-HBA1-bundle` | 2 | 2 | 0 | 0.02 | `phase2-hicache-design/work/R-HBA1-bundle/rhba1_analyze.py`, `phase2-hicache-design/work/R-HBA1-bundle/rhba1_harness.py` |
+| `phase2/work/R39-artifacts` | 2 | 2 | 0 | 0.00 | `phase2-hicache-design/work/R39-artifacts/remote-backup-inspection.txt`, `phase2-hicache-design/work/R39-artifacts/remote-preflight.txt` |
+| `phase1-patch-release` | 1 | 1 | 0 | 0.01 | `phase1-patch-release/work/phase1-patch-release-devops-e1.md` |
+| `phase2/HANDOFF-20260913.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/HANDOFF-20260913.md` |
+| `phase2/HANDOFF-20260914-LOCAL-PROD-BASELINE-v1.md` | 1 | 1 | 0 | 0.03 | `phase2-hicache-design/HANDOFF-20260914-LOCAL-PROD-BASELINE-v1.md` |
+| `phase2/HANDOFF-20260917-PRODUCTION-PRIORITY.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/HANDOFF-20260917-PRODUCTION-PRIORITY.md` |
+| `phase2/HANDOFF-20260917-SESSION-CLOSE.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/HANDOFF-20260917-SESSION-CLOSE.md` |
+| `phase2/HANDOFF-20260918-FINAL.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/HANDOFF-20260918-FINAL.md` |
+| `phase2/HANDOFF-20260918-SESSION-2.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/HANDOFF-20260918-SESSION-2.md` |
+| `phase2/HANDOFF-SESSION-RESTART-20260911.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/HANDOFF-SESSION-RESTART-20260911.md` |
+| `phase2/WORK-INVENTORY-20260914.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/WORK-INVENTORY-20260914.md` |
+| `phase2/agent` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/agent/PROC-STATE-AFTER-E-20260918.md` |
+| `phase2/authority.yaml` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/authority.yaml` |
+| `phase2/context.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/context.md` |
+| `phase2/fetched-hicache-upstream.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/fetched-hicache-upstream.md` |
+| `phase2/fetched-issue35537-batch-is-full-latch.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/fetched-issue35537-batch-is-full-latch.md` |
+| `phase2/ledger.md` | 1 | 1 | 0 | 0.98 | `phase2-hicache-design/ledger.md` |
+| `phase2/plan-p2io.md` | 1 | 1 | 0 | 0.03 | `phase2-hicache-design/plan-p2io.md` |
+| `phase2/plan-rh-durability.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/plan-rh-durability.md` |
+| `phase2/plan.md` | 1 | 1 | 0 | 0.04 | `phase2-hicache-design/plan.md` |
+| `phase2/work/ARCH-20260908-P0-BUILD-COMPLETE-CONTRACT.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/ARCH-20260908-P0-BUILD-COMPLETE-CONTRACT.md` |
+| `phase2/work/ARCH-20260908-P0-RESIDENCY-R17-TIMING-CONTRACT.md` | 1 | 1 | 0 | 0.04 | `phase2-hicache-design/work/ARCH-20260908-P0-RESIDENCY-R17-TIMING-CONTRACT.md` |
+| `phase2/work/ARCH-20260908-P0-SCOPE-CLOSURE.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/ARCH-20260908-P0-SCOPE-CLOSURE.md` |
+| `phase2/work/ARCH-20260909-HOST-ALLOC-EPOCH.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/ARCH-20260909-HOST-ALLOC-EPOCH.md` |
+| `phase2/work/ARCH-20260909-PATTERN-INTAKE.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/ARCH-20260909-PATTERN-INTAKE.md` |
+| `phase2/work/ARCH3060-RH-ARCH-20260909.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/ARCH3060-RH-ARCH-20260909.md` |
+| `phase2/work/ARCH3060-RH-GATE-ACCEPT-20260909.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/ARCH3060-RH-GATE-ACCEPT-20260909.md` |
+| `phase2/work/ARCH3060-RH-MATCH-GATE-ACCEPT-20260909.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/ARCH3060-RH-MATCH-GATE-ACCEPT-20260909.md` |
+| `phase2/work/ARCH3060-RH-MATCH-GATE-DESIGN-20260909.md` | 1 | 1 | 0 | 0.03 | `phase2-hicache-design/work/ARCH3060-RH-MATCH-GATE-DESIGN-20260909.md` |
+| `phase2/work/ARCH3060-RH-MATCH-GATE-INTAKE-20260909.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/ARCH3060-RH-MATCH-GATE-INTAKE-20260909.md` |
+| `phase2/work/ARCH3060-RH-MATCH-GATE-REPIN-20260909.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/ARCH3060-RH-MATCH-GATE-REPIN-20260909.md` |
+| `phase2/work/ARCH3060-RH-NOVEL-20260909.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/ARCH3060-RH-NOVEL-20260909.md` |
+| `phase2/work/ARCH3060-RH-PATTERN-20260909.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/ARCH3060-RH-PATTERN-20260909.md` |
+| `phase2/work/ARCH3060-RH-PIN-F629-20260909.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/ARCH3060-RH-PIN-F629-20260909.md` |
+| `phase2/work/BRANCH-TOPOLOGY-AND-SERVICE-SCAFFOLD-20260917.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/BRANCH-TOPOLOGY-AND-SERVICE-SCAFFOLD-20260917.md` |
+| `phase2/work/COD-20260908-3060-MINIMAL-KERNEL-FIX.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/COD-20260908-3060-MINIMAL-KERNEL-FIX.md` |
+| `phase2/work/COD-20260908-3060-MINIMAL-KERNEL-FIX2.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/COD-20260908-3060-MINIMAL-KERNEL-FIX2.md` |
+| `phase2/work/COD-20260908-3060-MINIMAL-KERNEL.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/COD-20260908-3060-MINIMAL-KERNEL.md` |
+| `phase2/work/COD-20260908-P0-BUILD-COMPLETE-EMITTER-FIX1.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/COD-20260908-P0-BUILD-COMPLETE-EMITTER-FIX1.md` |
+| `phase2/work/COD-20260908-P0-BUILD-COMPLETE-EMITTER.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/COD-20260908-P0-BUILD-COMPLETE-EMITTER.md` |
+| `phase2/work/COD-20260908-P0-DURABILITY-TRACE-V2.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/COD-20260908-P0-DURABILITY-TRACE-V2.md` |
+| `phase2/work/COD-20260908-P0-DURABILITY-TRACE.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/COD-20260908-P0-DURABILITY-TRACE.md` |
+| `phase2/work/COD-20260908-P0-FINISHED-ZERO-KEY-GUARD-FIX1.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/COD-20260908-P0-FINISHED-ZERO-KEY-GUARD-FIX1.md` |
+| `phase2/work/COD-20260908-P0-FINISHED-ZERO-KEY-GUARD.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/COD-20260908-P0-FINISHED-ZERO-KEY-GUARD.md` |
+| `phase2/work/COD-20260908-P0-LIVE-VEHICLE.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/COD-20260908-P0-LIVE-VEHICLE.md` |
+| `phase2/work/COD-20260908-P0-RESIDENCY-BARRIER-DIAGNOSTIC-FIX6.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/COD-20260908-P0-RESIDENCY-BARRIER-DIAGNOSTIC-FIX6.md` |
+| `phase2/work/COD-20260908-P0-RESIDENCY-BARRIER-EMITTER-FIX1.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/COD-20260908-P0-RESIDENCY-BARRIER-EMITTER-FIX1.md` |
+| `phase2/work/COD-20260908-P0-RESIDENCY-BARRIER-EMITTER-FIX2.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/COD-20260908-P0-RESIDENCY-BARRIER-EMITTER-FIX2.md` |
+| `phase2/work/COD-20260908-P0-RESIDENCY-BARRIER-EMITTER-FIX3.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/COD-20260908-P0-RESIDENCY-BARRIER-EMITTER-FIX3.md` |
+| `phase2/work/COD-20260908-P0-RESIDENCY-BARRIER-EMITTER-FIX4.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/COD-20260908-P0-RESIDENCY-BARRIER-EMITTER-FIX4.md` |
+| `phase2/work/COD-20260908-P0-RESIDENCY-BARRIER-EMITTER-FIX5.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/COD-20260908-P0-RESIDENCY-BARRIER-EMITTER-FIX5.md` |
+| `phase2/work/COD-20260908-P0-RESIDENCY-BARRIER-NODE-LOOKUP-FIX1.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/COD-20260908-P0-RESIDENCY-BARRIER-NODE-LOOKUP-FIX1.md` |
+| `phase2/work/COD-20260908-P0-RESIDENCY-BARRIER-NODE-SIDECAR-FIX1.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/COD-20260908-P0-RESIDENCY-BARRIER-NODE-SIDECAR-FIX1.md` |
+| `phase2/work/COD-20260908-P0-RESIDENCY-R17-TIMING-FIX1.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/COD-20260908-P0-RESIDENCY-R17-TIMING-FIX1.md` |
+| `phase2/work/COD-20260908-P0-RESIDENCY-R17-TIMING-FIX2.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/COD-20260908-P0-RESIDENCY-R17-TIMING-FIX2.md` |
+| `phase2/work/COD-20260908-P0-RESIDENCY-R17-TIMING-FIX5.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/COD-20260908-P0-RESIDENCY-R17-TIMING-FIX5.md` |
+| `phase2/work/COD-20260908-P0-RESIDENCY-R17-TIMING-FIX6.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/COD-20260908-P0-RESIDENCY-R17-TIMING-FIX6.md` |
+| `phase2/work/COD-20260908-P0-RESIDENCY-R17-TIMING-FIX7.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/COD-20260908-P0-RESIDENCY-R17-TIMING-FIX7.md` |
+| `phase2/work/COD-20260908-P0-SESSION-BARRIER-VEHICLE.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/COD-20260908-P0-SESSION-BARRIER-VEHICLE.md` |
+| `phase2/work/COD-20260908-P0-TRACE-CONTEXT-V3.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/COD-20260908-P0-TRACE-CONTEXT-V3.md` |
+| `phase2/work/COD-20260908-P0-TRACE-CONTEXT-V4.1.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/COD-20260908-P0-TRACE-CONTEXT-V4.1.md` |
+| `phase2/work/COD-20260908-P0-TRACE-CONTEXT-V4.2.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/COD-20260908-P0-TRACE-CONTEXT-V4.2.md` |
+| `phase2/work/COD-20260908-P0-TRACE-CONTEXT-V4.3-SESSION-RETIRE.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/COD-20260908-P0-TRACE-CONTEXT-V4.3-SESSION-RETIRE.md` |
+| `phase2/work/COD-20260908-P0-TRACE-CONTEXT-V4.3.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/COD-20260908-P0-TRACE-CONTEXT-V4.3.md` |
+| `phase2/work/COD-20260908-P0-TRACE-CONTEXT-V4.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/COD-20260908-P0-TRACE-CONTEXT-V4.md` |
+| `phase2/work/COD-20260908-P0-VEHICLE-BARRIER-SCHEDULER-FIX1.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/COD-20260908-P0-VEHICLE-BARRIER-SCHEDULER-FIX1.md` |
+| `phase2/work/COD-20260908-P0-VEHICLE-BARRIER-SCHEDULER-FIX2.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/COD-20260908-P0-VEHICLE-BARRIER-SCHEDULER-FIX2.md` |
+| `phase2/work/COD-20260908-P0-VEHICLE-BARRIER-SCHEDULER-FIX3.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/COD-20260908-P0-VEHICLE-BARRIER-SCHEDULER-FIX3.md` |
+| `phase2/work/COD-20260908-P0-VEHICLE-BARRIER-SCHEDULER-FIX4.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/COD-20260908-P0-VEHICLE-BARRIER-SCHEDULER-FIX4.md` |
+| `phase2/work/COD-20260908-P0-VEHICLE-TARGET-CHURN-FIX1.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/COD-20260908-P0-VEHICLE-TARGET-CHURN-FIX1.md` |
+| `phase2/work/COD-20260908-T38C-FIX.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/COD-20260908-T38C-FIX.md` |
+| `phase2/work/COD-20260908-T38C-MISSING-MAMBA-KEY.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/COD-20260908-T38C-MISSING-MAMBA-KEY.md` |
+| `phase2/work/COD-20260908-T38C-PAIRED-MAMBA-TRACE.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/COD-20260908-T38C-PAIRED-MAMBA-TRACE.md` |
+| `phase2/work/COD-20260909-3060-SM86-ARCH.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/COD-20260909-3060-SM86-ARCH.md` |
+| `phase2/work/COD-20260909-3060-SM86-LOADER-FIX.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/COD-20260909-3060-SM86-LOADER-FIX.md` |
+| `phase2/work/CODE-20260909-3060-RUNTIME-COMPAT.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/CODE-20260909-3060-RUNTIME-COMPAT.md` |
+| `phase2/work/CODE-20260909-ALLOC-FAILED-TERMINAL.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/CODE-20260909-ALLOC-FAILED-TERMINAL.md` |
+| `phase2/work/CODE-20260909-CAPACITY-SEMANTICS.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/CODE-20260909-CAPACITY-SEMANTICS.md` |
+| `phase2/work/CODE-20260909-HOST-ALLOC-EPOCH-FINAL-FIX.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/CODE-20260909-HOST-ALLOC-EPOCH-FINAL-FIX.md` |
+| `phase2/work/CODE-20260909-HOST-ALLOC-EPOCH-TELEMETRY-FINAL.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/CODE-20260909-HOST-ALLOC-EPOCH-TELEMETRY-FINAL.md` |
+| `phase2/work/CODE-20260909-HOST-ALLOC-EPOCH.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/CODE-20260909-HOST-ALLOC-EPOCH.md` |
+| `phase2/work/CODE-20260909-HYBRID-FRONTIER-GUARD.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/CODE-20260909-HYBRID-FRONTIER-GUARD.md` |
+| `phase2/work/CODE-20260909-PREFETCH-WAKE.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/CODE-20260909-PREFETCH-WAKE.md` |
+| `phase2/work/CODE-20260909-PREFILL-GRAPH-RECORDER-FIX.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/CODE-20260909-PREFILL-GRAPH-RECORDER-FIX.md` |
+| `phase2/work/CODE-20260909-SM86-GDC-AST-FIX.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/CODE-20260909-SM86-GDC-AST-FIX.md` |
+| `phase2/work/CODE-20260909-SM86-GDC-FOLLOWUP.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/CODE-20260909-SM86-GDC-FOLLOWUP.md` |
+| `phase2/work/CODE-20260909-SM86-GDC-QK-FIX.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/CODE-20260909-SM86-GDC-QK-FIX.md` |
+| `phase2/work/CODE-20260909-SM86-GDC.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/CODE-20260909-SM86-GDC.md` |
+| `phase2/work/CODE-20260909-SM86-QK-DOMINANCE-FIX.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/CODE-20260909-SM86-QK-DOMINANCE-FIX.md` |
+| `phase2/work/CODE3060-RH-CONTRACT-CORRECTIONS-20260909.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/CODE3060-RH-CONTRACT-CORRECTIONS-20260909.md` |
+| `phase2/work/CODE3060-RH-GATE-SKIP-FIX-20260909.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/CODE3060-RH-GATE-SKIP-FIX-20260909.md` |
+| `phase2/work/CODE3060-RH-HYBRID-DISCARD-READY-20260909.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/CODE3060-RH-HYBRID-DISCARD-READY-20260909.md` |
+| `phase2/work/CODE3060-RH-ISSUE-TELEMETRY-JOIN-20260909.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/CODE3060-RH-ISSUE-TELEMETRY-JOIN-20260909.md` |
+| `phase2/work/CODE3060-RH-PREADMISSION-20260909.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/CODE3060-RH-PREADMISSION-20260909.md` |
+| `phase2/work/CODE3060-RH-READY-HOST-AUX-20260909.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/CODE3060-RH-READY-HOST-AUX-20260909.md` |
+| `phase2/work/CODE3060-RH-VIEW-TYPE-20260909.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/CODE3060-RH-VIEW-TYPE-20260909.md` |
+| `phase2/work/CODER-RH-DUPLICATE-TEST-FIX-20260910.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/CODER-RH-DUPLICATE-TEST-FIX-20260910.md` |
+| `phase2/work/CODER-RH-RELEASE-EPOCH-FIX-20260910.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/CODER-RH-RELEASE-EPOCH-FIX-20260910.md` |
+| `phase2/work/CODER-RH-RELEASE-EPOCH-TEST-GAP-20260910.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/CODER-RH-RELEASE-EPOCH-TEST-GAP-20260910.md` |
+| `phase2/work/CODER-RH-STALE-NEGATIVE-20260910.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/CODER-RH-STALE-NEGATIVE-20260910.md` |
+| `phase2/work/CODER3060-RH-MATCH-EMIT-ROBUST-20260910.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/CODER3060-RH-MATCH-EMIT-ROBUST-20260910.md` |
+| `phase2/work/CODER3060-RH-MATCH-PREP-CLOSE-20260909.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/CODER3060-RH-MATCH-PREP-CLOSE-20260909.md` |
+| `phase2/work/CODER3060-RH-MATCH-PREP-IMPLEMENT-20260909.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/CODER3060-RH-MATCH-PREP-IMPLEMENT-20260909.md` |
+| `phase2/work/CODER3060-RH-MATCH-TELEMETRY-FIX-20260909.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/CODER3060-RH-MATCH-TELEMETRY-FIX-20260909.md` |
+| `phase2/work/CODER3060-RH-SPEC-BUDGET-RETRIGGER-20260910.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/CODER3060-RH-SPEC-BUDGET-RETRIGGER-20260910.md` |
+| `phase2/work/CODER3060-RH-TELEMETRY-FAILURE-MARKER-20260910.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/CODER3060-RH-TELEMETRY-FAILURE-MARKER-20260910.md` |
+| `phase2/work/CODER3060-RH-TENSOR-BOOL-FIX-20260910.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/CODER3060-RH-TENSOR-BOOL-FIX-20260910.md` |
+| `phase2/work/CTX-20260909-RH-MATCH-FINDING.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/CTX-20260909-RH-MATCH-FINDING.md` |
+| `phase2/work/DBG-20260908-P0-RESIDENCY-BARRIER-LIVE-R14-QUEUE-DRAIN.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/DBG-20260908-P0-RESIDENCY-BARRIER-LIVE-R14-QUEUE-DRAIN.md` |
+| `phase2/work/DBG-20260908-P0-RESIDENCY-BARRIER-R15-NO-OUTCOME.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/DBG-20260908-P0-RESIDENCY-BARRIER-R15-NO-OUTCOME.md` |
+| `phase2/work/DBG-20260908-P0-RESIDENCY-EVIDENCE-MAPPING.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/DBG-20260908-P0-RESIDENCY-EVIDENCE-MAPPING.md` |
+| `phase2/work/DBG-20260908-P0-RESIDENCY-R17-OUTCOME-TRIGGER.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/DBG-20260908-P0-RESIDENCY-R17-OUTCOME-TRIGGER.md` |
+| `phase2/work/DBG-20260908-P0-V4-FINDINGS.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/DBG-20260908-P0-V4-FINDINGS.md` |
+| `phase2/work/DBG-20260908-T38C-S25-MAMBA-OMISSION.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/DBG-20260908-T38C-S25-MAMBA-OMISSION.md` |
+| `phase2/work/DBG-20260908-T38C.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/DBG-20260908-T38C.md` |
+| `phase2/work/DBG-20260909-RH-NO-STAGING.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/DBG-20260909-RH-NO-STAGING.md` |
+| `phase2/work/DBG-20260909-RH-TELEMETRY-CAUSE.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/DBG-20260909-RH-TELEMETRY-CAUSE.md` |
+| `phase2/work/DEBUG-20260908-P0-MAMBA-FINAL-BOUNDARY-OWNER.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/DEBUG-20260908-P0-MAMBA-FINAL-BOUNDARY-OWNER.md` |
+| `phase2/work/DEBUG-20260908-P0-R3-V3-GAP.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/DEBUG-20260908-P0-R3-V3-GAP.md` |
+| `phase2/work/DEBUG-20260908-P0-R7-MISSING-BUILD-JOIN.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/DEBUG-20260908-P0-R7-MISSING-BUILD-JOIN.md` |
+| `phase2/work/DEBUG-20260908-P0-R8-ROOT-NODE.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/DEBUG-20260908-P0-R8-ROOT-NODE.md` |
+| `phase2/work/DEBUG-20260909-3060-RUNTIME-COMPAT.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/DEBUG-20260909-3060-RUNTIME-COMPAT.md` |
+| `phase2/work/DEBUG-20260909-HOST-ALLOC-WAKE.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/DEBUG-20260909-HOST-ALLOC-WAKE.md` |
+| `phase2/work/DEBUG-20260909-MAMBA-FILE-MISMATCH.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/DEBUG-20260909-MAMBA-FILE-MISMATCH.md` |
+| `phase2/work/DEBUG-20260909-P4-QUEUE-AUDIT.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/DEBUG-20260909-P4-QUEUE-AUDIT.md` |
+| `phase2/work/DEBUG-20260909-POST-GUARD-CAPACITY.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/DEBUG-20260909-POST-GUARD-CAPACITY.md` |
+| `phase2/work/DEBUG3060-RH-MATCH-RUNTIME-PROVENANCE-20260910.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/DEBUG3060-RH-MATCH-RUNTIME-PROVENANCE-20260910.md` |
+| `phase2/work/DEBUG3060-RH-READY-RELEASE-20260910.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/DEBUG3060-RH-READY-RELEASE-20260910.md` |
+| `phase2/work/DEBUG3060-RH-SPEC-BUDGET-RETRIGGER-20260910.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/DEBUG3060-RH-SPEC-BUDGET-RETRIGGER-20260910.md` |
+| `phase2/work/DELETE-ALLOWLIST-20260917.md` | 1 | 1 | 0 | 0.05 | `phase2-hicache-design/work/DELETE-ALLOWLIST-20260917.md` |
+| `phase2/work/DEVOPS-20260908-P0-EMITTER-FIX1-REMOTE-PREFLIGHT.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/DEVOPS-20260908-P0-EMITTER-FIX1-REMOTE-PREFLIGHT.md` |
+| `phase2/work/DEVOPS-20260908-P0-EMITTER-FIX2-REMOTE-PREFLIGHT.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/DEVOPS-20260908-P0-EMITTER-FIX2-REMOTE-PREFLIGHT.md` |
+| `phase2/work/DEVOPS-20260908-P0-R7-JOIN-ROBUSTNESS-REMOTE-PREFLIGHT.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/DEVOPS-20260908-P0-R7-JOIN-ROBUSTNESS-REMOTE-PREFLIGHT.md` |
+| `phase2/work/DEVOPS-20260908-P0-S25-LIVE-R1.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/DEVOPS-20260908-P0-S25-LIVE-R1.md` |
+| `phase2/work/DEVOPS-20260908-P0-S25-LIVE-R2.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/DEVOPS-20260908-P0-S25-LIVE-R2.md` |
+| `phase2/work/DEVOPS-20260908-P0-S25-LIVE-R3-CLEANUP.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/DEVOPS-20260908-P0-S25-LIVE-R3-CLEANUP.md` |
+| `phase2/work/DEVOPS-20260908-P0-S25-LIVE-R3-MONITOR.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/DEVOPS-20260908-P0-S25-LIVE-R3-MONITOR.md` |
+| `phase2/work/DEVOPS-20260908-P0-S25-LIVE-R3.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/DEVOPS-20260908-P0-S25-LIVE-R3.md` |
+| `phase2/work/DEVOPS-20260908-P0-S25-LIVE-R4-EXACT.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/DEVOPS-20260908-P0-S25-LIVE-R4-EXACT.md` |
+| `phase2/work/DEVOPS-20260908-P0-S25-LIVE-R5-EXACT-RETRY.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/DEVOPS-20260908-P0-S25-LIVE-R5-EXACT-RETRY.md` |
+| `phase2/work/DEVOPS-20260908-P0-S25-LIVE-R5-EXACT.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/DEVOPS-20260908-P0-S25-LIVE-R5-EXACT.md` |
+| `phase2/work/DEVOPS-20260908-P0-S25-LIVE-R6-EXACT.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/DEVOPS-20260908-P0-S25-LIVE-R6-EXACT.md` |
+| `phase2/work/DEVOPS-20260908-P0-S25-LIVE-R7-EXACT.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/DEVOPS-20260908-P0-S25-LIVE-R7-EXACT.md` |
+| `phase2/work/DEVOPS-20260908-P0-S25-LIVE-R8-CLEANUP.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/DEVOPS-20260908-P0-S25-LIVE-R8-CLEANUP.md` |
+| `phase2/work/DEVOPS-20260908-P0-V2-REMOTE-TEST-R2.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/DEVOPS-20260908-P0-V2-REMOTE-TEST-R2.md` |
+| `phase2/work/DEVOPS-20260908-P0-V2-REMOTE-TEST.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/DEVOPS-20260908-P0-V2-REMOTE-TEST.md` |
+| `phase2/work/DEVOPS-20260908-P0-V3-REMOTE-TEST.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/DEVOPS-20260908-P0-V3-REMOTE-TEST.md` |
+| `phase2/work/DEVOPS-20260908-P0-V43-REMOTE-SYNC-CORRECTION.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/DEVOPS-20260908-P0-V43-REMOTE-SYNC-CORRECTION.md` |
+| `phase2/work/DEVOPS-20260908-P0-V43-REMOTE-TEST.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/DEVOPS-20260908-P0-V43-REMOTE-TEST.md` |
+| `phase2/work/DEVOPS-20260908-REMOTE-CAPACITY-RECOVERY.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/DEVOPS-20260908-REMOTE-CAPACITY-RECOVERY.md` |
+| `phase2/work/DEVOPS-20260908-REMOTE-EXPERIMENT-MACHINE-CLEANUP-FIX1.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/DEVOPS-20260908-REMOTE-EXPERIMENT-MACHINE-CLEANUP-FIX1.md` |
+| `phase2/work/DEVOPS-20260909-RECONSTRUCT-SM86-LAUNCH.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/DEVOPS-20260909-RECONSTRUCT-SM86-LAUNCH.md` |
+| `phase2/work/DIRECTORY-MAP-AND-MERGE-EVALUATION-20260917.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/DIRECTORY-MAP-AND-MERGE-EVALUATION-20260917.md` |
+| `phase2/work/DISPATCH-P0A-REMOTE-RECONCILIATION-20260910.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/DISPATCH-P0A-REMOTE-RECONCILIATION-20260910.md` |
+| `phase2/work/DOMAIN-20260908-P0-MAMBA-FINISH-LENGTH.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/DOMAIN-20260908-P0-MAMBA-FINISH-LENGTH.md` |
+| `phase2/work/E-C1-bundle` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/E-C1-bundle/ec1_probe.py` |
+| `phase2/work/E-PHASE-CLOSURE-20260912.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/E-PHASE-CLOSURE-20260912.md` |
+| `phase2/work/E0-BACKEND-IDENTITY-AUDIT-20260912.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/E0-BACKEND-IDENTITY-AUDIT-20260912.md` |
+| `phase2/work/E1-EXTENT-L3-ARCHITECTURE-FREEZE-20260912.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/E1-EXTENT-L3-ARCHITECTURE-FREEZE-20260912.md` |
+| `phase2/work/E2-EXTENT-DEPLOYMENT-20260912.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/E2-EXTENT-DEPLOYMENT-20260912.md` |
+| `phase2/work/E4-EXTENT-PERFORMANCE-20260912.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/E4-EXTENT-PERFORMANCE-20260912.md` |
+| `phase2/work/EPOCH-RESUME-20260917-R2.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/EPOCH-RESUME-20260917-R2.md` |
+| `phase2/work/EXEC-20260908-P0-BARRIER-VEHICLE.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/EXEC-20260908-P0-BARRIER-VEHICLE.md` |
+| `phase2/work/EXP-20260908-T38C-PAIRED-TRACE-S25.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/EXP-20260908-T38C-PAIRED-TRACE-S25.md` |
+| `phase2/work/EXT-20260908-3060-4B-AWQ-CANDIDATES.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/EXT-20260908-3060-4B-AWQ-CANDIDATES.md` |
+| `phase2/work/F1-OPTION-A-BOUND-PROOF-NEGATIVE-20260917.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/F1-OPTION-A-BOUND-PROOF-NEGATIVE-20260917.md` |
+| `phase2/work/F1-OPTION-A-BOUND-PROOF-SPECIALIST-20260917.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/F1-OPTION-A-BOUND-PROOF-SPECIALIST-20260917.md` |
+| `phase2/work/F1-OPTION-C-AUTHORIZED-20260917.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/F1-OPTION-C-AUTHORIZED-20260917.md` |
+| `phase2/work/F1-OPTION-C-IMPLEMENTATION-VERIFIED-20260917.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/F1-OPTION-C-IMPLEMENTATION-VERIFIED-20260917.md` |
+| `phase2/work/F1-ROOT-CAUSE-REPORT-20260916.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/F1-ROOT-CAUSE-REPORT-20260916.md` |
+| `phase2/work/F1-SCOPE-EXPANSION-OWNER-RULING-20260916.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/F1-SCOPE-EXPANSION-OWNER-RULING-20260916.md` |
+| `phase2/work/FINAL-CAMPAIGN-VERDICT-20260917.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/FINAL-CAMPAIGN-VERDICT-20260917.md` |
+| `phase2/work/G1-ACCEPTANCE-TEST-CONTRACT-20260912.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/G1-ACCEPTANCE-TEST-CONTRACT-20260912.md` |
+| `phase2/work/G1-CORPUS-RECON-20260912.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/G1-CORPUS-RECON-20260912.md` |
+| `phase2/work/G1-DECISION-BRIEF-20260912.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/G1-DECISION-BRIEF-20260912.md` |
+| `phase2/work/G1-IMPLEMENTATION-NOTES-20260912.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/G1-IMPLEMENTATION-NOTES-20260912.md` |
+| `phase2/work/G1-IMPLEMENTATION-PLAN-20260912.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/G1-IMPLEMENTATION-PLAN-20260912.md` |
+| `phase2/work/G1-TARGET-RECON-20260912.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/G1-TARGET-RECON-20260912.md` |
+| `phase2/work/GATE-B-PASS-AND-F1-ROOT-CAUSE-20260916.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/GATE-B-PASS-AND-F1-ROOT-CAUSE-20260916.md` |
+| `phase2/work/GATE-HARNESS-AUDIT-VERDICT-20260917.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/GATE-HARNESS-AUDIT-VERDICT-20260917.md` |
+| `phase2/work/GGUF-ARTIFACT-PROVENANCE-20260917.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/GGUF-ARTIFACT-PROVENANCE-20260917.md` |
+| `phase2/work/HANDOFF-2026-09-07.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/HANDOFF-2026-09-07.md` |
+| `phase2/work/HANDOFF-2026-09-10-48H-SUMMARY.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/HANDOFF-2026-09-10-48H-SUMMARY.md` |
+| `phase2/work/HANDOFF-2026-09-10-RH-SPEC-BUDGET-SESSION2.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/HANDOFF-2026-09-10-RH-SPEC-BUDGET-SESSION2.md` |
+| `phase2/work/HANDOFF-2026-09-10-RH-SPEC-BUDGET.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/HANDOFF-2026-09-10-RH-SPEC-BUDGET.md` |
+| `phase2/work/INDEX-20260911.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/INDEX-20260911.md` |
+| `phase2/work/INDEX3060-RH-EVIDENCE-SESSION3-B2-20260910.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/INDEX3060-RH-EVIDENCE-SESSION3-B2-20260910.md` |
+| `phase2/work/INVESTIGATE-SUBAGENT-CONTEXT-INHERITANCE-20260911.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/INVESTIGATE-SUBAGENT-CONTEXT-INHERITANCE-20260911.md` |
+| `phase2/work/LOCAL-3090-ENV-20260911-R104.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/LOCAL-3090-ENV-20260911-R104.md` |
+| `phase2/work/LOCAL-3090-ISOLATE-20260911-R108.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/LOCAL-3090-ISOLATE-20260911-R108.md` |
+| `phase2/work/LOCAL-3090-SERVER-20260911-R105b.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/LOCAL-3090-SERVER-20260911-R105b.md` |
+| `phase2/work/LOCAL-3090-SERVER-20260911-R112.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/LOCAL-3090-SERVER-20260911-R112.md` |
+| `phase2/work/LOCAL-COMMIT-BASELINE.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/LOCAL-COMMIT-BASELINE.md` |
+| `phase2/work/M1-CACHE-IDENTITY-CLOSURE-20260917.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/M1-CACHE-IDENTITY-CLOSURE-20260917.md` |
+| `phase2/work/MEM-CONTEXT-CLEANUP-P0A-20260910.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/MEM-CONTEXT-CLEANUP-P0A-20260910.md` |
+| `phase2/work/MEM-P0A-FINAL-SNAPSHOT-20260910.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/MEM-P0A-FINAL-SNAPSHOT-20260910.md` |
+| `phase2/work/OPS-20260908-3060-12G-ENV-KERNEL-PREREQS.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-12G-ENV-KERNEL-PREREQS.md` |
+| `phase2/work/OPS-20260908-3060-12G-ENV-KERNEL-RETRY.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-12G-ENV-KERNEL-RETRY.md` |
+| `phase2/work/OPS-20260908-3060-12G-ENV-KERNEL.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-12G-ENV-KERNEL.md` |
+| `phase2/work/OPS-20260908-3060-12G-QWEN35-4B-DEPS-FINISH.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-12G-QWEN35-4B-DEPS-FINISH.md` |
+| `phase2/work/OPS-20260908-3060-12G-QWEN35-4B-ENV-BOOTSTRAP-2.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/OPS-20260908-3060-12G-QWEN35-4B-ENV-BOOTSTRAP-2.md` |
+| `phase2/work/OPS-20260908-3060-12G-QWEN35-4B-ENV-BOOTSTRAP.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-12G-QWEN35-4B-ENV-BOOTSTRAP.md` |
+| `phase2/work/OPS-20260908-3060-12G-QWEN35-4B-SOURCE-SYNC-RUNTIME.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-12G-QWEN35-4B-SOURCE-SYNC-RUNTIME.md` |
+| `phase2/work/OPS-20260908-3060-12G-SOURCE-PACK-SYNC.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-12G-SOURCE-PACK-SYNC.md` |
+| `phase2/work/OPS-20260908-3060-AOT-DEPS-LOCAL-053.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-AOT-DEPS-LOCAL-053.md` |
+| `phase2/work/OPS-20260908-3060-AOT-DEPS-POLL-057.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-AOT-DEPS-POLL-057.md` |
+| `phase2/work/OPS-20260908-3060-AOT-DEPS-POLL-058.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-AOT-DEPS-POLL-058.md` |
+| `phase2/work/OPS-20260908-3060-AOT-DEPS-REMOTE-054.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-AOT-DEPS-REMOTE-054.md` |
+| `phase2/work/OPS-20260908-3060-AOT-DEPS-REMOTE-056.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-AOT-DEPS-REMOTE-056.md` |
+| `phase2/work/OPS-20260908-3060-CHECKPOINT-DIRECT-EXACT.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-CHECKPOINT-DIRECT-EXACT.md` |
+| `phase2/work/OPS-20260908-3060-CHECKPOINT-DIRECT.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-CHECKPOINT-DIRECT.md` |
+| `phase2/work/OPS-20260908-3060-CHECKPOINT-DOWNLOAD-028.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-CHECKPOINT-DOWNLOAD-028.md` |
+| `phase2/work/OPS-20260908-3060-CHECKPOINT-DOWNLOAD.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-CHECKPOINT-DOWNLOAD.md` |
+| `phase2/work/OPS-20260908-3060-CURRENT-AUDIT-031.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-CURRENT-AUDIT-031.md` |
+| `phase2/work/OPS-20260908-3060-DEPS-AUDIT-033.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-DEPS-AUDIT-033.md` |
+| `phase2/work/OPS-20260908-3060-ENV-MINIMAL-VENV.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-ENV-MINIMAL-VENV.md` |
+| `phase2/work/OPS-20260908-3060-ENV-PROVISION.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-ENV-PROVISION.md` |
+| `phase2/work/OPS-20260908-3060-ENV-RECOVER.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-ENV-RECOVER.md` |
+| `phase2/work/OPS-20260908-3060-FLASHMLA-DEPS-LOCAL-055.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-FLASHMLA-DEPS-LOCAL-055.md` |
+| `phase2/work/OPS-20260908-3060-KERNEL-BUILD.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-KERNEL-BUILD.md` |
+| `phase2/work/OPS-20260908-3060-KERNEL-CUDA12-NARROW-050.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-KERNEL-CUDA12-NARROW-050.md` |
+| `phase2/work/OPS-20260908-3060-KERNEL-CUDA12-NARROW-051.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-KERNEL-CUDA12-NARROW-051.md` |
+| `phase2/work/OPS-20260908-3060-KERNEL-CUDA12-NARROW-052.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-KERNEL-CUDA12-NARROW-052.md` |
+| `phase2/work/OPS-20260908-3060-KERNEL-INSTALL.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-KERNEL-INSTALL.md` |
+| `phase2/work/OPS-20260908-3060-KERNEL-MICROCHECK.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-KERNEL-MICROCHECK.md` |
+| `phase2/work/OPS-20260908-3060-KERNEL-POLL-030.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-KERNEL-POLL-030.md` |
+| `phase2/work/OPS-20260908-3060-KERNEL-POLL.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-KERNEL-POLL.md` |
+| `phase2/work/OPS-20260908-3060-KERNEL-REBUILD-034.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-KERNEL-REBUILD-034.md` |
+| `phase2/work/OPS-20260908-3060-KERNEL-REBUILD-POLL-035.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-KERNEL-REBUILD-POLL-035.md` |
+| `phase2/work/OPS-20260908-3060-KERNEL-REBUILD-POLL-036.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-KERNEL-REBUILD-POLL-036.md` |
+| `phase2/work/OPS-20260908-3060-KERNEL-REBUILD-POLL-037.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-KERNEL-REBUILD-POLL-037.md` |
+| `phase2/work/OPS-20260908-3060-KERNEL-REVALIDATE-038.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-KERNEL-REVALIDATE-038.md` |
+| `phase2/work/OPS-20260908-3060-KERNEL-STATUS.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-KERNEL-STATUS.md` |
+| `phase2/work/OPS-20260908-3060-KERNEL-TERMINAL-POLL-039.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-KERNEL-TERMINAL-POLL-039.md` |
+| `phase2/work/OPS-20260908-3060-KERNEL-WHEEL-045-INSPECT-049.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-KERNEL-WHEEL-045-INSPECT-049.md` |
+| `phase2/work/OPS-20260908-3060-KERNEL-WHEEL-INSTALL-045.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-KERNEL-WHEEL-INSTALL-045.md` |
+| `phase2/work/OPS-20260908-3060-KERNEL-WHEEL-LOCAL-041.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-KERNEL-WHEEL-LOCAL-041.md` |
+| `phase2/work/OPS-20260908-3060-KERNEL-WHEEL-LOCAL-042.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-KERNEL-WHEEL-LOCAL-042.md` |
+| `phase2/work/OPS-20260908-3060-KERNEL-WHEEL-RESUME-040.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-KERNEL-WHEEL-RESUME-040.md` |
+| `phase2/work/OPS-20260908-3060-KERNEL-WHEEL-RETRY.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-KERNEL-WHEEL-RETRY.md` |
+| `phase2/work/OPS-20260908-3060-KERNEL-WHEEL-UPLOAD-043.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-KERNEL-WHEEL-UPLOAD-043.md` |
+| `phase2/work/OPS-20260908-3060-KERNEL-WHEEL-UPLOAD-POLL-044.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-KERNEL-WHEEL-UPLOAD-POLL-044.md` |
+| `phase2/work/OPS-20260908-3060-KERNEL-WHEEL.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-KERNEL-WHEEL.md` |
+| `phase2/work/OPS-20260908-3060-MINIMAL-BUILD-EXACT.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-MINIMAL-BUILD-EXACT.md` |
+| `phase2/work/OPS-20260908-3060-MINIMAL-BUILD-RETRY.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-MINIMAL-BUILD-RETRY.md` |
+| `phase2/work/OPS-20260908-3060-MINIMAL-BUILD.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-MINIMAL-BUILD.md` |
+| `phase2/work/OPS-20260908-3060-NVRTC13-LOCAL-046.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-NVRTC13-LOCAL-046.md` |
+| `phase2/work/OPS-20260908-3060-STORAGE-CHECKPOINT.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-STORAGE-CHECKPOINT.md` |
+| `phase2/work/OPS-20260908-3060-STORAGE-MICROCHECK.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-3060-STORAGE-MICROCHECK.md` |
+| `phase2/work/OPS-20260908-OPT-COMMIT-MERGE-3060-BRANCH.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-OPT-COMMIT-MERGE-3060-BRANCH.md` |
+| `phase2/work/OPS-20260908-OPT-COMMIT-TOPOLOGY-FIX.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-OPT-COMMIT-TOPOLOGY-FIX.md` |
+| `phase2/work/OPS-20260908-P0-R17-TRANSIENT-CLEANUP.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-P0-R17-TRANSIENT-CLEANUP.md` |
+| `phase2/work/OPS-20260908-SSH-KEY.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260908-SSH-KEY.md` |
+| `phase2/work/OPS-20260909-3060-MINIMAL-BUILD-CORRECT-SOURCE.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260909-3060-MINIMAL-BUILD-CORRECT-SOURCE.md` |
+| `phase2/work/OPS-20260909-3060-MINIMAL-BUILD-EXACT-LOCALDEPS.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260909-3060-MINIMAL-BUILD-EXACT-LOCALDEPS.md` |
+| `phase2/work/OPS-20260909-3060-MINIMAL-BUILD-FINAL.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260909-3060-MINIMAL-BUILD-FINAL.md` |
+| `phase2/work/OPS-20260909-3060-MINIMAL-BUILD-LOCALDEPS.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260909-3060-MINIMAL-BUILD-LOCALDEPS.md` |
+| `phase2/work/OPS-20260909-3060-MINIMAL-BUILD-RESTORE.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260909-3060-MINIMAL-BUILD-RESTORE.md` |
+| `phase2/work/OPS-20260909-3060-MINIMAL-BUILD-VENV.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260909-3060-MINIMAL-BUILD-VENV.md` |
+| `phase2/work/OPS-20260909-3060-RUNTIME-DIAG.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/OPS-20260909-3060-RUNTIME-DIAG.md` |
+| `phase2/work/OPS-20260909-3060-RUNTIME-SMOKE-DEPS.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260909-3060-RUNTIME-SMOKE-DEPS.md` |
+| `phase2/work/OPS-20260909-3060-RUNTIME-SMOKE.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260909-3060-RUNTIME-SMOKE.md` |
+| `phase2/work/OPS-20260909-3060-SM86-BUILD-FINAL.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260909-3060-SM86-BUILD-FINAL.md` |
+| `phase2/work/OPS-20260909-3060-SM86-IMPORT.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260909-3060-SM86-IMPORT.md` |
+| `phase2/work/OPS-20260909-DEPLOY-CAPACITY-BUNDLE.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260909-DEPLOY-CAPACITY-BUNDLE.md` |
+| `phase2/work/OPS-20260909-DEPLOY-CAPACITY-SEMANTICS.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260909-DEPLOY-CAPACITY-SEMANTICS.md` |
+| `phase2/work/OPS-20260909-DEPLOY-HOST-ALLOC-FINAL.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260909-DEPLOY-HOST-ALLOC-FINAL.md` |
+| `phase2/work/OPS-20260909-DEPLOY-HYBRID-GUARD.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260909-DEPLOY-HYBRID-GUARD.md` |
+| `phase2/work/OPS-20260909-GPU-OWNER-AUDIT-RETRY.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260909-GPU-OWNER-AUDIT-RETRY.md` |
+| `phase2/work/OPS-20260909-GPU-OWNER-AUDIT.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260909-GPU-OWNER-AUDIT.md` |
+| `phase2/work/OPS-20260909-MAMBA-INVENTORY.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260909-MAMBA-INVENTORY.md` |
+| `phase2/work/OPS-20260909-RESTART-NINJA.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260909-RESTART-NINJA.md` |
+| `phase2/work/OPS-20260909-RESTART-SEEDED-HOST-ALLOC.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260909-RESTART-SEEDED-HOST-ALLOC.md` |
+| `phase2/work/OPS-20260909-RH-OFF-CLEAN-RESTART.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260909-RH-OFF-CLEAN-RESTART.md` |
+| `phase2/work/OPS-20260909-RH-OFF-RESTART.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260909-RH-OFF-RESTART.md` |
+| `phase2/work/OPS-20260909-RH-ON-RESTART.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260909-RH-ON-RESTART.md` |
+| `phase2/work/OPS-20260909-RH-STARTUP-NVRUNTIME-RETRY.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS-20260909-RH-STARTUP-NVRUNTIME-RETRY.md` |
+| `phase2/work/OPS-CLOSURE-AND-GATEA-BASELINE-20260917.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/OPS-CLOSURE-AND-GATEA-BASELINE-20260917.md` |
+| `phase2/work/OPS-P0-A-REMOTE-RECONCILE-PREP-20260910.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/OPS-P0-A-REMOTE-RECONCILE-PREP-20260910.md` |
+| `phase2/work/OPS3060-BF16-CORRECTNESS-SMOKE-20260910.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS3060-BF16-CORRECTNESS-SMOKE-20260910.md` |
+| `phase2/work/OPS3060-BF16-CORRECTNESS-SMOKE-R2-20260910.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS3060-BF16-CORRECTNESS-SMOKE-R2-20260910.md` |
+| `phase2/work/OPS3060-BF16-CORRECTNESS-SMOKE-R3-20260910.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS3060-BF16-CORRECTNESS-SMOKE-R3-20260910.md` |
+| `phase2/work/OPS3060-BF16-WEIGHTS-SYNC-20260910-R3.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS3060-BF16-WEIGHTS-SYNC-20260910-R3.md` |
+| `phase2/work/OPS3060-CONTEXT-CAPACITY-R3-20260910.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS3060-CONTEXT-CAPACITY-R3-20260910.md` |
+| `phase2/work/OPS3060-DECODE-CONCURRENCY-SWEEP-R1-20260910.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS3060-DECODE-CONCURRENCY-SWEEP-R1-20260910.md` |
+| `phase2/work/OPS3060-DECODE-CONCURRENCY-SWEEP-R2-20260910.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS3060-DECODE-CONCURRENCY-SWEEP-R2-20260910.md` |
+| `phase2/work/OPS3060-DEPLOY-9213-RH-OFF-20260909.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS3060-DEPLOY-9213-RH-OFF-20260909.md` |
+| `phase2/work/OPS3060-DEPLOY-9213-RH-ON-20260910.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS3060-DEPLOY-9213-RH-ON-20260910.md` |
+| `phase2/work/OPS3060-DEPLOY-F629-RH-ON-20260909.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS3060-DEPLOY-F629-RH-ON-20260909.md` |
+| `phase2/work/OPS3060-DEPLOY-RH-FINAL-20260909.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS3060-DEPLOY-RH-FINAL-20260909.md` |
+| `phase2/work/OPS3060-HICACHE-RESTORE-R3-20260910.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS3060-HICACHE-RESTORE-R3-20260910.md` |
+| `phase2/work/OPS3060-RH-ENV-PATH-RESTORE-20260910.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS3060-RH-ENV-PATH-RESTORE-20260910.md` |
+| `phase2/work/OPS3060-RH-FINAL-ON-RESTART.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS3060-RH-FINAL-ON-RESTART.md` |
+| `phase2/work/OPS3060-RH-HORIZON-COMPARE-R2-20260910.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS3060-RH-HORIZON-COMPARE-R2-20260910.md` |
+| `phase2/work/OPS3060-RH-MATCH-EMIT-DEPLOY-20260910.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/OPS3060-RH-MATCH-EMIT-DEPLOY-20260910.md` |
+| `phase2/work/OPS3060-RH-MATCH-EMIT-PROBE-20260910.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS3060-RH-MATCH-EMIT-PROBE-20260910.md` |
+| `phase2/work/OPS3060-RH-MATCH-EMIT-PROBE-SHORT-20260910.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS3060-RH-MATCH-EMIT-PROBE-SHORT-20260910.md` |
+| `phase2/work/OPS3060-RH-QUEUE-COMPARE-R1-20260910.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS3060-RH-QUEUE-COMPARE-R1-20260910.md` |
+| `phase2/work/OPS3060-RH-TELEMETRY-COMMIT-20260910.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS3060-RH-TELEMETRY-COMMIT-20260910.md` |
+| `phase2/work/OPS3060-RH-TELEMETRY-DEPLOY-PROBE-20260910.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS3060-RH-TELEMETRY-DEPLOY-PROBE-20260910.md` |
+| `phase2/work/OPS3060-RH-TELEMETRY-DEPLOY-PROBE-R3-20260910.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS3060-RH-TELEMETRY-DEPLOY-PROBE-R3-20260910.md` |
+| `phase2/work/OPS3060-RH-TELEMETRY-RUNTIME-20260910.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/OPS3060-RH-TELEMETRY-RUNTIME-20260910.md` |
+| `phase2/work/OPS3060-RH-TENSOR-BOOL-COMMIT-20260910.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS3060-RH-TENSOR-BOOL-COMMIT-20260910.md` |
+| `phase2/work/OPS3060-RH-TENSOR-BOOL-PROBE-R4-20260910.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPS3060-RH-TENSOR-BOOL-PROBE-R4-20260910.md` |
+| `phase2/work/OPTION-C-ORACLE-ADJUDICATION-VERDICT-20260917.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OPTION-C-ORACLE-ADJUDICATION-VERDICT-20260917.md` |
+| `phase2/work/ORCH-20260908-T38C-METRICS-ADDENDUM.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/ORCH-20260908-T38C-METRICS-ADDENDUM.md` |
+| `phase2/work/OWNER-RULINGS-HARNESS-AND-GPU-SCHEDULE-20260917.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/OWNER-RULINGS-HARNESS-AND-GPU-SCHEDULE-20260917.md` |
+| `phase2/work/P0-A-BUDGET-FIX-20260911-R11.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-A-BUDGET-FIX-20260911-R11.md` |
+| `phase2/work/P0-A-BUDGET-RECONCILE-20260911-R15.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-A-BUDGET-RECONCILE-20260911-R15.md` |
+| `phase2/work/P0-A-BUDGET-RERUN-20260911-R14.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-A-BUDGET-RERUN-20260911-R14.md` |
+| `phase2/work/P0-A-BUDGET-REVIEW-20260911-R12.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-A-BUDGET-REVIEW-20260911-R12.md` |
+| `phase2/work/P0-A-BUDGET-TRIAGE-20260911-R10.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P0-A-BUDGET-TRIAGE-20260911-R10.md` |
+| `phase2/work/P0-A-CLEAN-RERUN-20260911-R28.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-A-CLEAN-RERUN-20260911-R28.md` |
+| `phase2/work/P0-A-CLEAN-RERUN-20260911-R28.transcript` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P0-A-CLEAN-RERUN-20260911-R28.transcript` |
+| `phase2/work/P0-A-FAILURE-TRIAGE-20260911.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P0-A-FAILURE-TRIAGE-20260911.md` |
+| `phase2/work/P0-A-FINAL-RERUN-20260911-R23.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-A-FINAL-RERUN-20260911-R23.md` |
+| `phase2/work/P0-A-FIX-20260911-R4.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P0-A-FIX-20260911-R4.md` |
+| `phase2/work/P0-A-FIX-FIXTURES-20260911.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-A-FIX-FIXTURES-20260911.md` |
+| `phase2/work/P0-A-FIX-FIXTURES-REVIEW-20260911.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-A-FIX-FIXTURES-REVIEW-20260911.md` |
+| `phase2/work/P0-A-FIX-TYPED-20260911-R5.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-A-FIX-TYPED-20260911-R5.md` |
+| `phase2/work/P0-A-HOST-RELEASE-RECONCILE-20260911-R27.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-A-HOST-RELEASE-RECONCILE-20260911-R27.md` |
+| `phase2/work/P0-A-PROVENANCE-RERUN-20260911-R25.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-A-PROVENANCE-RERUN-20260911-R25.md` |
+| `phase2/work/P0-A-PROVENANCE-RERUN-20260911-R26.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-A-PROVENANCE-RERUN-20260911-R26.md` |
+| `phase2/work/P0-A-PROVENANCE-RERUN-20260911-R26.transcript` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-A-PROVENANCE-RERUN-20260911-R26.transcript` |
+| `phase2/work/P0-A-REMOTE-EXACT-20260911-R18.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-A-REMOTE-EXACT-20260911-R18.md` |
+| `phase2/work/P0-A-REMOTE-EXACT-20260911-R18.transcript` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-A-REMOTE-EXACT-20260911-R18.transcript` |
+| `phase2/work/P0-A-REMOTE-EXEC-20260911-R23.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-A-REMOTE-EXEC-20260911-R23.md` |
+| `phase2/work/P0-A-REMOTE-EXEC-20260911-R9.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-A-REMOTE-EXEC-20260911-R9.md` |
+| `phase2/work/P0-A-REMOTE-EXEC-20260911-R9.transcript` | 1 | 1 | 0 | 0.04 | `phase2-hicache-design/work/P0-A-REMOTE-EXEC-20260911-R9.transcript` |
+| `phase2/work/P0-A-REMOTE-FINAL-20260911-R16.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-A-REMOTE-FINAL-20260911-R16.md` |
+| `phase2/work/P0-A-REMOTE-FINAL-20260911-R16.transcript` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-A-REMOTE-FINAL-20260911-R16.transcript` |
+| `phase2/work/P0-A-REMOTE-RERUN-20260911-R17.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-A-REMOTE-RERUN-20260911-R17.md` |
+| `phase2/work/P0-A-REMOTE-RERUN-20260911-R19.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-A-REMOTE-RERUN-20260911-R19.md` |
+| `phase2/work/P0-A-REMOTE-RERUN-20260911-R7.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-A-REMOTE-RERUN-20260911-R7.md` |
+| `phase2/work/P0-A-REMOTE-SOURCE-RECONCILE-20260911.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-A-REMOTE-SOURCE-RECONCILE-20260911.md` |
+| `phase2/work/P0-A-REMOTE-TRANSFER-20260911-R8.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-A-REMOTE-TRANSFER-20260911-R8.md` |
+| `phase2/work/P0-A-RESIDENCY-FIX-20260911-R21.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-A-RESIDENCY-FIX-20260911-R21.md` |
+| `phase2/work/P0-A-RESIDENCY-REVIEW-20260911-R22.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-A-RESIDENCY-REVIEW-20260911-R22.md` |
+| `phase2/work/P0-A-RESIDENCY-TRIAGE-20260911-R20.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P0-A-RESIDENCY-TRIAGE-20260911-R20.md` |
+| `phase2/work/P0-A-REVIEW-20260911-R4.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P0-A-REVIEW-20260911-R4.md` |
+| `phase2/work/P0-A-REVIEW-TYPED-20260911-R5.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-A-REVIEW-TYPED-20260911-R5.md` |
+| `phase2/work/P0-A-RH-REGRESSION-20260911.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P0-A-RH-REGRESSION-20260911.md` |
+| `phase2/work/P0-A-RH-REGRESSION-FIXED-20260911.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P0-A-RH-REGRESSION-FIXED-20260911.md` |
+| `phase2/work/P0-A-RH-REGRESSION-RECONCILED-20260911-R2.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-A-RH-REGRESSION-RECONCILED-20260911-R2.md` |
+| `phase2/work/P0-A-RH-REGRESSION-RECONCILED-20260911-R3.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P0-A-RH-REGRESSION-RECONCILED-20260911-R3.md` |
+| `phase2/work/P0-A-TRIAGE-20260911-R4.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-A-TRIAGE-20260911-R4.md` |
+| `phase2/work/P0-A-VERIFY-20260911-R24.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P0-A-VERIFY-20260911-R24.md` |
+| `phase2/work/P0-A-VERIFY-20260911-R29.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-A-VERIFY-20260911-R29.md` |
+| `phase2/work/P0-B-AUTH-REVIEW-20260911-R31.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-B-AUTH-REVIEW-20260911-R31.md` |
+| `phase2/work/P0-B-CAPACITY-ACTION-20260911-R67.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/P0-B-CAPACITY-ACTION-20260911-R67.md` |
+| `phase2/work/P0-B-COVERAGE-GATE-20260911-R115.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P0-B-COVERAGE-GATE-20260911-R115.md` |
+| `phase2/work/P0-B-DURABLE-RECIPE-20260911-R114.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P0-B-DURABLE-RECIPE-20260911-R114.md` |
+| `phase2/work/P0-B-EVENT-CONTRACT-20260911-R101.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-B-EVENT-CONTRACT-20260911-R101.md` |
+| `phase2/work/P0-B-EXECUTION-PACKET-20260911-R79.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-B-EXECUTION-PACKET-20260911-R79.md` |
+| `phase2/work/P0-B-FAILURE-DETAIL-20260911-R45.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P0-B-FAILURE-DETAIL-20260911-R45.md` |
+| `phase2/work/P0-B-FAILURE-TRIAGE-20260911-R33.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-B-FAILURE-TRIAGE-20260911-R33.md` |
+| `phase2/work/P0-B-FINAL-CHAIN-20260911-R113.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/P0-B-FINAL-CHAIN-20260911-R113.md` |
+| `phase2/work/P0-B-FIXTURE-REPAIR-20260911-R47.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-B-FIXTURE-REPAIR-20260911-R47.md` |
+| `phase2/work/P0-B-FIXTURE-REVIEW-20260911-R36.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-B-FIXTURE-REVIEW-20260911-R36.md` |
+| `phase2/work/P0-B-FIXTURE-REVIEW-20260911-R49.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-B-FIXTURE-REVIEW-20260911-R49.md` |
+| `phase2/work/P0-B-FIXTURE-REVIEW-20260911-R50.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-B-FIXTURE-REVIEW-20260911-R50.md` |
+| `phase2/work/P0-B-FIXTURES-20260911-R35.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-B-FIXTURES-20260911-R35.md` |
+| `phase2/work/P0-B-FOCUSED-RERUN-20260911-R39.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-B-FOCUSED-RERUN-20260911-R39.md` |
+| `phase2/work/P0-B-FOCUSED-RERUN-20260911-R40.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-B-FOCUSED-RERUN-20260911-R40.md` |
+| `phase2/work/P0-B-FOCUSED-RERUN-20260911-R41.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-B-FOCUSED-RERUN-20260911-R41.md` |
+| `phase2/work/P0-B-FOCUSED-RERUN-20260911-R41.transcript` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-B-FOCUSED-RERUN-20260911-R41.transcript` |
+| `phase2/work/P0-B-FOCUSED-RERUN-20260911-R42.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-B-FOCUSED-RERUN-20260911-R42.md` |
+| `phase2/work/P0-B-FOCUSED-RERUN-20260911-R51.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-B-FOCUSED-RERUN-20260911-R51.md` |
+| `phase2/work/P0-B-FOCUSED-RERUN-20260911-R51.transcript` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P0-B-FOCUSED-RERUN-20260911-R51.transcript` |
+| `phase2/work/P0-B-FOCUSED-RERUN-20260911-R52.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-B-FOCUSED-RERUN-20260911-R52.md` |
+| `phase2/work/P0-B-FOCUSED-RERUN-20260911-R52.transcript` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-B-FOCUSED-RERUN-20260911-R52.transcript` |
+| `phase2/work/P0-B-FOCUSED-VERIFY-20260911-R53.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P0-B-FOCUSED-VERIFY-20260911-R53.md` |
+| `phase2/work/P0-B-GAP-CLASSIFY-20260911-R110.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/P0-B-GAP-CLASSIFY-20260911-R110.md` |
+| `phase2/work/P0-B-HARNESS-BIND-20260911-R91.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-B-HARNESS-BIND-20260911-R91.md` |
+| `phase2/work/P0-B-HARNESS-BIND-20260911-R92.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-B-HARNESS-BIND-20260911-R92.md` |
+| `phase2/work/P0-B-HARNESS-BOUNDARY-20260911-R38.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/P0-B-HARNESS-BOUNDARY-20260911-R38.md` |
+| `phase2/work/P0-B-HARNESS-EXECUTE-20260911-R82.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-B-HARNESS-EXECUTE-20260911-R82.md` |
+| `phase2/work/P0-B-HARNESS-IMPLEMENT-20260911-R76.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-B-HARNESS-IMPLEMENT-20260911-R76.md` |
+| `phase2/work/P0-B-HARNESS-IMPLEMENT-20260911-R89.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-B-HARNESS-IMPLEMENT-20260911-R89.md` |
+| `phase2/work/P0-B-HARNESS-IMPLEMENT-20260911-R94.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-B-HARNESS-IMPLEMENT-20260911-R94.md` |
+| `phase2/work/P0-B-HARNESS-IMPLEMENT-20260911-R97.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-B-HARNESS-IMPLEMENT-20260911-R97.md` |
+| `phase2/work/P0-B-HARNESS-RECONCILE-20260911-R85.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-B-HARNESS-RECONCILE-20260911-R85.md` |
+| `phase2/work/P0-B-HARNESS-RECOVER-20260911-R75.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-B-HARNESS-RECOVER-20260911-R75.md` |
+| `phase2/work/P0-B-HARNESS-REVIEW-20260911-R100.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-B-HARNESS-REVIEW-20260911-R100.md` |
+| `phase2/work/P0-B-HARNESS-REVIEW-20260911-R58.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-B-HARNESS-REVIEW-20260911-R58.md` |
+| `phase2/work/P0-B-HARNESS-REVIEW-20260911-R81.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-B-HARNESS-REVIEW-20260911-R81.md` |
+| `phase2/work/P0-B-HARNESS-REVIEW-20260911-R90.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-B-HARNESS-REVIEW-20260911-R90.md` |
+| `phase2/work/P0-B-HARNESS-REVIEW-20260911-R98.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P0-B-HARNESS-REVIEW-20260911-R98.md` |
+| `phase2/work/P0-B-HARNESS-SCOUT-20260911-R34.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/P0-B-HARNESS-SCOUT-20260911-R34.md` |
+| `phase2/work/P0-B-HARNESS-VERIFY-20260911-R88.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-B-HARNESS-VERIFY-20260911-R88.md` |
+| `phase2/work/P0-B-HARNESS-VERIFY-FILES-20260911-R83.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-B-HARNESS-VERIFY-FILES-20260911-R83.md` |
+| `phase2/work/P0-B-HOST-ALLOC-LIVENESS-SCOUT-20260911.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P0-B-HOST-ALLOC-LIVENESS-SCOUT-20260911.md` |
+| `phase2/work/P0-B-HOST-FIX-20260911-R48.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-B-HOST-FIX-20260911-R48.md` |
+| `phase2/work/P0-B-LINEAGE-COMPLETE-20260911-R106b.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P0-B-LINEAGE-COMPLETE-20260911-R106b.md` |
+| `phase2/work/P0-B-LIVE-CHAIN-20260911-R109.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/P0-B-LIVE-CHAIN-20260911-R109.md` |
+| `phase2/work/P0-B-LIVE-COLLECT-20260911-R37.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-B-LIVE-COLLECT-20260911-R37.md` |
+| `phase2/work/P0-B-LIVE-PLAN-20260911-R54.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/P0-B-LIVE-PLAN-20260911-R54.md` |
+| `phase2/work/P0-B-LIVENESS-RECON-20260911-R30.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-B-LIVENESS-RECON-20260911-R30.md` |
+| `phase2/work/P0-B-LIVENESS-RUN-20260911-R32.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-B-LIVENESS-RUN-20260911-R32.md` |
+| `phase2/work/P0-B-ORACLE-REFREEZE-20260911-R111.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/P0-B-ORACLE-REFREEZE-20260911-R111.md` |
+| `phase2/work/P0-B-PACKET-REVIEW-20260911-R80.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-B-PACKET-REVIEW-20260911-R80.md` |
+| `phase2/work/P0-B-R42-REVIEW-20260911-R44.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P0-B-R42-REVIEW-20260911-R44.md` |
+| `phase2/work/P0-B-R42-TRIAGE-20260911-R43.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P0-B-R42-TRIAGE-20260911-R43.md` |
+| `phase2/work/P0-B-R45-REVIEW-20260911-R46.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P0-B-R45-REVIEW-20260911-R46.md` |
+| `phase2/work/P0-B-R84-REVIEW-PREP-20260911-R86.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-B-R84-REVIEW-PREP-20260911-R86.md` |
+| `phase2/work/P0-B-REDUCER-FREEZE-20260911-R107.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P0-B-REDUCER-FREEZE-20260911-R107.md` |
+| `phase2/work/P0-B-STORAGE-DURABILITY-20260911-R116.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P0-B-STORAGE-DURABILITY-20260911-R116.md` |
+| `phase2/work/P0-B-TELEMETRY-IMPLEMENT-20260911-R102.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-B-TELEMETRY-IMPLEMENT-20260911-R102.md` |
+| `phase2/work/P0-C-3090-PROFILE-FREEZE-20260911-R117.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-C-3090-PROFILE-FREEZE-20260911-R117.md` |
+| `phase2/work/P0-C-AMEND-20260911-R64.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P0-C-AMEND-20260911-R64.md` |
+| `phase2/work/P0-C-BIND-20260911-R68.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/P0-C-BIND-20260911-R68.md` |
+| `phase2/work/P0-C-F4-CAPTURE-20260911-R66.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/P0-C-F4-CAPTURE-20260911-R66.md` |
+| `phase2/work/P0-C-F4-REVIEW-20260911-R70.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/P0-C-F4-REVIEW-20260911-R70.md` |
+| `phase2/work/P0-C-PROFILE-FREEZE-20260911-R60.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P0-C-PROFILE-FREEZE-20260911-R60.md` |
+| `phase2/work/P0-C-PROFILE-RECON-20260911-R59.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/P0-C-PROFILE-RECON-20260911-R59.md` |
+| `phase2/work/P0-C-PROFILE-REVIEW-20260911-R61.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P0-C-PROFILE-REVIEW-20260911-R61.md` |
+| `phase2/work/P0-C-R60-CORRECT-20260911-R73.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P0-C-R60-CORRECT-20260911-R73.md` |
+| `phase2/work/P0-C-RECONCILE-RESTART-20260911-R72.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-C-RECONCILE-RESTART-20260911-R72.md` |
+| `phase2/work/P0-C-RECONCILE-REVIEW-20260911-R78.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P0-C-RECONCILE-REVIEW-20260911-R78.md` |
+| `phase2/work/P0-C-UNKNOWN-CLOSE-20260911-R62.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/P0-C-UNKNOWN-CLOSE-20260911-R62.md` |
+| `phase2/work/P1-CAUSAL-PREP-20260911-R63.md` | 1 | 1 | 0 | 0.03 | `phase2-hicache-design/work/P1-CAUSAL-PREP-20260911-R63.md` |
+| `phase2/work/P1-CLOSURE-VERIFIED-20260912.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P1-CLOSURE-VERIFIED-20260912.md` |
+| `phase2/work/P1-DURABLE-PREFIX-REPLAY-20260912-R125.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P1-DURABLE-PREFIX-REPLAY-20260912-R125.md` |
+| `phase2/work/P1-DURABLE-PREFIX-REPLAY-20260912-R126.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P1-DURABLE-PREFIX-REPLAY-20260912-R126.md` |
+| `phase2/work/P1-HOST-ALLOC-WAKE-ELIGIBILITY-SOURCE-NOTE.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P1-HOST-ALLOC-WAKE-ELIGIBILITY-SOURCE-NOTE.md` |
+| `phase2/work/P1-SPEC-BUDGET-CHAIN-20260911-R118.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P1-SPEC-BUDGET-CHAIN-20260911-R118.md` |
+| `phase2/work/P1-SPEC-BUDGET-CHAIN-20260911-R119.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P1-SPEC-BUDGET-CHAIN-20260911-R119.md` |
+| `phase2/work/P1-SPEC-BUDGET-CONTROLLED-EVICTION-20260911-R121.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P1-SPEC-BUDGET-CONTROLLED-EVICTION-20260911-R121.md` |
+| `phase2/work/P1-SPEC-BUDGET-CONTROLLED-EVICTION-20260911-R122.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P1-SPEC-BUDGET-CONTROLLED-EVICTION-20260911-R122.md` |
+| `phase2/work/P1-SPEC-BUDGET-CONTROLLED-EVICTION-20260911-R123.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P1-SPEC-BUDGET-CONTROLLED-EVICTION-20260911-R123.md` |
+| `phase2/work/P1-SPEC-BUDGET-CONTROLLED-EVICTION-20260911-R124.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P1-SPEC-BUDGET-CONTROLLED-EVICTION-20260911-R124.md` |
+| `phase2/work/P1-SPEC-BUDGET-FULLCHAIN-20260911-R120.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P1-SPEC-BUDGET-FULLCHAIN-20260911-R120.md` |
+| `phase2/work/P1-TEMPORAL-DISCRIMINATION-R121.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P1-TEMPORAL-DISCRIMINATION-R121.md` |
+| `phase2/work/P2-B0-CONTRACT-20260911-R71.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/P2-B0-CONTRACT-20260911-R71.md` |
+| `phase2/work/P2-B0-SCORECARD-20260912-pass1.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P2-B0-SCORECARD-20260912-pass1.md` |
+| `phase2/work/P2A-AB-METADATA-CACHE-20260912-R130.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P2A-AB-METADATA-CACHE-20260912-R130.md` |
+| `phase2/work/P2A-AB-METADATA-CACHE-CONTRACT-20260912.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P2A-AB-METADATA-CACHE-CONTRACT-20260912.md` |
+| `phase2/work/P2A-COLLECTION-CONTRACT-20260912.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/P2A-COLLECTION-CONTRACT-20260912.md` |
+| `phase2/work/P2A-LIVE-COLLECTION-20260912-R129.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P2A-LIVE-COLLECTION-20260912-R129.md` |
+| `phase2/work/P2A-MEASUREMENT-CONTRACT-20260912.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P2A-MEASUREMENT-CONTRACT-20260912.md` |
+| `phase2/work/P2A-TELEMETRY-COVERAGE-20260912-R127.md` | 1 | 1 | 0 | 0.03 | `phase2-hicache-design/work/P2A-TELEMETRY-COVERAGE-20260912-R127.md` |
+| `phase2/work/P2B0-ANOMALY-EXPERIMENT-PLAN-20260912.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P2B0-ANOMALY-EXPERIMENT-PLAN-20260912.md` |
+| `phase2/work/P2B0-EXECUTION-CONTRACT-20260912.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/P2B0-EXECUTION-CONTRACT-20260912.md` |
+| `phase2/work/P2P3Q-READINESS-20260911-R65.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/P2P3Q-READINESS-20260911-R65.md` |
+| `phase2/work/PHASE2-CONTEXT-CONSOLIDATE-20260911-R69.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/PHASE2-CONTEXT-CONSOLIDATE-20260911-R69.md` |
+| `phase2/work/PLAN-20260908-RH-DURABILITY.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/PLAN-20260908-RH-DURABILITY.md` |
+| `phase2/work/PLAN-3060-HICACHE-CORRECTIONS-20260910.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/PLAN-3060-HICACHE-CORRECTIONS-20260910.md` |
+| `phase2/work/PLAN-3060-HICACHE-NEXT-20260910.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/PLAN-3060-HICACHE-NEXT-20260910.md` |
+| `phase2/work/PLAN-RH-HICACHE-20260911.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/PLAN-RH-HICACHE-20260911.md` |
+| `phase2/work/PLAN-RH-HICACHE-REMOTE-AUTH-20260911.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/PLAN-RH-HICACHE-REMOTE-AUTH-20260911.md` |
+| `phase2/work/PROD-SERVICE-ANALYSIS-20260917.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/PROD-SERVICE-ANALYSIS-20260917.md` |
+| `phase2/work/PROD-SERVICE-README-20260917.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/PROD-SERVICE-README-20260917.md` |
+| `phase2/work/PROD-TAKEOVER-AUTHORITY-AND-GATE-A-20260917.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/PROD-TAKEOVER-AUTHORITY-AND-GATE-A-20260917.md` |
+| `phase2/work/PRODUCTION-COMMIT-RECONCILIATION-20260917.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/PRODUCTION-COMMIT-RECONCILIATION-20260917.md` |
+| `phase2/work/PROVENANCE-CORRECTION-AND-V1.2.1-CLOSURE-20260917.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/PROVENANCE-CORRECTION-AND-V1.2.1-CLOSURE-20260917.md` |
+| `phase2/work/R-HBA1-ACCEPTANCE-CONTRACT-20260912.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/R-HBA1-ACCEPTANCE-CONTRACT-20260912.md` |
+| `phase2/work/R-HBA1-VERDICT-20260912.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/R-HBA1-VERDICT-20260912.md` |
+| `phase2/work/R124-profile` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/R124-profile/P0-C-3090-PROFILE-REFREEZE-20260912.md` |
+| `phase2/work/R128-profile` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/R128-profile/P0-C-3090-PROFILE-REFREEZE-20260912.md` |
+| `phase2/work/RECON3060-RH-DRIVER-JOIN-SESSION3-B-20260910.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/RECON3060-RH-DRIVER-JOIN-SESSION3-B-20260910.md` |
+| `phase2/work/RECON3060-RH-LIVE-STATE-R2-20260910.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/RECON3060-RH-LIVE-STATE-R2-20260910.md` |
+| `phase2/work/RECON3060-RH-LIVE-STATE-SESSION3-A-20260910.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/RECON3060-RH-LIVE-STATE-SESSION3-A-20260910.md` |
+| `phase2/work/RECONCILE-REPORT-20260917.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/RECONCILE-REPORT-20260917.md` |
+| `phase2/work/RECONCILIATION-STEP1-RECON-20260917.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/RECONCILIATION-STEP1-RECON-20260917.md` |
+| `phase2/work/REPO-AND-DIRECTORY-INVENTORY-20260917.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/REPO-AND-DIRECTORY-INVENTORY-20260917.md` |
+| `phase2/work/RESCUE-20260917.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/RESCUE-20260917.md` |
+| `phase2/work/REV-20260908-3060-MINIMAL-KERNEL-FIX.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/REV-20260908-3060-MINIMAL-KERNEL-FIX.md` |
+| `phase2/work/REV-20260908-3060-MINIMAL-KERNEL.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/REV-20260908-3060-MINIMAL-KERNEL.md` |
+| `phase2/work/REV-20260908-P0-BUILD-COMPLETE-EMITTER-FIX1.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/REV-20260908-P0-BUILD-COMPLETE-EMITTER-FIX1.md` |
+| `phase2/work/REV-20260908-P0-BUILD-COMPLETE-EMITTER-FIX2.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/REV-20260908-P0-BUILD-COMPLETE-EMITTER-FIX2.md` |
+| `phase2/work/REV-20260908-P0-BUILD-COMPLETE-EMITTER.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/REV-20260908-P0-BUILD-COMPLETE-EMITTER.md` |
+| `phase2/work/REV-20260908-P0-FINISHED-ZERO-KEY-GUARD-FIX1.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/REV-20260908-P0-FINISHED-ZERO-KEY-GUARD-FIX1.md` |
+| `phase2/work/REV-20260908-P0-FINISHED-ZERO-KEY-GUARD.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/REV-20260908-P0-FINISHED-ZERO-KEY-GUARD.md` |
+| `phase2/work/REV-20260908-P0-R7-JOIN-ROBUSTNESS-FIX4.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/REV-20260908-P0-R7-JOIN-ROBUSTNESS-FIX4.md` |
+| `phase2/work/REV-20260908-P0-R7-JOIN-ROBUSTNESS-FIX5.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/REV-20260908-P0-R7-JOIN-ROBUSTNESS-FIX5.md` |
+| `phase2/work/REV-20260908-P0-R7-JOIN-ROBUSTNESS.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/REV-20260908-P0-R7-JOIN-ROBUSTNESS.md` |
+| `phase2/work/REV-20260908-P0-RESIDENCY-BARRIER-DIAGNOSTIC-FIX6.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/REV-20260908-P0-RESIDENCY-BARRIER-DIAGNOSTIC-FIX6.md` |
+| `phase2/work/REV-20260908-P0-RESIDENCY-BARRIER-EMITTER-FIX1.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/REV-20260908-P0-RESIDENCY-BARRIER-EMITTER-FIX1.md` |
+| `phase2/work/REV-20260908-P0-RESIDENCY-BARRIER-EMITTER-FIX2.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/REV-20260908-P0-RESIDENCY-BARRIER-EMITTER-FIX2.md` |
+| `phase2/work/REV-20260908-P0-RESIDENCY-BARRIER-EMITTER-FIX3.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/REV-20260908-P0-RESIDENCY-BARRIER-EMITTER-FIX3.md` |
+| `phase2/work/REV-20260908-P0-RESIDENCY-BARRIER-EMITTER-FIX4.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/REV-20260908-P0-RESIDENCY-BARRIER-EMITTER-FIX4.md` |
+| `phase2/work/REV-20260908-P0-RESIDENCY-BARRIER-EMITTER-FIX5.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/REV-20260908-P0-RESIDENCY-BARRIER-EMITTER-FIX5.md` |
+| `phase2/work/REV-20260908-P0-RESIDENCY-BARRIER-NODE-LOOKUP-FIX1.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/REV-20260908-P0-RESIDENCY-BARRIER-NODE-LOOKUP-FIX1.md` |
+| `phase2/work/REV-20260908-P0-RESIDENCY-BARRIER-NODE-SIDECAR-FIX1.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/REV-20260908-P0-RESIDENCY-BARRIER-NODE-SIDECAR-FIX1.md` |
+| `phase2/work/REV-20260908-P0-RESIDENCY-R17-TIMING-FIX1.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/REV-20260908-P0-RESIDENCY-R17-TIMING-FIX1.md` |
+| `phase2/work/REV-20260908-P0-VEHICLE-BARRIER-SCHEDULER-FIX1.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/REV-20260908-P0-VEHICLE-BARRIER-SCHEDULER-FIX1.md` |
+| `phase2/work/REV-20260908-P0-VEHICLE-BARRIER-SCHEDULER-FIX2.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/REV-20260908-P0-VEHICLE-BARRIER-SCHEDULER-FIX2.md` |
+| `phase2/work/REV-20260908-P0-VEHICLE-BARRIER-SCHEDULER-FIX3.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/REV-20260908-P0-VEHICLE-BARRIER-SCHEDULER-FIX3.md` |
+| `phase2/work/REV-20260908-P0-VEHICLE-BARRIER-SCHEDULER-FIX4.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/REV-20260908-P0-VEHICLE-BARRIER-SCHEDULER-FIX4.md` |
+| `phase2/work/REV-20260908-P0-VEHICLE-TARGET-CHURN-FIX1.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/REV-20260908-P0-VEHICLE-TARGET-CHURN-FIX1.md` |
+| `phase2/work/REV-20260909-3060-MINIMAL-KERNEL-FIX2.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/REV-20260909-3060-MINIMAL-KERNEL-FIX2.md` |
+| `phase2/work/REV-20260909-3060-SM86-ARCH.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/REV-20260909-3060-SM86-ARCH.md` |
+| `phase2/work/REV-20260909-3060-SM86-LOADER-FIX.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/REV-20260909-3060-SM86-LOADER-FIX.md` |
+| `phase2/work/REVIEW-RH-FINAL-TEST-GATE-20260910.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/REVIEW-RH-FINAL-TEST-GATE-20260910.md` |
+| `phase2/work/REVIEW-RH-RELEASE-EPOCH-20260910.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/REVIEW-RH-RELEASE-EPOCH-20260910.md` |
+| `phase2/work/REVIEW-RH-RELEASE-EPOCH-FINAL-20260910.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/REVIEW-RH-RELEASE-EPOCH-FINAL-20260910.md` |
+| `phase2/work/REVIEW-RH-RELEASE-FINAL-GATE-20260910.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/REVIEW-RH-RELEASE-FINAL-GATE-20260910.md` |
+| `phase2/work/REVIEW3060-RH-FINAL-20260909.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/REVIEW3060-RH-FINAL-20260909.md` |
+| `phase2/work/REVIEW3060-RH-FINAL-JOIN-20260909.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/REVIEW3060-RH-FINAL-JOIN-20260909.md` |
+| `phase2/work/REVIEW3060-RH-MATCH-EMIT-20260910.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/REVIEW3060-RH-MATCH-EMIT-20260910.md` |
+| `phase2/work/REVIEW3060-RH-PREADMISSION-20260909.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/REVIEW3060-RH-PREADMISSION-20260909.md` |
+| `phase2/work/REVIEW3060-RH-SPEC-BUDGET-RETRIGGER-20260910.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/REVIEW3060-RH-SPEC-BUDGET-RETRIGGER-20260910.md` |
+| `phase2/work/REVIEW3060-RH-SPEC-BUDGET-RETRIGGER-R3-20260910.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/REVIEW3060-RH-SPEC-BUDGET-RETRIGGER-R3-20260910.md` |
+| `phase2/work/RH-PRESSURE-ACCEPTANCE-CONTRACT-20260912.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/RH-PRESSURE-ACCEPTANCE-CONTRACT-20260912.md` |
+| `phase2/work/RH-PRESSURE-SUMMARY-20260912.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/RH-PRESSURE-SUMMARY-20260912.md` |
+| `phase2/work/RH-PRESSURE-VERDICT-20260912.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/RH-PRESSURE-VERDICT-20260912.md` |
+| `phase2/work/SCOUT-20260908-3060-CODE-SURVEY.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/SCOUT-20260908-3060-CODE-SURVEY.md` |
+| `phase2/work/SCOUT-20260908-P0-R3-EVENT-GAP.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/SCOUT-20260908-P0-R3-EVENT-GAP.md` |
+| `phase2/work/SCOUT-20260908-P0-SESSION-JOIN.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/SCOUT-20260908-P0-SESSION-JOIN.md` |
+| `phase2/work/SCOUT-20260908-RH-HOOKS.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/SCOUT-20260908-RH-HOOKS.md` |
+| `phase2/work/SCOUT-20260909-3060-HICACHE-FILE.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/SCOUT-20260909-3060-HICACHE-FILE.md` |
+| `phase2/work/SCOUT-20260909-RH-IMPLEMENT-SURFACE.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/SCOUT-20260909-RH-IMPLEMENT-SURFACE.md` |
+| `phase2/work/SCOUT-20260909-RH-PATTERN-CORPUS.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/SCOUT-20260909-RH-PATTERN-CORPUS.md` |
+| `phase2/work/SCOUT-HICACHE-OPT-GOAL-20260910.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/SCOUT-HICACHE-OPT-GOAL-20260910.md` |
+| `phase2/work/SCOUT-P0-A-SOURCE-IDENTICAL-ENV-20260910.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/SCOUT-P0-A-SOURCE-IDENTICAL-ENV-20260910.md` |
+| `phase2/work/SCOUT-TAKEOVER-20260911.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/SCOUT-TAKEOVER-20260911.md` |
+| `phase2/work/SCOUT3060-RH-MATCH-PREPARE-BYPASS-20260910.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/SCOUT3060-RH-MATCH-PREPARE-BYPASS-20260910.md` |
+| `phase2/work/SCOUT3060-RH-TELEMETRY-AUDIT-20260910.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/SCOUT3060-RH-TELEMETRY-AUDIT-20260910.md` |
+| `phase2/work/SCT-20260908-3060-12G-HICACHE-TRANSFER-FEASIBILITY.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/SCT-20260908-3060-12G-HICACHE-TRANSFER-FEASIBILITY.md` |
+| `phase2/work/SESSION-TASK-AUDIT-20260911-03.md` | 1 | 1 | 0 | 0.04 | `phase2-hicache-design/work/SESSION-TASK-AUDIT-20260911-03.md` |
+| `phase2/work/SOURCE-AUTHORITY-CORRECTION-20260917.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/SOURCE-AUTHORITY-CORRECTION-20260917.md` |
+| `phase2/work/SOURCE-AUTHORITY-REVIEW-RESULT-20260917.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/SOURCE-AUTHORITY-REVIEW-RESULT-20260917.md` |
+| `phase2/work/TEST-20260908-P0-S25-LIVE-EMITTER-FIX3.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/TEST-20260908-P0-S25-LIVE-EMITTER-FIX3.md` |
+| `phase2/work/TEST-20260908-P0-S25-LIVE-EMITTER-FIX5.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/TEST-20260908-P0-S25-LIVE-EMITTER-FIX5.md` |
+| `phase2/work/TEST-20260908-P0-S25-LIVE-FIX1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/TEST-20260908-P0-S25-LIVE-FIX1.md` |
+| `phase2/work/TEST-20260908-P0-S25-LIVE-FIX2.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/TEST-20260908-P0-S25-LIVE-FIX2.md` |
+| `phase2/work/TEST-20260908-P0-S25-LIVE-FIX4.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/TEST-20260908-P0-S25-LIVE-FIX4.md` |
+| `phase2/work/TEST-20260908-P0-S25-LIVE-RESIDENCY-DIAGNOSTIC-FIX6.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/TEST-20260908-P0-S25-LIVE-RESIDENCY-DIAGNOSTIC-FIX6.md` |
+| `phase2/work/TEST-20260908-P0-S25-LIVE-RESIDENCY-NODE-SIDECAR-FIX1-R16.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/TEST-20260908-P0-S25-LIVE-RESIDENCY-NODE-SIDECAR-FIX1-R16.md` |
+| `phase2/work/TEST-20260908-P0-S25-LIVE-TARGET-CHURN-FIX1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/TEST-20260908-P0-S25-LIVE-TARGET-CHURN-FIX1.md` |
+| `phase2/work/TEST-20260908-T38C-PAIRED-TRACE-INDEPENDENT.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/TEST-20260908-T38C-PAIRED-TRACE-INDEPENDENT.md` |
+| `phase2/work/TEST-20260909-3060-BASELINE-CAP-CONC.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/TEST-20260909-3060-BASELINE-CAP-CONC.md` |
+| `phase2/work/TEST-20260909-3060-P4-HICACHE.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/TEST-20260909-3060-P4-HICACHE.md` |
+| `phase2/work/TEST-20260909-CAPACITY-BUNDLE-LIVE.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/TEST-20260909-CAPACITY-BUNDLE-LIVE.md` |
+| `phase2/work/TEST-20260909-HOST-ALLOC-EPOCH-LIVE.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/TEST-20260909-HOST-ALLOC-EPOCH-LIVE.md` |
+| `phase2/work/TEST-20260909-HOST-ALLOC-EPOCH-QUIESCENT.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/TEST-20260909-HOST-ALLOC-EPOCH-QUIESCENT.md` |
+| `phase2/work/TEST-20260909-HOST-ALLOC-EPOCH-SEEDED-LIVE.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/TEST-20260909-HOST-ALLOC-EPOCH-SEEDED-LIVE.md` |
+| `phase2/work/TEST-20260909-P4-FRONTIER-GUARD.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/TEST-20260909-P4-FRONTIER-GUARD.md` |
+| `phase2/work/TEST-20260909-RH-OFF-BOUNDED-TRACE.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/TEST-20260909-RH-OFF-BOUNDED-TRACE.md` |
+| `phase2/work/TEST-20260909-RH-OFF-EVIDENCE-RECOVERY.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/TEST-20260909-RH-OFF-EVIDENCE-RECOVERY.md` |
+| `phase2/work/TEST-20260909-RH-OFF-TRACE.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/TEST-20260909-RH-OFF-TRACE.md` |
+| `phase2/work/TEST-20260909-RH-ON-BOUNDED-TRACE.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/TEST-20260909-RH-ON-BOUNDED-TRACE.md` |
+| `phase2/work/TEST-P0-A-REMOTE-RECONCILIATION-20260910.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/TEST-P0-A-REMOTE-RECONCILIATION-20260910.md` |
+| `phase2/work/TEST-P0-A-RH-FOCUSED-REGRESSION-20260910.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/TEST-P0-A-RH-FOCUSED-REGRESSION-20260910.md` |
+| `phase2/work/TEST-RH-FOCUSED-PY3-SESSION4-20260910.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/TEST-RH-FOCUSED-PY3-SESSION4-20260910.md` |
+| `phase2/work/TEST-RH-FOCUSED-PY3-SESSION4.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/TEST-RH-FOCUSED-PY3-SESSION4.md` |
+| `phase2/work/TEST-RH-FOCUSED-SESSION4-20260910.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/TEST-RH-FOCUSED-SESSION4-20260910.md` |
+| `phase2/work/TEST-RH-RELEASE-EPOCH-20260910.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/TEST-RH-RELEASE-EPOCH-20260910.md` |
+| `phase2/work/TEST-RH-SPEC-BUDGET-RETRIGGER-BROAD-20260911.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/TEST-RH-SPEC-BUDGET-RETRIGGER-BROAD-20260911.md` |
+| `phase2/work/TEST3060-AWQ-RUNTIME-AUDIT-20260910.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/TEST3060-AWQ-RUNTIME-AUDIT-20260910.md` |
+| `phase2/work/TEST3060-DECODE-CONCURRENCY-SWEEP-20260910.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/TEST3060-DECODE-CONCURRENCY-SWEEP-20260910.md` |
+| `phase2/work/TEST3060-RH-CONTRACT-CORRECTIONS-20260909.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/TEST3060-RH-CONTRACT-CORRECTIONS-20260909.md` |
+| `phase2/work/TEST3060-RH-FINAL-OFF-9213-20260910.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/TEST3060-RH-FINAL-OFF-9213-20260910.md` |
+| `phase2/work/TEST3060-RH-FINAL-OFF-TRACE-20260909.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/TEST3060-RH-FINAL-OFF-TRACE-20260909.md` |
+| `phase2/work/TEST3060-RH-FINAL-ON-9213-20260910.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/TEST3060-RH-FINAL-ON-9213-20260910.md` |
+| `phase2/work/TEST3060-RH-FINAL-ON-TRACE-20260909.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/TEST3060-RH-FINAL-ON-TRACE-20260909.md` |
+| `phase2/work/TEST3060-RH-MATCH-EMIT-VERIFY-20260910-COMPLIANT.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/TEST3060-RH-MATCH-EMIT-VERIFY-20260910-COMPLIANT.md` |
+| `phase2/work/TEST3060-RH-MATCH-EMIT-VERIFY-20260910-FRESH.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/TEST3060-RH-MATCH-EMIT-VERIFY-20260910-FRESH.md` |
+| `phase2/work/TEST3060-RH-MATCH-PREP-VERIFY-20260909.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/TEST3060-RH-MATCH-PREP-VERIFY-20260909.md` |
+| `phase2/work/TEST3060-RH-MATCH-PREP-VERIFY-R2-20260909.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/TEST3060-RH-MATCH-PREP-VERIFY-R2-20260909.md` |
+| `phase2/work/TEST3060-RH-MATCH-TELEMETRY-VERIFY-20260909.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/TEST3060-RH-MATCH-TELEMETRY-VERIFY-20260909.md` |
+| `phase2/work/TEST3060-RH-PREADMISSION-FIX-20260909.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/TEST3060-RH-PREADMISSION-FIX-20260909.md` |
+| `phase2/work/TEST3060-RH-PREADMISSION-STATIC-20260909.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/TEST3060-RH-PREADMISSION-STATIC-20260909.md` |
+| `phase2/work/TEST3060-RH-READY-HOST-AUX-20260909.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/TEST3060-RH-READY-HOST-AUX-20260909.md` |
+| `phase2/work/TEST3060-RH-REALPATH-VERIFY-20260909.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/TEST3060-RH-REALPATH-VERIFY-20260909.md` |
+| `phase2/work/TEST3060-RH-SPEC-BUDGET-RETRIGGER-20260910.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/TEST3060-RH-SPEC-BUDGET-RETRIGGER-20260910.md` |
+| `phase2/work/TEST3060-RH-SPEC-BUDGET-RETRIGGER-R2-20260910.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/TEST3060-RH-SPEC-BUDGET-RETRIGGER-R2-20260910.md` |
+| `phase2/work/TEST3060-RH-VIEW-TYPE-20260909.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/TEST3060-RH-VIEW-TYPE-20260909.md` |
+| `phase2/work/TREE-SHA256.regen-a.txt.sha256` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/TREE-SHA256.regen-a.txt.sha256` |
+| `phase2/work/TST-20260908-3060-12G-LOCAL-SOURCE-BASELINE.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/TST-20260908-3060-12G-LOCAL-SOURCE-BASELINE.md` |
+| `phase2/work/TST-20260908-P0-RESIDENCY-R17-TIMING-ASYNC-TRACE.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/TST-20260908-P0-RESIDENCY-R17-TIMING-ASYNC-TRACE.md` |
+| `phase2/work/TST-20260908-P0-RESIDENCY-R17-TIMING-BOUNDED-TRACE.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/TST-20260908-P0-RESIDENCY-R17-TIMING-BOUNDED-TRACE.md` |
+| `phase2/work/adv-features-list.json` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/adv-features-list.json` |
+| `phase2/work/adv-features-list2.json` | 1 | 1 | 0 | 0.04 | `phase2-hicache-design/work/adv-features-list2.json` |
+| `phase2/work/direct-launch-warmctx.sh` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/direct-launch-warmctx.sh` |
+| `phase2/work/e18-gate.txt` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/e18-gate.txt` |
+| `phase2/work/freeze-selftest-manifest.diff` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/freeze-selftest-manifest.diff` |
+| `phase2/work/freeze-selftest-negative-tests.sh` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/freeze-selftest-negative-tests.sh` |
+| `phase2/work/gate2-s32-evidence` | 1 | 1 | 0 | 0.21 | `phase2-hicache-design/work/gate2-s32-evidence/s32k8-evidence.tar.gz` |
+| `phase2/work/gate2_warmctx.py` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/gate2_warmctx.py` |
+| `phase2/work/gate3-soak-evidence` | 1 | 1 | 0 | 0.48 | `phase2-hicache-design/work/gate3-soak-evidence/soak-evidence.tar.gz` |
+| `phase2/work/gate3_soak.sh` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/gate3_soak.sh` |
+| `phase2/work/hicache-design-api.json` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/hicache-design-api.json` |
+| `phase2/work/hicache-docs-site.html` | 1 | 1 | 0 | 0.09 | `phase2-hicache-design/work/hicache-docs-site.html` |
+| `phase2/work/hicache_design.mdx` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/hicache_design.mdx` |
+| `phase2/work/issue-32724-comments.json` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/issue-32724-comments.json` |
+| `phase2/work/issue-32724.json` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/issue-32724.json` |
+| `phase2/work/l3-native-ab-inst-20260916.json` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/l3-native-ab-inst-20260916.json` |
+| `phase2/work/l3-native-src-20260916.json` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/l3-native-src-20260916.json` |
+| `phase2/work/p2io-coder-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-coder-e1.md` |
+| `phase2/work/p2io-coder-e10.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-coder-e10.md` |
+| `phase2/work/p2io-coder-e11.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-coder-e11.md` |
+| `phase2/work/p2io-coder-e12.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-coder-e12.md` |
+| `phase2/work/p2io-coder-e13.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/p2io-coder-e13.md` |
+| `phase2/work/p2io-coder-e14.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-coder-e14.md` |
+| `phase2/work/p2io-coder-e18.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-coder-e18.md` |
+| `phase2/work/p2io-coder-e19.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-coder-e19.md` |
+| `phase2/work/p2io-coder-e2.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-coder-e2.md` |
+| `phase2/work/p2io-coder-e21.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-coder-e21.md` |
+| `phase2/work/p2io-coder-e22.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-coder-e22.md` |
+| `phase2/work/p2io-coder-e23.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/p2io-coder-e23.md` |
+| `phase2/work/p2io-coder-e24.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-coder-e24.md` |
+| `phase2/work/p2io-coder-e25.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-coder-e25.md` |
+| `phase2/work/p2io-coder-e26.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-coder-e26.md` |
+| `phase2/work/p2io-coder-e27.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-coder-e27.md` |
+| `phase2/work/p2io-coder-e28.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-coder-e28.md` |
+| `phase2/work/p2io-coder-e3.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/p2io-coder-e3.md` |
+| `phase2/work/p2io-coder-e4.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-coder-e4.md` |
+| `phase2/work/p2io-coder-e5.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-coder-e5.md` |
+| `phase2/work/p2io-coder-e6.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-coder-e6.md` |
+| `phase2/work/p2io-coder-e7.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-coder-e7.md` |
+| `phase2/work/p2io-coder-e8.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-coder-e8.md` |
+| `phase2/work/p2io-coder-e9.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-coder-e9.md` |
+| `phase2/work/p2io-scout-backend-e1.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/p2io-scout-backend-e1.md` |
+| `phase2/work/p2io-scout-zerocopy-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-scout-zerocopy-e1.md` |
+| `phase2/work/p2io-task-manager-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-task-manager-e1.md` |
+| `phase2/work/p2io-tester-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-tester-e1.md` |
+| `phase2/work/p2io-tester-e2.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-tester-e2.md` |
+| `phase2/work/p2io-tester-e3.md` | 1 | 1 | 0 | 0.05 | `phase2-hicache-design/work/p2io-tester-e3.md` |
+| `phase2/work/p2io-tester-e4.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/p2io-tester-e4.md` |
+| `phase2/work/p2io-tester-e5.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-tester-e5.md` |
+| `phase2/work/p2io-tester-e6.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-tester-e6.md` |
+| `phase2/work/p2io-tester-e7.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-tester-e7.md` |
+| `phase2/work/p2io-tester-e7b.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-tester-e7b.md` |
+| `phase2/work/p2io-tester-e7c.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-tester-e7c.md` |
+| `phase2/work/p2io-tester-e7d.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-tester-e7d.md` |
+| `phase2/work/p2io-tester-e7e.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-tester-e7e.md` |
+| `phase2/work/p2io-tester-e7f.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-tester-e7f.md` |
+| `phase2/work/p2io-tester-e7g.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-tester-e7g.md` |
+| `phase2/work/p2io-tester-e7h.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-tester-e7h.md` |
+| `phase2/work/p2io-tester-e7i.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-tester-e7i.md` |
+| `phase2/work/p2io-tester-e7j.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-tester-e7j.md` |
+| `phase2/work/p2io-tester-e7k.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-tester-e7k.md` |
+| `phase2/work/p2io-tester-e7l.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-tester-e7l.md` |
+| `phase2/work/p2io-tester-e7m.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-tester-e7m.md` |
+| `phase2/work/p2io-tester-e7n.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-tester-e7n.md` |
+| `phase2/work/p2io-tester-e7o.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-tester-e7o.md` |
+| `phase2/work/p2io-tester-e8.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io-tester-e8.md` |
+| `phase2/work/p2io_batch_size_microbench.py` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/p2io_batch_size_microbench.py` |
+| `phase2/work/phase2-backupassert-architect-e3.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/phase2-backupassert-architect-e3.md` |
+| `phase2/work/phase2-cap-driver-patch-coder-e1.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/phase2-cap-driver-patch-coder-e1.md` |
+| `phase2/work/phase2-cap-e2-tester-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-cap-e2-tester-e1.md` |
+| `phase2/work/phase2-cap-e3-tester-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-cap-e3-tester-e1.md` |
+| `phase2/work/phase2-cap-e4-architect-e1.md` | 1 | 1 | 0 | 0.03 | `phase2-hicache-design/work/phase2-cap-e4-architect-e1.md` |
+| `phase2/work/phase2-cap-e5-architect-e1.md` | 1 | 1 | 0 | 0.04 | `phase2-hicache-design/work/phase2-cap-e5-architect-e1.md` |
+| `phase2/work/phase2-cap-e6-architect-e1.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/phase2-cap-e6-architect-e1.md` |
+| `phase2/work/phase2-cap-gate3-deploy-devops-e1.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/phase2-cap-gate3-deploy-devops-e1.md` |
+| `phase2/work/phase2-cap-protocol-architect-e1.md` | 1 | 1 | 0 | 0.03 | `phase2-hicache-design/work/phase2-cap-protocol-architect-e1.md` |
+| `phase2/work/phase2-cap-reviewer-e1.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/phase2-cap-reviewer-e1.md` |
+| `phase2/work/phase2-cap-scout-e1.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/phase2-cap-scout-e1.md` |
+| `phase2/work/phase2-churn-rebound-architect-e1.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/phase2-churn-rebound-architect-e1.md` |
+| `phase2/work/phase2-fixb-strip-coder-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-fixb-strip-coder-e1.md` |
+| `phase2/work/phase2-fixb-strip-tester-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-fixb-strip-tester-e1.md` |
+| `phase2/work/phase2-freeze-devops-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-freeze-devops-e1.md` |
+| `phase2/work/phase2-hicache-design-architect-e10.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-architect-e10.md` |
+| `phase2/work/phase2-hicache-design-architect-e11.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/phase2-hicache-design-architect-e11.md` |
+| `phase2/work/phase2-hicache-design-architect-e12.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-architect-e12.md` |
+| `phase2/work/phase2-hicache-design-architect-e2-03.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-architect-e2-03.md` |
+| `phase2/work/phase2-hicache-design-architect-e2-04.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-architect-e2-04.md` |
+| `phase2/work/phase2-hicache-design-architect-e7.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-architect-e7.md` |
+| `phase2/work/phase2-hicache-design-architect-e8.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-architect-e8.md` |
+| `phase2/work/phase2-hicache-design-architect-e9.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-architect-e9.md` |
+| `phase2/work/phase2-hicache-design-coder-e1-01.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-coder-e1-01.md` |
+| `phase2/work/phase2-hicache-design-coder-e1-02.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-coder-e1-02.md` |
+| `phase2/work/phase2-hicache-design-coder-e10-01.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-coder-e10-01.md` |
+| `phase2/work/phase2-hicache-design-coder-e11-01.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-coder-e11-01.md` |
+| `phase2/work/phase2-hicache-design-coder-e12-01.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-coder-e12-01.md` |
+| `phase2/work/phase2-hicache-design-coder-e13-01.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-coder-e13-01.md` |
+| `phase2/work/phase2-hicache-design-coder-e14-01.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-coder-e14-01.md` |
+| `phase2/work/phase2-hicache-design-coder-e15-01.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-coder-e15-01.md` |
+| `phase2/work/phase2-hicache-design-coder-e16-01.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-coder-e16-01.md` |
+| `phase2/work/phase2-hicache-design-coder-e3-05.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-coder-e3-05.md` |
+| `phase2/work/phase2-hicache-design-coder-e3-06.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-coder-e3-06.md` |
+| `phase2/work/phase2-hicache-design-coder-e3-09.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/phase2-hicache-design-coder-e3-09.md` |
+| `phase2/work/phase2-hicache-design-coder-e3-10.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-coder-e3-10.md` |
+| `phase2/work/phase2-hicache-design-coder-e3-11.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-coder-e3-11.md` |
+| `phase2/work/phase2-hicache-design-coder-e3-12.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-coder-e3-12.md` |
+| `phase2/work/phase2-hicache-design-coder-e4-01.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-coder-e4-01.md` |
+| `phase2/work/phase2-hicache-design-coder-e5-01.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-coder-e5-01.md` |
+| `phase2/work/phase2-hicache-design-coder-e6-01.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-coder-e6-01.md` |
+| `phase2/work/phase2-hicache-design-coder-e7-01.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-coder-e7-01.md` |
+| `phase2/work/phase2-hicache-design-coder-e8-01.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-coder-e8-01.md` |
+| `phase2/work/phase2-hicache-design-coder-e9-01.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-coder-e9-01.md` |
+| `phase2/work/phase2-hicache-design-coder-fallback-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-coder-fallback-e1.md` |
+| `phase2/work/phase2-hicache-design-coder-fallback-revert-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-coder-fallback-revert-e1.md` |
+| `phase2/work/phase2-hicache-design-coder-fbe-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-coder-fbe-e1.md` |
+| `phase2/work/phase2-hicache-design-coder-gen-driver-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-coder-gen-driver-e1.md` |
+| `phase2/work/phase2-hicache-design-coder-gen-fix-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-coder-gen-fix-e1.md` |
+| `phase2/work/phase2-hicache-design-coder-l0-loss-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-coder-l0-loss-e1.md` |
+| `phase2/work/phase2-hicache-design-coder-restore-hit0-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-coder-restore-hit0-e1.md` |
+| `phase2/work/phase2-hicache-design-devops-data-clean-e1.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/phase2-hicache-design-devops-data-clean-e1.md` |
+| `phase2/work/phase2-hicache-design-devops-diskbench-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-devops-diskbench-e1.md` |
+| `phase2/work/phase2-hicache-design-devops-env-finalize-e1.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/phase2-hicache-design-devops-env-finalize-e1.md` |
+| `phase2/work/phase2-hicache-design-devops-env-migrate-e1.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/phase2-hicache-design-devops-env-migrate-e1.md` |
+| `phase2/work/phase2-hicache-design-devops-env-verify-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-devops-env-verify-e1.md` |
+| `phase2/work/phase2-hicache-design-devops-gate2-b64-e1.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/phase2-hicache-design-devops-gate2-b64-e1.md` |
+| `phase2/work/phase2-hicache-design-devops-hicap-wrapper-e1.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/phase2-hicache-design-devops-hicap-wrapper-e1.md` |
+| `phase2/work/phase2-hicache-design-devops-model-fill-e1.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/phase2-hicache-design-devops-model-fill-e1.md` |
+| `phase2/work/phase2-hicache-design-devops-prod-deploy-22151-e1.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/phase2-hicache-design-devops-prod-deploy-22151-e1.md` |
+| `phase2/work/phase2-hicache-design-devops-prod-deploy-e1.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/phase2-hicache-design-devops-prod-deploy-e1.md` |
+| `phase2/work/phase2-hicache-design-devops-sweep-run-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-devops-sweep-run-e1.md` |
+| `phase2/work/phase2-hicache-design-doc-writer-scorecard-spec-e1.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/phase2-hicache-design-doc-writer-scorecard-spec-e1.md` |
+| `phase2/work/phase2-hicache-design-docwriter-baseline-s7-e1.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/phase2-hicache-design-docwriter-baseline-s7-e1.md` |
+| `phase2/work/phase2-hicache-design-docwriter-proddeploy-e1.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/phase2-hicache-design-docwriter-proddeploy-e1.md` |
+| `phase2/work/phase2-hicache-design-external-scout-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-external-scout-e1.md` |
+| `phase2/work/phase2-hicache-design-external-scout-e2.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-external-scout-e2.md` |
+| `phase2/work/phase2-hicache-design-orchestrator-gate3-closeout-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-orchestrator-gate3-closeout-e1.md` |
+| `phase2/work/phase2-hicache-design-reviewer-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-reviewer-e1.md` |
+| `phase2/work/phase2-hicache-design-scout-fallback-survey.md` | 1 | 1 | 0 | 0.03 | `phase2-hicache-design/work/phase2-hicache-design-scout-fallback-survey.md` |
+| `phase2/work/phase2-hicache-design-scout-remaining-issues-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-scout-remaining-issues-e1.md` |
+| `phase2/work/phase2-hicache-design-task-manager-e1.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/phase2-hicache-design-task-manager-e1.md` |
+| `phase2/work/phase2-hicache-design-tester-conc-sweep-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-tester-conc-sweep-e1.md` |
+| `phase2/work/phase2-hicache-design-tester-decbm-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-tester-decbm-e1.md` |
+| `phase2/work/phase2-hicache-design-tester-e10.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/phase2-hicache-design-tester-e10.md` |
+| `phase2/work/phase2-hicache-design-tester-e11.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/phase2-hicache-design-tester-e11.md` |
+| `phase2/work/phase2-hicache-design-tester-e12.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-tester-e12.md` |
+| `phase2/work/phase2-hicache-design-tester-e13.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/phase2-hicache-design-tester-e13.md` |
+| `phase2/work/phase2-hicache-design-tester-e14.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-tester-e14.md` |
+| `phase2/work/phase2-hicache-design-tester-e15.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/phase2-hicache-design-tester-e15.md` |
+| `phase2/work/phase2-hicache-design-tester-e16.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-tester-e16.md` |
+| `phase2/work/phase2-hicache-design-tester-e17.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/phase2-hicache-design-tester-e17.md` |
+| `phase2/work/phase2-hicache-design-tester-e18.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/phase2-hicache-design-tester-e18.md` |
+| `phase2/work/phase2-hicache-design-tester-e19.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/phase2-hicache-design-tester-e19.md` |
+| `phase2/work/phase2-hicache-design-tester-e20.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/phase2-hicache-design-tester-e20.md` |
+| `phase2/work/phase2-hicache-design-tester-e22.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-tester-e22.md` |
+| `phase2/work/phase2-hicache-design-tester-e5.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-tester-e5.md` |
+| `phase2/work/phase2-hicache-design-tester-e6.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-tester-e6.md` |
+| `phase2/work/phase2-hicache-design-tester-e7.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/phase2-hicache-design-tester-e7.md` |
+| `phase2/work/phase2-hicache-design-tester-e7p.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/phase2-hicache-design-tester-e7p.md` |
+| `phase2/work/phase2-hicache-design-tester-e8.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/phase2-hicache-design-tester-e8.md` |
+| `phase2/work/phase2-hicache-design-tester-e9.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/phase2-hicache-design-tester-e9.md` |
+| `phase2/work/phase2-hicache-design-tester-fallback-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-tester-fallback-e1.md` |
+| `phase2/work/phase2-hicache-design-tester-gate1-l3restore.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-tester-gate1-l3restore.md` |
+| `phase2/work/phase2-hicache-design-tester-gate2-fbe-rerun.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-tester-gate2-fbe-rerun.md` |
+| `phase2/work/phase2-hicache-design-tester-gate2-redesign-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-tester-gate2-redesign-e1.md` |
+| `phase2/work/phase2-hicache-design-tester-gate2-s32-e1.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/phase2-hicache-design-tester-gate2-s32-e1.md` |
+| `phase2/work/phase2-hicache-design-tester-gate2-saturation.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-tester-gate2-saturation.md` |
+| `phase2/work/phase2-hicache-design-tester-gate3-soak-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-tester-gate3-soak-e1.md` |
+| `phase2/work/phase2-hicache-design-tester-hbm-budget-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-tester-hbm-budget-e1.md` |
+| `phase2/work/phase2-hicache-design-tester-revoked-miss-decomp.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/phase2-hicache-design-tester-revoked-miss-decomp.md` |
+| `phase2/work/phase2-hicache-design-tester-rh-ab-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-tester-rh-ab-e1.md` |
+| `phase2/work/phase2-hicache-design-tester-rh-ab-e2.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/phase2-hicache-design-tester-rh-ab-e2.md` |
+| `phase2/work/phase2-hicache-design-tester-scorecard-e1.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/phase2-hicache-design-tester-scorecard-e1.md` |
+| `phase2/work/phase2-hicache-design-tester-warmctx-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-hicache-design-tester-warmctx-e1.md` |
+| `phase2/work/phase2-l3ack-architect-e2.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/phase2-l3ack-architect-e2.md` |
+| `phase2/work/phase2-load-driver-design-coder-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-load-driver-design-coder-e1.md` |
+| `phase2/work/phase2-mamba-sizing-tester-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-mamba-sizing-tester-e1.md` |
+| `phase2/work/phase2-p0-fix-coder-e1.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/phase2-p0-fix-coder-e1.md` |
+| `phase2/work/phase2-p0-fix-tester-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-p0-fix-tester-e1.md` |
+| `phase2/work/phase2-p0fix2-coder-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-p0fix2-coder-e1.md` |
+| `phase2/work/phase2-p0fix2-tester-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-p0fix2-tester-e1.md` |
+| `phase2/work/phase2-p1-fix-coder-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-p1-fix-coder-e1.md` |
+| `phase2/work/phase2-p1-fix-tester-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-p1-fix-tester-e1.md` |
+| `phase2/work/phase2-p2-fixa-tester-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-p2-fixa-tester-e1.md` |
+| `phase2/work/phase2-p3-closeout-architect-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-p3-closeout-architect-e1.md` |
+| `phase2/work/phase2-p3-fix-coder-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-p3-fix-coder-e1.md` |
+| `phase2/work/phase2-p3-fix-tester-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-p3-fix-tester-e1.md` |
+| `phase2/work/phase2-p4-coder-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-p4-coder-e1.md` |
+| `phase2/work/phase2-p4-p3-design-architect-e1.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/phase2-p4-p3-design-architect-e1.md` |
+| `phase2/work/phase2-p4-round2-design-architect-e1.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/phase2-p4-round2-design-architect-e1.md` |
+| `phase2/work/phase2-p4-tester-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-p4-tester-e1.md` |
+| `phase2/work/phase2-parked-v2-coder-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-parked-v2-coder-e1.md` |
+| `phase2/work/phase2-peranchor-coder-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-peranchor-coder-e1.md` |
+| `phase2/work/phase2-peranchor-diagnose-architect-e1.md` | 1 | 1 | 0 | 0.03 | `phase2-hicache-design/work/phase2-peranchor-diagnose-architect-e1.md` |
+| `phase2/work/phase2-peranchor-tester-e1.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/phase2-peranchor-tester-e1.md` |
+| `phase2/work/phase2-push-devops-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-push-devops-e1.md` |
+| `phase2/work/phase2-re-unified-architect-e1.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/phase2-re-unified-architect-e1.md` |
+| `phase2/work/phase2-restorearm-architect-e3.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/phase2-restorearm-architect-e3.md` |
+| `phase2/work/phase2-rhfix-architect-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-rhfix-architect-e1.md` |
+| `phase2/work/phase2-rhfix-coder-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-rhfix-coder-e1.md` |
+| `phase2/work/phase2-rhfix-fixb-crosstest-tester-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-rhfix-fixb-crosstest-tester-e1.md` |
+| `phase2/work/phase2-rhfix-tester-e1.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/phase2-rhfix-tester-e1.md` |
+| `phase2/work/phase2-rhono-bug-architect-e1.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/phase2-rhono-bug-architect-e1.md` |
+| `phase2/work/phase2-rhono-forensics-tester-e1.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/phase2-rhono-forensics-tester-e1.md` |
+| `phase2/work/phase2-rhono-rootcause-architect-e1.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/phase2-rhono-rootcause-architect-e1.md` |
+| `phase2/work/phase2-round2-coder-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-round2-coder-e1.md` |
+| `phase2/work/phase2-round2-tester-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-round2-tester-e1.md` |
+| `phase2/work/phase2-soak-tester-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-soak-tester-e1.md` |
+| `phase2/work/phase2-tooshort-architect-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-tooshort-architect-e1.md` |
+| `phase2/work/phase2-tooshort-fix-coder-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-tooshort-fix-coder-e1.md` |
+| `phase2/work/phase2-tooshort-fix-tester-e1.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-tooshort-fix-tester-e1.md` |
+| `phase2/work/phase2-transcript-diag.md` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/phase2-transcript-diag.md` |
+| `phase2/work/pr-32725.json` | 1 | 1 | 0 | 0.03 | `phase2-hicache-design/work/pr-32725.json` |
+| `phase2/work/pr-34568.json` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/pr-34568.json` |
+| `phase2/work/prod-b-requirement.md` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/prod-b-requirement.md` |
+| `phase2/work/prod_gate4.py` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/prod_gate4.py` |
+| `phase2/work/prod_gate_runner.py` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/prod_gate_runner.py` |
+| `phase2/work/run-p2-decbm-cells.sh` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/run-p2-decbm-cells.sh` |
+| `phase2/work/run-warmctx-tier.sh` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/run-warmctx-tier.sh` |
+| `phase2/work/search-32724-prs.json` | 1 | 1 | 0 | 0.01 | `phase2-hicache-design/work/search-32724-prs.json` |
+| `phase2/work/session_radix_cache.mdx` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/session_radix_cache.mdx` |
+| `phase2/work/test-apply.json` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/test-apply.json` |
+| `phase2/work/tester-e24.md` | 1 | 1 | 0 | 0.02 | `phase2-hicache-design/work/tester-e24.md` |
+| `phase2/work/v1.1.2-f1fix-20260916.json` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/v1.1.2-f1fix-20260916.json` |
+| `phase2/work/v1.1.2-freeze-selftest.json` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/v1.1.2-freeze-selftest.json` |
+| `phase2/work/v1.1.2-optionC-20260917.json` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/v1.1.2-optionC-20260917.json` |
+| `phase2/work/warmctx_analyze.py` | 1 | 1 | 0 | 0.00 | `phase2-hicache-design/work/warmctx_analyze.py` |

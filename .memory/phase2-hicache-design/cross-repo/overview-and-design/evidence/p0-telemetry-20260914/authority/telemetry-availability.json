@@ -1,0 +1,29 @@
+{
+  "contract_id": "telemetry-availability-20260914",
+  "task_id": "LOCAL-PERF-TELEMETRY-CONTRACT-20260914",
+  "status": "TELEMETRY_CONTRACT_READY",
+  "scope": "performance-cache-manifests-only",
+  "collection_sources": [
+    {"path": "/metrics", "availability": "authoritative-exported-metrics"},
+    {"path": "/v1/loads?include=all", "availability": "authoritative-load-fields"},
+    {"path": "/health", "availability": "health-endpoint"},
+    {"path": "/v1/models", "availability": "model-inventory-endpoint"},
+    {"path": "/v1/server", "availability": "server-status-endpoint"}
+  ],
+  "authoritative_recording": {
+    "metrics": {"source": "/metrics", "names": "verbatim_exposition", "units": "verbatim_or_unknown", "type": "preserve_counter_or_gauge", "caveats": ["record_scrape_interval", "record_reset_or_restart_boundary"]},
+    "loads": {"source": "/v1/loads?include=all", "fields": "verbatim_response_fields", "semantics": "snapshot_unless_explicitly_declared"},
+    "health": {"source": "/health", "fields": ["http_status", "response_body"], "semantics": "point_in_time_checkpoint"},
+    "models": {"source": "/v1/models", "fields": "verbatim_response_fields", "semantics": "snapshot"},
+    "server": {"source": "/v1/server", "fields": "verbatim_response_fields", "semantics": "snapshot"}
+  },
+  "unavailable": {
+    "cache": ["exact_l1_l2_l3_partition_accounting", "exact_l1_l2_l3_restore_stage_accounting"],
+    "mamba": ["restore", "rebuild", "evict"],
+    "rh": ["lead", "slack", "ready_before_admission", "avoidable_recompute", "cache_idle"],
+    "external": ["gpu", "cpu", "pcie_h2d_d2h", "nvme_read_write"]
+  },
+  "no_inference": true,
+  "validation": {"json": "required", "markdown": "required", "sha256": "required"},
+  "execution_constraints": {"gpu_started": false, "server_started": false, "source_model_runtime_modified": false, "raw_runs_modified": false}
+}

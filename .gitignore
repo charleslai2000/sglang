@@ -285,7 +285,10 @@ artifacts/
 # Internal, non-published docs
 internal-docs/
 
-# Large local evidence artifacts (keep existing tracked copies in Git history/tree)
+# Local-only raw evidence archive (textual work records remain tracked)
+.memory/data/
+
+# Large artifacts retained in the existing source memory tree; avoid re-adding if removed locally
 .memory/phase2-hicache-design/work/R120-bundle/analysis-run1.txt
 .memory/phase2-hicache-design/work/M2-RELEASE-WINDOW-A-20260918/_synthetic_stage_full.txt
 .memory/phase2-hicache-design/work/M2-RELEASE-STAGE2-20260918/stage2-source.txt

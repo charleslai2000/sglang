@@ -1,0 +1,13 @@
+### checkout git-repo test
+NOT_A_GIT_REPO (.git absent)
+fatal: not a git repository (or any of the parent directories): .git
+### python/torch/cuda one-liner
+python 3.11.11
+torch 2.6.0+cu124 cuda 12.4 avail True
+### VIRTUAL_ENV
+VIRTUAL_ENV=
+exe=/usr/bin/python3.11
+### nvcc
+nvcc_absent
+### date
+2026-09-11T13:47:39+08:00
