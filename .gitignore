@@ -284,3 +284,16 @@ artifacts/
 
 # Internal, non-published docs
 internal-docs/
+
+# Large local evidence artifacts (keep existing tracked copies in Git history/tree)
+.memory/phase2-hicache-design/work/R120-bundle/analysis-run1.txt
+.memory/phase2-hicache-design/work/M2-RELEASE-WINDOW-A-20260918/_synthetic_stage_full.txt
+.memory/phase2-hicache-design/work/M2-RELEASE-STAGE2-20260918/stage2-source.txt
+.memory/phase2-hicache-design/work/M2-RELEASE-STAGE2-20260918/stage2-source-regen.txt
+.memory/phase2-hicache-design/work/M2-RELEASE-WINDOW-A-20260918/_stage_full.txt
+.memory/phase2-hicache-design/work/M2-RELEASE-WINDOW-A-20260918/_baseline_full.txt
+.memory/phase2-hicache-design/work/M2-RELEASE-WINDOW-A-20260918/_scope_none.json
+experimental/sgl-router/tests/fixtures/tiny_tokenizer.json
+# These two paths were reported in a prior size scan but are not present in this checkout.
+test/srt/Llama-3.1-8B-Instruct.json
+test/manual/double-sparsity-config-Llama-3.1-8B-Instruct.json
