@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=rh-p0c-runtime-provenance/P0-C-PROFILE-FREEZE-20260911-R60.artifacts/SHA256SUMS.txt
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=779
+sha256=66f1abf65dc5be69c4bb6a0f55ef59ed5a92a00d8d048dc8994818121ccee1b6
+stored_path=data/sglang-3090-24g-hicache/66/66f1abf65dc5be69c4bb6a0f55ef59ed5a92a00d8d048dc8994818121ccee1b6.txt

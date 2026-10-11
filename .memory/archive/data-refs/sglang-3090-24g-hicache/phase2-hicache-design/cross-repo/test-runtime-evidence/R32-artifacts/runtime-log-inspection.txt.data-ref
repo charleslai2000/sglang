@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=phase2-hicache-design/cross-repo/test-runtime-evidence/R32-artifacts/runtime-log-inspection.txt
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=29738
+sha256=99d3d55c51d4c8f179a83f922bd56735eb801cd6774d8f11c8fb9cd259eaf0ab
+stored_path=data/sglang-3090-24g-hicache/99/99d3d55c51d4c8f179a83f922bd56735eb801cd6774d8f11c8fb9cd259eaf0ab.txt

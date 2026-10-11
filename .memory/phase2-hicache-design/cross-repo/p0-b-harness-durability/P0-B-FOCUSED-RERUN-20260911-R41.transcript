@@ -1,0 +1,23 @@
+Remote execution transcript (2026-09-11, authorized target root@i-1.gpushare.com:27460)
+
+Backup: /root/p0b-focused-rerun-20260911-r41-backup-1789079376
+Remote hashes:
+de0f519ec565e33ba3ab0b901f716a3574ef66c7026d6ed5a48a2c0c2da2dca2  test/registered/unit/managers/test_hicache_host_allocability.py
+36d1784aaa4672d711bf1c0be10b725e3d258a55bd164177fadb8ba0ec508ecd  3090-dev/test_drain_reentry.py
+431389cd5503be3062c75552e10b5e8c3b322b31eb8ae4665eecfc024e95c47c  3090-dev/test_storage_regression.py
+
+Commands (second pass, PYTHONPATH=$PWD/python:$PWD):
+1 python test/registered/unit/managers/test_hicache_host_allocability.py
+Exit 1; ModuleNotFoundError: No module named 'orjson'
+2 python 3090-dev/test_drain_reentry.py
+Exit 1; ModuleNotFoundError: No module named 'orjson'
+3 python 3090-dev/test_storage_regression.py
+Exit 1; ModuleNotFoundError: No module named 'orjson'
+4 python 3090-dev/test_hicache_restore_scheduler_feed.py
+Exit 1; ModuleNotFoundError: No module named 'orjson'
+5 python 3090-dev/test_hicache_restore.py -k "host_alloc or alloc_failed or wait_capacity or restore"
+Exit 0; Ran 0 tests in 0.000s; OK
+6 python 3090-dev/test_ready_horizon_partition.py
+Exit 1; ModuleNotFoundError: No module named 'orjson'
+
+All six were run; no product changes, new harnesses, instrumentation, live-chain claim, or unauthorized dependency installation occurred.

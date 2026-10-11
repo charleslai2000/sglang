@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=rh-p0b-harness-durability/R107-reducer/manifest.sha256
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=329
+sha256=b118299381816806c3b96c21171c1501f24276e61a11fae313273e6554f8d852
+stored_path=data/sglang-3090-24g-hicache/b1/b118299381816806c3b96c21171c1501f24276e61a11fae313273e6554f8d852.sha256

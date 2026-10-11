@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=rh-p0b-harness-durability/R114-bundle/reducer.exit.txt
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=7
+sha256=418a5c17f33c70e99b0cc0a07fce69191489cfedc94164bfa903785777c5bd4b
+stored_path=data/sglang-3090-24g-hicache/41/418a5c17f33c70e99b0cc0a07fce69191489cfedc94164bfa903785777c5bd4b.txt

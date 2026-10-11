@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=rh-p2-telemetry-metadata-cache/P2B0-bundle/dry-run/cell-summary.json
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=7950
+sha256=cecea5e34f5f0c2ddf7e8d25042009888878278d352d6ce730a257d2981e7957
+stored_path=data/sglang-3090-24g-hicache/ce/cecea5e34f5f0c2ddf7e8d25042009888878278d352d6ce730a257d2981e7957.json

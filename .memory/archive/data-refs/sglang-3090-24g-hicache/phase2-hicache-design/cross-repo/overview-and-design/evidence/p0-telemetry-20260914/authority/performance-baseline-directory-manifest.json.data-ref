@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=phase2-hicache-design/cross-repo/overview-and-design/evidence/p0-telemetry-20260914/authority/performance-baseline-directory-manifest.json
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=2517
+sha256=fd3bddb017dd24c1e4853cae0e896c486316d37a010aa8701226eb74b43e66d3
+stored_path=data/sglang-3090-24g-hicache/fd/fd3bddb017dd24c1e4853cae0e896c486316d37a010aa8701226eb74b43e66d3.json

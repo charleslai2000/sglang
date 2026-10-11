@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=phase2-hicache-design/cross-repo/overview-and-design/evidence/p0-telemetry-20260914/authority/telemetry-availability.json
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=1884
+sha256=0d401c8f3ebe64e7a30aabd38edb8aa877dc44ae29cbd5a6c5ebad9585fde483
+stored_path=data/sglang-3090-24g-hicache/0d/0d401c8f3ebe64e7a30aabd38edb8aa877dc44ae29cbd5a6c5ebad9585fde483.json

@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=hicache-l3-extent-storage/evidence/p0-telemetry-20260914/packet/manifest.json
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=15397
+sha256=c3df637ebdf6f4e28876d77a384e2728d18a985f8836e6e358527f07ac383773
+stored_path=data/sglang-3090-24g-hicache/c3/c3df637ebdf6f4e28876d77a384e2728d18a985f8836e6e358527f07ac383773.json

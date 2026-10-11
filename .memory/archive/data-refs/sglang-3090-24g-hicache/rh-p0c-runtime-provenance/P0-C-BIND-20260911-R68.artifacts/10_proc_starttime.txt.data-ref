@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=rh-p0c-runtime-provenance/P0-C-BIND-20260911-R68.artifacts/10_proc_starttime.txt
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=3626
+sha256=ed1d85f6aa8791519c108cb70d7010b481bb8efa5d4d0d92a1b449f3626653f7
+stored_path=data/sglang-3090-24g-hicache/ed/ed1d85f6aa8791519c108cb70d7010b481bb8efa5d4d0d92a1b449f3626653f7.txt

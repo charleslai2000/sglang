@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=rh-p0b-harness-durability/R94-harness/manifest.sha256
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=402
+sha256=57067e01a20c07513b342104aac27a4735a2167f764af58b7226956e9431ebb7
+stored_path=data/sglang-3090-24g-hicache/57/57067e01a20c07513b342104aac27a4735a2167f764af58b7226956e9431ebb7.sha256

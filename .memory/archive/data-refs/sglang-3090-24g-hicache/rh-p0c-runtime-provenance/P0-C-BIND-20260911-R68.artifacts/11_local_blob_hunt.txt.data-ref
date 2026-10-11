@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=rh-p0c-runtime-provenance/P0-C-BIND-20260911-R68.artifacts/11_local_blob_hunt.txt
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=1980
+sha256=61c6e73cc751d9bea544ef48d0e98ce2366cb2c6e9f9055ec8ec8805ae14743f
+stored_path=data/sglang-3090-24g-hicache/61/61c6e73cc751d9bea544ef48d0e98ce2366cb2c6e9f9055ec8ec8805ae14743f.txt

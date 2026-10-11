@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=phase2-hicache-design/cross-repo/overview-and-design/evidence/p0-telemetry-20260914/authority/P0-TELEMETRY-EXPERT-GATE-20260914.commands-exits
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=2239
+sha256=d22cf5684b0d3069959d0d92d29056c0482ea22774a200216ac010f448d73a2e
+stored_path=data/sglang-3090-24g-hicache/d2/d22cf5684b0d3069959d0d92d29056c0482ea22774a200216ac010f448d73a2e.commands-exits

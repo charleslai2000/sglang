@@ -1,0 +1,5 @@
+repo=sglang-3090-24g-hicache
+branch=3090-24g-hicache
+head=5be7b9b927fab4e45bf5a5cc412737ae06cacf1d
+memory_worktree_dirty=1
+source_path=/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-hicache

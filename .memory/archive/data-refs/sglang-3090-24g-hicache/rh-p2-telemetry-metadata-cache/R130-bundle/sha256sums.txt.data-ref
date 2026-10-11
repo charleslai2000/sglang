@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=rh-p2-telemetry-metadata-cache/R130-bundle/sha256sums.txt
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=1037
+sha256=b5ca2bf5e91b129ba30baa9928ef4e0c7f9e5892ee76ec1f77251a5b521981df
+stored_path=data/sglang-3090-24g-hicache/b5/b5ca2bf5e91b129ba30baa9928ef4e0c7f9e5892ee76ec1f77251a5b521981df.txt

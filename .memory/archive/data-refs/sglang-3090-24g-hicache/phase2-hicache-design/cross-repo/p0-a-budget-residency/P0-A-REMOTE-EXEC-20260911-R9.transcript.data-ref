@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=phase2-hicache-design/cross-repo/p0-a-budget-residency/P0-A-REMOTE-EXEC-20260911-R9.transcript
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=37151
+sha256=0116b221a651403b3671483295c72c987bc3104fa899a1959b2820ea9900e7a1
+stored_path=data/sglang-3090-24g-hicache/01/0116b221a651403b3671483295c72c987bc3104fa899a1959b2820ea9900e7a1.transcript

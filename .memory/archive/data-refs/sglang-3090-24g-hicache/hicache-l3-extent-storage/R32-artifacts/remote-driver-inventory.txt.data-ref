@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=hicache-l3-extent-storage/R32-artifacts/remote-driver-inventory.txt
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=5008
+sha256=391248047796b1f818fc5a8d46f51b07801e823daac245be9c5098e1b2038636
+stored_path=data/sglang-3090-24g-hicache/39/391248047796b1f818fc5a8d46f51b07801e823daac245be9c5098e1b2038636.txt

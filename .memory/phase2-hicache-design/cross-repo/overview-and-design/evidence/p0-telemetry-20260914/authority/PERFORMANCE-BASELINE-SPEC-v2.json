@@ -1,0 +1,41 @@
+{
+  "schema": "comprehensive-layered-performance-baseline-spec-v2",
+  "task_id": "LOCAL-PERF-BASELINE-SPEC-V2-20260914",
+  "status": "SPECIFICATION_ONLY",
+  "scope": "documentation only; no GPU/server/source/model/runtime/raw-run changes",
+  "root": "/mnt/data/cache/performance-baseline-v1",
+  "hierarchy": ["manifest", "compute", "prefill", "cache-l1", "cache-l2", "cache-l3", "agent", "stability", "telemetry"],
+  "identity_fields": ["source.commit", "source.dirty_hash", "model.sha", "launcher", "effective_argv", "python", "torch", "cuda", "triton", "sglang", "kernel", "gpu.uuid", "gpu.driver", "storage.namespace"],
+  "metrics": {
+    "ux_latency_percentiles": ["ttft", "e2e", "tpot", "itl"],
+    "percentiles": ["p50", "p95", "p99"],
+    "throughput": {
+      "req_per_s": "completed_requests/wall_time",
+      "aggregate_output_tps": "output_tokens/wall_time",
+      "effective_compute_tps": "(actual_prefill_tokens+output_tokens)/wall_time",
+      "served_context_tps": "(prompt_tokens+output_tokens)/wall_time"
+    },
+    "stage": ["prefill_tok_s", "decode_tok_s", "batch_histogram"],
+    "queue": ["wait", "admission", "active", "queued"],
+    "cache_prompt_accounting": "prompt_tokens=L1+L2+L3+newly_prefilled+avoidable_recompute",
+    "cache": ["hit_tokens", "hit_requests", "full", "partial", "miss", "restore_tokens", "stage_latency", "mamba_slots", "mamba_restore", "mamba_rebuild", "mamba_eviction", "rh_lead", "rh_slack", "rh_ready_before_admission", "rh_avoidable_recompute", "cache_idle"],
+    "telemetry": ["gpu_util", "vram", "gpu_bw", "power", "clocks", "cpu", "ram", "pcie_h2d", "pcie_d2h", "nvme_read_gbps", "nvme_write_gbps", "nvme_iops", "nvme_latency", "nvme_bytes_staged"]
+  },
+  "unavailable_policy": "Authoritative counter unavailable => UNAVAILABLE; never infer from occupancy or total token throughput.",
+  "workloads": {
+    "compute": "short_prompt_long_output:C1,C4,C8,C16",
+    "prefill": "input:2K,8K,32K,64K;output:32;concurrency:C1,C4",
+    "cache": ["L1-hot", "L2-hot", "L3-hot", "partial", "miss"],
+    "agent": "fixed multi-round/tool corpus with growing context",
+    "repeats_per_cell": 3,
+    "num_prompts_rule": ">=5x concurrency",
+    "streaming": ["UX", "agent"],
+    "nonstreaming": "permitted for throughput",
+    "warmup_measured_separate": true,
+    "cold_flush_and_warm_no_flush": true,
+    "fixed_seed_and_corpus": true
+  },
+  "stability": {"separate_from_performance_score": true, "soak": "required_when_claimed", "restart": "requires_verified_post_restart_evidence"},
+  "current_status": {"accepted_bounded_nonstreaming": "semantic aggregate; TTFT unavailable", "cache_counters": "UNAVAILABLE", "soak_restart": "INCOMPLETE:35/36 semantic; restart unverified", "comprehensive_corpus": "PENDING", "performance_completion_claimed": false},
+  "validation": {"workload_run": false, "gpu_or_server_started": false, "source_model_runtime_modified": false, "hash_file": "PERFORMANCE-BASELINE-SPEC-v2.sha256"}
+}

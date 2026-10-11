@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=hicache-l3-extent-storage/E4-bundle/extracted-e4.json
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=32812
+sha256=d55e0429e95eb5a8488fb1664c0b25f8a3964339201a36ac776ce81b627314c2
+stored_path=data/sglang-3090-24g-hicache/d5/d55e0429e95eb5a8488fb1664c0b25f8a3964339201a36ac776ce81b627314c2.json

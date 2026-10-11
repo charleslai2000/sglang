@@ -1,0 +1,21 @@
+Task ID: G3-BASELINE-C1-20260907
+Remote host: root@175.155.64.171, SSH port 22109
+Baseline API: http://127.0.0.1:8035
+Initial remote command (pre-execution failure): python /tmp/c1_server_probe.py
+Initial local wrapper: sshpass -e ssh -T -p 22109 -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new root@175.155.64.171 'python /tmp/c1_server_probe.py'
+Initial result: SSH succeeded; remote non-login PATH had no `python`; exit 127; no API request was sent.
+Actual remote command: /data/sglang-qwen35-env/bin/python /tmp/c1_server_probe.py
+Actual local wrapper: sshpass -e ssh -T -p 22109 -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new root@175.155.64.171 '/data/sglang-qwen35-env/bin/python /tmp/c1_server_probe.py'
+Probe script SHA-256: 2f0e17e90f4214ae047cea5d2c9ba8beb755f64a7faedbaa28e2640a2df381a4
+
+Fixed request in the established probe:
+  model=default
+  endpoint=/v1/chat/completions
+  system=You are a helpful assistant.
+  user=Reply with exactly the single word: pong
+  temperature=1.0
+  top_p=0.95
+  top_k=20
+  max_tokens=64
+  chat_template_kwargs.reasoning_effort=medium
+  chat_template_kwargs.preserve_thinking=false

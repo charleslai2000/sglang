@@ -1,0 +1,24 @@
+ENTRY: ACCEPT
+status: blocked
+
+Local command:
+pwd; for f in 3090-dev/test_ready_horizon_unit.py 3090-dev/test_prefetch_budget_split_unit.py 3090-dev/test_hicache_restore_scheduler_feed.py; do if test -f "$f"; then printf 'EXISTS %s\n' "$f"; sha256sum -- "$f"; else printf 'MISSING %s\n' "$f"; exit 2; fi; done
+
+Output:
+/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt
+EXISTS 3090-dev/test_ready_horizon_unit.py
+696ef7b89d8bec8f58c9c2751e24ca67b0540ac94571114ed953eacf7fc7ecfa
+EXISTS 3090-dev/test_prefetch_budget_split_unit.py
+0f64c30c4f3db7e37cde46a6ccc5ed13af1e241c7bc4b9c2e815d8ec09bb1a0d
+EXISTS 3090-dev/test_hicache_restore_scheduler_feed.py
+c46abd775e2f115172c94ace9d1fc5e6bcc59921a27e4164a18ae430fc3ce607
+
+Remote gate command output:
+REMOTE_BACKUP=/root/sglang-3060-12g-hicache/.p0a-provenance-backup-20260910T214038Z
+backup hashes: all three exactly matched the local hashes above
+REMOTE_PRE_HASHES: all three exactly matched the local hashes above
+SYMBOL_OK 3090-dev/test_ready_horizon_unit.py origin
+SYMBOL_OK 3090-dev/test_ready_horizon_unit.py PrefetchIssueResult
+SYMBOL_MISSING 3090-dev/test_ready_horizon_unit.py host_release
+
+The remote script exited nonzero at the required gate. No transfer and no pytest commands followed.

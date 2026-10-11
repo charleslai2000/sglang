@@ -1,0 +1,6 @@
+ARCHIVE_PATH=data/sglang-qwen3-27b-iq3s/83/83e1b3cfd6e6eeade9c0f4d97bbd0f139dd56ee22f8d18b53fbdbcd6be93dd92.body
+SHA256=83e1b3cfd6e6eeade9c0f4d97bbd0f139dd56ee22f8d18b53fbdbcd6be93dd92
+SIZE=1019
+SOURCE_STATE=local-only
+SOURCE_HEAD=4d3068316e21d4c5a2b86ad0e0efdff7f05850c2
+SOURCE_WORKTREE_DIRTY=0

@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=hicache-l3-extent-storage/evidence/p0-telemetry-20260914/packet/hashes.sha256
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=2041
+sha256=299d423faccd4b8f2ef74735bc5979e5c5c751d0264369dcf3a4e4435843268d
+stored_path=data/sglang-3090-24g-hicache/29/299d423faccd4b8f2ef74735bc5979e5c5c751d0264369dcf3a4e4435843268d.sha256

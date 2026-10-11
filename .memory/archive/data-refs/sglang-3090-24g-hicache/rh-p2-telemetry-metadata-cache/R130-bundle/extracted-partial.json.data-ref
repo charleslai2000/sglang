@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=rh-p2-telemetry-metadata-cache/R130-bundle/extracted-partial.json
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=9707
+sha256=dc368e4d68c9657c1424a04eaaf24d81124a26a65838e632d0b4b4c10950cf84
+stored_path=data/sglang-3090-24g-hicache/dc/dc368e4d68c9657c1424a04eaaf24d81124a26a65838e632d0b4b4c10950cf84.json

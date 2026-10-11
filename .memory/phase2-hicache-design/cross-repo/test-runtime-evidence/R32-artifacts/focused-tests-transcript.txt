@@ -1,0 +1,763 @@
+COMMAND: focused dependency-complete HOST_ALLOC/restore suite
+START_UTC: 2026-09-10T22:07:37Z
+.....F..F............................................................... [ 26%]
+........................................................................ [ 52%]
+........F..................................FF........................... [ 79%]
+FF.......................F...FF.......F..................                [100%]
+=================================== FAILURES ===================================
+_ HostAllocabilityWakeTests.test_no_change_no_spin_and_failed_retry_rotates_fifo _
+
+self = <test_hicache_host_allocability.HostAllocabilityWakeTests testMethod=test_no_change_no_spin_and_failed_retry_rotates_fifo>
+
+    def test_no_change_no_spin_and_failed_retry_rotates_fifo(self):
+        initial = _snapshot(free_kv=1024)
+        cache = _SnapshotCache(initial)
+        scheduler = self._scheduler(cache)
+        first = _request("first", initial)
+        second = _request("second", initial)
+        scheduler.waiting_queue = [first, second]
+        scheduler._host_alloc_wake_arbiter.enqueue(first.rid)
+        scheduler._host_alloc_wake_arbiter.enqueue(second.rid)
+    
+        # HAE-03: unchanged state never grants a retry.
+        self.assertIsNone(scheduler._select_host_alloc_waiter())
+    
+        cache.snapshot = _snapshot(kv=1, free_kv=1024, evict_kv=2048)
+        self.assertEqual(scheduler._select_host_alloc_waiter(), "first")
+        scheduler._host_alloc_wake_arbiter.record_attempt_result(
+            first.rid, cache.snapshot, first.hicache_host_alloc_wait_cursor.blocked_domains
+        )
+        first.hicache_host_alloc_wait_cursor = HostAllocWaitCursor(
+            snapshot=cache.snapshot,
+            blocked_domains=frozenset({"kv"}),
+            requested_primary_tokens=54976,
+            required_aux_units={},
+            fifo_sequence=1,
+        )
+        # The failed attempt's post-cleanup vector cannot immediately wake
+        # itself, and the single grant was consumed for this generation.
+>       self.assertIsNone(scheduler._select_host_alloc_waiter())
+E       AssertionError: 'second' is not None
+
+test/registered/unit/managers/test_hicache_host_allocability.py:110: AssertionError
+_ HostAllocabilityWakeTests.test_waiter_departure_removes_fifo_entry_immediately _
+
+self = <test_hicache_host_allocability.HostAllocabilityWakeTests testMethod=test_waiter_departure_removes_fifo_entry_immediately>
+
+    def test_waiter_departure_removes_fifo_entry_immediately(self):
+        cache = _SnapshotCache(_snapshot())
+        scheduler = self._scheduler(cache)
+        req = _request("depart", _snapshot())
+        scheduler._host_alloc_wake_arbiter.enqueue(req.rid)
+>       scheduler._apply_restore_event(req, RestoreEvent.TIMEOUT)
+
+test/registered/unit/managers/test_hicache_host_allocability.py:193: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sglang.srt.managers.scheduler.Scheduler object at 0x7fbf232fdc50>
+req = namespace(rid='depart', hicache_restore_state=<RestoreState.NONE: 1>, hicache_restore_wait_reason=None, hicache_host_a...tempt_id=None, hicache_restore_miss_epoch=None, hicache_restore_miss_generation=None, hicache_restore_miss_anchor=None)
+event = <RestoreEvent.TIMEOUT: 13>, capacity_fits = False, genuine_miss = False
+rearm_allowed = True, short_tail_recompute = False
+
+    def _apply_restore_event(
+        self,
+        req,
+        event,
+        *,
+        capacity_fits: bool = False,
+        genuine_miss: bool = False,
+        rearm_allowed: bool = True,
+        short_tail_recompute: bool = False,
+    ) -> RestoreDecision:
+        """Feed a restore event into the request's state machine and apply
+        the transition (Req fields only; the decision is returned for the
+        caller to execute). Scheduler thread only -- the drain, the
+        reconciliation and the admission loop all run on it, so there is no
+        concurrent write."""
+        prev_state = req.hicache_restore_state
+        next_state, decision = next_restore(
+            req.hicache_restore_state,
+            event,
+            capacity_fits=capacity_fits,
+            genuine_miss=genuine_miss,
+            rearm_allowed=rearm_allowed,
+            short_tail_recompute=short_tail_recompute,
+        )
+        if next_state is req.hicache_restore_state and decision is RestoreDecision.NONE:
+            return decision
+        if (
+            prev_state is RestoreState.WAIT_CAPACITY
+            and req.hicache_restore_wait_reason is RestoreWaitReason.HOST_ALLOC
+        ):
+            if not (
+                next_state is RestoreState.WAIT_CAPACITY
+                and wait_reason_for(event, genuine_miss=genuine_miss)
+                is RestoreWaitReason.HOST_ALLOC
+            ):
+                self._remove_host_alloc_waiter(req.rid)
+                req.hicache_host_alloc_wait_cursor = None
+        req.hicache_restore_state = next_state
+        if next_state is RestoreState.WAIT_CAPACITY:
+            req.hicache_restore_wait_reason = wait_reason_for(
+                event, genuine_miss=genuine_miss
+            )
+        else:
+            req.hicache_restore_wait_reason = None
+        if next_state is not RestoreState.MISS_RECOMPUTE:
+            # P1: leaving the sticky-miss state (a re-arm override, an
+            # abort, a forward READY, or a re-issued restore) drops the
+            # negative evidence -- the miss no longer binds the request.
+            req.hicache_restore_miss_epoch = None
+            req.hicache_restore_miss_generation = None
+            req.hicache_restore_miss_anchor = None
+        # The wait clock is armed at the first WAIT entry of the episode and
+        # never re-armed by a re-decline: re-arming was what let the
+        # capacity loop evade the T13 timeout (state_ts reset every pass).
+        req.hicache_restore_state_ts = wait_clock_next(
+>           prev_state, next_state, req.hicache_restore_state_ts, time.perf_counter()
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        )
+E       AttributeError: 'types.SimpleNamespace' object has no attribute 'hicache_restore_state_ts'
+
+python/sglang/srt/managers/scheduler.py:4132: AttributeError
+_ StorageFailureDegradationTest.test_handle_storage_failure_revokes_inflight_and_releases_locks _
+
+self = <test_storage_regression.StorageFailureDegradationTest testMethod=test_handle_storage_failure_revokes_inflight_and_releases_locks>
+
+    def test_handle_storage_failure_revokes_inflight_and_releases_locks(self):
+        cache = _make_cache()
+        cc = cache.cache_controller
+        cc.storage_failure_reason = "prefetch_io_aux_func: ValueError: io boom"
+    
+        # One pre-alloc prefetch (revoke path) and one post-alloc prefetch
+        # (release_aborted_request path).
+        pre_op = _make_operation(0, requested=100)
+        pre_op.host_indices = None
+        pre_op.storage_hit_count = 0
+        cache.ongoing_prefetch["pre"] = (
+            1,
+            list(range(100)),
+            None,
+            pre_op,
+            None,
+            {},
+        )
+        post_op = _make_operation(3, requested=100)
+        post_op.host_indices = [10, 11, 12]
+        post_op.storage_hit_count = 64
+        cache.ongoing_prefetch["post"] = (
+            2,
+            list(range(100)),
+            [10, 11, 12],
+            post_op,
+            None,
+            {},
+        )
+        cache.ongoing_backup = {7: (42, "lock-params")}
+    
+>       cache._handle_storage_failure("prefetch_io_aux_func: ValueError: io boom")
+
+3090-dev/test_storage_regression.py:1028: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/sglang/srt/mem_cache/unified_radix_cache.py:7685: in _handle_storage_failure
+    self.dec_host_lock_ref(node_id, lock_params)
+python/sglang/srt/mem_cache/unified_radix_cache.py:3285: in dec_host_lock_ref
+    before = self._host_allocability_signatures()
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sglang.srt.mem_cache.unified_radix_cache.UnifiedRadixCache object at 0x7fbf23393e50>
+
+    def _host_allocability_signatures(self) -> dict[str, tuple[int, frozenset[int]]]:
+        pools = [PoolName.KV.value]
+        pools.extend(
+            self._host_allocability_pool_for_component(ct)
+>           for ct in self.components
+                      ^^^^^^^^^^^^^^^
+            if ct != BASE_COMPONENT_TYPE
+        )
+E       AttributeError: 'UnifiedRadixCache' object has no attribute 'components'
+
+python/sglang/srt/mem_cache/unified_radix_cache.py:3658: AttributeError
+------------------------------ Captured log call -------------------------------
+ERROR    sglang.srt.mem_cache.unified_radix_cache:unified_radix_cache.py:7676 HiCache storage failure: prefetch_io_aux_func: ValueError: io boom. Degrading: L3 queries/prefetches/writes are disabled for the rest of this run; requests fall back to recompute.
+_ StorageBackedHollowEvictionTests.test_drop_to_miss_when_chain_not_persisted __
+
+self = <test_storage_regression.StorageBackedHollowEvictionTests testMethod=test_drop_to_miss_when_chain_not_persisted>
+
+    def test_drop_to_miss_when_chain_not_persisted(self):
+        # P2-1 e15 Z3 contract flip (was test_no_hollow_when_chain_not_persisted):
+        # a chain with no L3 copy still never hollows (there is no L3 copy to
+        # hollow into), but it must also not stay device-resident until host
+        # space frees -- that was the e11 deadlock shape. The dual-fail
+        # fallback now sacrifices the device copy as a plain drop-to-miss:
+        # cache persistence is lost (a future access recomputes), never faked
+        # as a hollow with an L3 restore expectation.
+        cache = _make_cache()
+        cache.is_swa_enabled = False
+        cache.tree_components = [_component_type.FULL, _component_type.MAMBA]
+        cache.cache_controller.mem_pool_host = SimpleNamespace(
+            available_size=lambda: 0
+        )
+        cache.evict_host = lambda needed: 0
+        cache.tree_core = _HollowWalkTree(persisted=False)
+        cache.token_to_kv_pool_allocator = SimpleNamespace(
+            available_size=lambda: 0
+        )
+        tracker = {ct: 0 for ct in cache.tree_components}
+>       cache._evict_components(
+            {_component_type.FULL: 2048, _component_type.MAMBA: 0},
+            tracker,
+            available_size_targets={_component_type.FULL: 2048},
+        )
+
+3090-dev/test_storage_regression.py:1846: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/sglang/srt/mem_cache/unified_radix_cache.py:3164: in _evict_components
+    backup_kv = self._evict_device_leaf(node_id, tracker)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+python/sglang/srt/mem_cache/unified_radix_cache.py:3047: in _evict_device_leaf
+    _t38c_residency_barrier(self, node_id)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cache = <sglang.srt.mem_cache.unified_radix_cache.UnifiedRadixCache object at 0x7fbf23119d90>
+node_id = 42, expected_identity = None, retry_epoch = 0, poll_attempt = 0
+trigger = 'reconcile'
+
+    def _t38c_residency_barrier(
+        cache,
+        node_id,
+        expected_identity=None,
+        retry_epoch=0,
+        poll_attempt=0,
+        trigger="reconcile",
+    ):
+        """Publish cold residency only after keyed detaches have actually freed."""
+        if not _t38c_durable_enabled():
+            return
+>       with cache._t38c_residency_lock:
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'UnifiedRadixCache' object has no attribute '_t38c_residency_lock'
+
+python/sglang/srt/mem_cache/unified_radix_cache.py:981: AttributeError
+_ StorageBackedHollowEvictionTests.test_hollow_evict_breaks_backup_and_drop_deadlock _
+
+self = <test_storage_regression.StorageBackedHollowEvictionTests testMethod=test_hollow_evict_breaks_backup_and_drop_deadlock>
+
+    def test_hollow_evict_breaks_backup_and_drop_deadlock(self):
+        # P2-1 e11 OOM pin: backup fails (host full) and the subtree drop
+        # declines (host locks), but the chain is L3-persisted -- the walker
+        # must free the leaf's device layers instead of leaving it
+        # unevictable until host space frees (the four-run GPU OOM). The
+        # durable chain must hollow (L3-backed), never drop to a miss
+        # (e15 Z3 regression pin).
+        cache = _make_cache()
+        cache.is_swa_enabled = False
+        cache.tree_components = [_component_type.FULL, _component_type.MAMBA]
+        cache.cache_controller.mem_pool_host = SimpleNamespace(
+            available_size=lambda: 0
+        )
+        cache.evict_host = lambda needed: 0  # host full: no frees
+        cache.tree_core = _HollowWalkTree()
+        cache.token_to_kv_pool_allocator = SimpleNamespace(
+            available_size=lambda: (
+                cache.tree_core.freed_after_hollow
+                if cache.tree_core.hollowed
+                else 0
+            )
+        )
+        tracker = {ct: 0 for ct in cache.tree_components}
+>       cache._evict_components(
+            {_component_type.FULL: 2048, _component_type.MAMBA: 0},
+            tracker,
+            available_size_targets={_component_type.FULL: 2048},
+        )
+
+3090-dev/test_storage_regression.py:1817: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/sglang/srt/mem_cache/unified_radix_cache.py:3164: in _evict_components
+    backup_kv = self._evict_device_leaf(node_id, tracker)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+python/sglang/srt/mem_cache/unified_radix_cache.py:3047: in _evict_device_leaf
+    _t38c_residency_barrier(self, node_id)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cache = <sglang.srt.mem_cache.unified_radix_cache.UnifiedRadixCache object at 0x7fbf2311a410>
+node_id = 42, expected_identity = None, retry_epoch = 0, poll_attempt = 0
+trigger = 'reconcile'
+
+    def _t38c_residency_barrier(
+        cache,
+        node_id,
+        expected_identity=None,
+        retry_epoch=0,
+        poll_attempt=0,
+        trigger="reconcile",
+    ):
+        """Publish cold residency only after keyed detaches have actually freed."""
+        if not _t38c_durable_enabled():
+            return
+>       with cache._t38c_residency_lock:
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'UnifiedRadixCache' object has no attribute '_t38c_residency_lock'
+
+python/sglang/srt/mem_cache/unified_radix_cache.py:981: AttributeError
+__ RestoreChainHollowEvictionTests.test_drop_to_miss_for_pure_recompute_chain __
+
+self = <test_storage_regression.RestoreChainHollowEvictionTests testMethod=test_drop_to_miss_for_pure_recompute_chain>
+
+    def test_drop_to_miss_for_pure_recompute_chain(self):
+        # P2-1 e15 Z3 contract flip (was test_no_hollow_for_pure_recompute_chain):
+        # a pure recompute chain (no L3 copy anywhere -- neither acked nor
+        # restored) still never hollows, but under the backup+drop dual fail
+        # it now drops its device layers to a plain miss instead of leaving
+        # the walker stuck: the eviction must keep making progress even when
+        # no tier can take over the KV (the e11 K=32 deadlock shape).
+        cache = _make_cache()
+        cache.is_swa_enabled = False
+        cache.tree_components = [_component_type.FULL, _component_type.MAMBA]
+        cache.cache_controller.mem_pool_host = SimpleNamespace(
+            available_size=lambda: 0
+        )
+        cache.evict_host = lambda needed: 0
+        cache.tree_core = _HollowWalkTree(persisted=False)
+        cache.token_to_kv_pool_allocator = SimpleNamespace(
+            available_size=lambda: 0
+        )
+        tracker = {ct: 0 for ct in cache.tree_components}
+>       cache._evict_components(
+            {_component_type.FULL: 2048, _component_type.MAMBA: 0},
+            tracker,
+            available_size_targets={_component_type.FULL: 2048},
+        )
+
+3090-dev/test_storage_regression.py:3114: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/sglang/srt/mem_cache/unified_radix_cache.py:3164: in _evict_components
+    backup_kv = self._evict_device_leaf(node_id, tracker)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+python/sglang/srt/mem_cache/unified_radix_cache.py:3047: in _evict_device_leaf
+    _t38c_residency_barrier(self, node_id)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cache = <sglang.srt.mem_cache.unified_radix_cache.UnifiedRadixCache object at 0x7fbf23465c50>
+node_id = 42, expected_identity = None, retry_epoch = 0, poll_attempt = 0
+trigger = 'reconcile'
+
+    def _t38c_residency_barrier(
+        cache,
+        node_id,
+        expected_identity=None,
+        retry_epoch=0,
+        poll_attempt=0,
+        trigger="reconcile",
+    ):
+        """Publish cold residency only after keyed detaches have actually freed."""
+        if not _t38c_durable_enabled():
+            return
+>       with cache._t38c_residency_lock:
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'UnifiedRadixCache' object has no attribute '_t38c_residency_lock'
+
+python/sglang/srt/mem_cache/unified_radix_cache.py:981: AttributeError
+_ RestoreChainHollowEvictionTests.test_hollow_evict_breaks_deadlock_on_restored_chain _
+
+self = <test_storage_regression.RestoreChainHollowEvictionTests testMethod=test_hollow_evict_breaks_deadlock_on_restored_chain>
+
+    def test_hollow_evict_breaks_deadlock_on_restored_chain(self):
+        cache = _make_cache()
+        cache.is_swa_enabled = False
+        cache.tree_components = [_component_type.FULL, _component_type.MAMBA]
+        cache.cache_controller.mem_pool_host = SimpleNamespace(
+            available_size=lambda: 0
+        )
+        cache.evict_host = lambda needed: 0
+        tree = _HollowWalkTree(persisted=False)
+        tree.durable.add(42)  # restored 43s ago; never written by this engine
+        cache.tree_core = tree
+        cache.token_to_kv_pool_allocator = SimpleNamespace(
+            available_size=lambda: (
+                tree.freed_after_hollow if tree.hollowed else 0
+            )
+        )
+        tracker = {ct: 0 for ct in cache.tree_components}
+>       cache._evict_components(
+            {_component_type.FULL: 2048, _component_type.MAMBA: 0},
+            tracker,
+            available_size_targets={_component_type.FULL: 2048},
+        )
+
+3090-dev/test_storage_regression.py:3086: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/sglang/srt/mem_cache/unified_radix_cache.py:3164: in _evict_components
+    backup_kv = self._evict_device_leaf(node_id, tracker)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+python/sglang/srt/mem_cache/unified_radix_cache.py:3047: in _evict_device_leaf
+    _t38c_residency_barrier(self, node_id)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cache = <sglang.srt.mem_cache.unified_radix_cache.UnifiedRadixCache object at 0x7fbf219e8490>
+node_id = 42, expected_identity = None, retry_epoch = 0, poll_attempt = 0
+trigger = 'reconcile'
+
+    def _t38c_residency_barrier(
+        cache,
+        node_id,
+        expected_identity=None,
+        retry_epoch=0,
+        poll_attempt=0,
+        trigger="reconcile",
+    ):
+        """Publish cold residency only after keyed detaches have actually freed."""
+        if not _t38c_durable_enabled():
+            return
+>       with cache._t38c_residency_lock:
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'UnifiedRadixCache' object has no attribute '_t38c_residency_lock'
+
+python/sglang/srt/mem_cache/unified_radix_cache.py:981: AttributeError
+_ PromotionLockedDerivationEvidenceTests.test_gate_locks_do_not_move_span_into_derived_locked _
+
+self = <test_storage_regression.PromotionLockedDerivationEvidenceTests testMethod=test_gate_locks_do_not_move_span_into_derived_locked>
+
+    def test_gate_locks_do_not_move_span_into_derived_locked(self):
+        # The load_back entry state (1567/1570 locks on a device-less chain):
+        # inc_host_lock_ref + inc_lock_ref change no size counter (the
+        # tombstone-skip path), so derived locked is unchanged -- the span
+        # is still free and the reservation covers it.
+        cache = _make_loadback_cache(size_full=8192)
+        child = _attach_host_chain(cache.tree_core, 2048)
+        locked0 = cache._device_locked_tokens()
+        self.assertEqual(locked0, 0)
+        host_params = cache.inc_host_lock_ref(child.id).to_dec_params()
+        lock_params = cache.inc_lock_ref(child.id).to_dec_params()
+        self.assertEqual(cache._device_locked_tokens(), locked0)
+        cache.dec_lock_ref(child.id, lock_params)
+>       cache.dec_host_lock_ref(child.id, host_params)
+
+3090-dev/test_storage_regression.py:3608: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/sglang/srt/mem_cache/unified_radix_cache.py:3287: in dec_host_lock_ref
+    self._bump_changed_host_allocability(before, "lock_release_evictable")
+python/sglang/srt/mem_cache/unified_radix_cache.py:3768: in _bump_changed_host_allocability
+    self._bump_host_allocability(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sglang.srt.mem_cache.unified_radix_cache.UnifiedRadixCache object at 0x7fbf2197f710>
+pool = 'kv', cause = 'lock_release_evictable', returned_units = 0
+evictable_before = 0, evictable_after = 2048, causal_rid = None
+trace_context = None
+
+    def _bump_host_allocability(
+        self,
+        pool: str,
+        cause: str,
+        returned_units: int = 0,
+        *,
+        evictable_before: Optional[int] = None,
+        evictable_after: Optional[int] = None,
+        causal_rid: Optional[str] = None,
+        trace_context=None,
+    ) -> None:
+        """Advance one pool generation after a completed causal mutation.
+    
+        The generation and telemetry sequence advance for every mutation.
+        Mutation records are observational samples keyed by pool, cause,
+        request, and trace context: the first 16 per key are emitted, then
+        every 128th mutation, with a 64-record per-key and 256-record
+        per-cache-instance hard cap.  This preserves request/cause joins and
+        sequence gaps while bounding log volume; it never changes wake or
+        allocation behavior.
+        """
+        import json as _json
+    
+        returned_units = int(returned_units or 0)
+        if returned_units <= 0 and cause != "lock_release_evictable":
+            return
+        pool = getattr(pool, "value", pool)
+        generations = getattr(self, "_host_allocability_generations", None)
+        if generations is None:
+            generations = {}
+            self._host_allocability_generations = generations
+        before = generations.get(pool, 0)
+        generations[pool] = before + 1
+        if evictable_after is None:
+            evictable_after = self._host_evictable_signature(pool)[0]
+        if evictable_before is None:
+            evictable_before = evictable_after
+>       self._host_allocability_telemetry_seq += 1
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'UnifiedRadixCache' object has no attribute '_host_allocability_telemetry_seq'
+
+python/sglang/srt/mem_cache/unified_radix_cache.py:3700: AttributeError
+______ PromotionLifecycleReleaseTests.test_e3_eviction_shortfall_releases ______
+
+self = <test_storage_regression.PromotionLifecycleReleaseTests testMethod=test_e3_eviction_shortfall_releases>
+
+    def test_e3_eviction_shortfall_releases(self):
+        # Budget passes at the gate (locked 0 + 2048 <= 8192 - 2048) but
+        # the pool has no free tokens and the (stubbed) eviction finds
+        # nothing: E3 returns the reservation with the locks.
+        cache = _make_loadback_cache(size_full=8192)
+        tree = cache.tree_core
+        # A device-on filler occupies the pool as evictable (the production
+        # eviction would reclaim it; the stub declines, so E3 fires).
+        _attach_chain(tree, 8192)
+        tree.component_evictable_size_[_component_type.FULL] += 8192
+        cache.token_to_kv_pool_allocator.alloc(8192)  # pool full
+        child = _attach_host_chain(tree, 2048, key_offset=8192)
+        evict_calls = []
+        cache.evict_for_alloc = lambda params: evict_calls.append(params.num_tokens)
+>       self.assertFalse(cache.load_back(child.id, req=_promo_req(2048)))
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+3090-dev/test_storage_regression.py:3687: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/sglang/srt/mem_cache/unified_radix_cache.py:4465: in load_back
+    success = self._load_back_transfers(
+python/sglang/srt/mem_cache/unified_radix_cache.py:4565: in _load_back_transfers
+    self.dec_host_lock_ref(node_id, host_anchor_params)
+python/sglang/srt/mem_cache/unified_radix_cache.py:3287: in dec_host_lock_ref
+    self._bump_changed_host_allocability(before, "lock_release_evictable")
+python/sglang/srt/mem_cache/unified_radix_cache.py:3768: in _bump_changed_host_allocability
+    self._bump_host_allocability(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sglang.srt.mem_cache.unified_radix_cache.UnifiedRadixCache object at 0x7fbf226b8110>
+pool = 'kv', cause = 'lock_release_evictable', returned_units = 0
+evictable_before = 0, evictable_after = 2048, causal_rid = None
+trace_context = None
+
+    def _bump_host_allocability(
+        self,
+        pool: str,
+        cause: str,
+        returned_units: int = 0,
+        *,
+        evictable_before: Optional[int] = None,
+        evictable_after: Optional[int] = None,
+        causal_rid: Optional[str] = None,
+        trace_context=None,
+    ) -> None:
+        """Advance one pool generation after a completed causal mutation.
+    
+        The generation and telemetry sequence advance for every mutation.
+        Mutation records are observational samples keyed by pool, cause,
+        request, and trace context: the first 16 per key are emitted, then
+        every 128th mutation, with a 64-record per-key and 256-record
+        per-cache-instance hard cap.  This preserves request/cause joins and
+        sequence gaps while bounding log volume; it never changes wake or
+        allocation behavior.
+        """
+        import json as _json
+    
+        returned_units = int(returned_units or 0)
+        if returned_units <= 0 and cause != "lock_release_evictable":
+            return
+        pool = getattr(pool, "value", pool)
+        generations = getattr(self, "_host_allocability_generations", None)
+        if generations is None:
+            generations = {}
+            self._host_allocability_generations = generations
+        before = generations.get(pool, 0)
+        generations[pool] = before + 1
+        if evictable_after is None:
+            evictable_after = self._host_evictable_signature(pool)[0]
+        if evictable_before is None:
+            evictable_before = evictable_after
+>       self._host_allocability_telemetry_seq += 1
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'UnifiedRadixCache' object has no attribute '_host_allocability_telemetry_seq'
+
+python/sglang/srt/mem_cache/unified_radix_cache.py:3700: AttributeError
+_________ PromotionLifecycleReleaseTests.test_e4_load_failure_releases _________
+
+self = <test_storage_regression.PromotionLifecycleReleaseTests testMethod=test_e4_load_failure_releases>
+
+    def test_e4_load_failure_releases(self):
+        # The controller refuses the allocation: E4 returns the reservation.
+        cache = _make_loadback_cache(size_full=8192, fail_load=True)
+        child = _attach_host_chain(cache.tree_core, 2048)
+>       self.assertFalse(cache.load_back(child.id, req=_promo_req(2048)))
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+3090-dev/test_storage_regression.py:3702: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/sglang/srt/mem_cache/unified_radix_cache.py:4465: in load_back
+    success = self._load_back_transfers(
+python/sglang/srt/mem_cache/unified_radix_cache.py:4585: in _load_back_transfers
+    self.dec_host_lock_ref(node_id, host_anchor_params)
+python/sglang/srt/mem_cache/unified_radix_cache.py:3287: in dec_host_lock_ref
+    self._bump_changed_host_allocability(before, "lock_release_evictable")
+python/sglang/srt/mem_cache/unified_radix_cache.py:3768: in _bump_changed_host_allocability
+    self._bump_host_allocability(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sglang.srt.mem_cache.unified_radix_cache.UnifiedRadixCache object at 0x7fbf2310ded0>
+pool = 'kv', cause = 'lock_release_evictable', returned_units = 0
+evictable_before = 0, evictable_after = 2048, causal_rid = None
+trace_context = None
+
+    def _bump_host_allocability(
+        self,
+        pool: str,
+        cause: str,
+        returned_units: int = 0,
+        *,
+        evictable_before: Optional[int] = None,
+        evictable_after: Optional[int] = None,
+        causal_rid: Optional[str] = None,
+        trace_context=None,
+    ) -> None:
+        """Advance one pool generation after a completed causal mutation.
+    
+        The generation and telemetry sequence advance for every mutation.
+        Mutation records are observational samples keyed by pool, cause,
+        request, and trace context: the first 16 per key are emitted, then
+        every 128th mutation, with a 64-record per-key and 256-record
+        per-cache-instance hard cap.  This preserves request/cause joins and
+        sequence gaps while bounding log volume; it never changes wake or
+        allocation behavior.
+        """
+        import json as _json
+    
+        returned_units = int(returned_units or 0)
+        if returned_units <= 0 and cause != "lock_release_evictable":
+            return
+        pool = getattr(pool, "value", pool)
+        generations = getattr(self, "_host_allocability_generations", None)
+        if generations is None:
+            generations = {}
+            self._host_allocability_generations = generations
+        before = generations.get(pool, 0)
+        generations[pool] = before + 1
+        if evictable_after is None:
+            evictable_after = self._host_evictable_signature(pool)[0]
+        if evictable_before is None:
+            evictable_before = evictable_after
+>       self._host_allocability_telemetry_seq += 1
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'UnifiedRadixCache' object has no attribute '_host_allocability_telemetry_seq'
+
+python/sglang/srt/mem_cache/unified_radix_cache.py:3700: AttributeError
+______ PromotionDeniedPathTests.test_precise_gate_rejects_kv_over_budget _______
+
+self = <test_storage_regression.PromotionDeniedPathTests testMethod=test_precise_gate_rejects_kv_over_budget>
+
+    def test_precise_gate_rejects_kv_over_budget(self):
+        # est is under the budget (entry gate passes) but the exact spec is
+        # over: the precise gate is authoritative.
+        cache = _make_loadback_cache(size_full=8192)
+        child = _attach_host_chain(cache.tree_core, 8192)
+        cache.promotion_margin_tokens = 2048
+        self.assertTrue(_promotion_budget_fits(0, 0, 2048, 8192, 2048))
+        self.assertFalse(_promotion_budget_fits(0, 0, 8192, 8192, 2048))
+>       self.assertFalse(cache.load_back(child.id, req=_promo_req(2048)))
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+3090-dev/test_storage_regression.py:3833: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/sglang/srt/mem_cache/unified_radix_cache.py:4465: in load_back
+    success = self._load_back_transfers(
+python/sglang/srt/mem_cache/unified_radix_cache.py:4531: in _load_back_transfers
+    self.dec_host_lock_ref(node_id, host_anchor_params)
+python/sglang/srt/mem_cache/unified_radix_cache.py:3287: in dec_host_lock_ref
+    self._bump_changed_host_allocability(before, "lock_release_evictable")
+python/sglang/srt/mem_cache/unified_radix_cache.py:3768: in _bump_changed_host_allocability
+    self._bump_host_allocability(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sglang.srt.mem_cache.unified_radix_cache.UnifiedRadixCache object at 0x7fbf234642d0>
+pool = 'kv', cause = 'lock_release_evictable', returned_units = 0
+evictable_before = 0, evictable_after = 8192, causal_rid = None
+trace_context = None
+
+    def _bump_host_allocability(
+        self,
+        pool: str,
+        cause: str,
+        returned_units: int = 0,
+        *,
+        evictable_before: Optional[int] = None,
+        evictable_after: Optional[int] = None,
+        causal_rid: Optional[str] = None,
+        trace_context=None,
+    ) -> None:
+        """Advance one pool generation after a completed causal mutation.
+    
+        The generation and telemetry sequence advance for every mutation.
+        Mutation records are observational samples keyed by pool, cause,
+        request, and trace context: the first 16 per key are emitted, then
+        every 128th mutation, with a 64-record per-key and 256-record
+        per-cache-instance hard cap.  This preserves request/cause joins and
+        sequence gaps while bounding log volume; it never changes wake or
+        allocation behavior.
+        """
+        import json as _json
+    
+        returned_units = int(returned_units or 0)
+        if returned_units <= 0 and cause != "lock_release_evictable":
+            return
+        pool = getattr(pool, "value", pool)
+        generations = getattr(self, "_host_allocability_generations", None)
+        if generations is None:
+            generations = {}
+            self._host_allocability_generations = generations
+        before = generations.get(pool, 0)
+        generations[pool] = before + 1
+        if evictable_after is None:
+            evictable_after = self._host_evictable_signature(pool)[0]
+        if evictable_before is None:
+            evictable_before = evictable_after
+>       self._host_allocability_telemetry_seq += 1
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'UnifiedRadixCache' object has no attribute '_host_allocability_telemetry_seq'
+
+python/sglang/srt/mem_cache/unified_radix_cache.py:3700: AttributeError
+=============================== warnings summary ===============================
+../sglang-env-3060-4b/lib/python3.11/site-packages/_pytest/config/__init__.py:1464
+  /root/sglang-env-3060-4b/lib/python3.11/site-packages/_pytest/config/__init__.py:1464: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+<frozen importlib._bootstrap_external>:1241
+  <frozen importlib._bootstrap_external>:1241: DeprecationWarning: The cuda.cudart module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.runtime module instead.
+
+<frozen importlib._bootstrap_external>:1241
+  <frozen importlib._bootstrap_external>:1241: DeprecationWarning: The cuda.nvrtc module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.nvrtc module instead.
+
+::DropToMissSafetyValveTests::test_drop_to_miss_keeps_host_subtree
+::DropToMissSafetyValveTests::test_drop_to_miss_releases_device_and_leaf_misses
+::DropToMissEvictionOrderRegressionTests::test_ancestor_drop_does_not_orphan_tombstone_host_children
+::DropToMissEvictionOrderRegressionTests::test_detach_clears_orphaned_host_subtree_registrations
+::DropToMissEvictionOrderRegressionTests::test_detach_preserves_parent_chain_and_query_visibility
+::DropToMissEvictionOrderRegressionTests::test_drop_subtree_skips_forced_miss_ancestor_standalone
+::DropToMissEvictionOrderRegressionTests::test_interleaved_descendant_forced_drop_then_ancestor_drop_subtree
+  /root/sglang-env-3060-4b/lib/python3.11/site-packages/_pytest/unraisableexception.py:67: PytestUnraisableExceptionWarning: Exception ignored in: <function BaseEvictionResult.__del__ at 0x7fbf238194e0>
+  
+  Traceback (most recent call last):
+    File "/root/sglang-3060-12g-hicache/python/sglang/srt/mem_cache/unified_cache/unified_tree_core_interface.py", line 39, in __del__
+      not self.device_frees and not self.host_frees
+  AssertionError: BaseEvictionResult dropped with undrained values
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test/registered/unit/managers/test_hicache_host_allocability.py::HostAllocabilityWakeTests::test_no_change_no_spin_and_failed_retry_rotates_fifo
+FAILED test/registered/unit/managers/test_hicache_host_allocability.py::HostAllocabilityWakeTests::test_waiter_departure_removes_fifo_entry_immediately
+FAILED test::StorageFailureDegradationTest::test_handle_storage_failure_revokes_inflight_and_releases_locks
+FAILED test::StorageBackedHollowEvictionTests::test_drop_to_miss_when_chain_not_persisted
+FAILED test::StorageBackedHollowEvictionTests::test_hollow_evict_breaks_backup_and_drop_deadlock
+FAILED test::RestoreChainHollowEvictionTests::test_drop_to_miss_for_pure_recompute_chain
+FAILED test::RestoreChainHollowEvictionTests::test_hollow_evict_breaks_deadlock_on_restored_chain
+FAILED test::PromotionLockedDerivationEvidenceTests::test_gate_locks_do_not_move_span_into_derived_locked
+FAILED test::PromotionLifecycleReleaseTests::test_e3_eviction_shortfall_releases
+FAILED test::PromotionLifecycleReleaseTests::test_e4_load_failure_releases - ...
+FAILED test::PromotionDeniedPathTests::test_precise_gate_rejects_kv_over_budget
+11 failed, 262 passed, 10 warnings in 16.75s
+REMOTE_EXIT=1
+END_UTC: 2026-09-10T22:07:57Z
+LOCAL_PIPE_EXIT=1

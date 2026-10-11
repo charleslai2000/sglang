@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=rh-p0b-harness-durability/R109-bundle/key-lines.txt
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=9986
+sha256=e7875be87f60fe68c46a7d1fb4b513175cbb56fa8d0da768100b9addedc44bde
+stored_path=data/sglang-3090-24g-hicache/e7/e7875be87f60fe68c46a7d1fb4b513175cbb56fa8d0da768100b9addedc44bde.txt

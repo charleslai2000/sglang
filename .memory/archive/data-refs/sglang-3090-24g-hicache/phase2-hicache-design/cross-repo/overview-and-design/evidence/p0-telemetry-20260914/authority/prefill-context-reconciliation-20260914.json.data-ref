@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=phase2-hicache-design/cross-repo/overview-and-design/evidence/p0-telemetry-20260914/authority/prefill-context-reconciliation-20260914.json
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=4868
+sha256=81b12eb6e59a176e08b7e60e11c27f09c5be9827535aaf31d4dd7a91b5174630
+stored_path=data/sglang-3090-24g-hicache/81/81b12eb6e59a176e08b7e60e11c27f09c5be9827535aaf31d4dd7a91b5174630.json

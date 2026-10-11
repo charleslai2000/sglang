@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=rh-p1-durable-replay-eviction/R123-bundle/sha256sums.txt
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=976
+sha256=e4ef2cd33569f3172534c07f22660c3d9f1afbf9e53cb3c914ef1d8600bb6862
+stored_path=data/sglang-3090-24g-hicache/e4/e4ef2cd33569f3172534c07f22660c3d9f1afbf9e53cb3c914ef1d8600bb6862.txt

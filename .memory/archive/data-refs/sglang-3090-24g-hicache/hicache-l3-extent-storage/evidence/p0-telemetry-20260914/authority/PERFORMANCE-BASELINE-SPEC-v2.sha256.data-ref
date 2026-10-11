@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=hicache-l3-extent-storage/evidence/p0-telemetry-20260914/authority/PERFORMANCE-BASELINE-SPEC-v2.sha256
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=198
+sha256=d2784f8aae59c70a87c1ce8338d1a18e39408ac00efbd6d604ef4dbb11f09529
+stored_path=data/sglang-3090-24g-hicache/d2/d2784f8aae59c70a87c1ce8338d1a18e39408ac00efbd6d604ef4dbb11f09529.sha256

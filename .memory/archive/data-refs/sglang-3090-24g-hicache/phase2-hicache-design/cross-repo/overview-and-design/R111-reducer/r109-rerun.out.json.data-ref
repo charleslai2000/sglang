@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=phase2-hicache-design/cross-repo/overview-and-design/R111-reducer/r109-rerun.out.json
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=12042
+sha256=a1f7d3a29903ce97626998b18f4d233f46e54a8f3fd1915bc891d75b998f0e25
+stored_path=data/sglang-3090-24g-hicache/a1/a1f7d3a29903ce97626998b18f4d233f46e54a8f3fd1915bc891d75b998f0e25.json

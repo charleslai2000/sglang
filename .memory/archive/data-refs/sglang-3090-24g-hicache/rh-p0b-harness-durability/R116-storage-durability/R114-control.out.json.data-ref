@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=rh-p0b-harness-durability/R116-storage-durability/R114-control.out.json
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=1523
+sha256=be6a74d74d4a2e582c828848dbee555029c66e7e06179ae9f2a0ba6d5abdea04
+stored_path=data/sglang-3090-24g-hicache/be/be6a74d74d4a2e582c828848dbee555029c66e7e06179ae9f2a0ba6d5abdea04.json

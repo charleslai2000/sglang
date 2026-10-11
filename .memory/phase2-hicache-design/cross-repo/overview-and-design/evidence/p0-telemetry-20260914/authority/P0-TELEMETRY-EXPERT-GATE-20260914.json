@@ -1,0 +1,210 @@
+{
+  "schema": "p0_telemetry_expert_gate.v1",
+  "task_id": "LOCAL-P0-TELEMETRY-EXPERT-GATE-20260914",
+  "date": "2026-09-14",
+  "role": "architect",
+  "status": "done",
+  "decision": "EXPERT-GATE-RESOLVED",
+  "authority": "recommendation_requires_orchestrator_acceptance",
+  "execution": {
+    "product_code_modified": false,
+    "gpu_started": false,
+    "server_started": false,
+    "tests_or_workloads_rerun": false,
+    "telemetry_enabled_reruns_authorized": false
+  },
+  "resolution": {
+    "issue_event": {
+      "authoritative_event": "controller_acceptance_timestamp_immediately_before_queue_publication",
+      "owner": "HybridCacheController.prefetch",
+      "order": [
+        "construct_operation",
+        "populate_join_fields",
+        "assign_prefetch_issue_mono_ns_once",
+        "prefetch_queue.put"
+      ],
+      "overwrite_allowed": false,
+      "declined_or_unpublished_value": null,
+      "invariant": "issue<=query_start<=query_end"
+    },
+    "matched_prefix_l3_authority": {
+      "required_join": [
+        "request_lineage",
+        "prefetch_attempt_id",
+        "session_generation",
+        "prompt_hash_lineage",
+        "selected_anchor",
+        "matched_token_boundary",
+        "required_component_set",
+        "per_component_common_durable_boundary",
+        "proof_kind",
+        "proof_observation_point"
+      ],
+      "allowed_proof_kinds": {
+        "persisted_contiguous": "exact live anchor and matched boundary; KV storage_persisted; every required hybrid component has durable group/member coverage",
+        "joined_restore": "accepted same-lineage request/attempt/generation restore proof with common component prefix",
+        "root_zero": "root anchor with zero matched tokens"
+      },
+      "insufficient_alone": [
+        "matched_len",
+        "device_indices",
+        "host_hit_length",
+        "backuped",
+        "storage_written",
+        "l3_publish_epoch",
+        "anchor_storage_version",
+        "cache_hash_without_positive_result",
+        "is_l3_durable_without_contiguous_component_proof"
+      ],
+      "classifications": [
+        "l3_durable",
+        "device_reusable",
+        "host_reusable",
+        "none",
+        "unknown"
+      ],
+      "null_rule": "device_reusable, host_reusable, mixed, stale, component-unproven, and unknown classifications yield null durable fields; root_zero yields zero",
+      "suffix_rule": "accepted joined cross-rank/common-component completion; DSA clamps to minimum common prefix; SWA/Mamba-like layouts are all-or-nothing",
+      "total_rule": "D=min(prompt_tokens,Md+S) only when Md and S are authoritative; otherwise null"
+    },
+    "accounting": {
+      "cached_coverage": "C=L1_tokens+L2_tokens+L3_tokens",
+      "newly_prefilled": "newly_prefilled_tokens=prompt_tokens-C",
+      "conservation": "prompt_tokens=L1_tokens+L2_tokens+L3_tokens+newly_prefilled_tokens",
+      "optimization_opportunity": "avoidable_recompute_tokens=max(0,min(prompt_tokens,D)-C) when D authoritative; otherwise null",
+      "avoidable_is_additive_partition": false,
+      "avoidable_is_subset_of_newly_prefilled": true,
+      "aux_units_in_conservation": false,
+      "clamp_invalid_raw_partition_to_success": false
+    },
+    "v2_erratum": {
+      "old_key": "cache_prompt_accounting",
+      "new_keys": {
+        "cache_prompt_conservation": "prompt_tokens=L1+L2+L3+newly_prefilled",
+        "cache_optimization_opportunity": "avoidable_recompute=max(0,min(prompt_tokens,durable_reusable_prefix)-cached_coverage); null_without_authority; subset_of_newly_prefilled"
+      },
+      "requires_runner_hash_binding": true
+    }
+  },
+  "prometheus": {
+    "owner": "SchedulerMetricsCollector",
+    "forbidden_labels": [
+      "rid",
+      "request_id",
+      "session_id",
+      "attempt_id",
+      "cache_key",
+      "node_id",
+      "storage_key",
+      "proof_kind",
+      "reason",
+      "free_form"
+    ],
+    "metrics": [
+      {
+        "name": "sglang:hicache_prompt_tokens_total",
+        "type": "counter",
+        "labels_added": {"source": ["l1", "l2", "l3", "newly_prefilled"]}
+      },
+      {
+        "name": "sglang:hicache_avoidable_recompute_tokens_total",
+        "type": "counter",
+        "labels_added": {}
+      },
+      {
+        "name": "sglang:hicache_rh_prefetch_lead_seconds",
+        "type": "histogram",
+        "labels_added": {}
+      },
+      {
+        "name": "sglang:hicache_rh_ready_slack_seconds",
+        "type": "histogram",
+        "labels_added": {}
+      },
+      {
+        "name": "sglang:hicache_stage_latency_seconds",
+        "type": "histogram",
+        "labels_added": {"stage": ["storage_query", "prefetch_to_ready", "ready_to_admission", "admission_to_prefill_finish"]}
+      },
+      {
+        "name": "sglang:hicache_telemetry_records_total",
+        "type": "counter",
+        "labels_added": {"outcome": ["complete", "partial", "invalid"]}
+      }
+    ],
+    "histogram_buckets_seconds": [0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 20, 40, 80],
+    "reset": "process_restart_only"
+  },
+  "jsonl": {
+    "schema": "hicache_request.v1",
+    "owner": "existing FileRequestMetricsExporter",
+    "cardinality": "at_most_one_terminal_record_per_non_health_check_request",
+    "outcomes": ["complete", "partial", "invalid"],
+    "partial_reasons": ["lifecycle_inapplicable", "lifecycle_missing", "durable_unknown"],
+    "invalid_reasons_in_precedence_order": ["attempt_mismatch", "generation_mismatch", "clock_order", "tier_nonconservation", "durable_contradiction"],
+    "matched_prefix_authority": ["l3_durable", "device_reusable", "host_reusable", "none", "unknown"],
+    "required_fields": [
+      "schema",
+      "outcome",
+      "partial_reason",
+      "invalid_reason",
+      "rh_eligible",
+      "prefetch_origin",
+      "prefetch_attempt_id",
+      "enqueue_mono_ns",
+      "prefetch_issue_mono_ns",
+      "storage_query_start_mono_ns",
+      "storage_query_end_mono_ns",
+      "ready_mono_ns",
+      "admission_mono_ns",
+      "prefill_finish_mono_ns",
+      "prompt_tokens",
+      "l1_tokens",
+      "l2_tokens",
+      "l3_tokens",
+      "newly_prefilled_tokens",
+      "matched_prefix_tokens",
+      "matched_prefix_authority",
+      "matched_prefix_l3_tokens",
+      "durable_reusable_prefix_tokens",
+      "avoidable_recompute_tokens",
+      "completed_kv_tokens",
+      "required_aux_pools",
+      "completed_aux_units",
+      "hybrid_restore_complete",
+      "rh_prefetch_lead_seconds",
+      "rh_ready_slack_seconds",
+      "stage_latency_seconds"
+    ],
+    "forbidden_payload": ["prompt_text", "token_ids", "cache_hash", "storage_key", "node_id", "raw_payload", "proof_tuple"]
+  },
+  "minimum_repairs": [
+    "move issue assignment to controller before queue publication and remove caller overwrites",
+    "replace total matched length with operation-local matched-prefix L3 proof/result",
+    "derive total durable prefix only from authoritative matched proof plus accepted joined suffix",
+    "validate raw exclusive partition without clamping invalid input into success",
+    "split avoidable recompute into separately named Prometheus counter",
+    "export fixed public outcome, reason, and matched-authority fields through existing JSONL writer",
+    "correct v2 Markdown/JSON formula names and bind future runner to corrected hash"
+  ],
+  "minimum_tests": [
+    "real controller queue put observes initialized immutable issue and issue<=query_start",
+    "root/device/host/unacked/persisted/restored-unjoined matched-prefix authority vectors through finalizer handoff",
+    "accepted full/partial suffix, DSA clamp, SWA/Mamba all-or-nothing, stale attempt/generation vectors",
+    "exclusive conservation and avoidable-subset formula vectors including invalid raw inputs",
+    "exact Prometheus registration/labels/idempotence and separate avoidable counter",
+    "one-line JSONL outcome/null/health exclusion and multi-tokenizer propagation",
+    "telemetry failure isolation"
+  ],
+  "boundaries": {
+    "new_writer": false,
+    "new_thread": false,
+    "new_queue": false,
+    "new_lock": false,
+    "persistence_format_change": false,
+    "scheduler_or_cache_authority_change": false,
+    "default_enablement_change": false
+  },
+  "next_gate": "bounded implementation correction, focused CPU tests, fresh dependent-byte identities, independent correction-and-revalidate review",
+  "open_uncertainty": "A generic authoritative durable matched-prefix predicate for every hybrid component layout was not confirmed in current code; implementations must emit unknown/null until dependency-local component/group proof exists."
+}

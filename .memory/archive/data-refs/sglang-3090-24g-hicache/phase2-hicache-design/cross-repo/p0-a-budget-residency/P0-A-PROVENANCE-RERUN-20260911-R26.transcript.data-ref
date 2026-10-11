@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=phase2-hicache-design/cross-repo/p0-a-budget-residency/P0-A-PROVENANCE-RERUN-20260911-R26.transcript
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=1248
+sha256=57c84e6743906ead61847d593f400468032b11377919ce4fdc167c6434e65fd3
+stored_path=data/sglang-3090-24g-hicache/57/57c84e6743906ead61847d593f400468032b11377919ce4fdc167c6434e65fd3.transcript

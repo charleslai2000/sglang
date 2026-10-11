@@ -1,0 +1,318 @@
+{
+ "schema": "p2b0-cell-summary-1",
+ "cell": {
+  "synthetic": true,
+  "nonce": "20260912-091533",
+  "args": {
+   "base": "http://127.0.0.1:30000",
+   "model": "/mnt/data/models/qwen35-gptq",
+   "agents": 4,
+   "prime_turns": 2,
+   "measure_turns": 10,
+   "hist_tokens": 6000,
+   "delta_words": 210,
+   "max_tokens": 32,
+   "measure_seconds": 300.0,
+   "client_max_time": 1200.0,
+   "tok_per_word": 4.8,
+   "prime_barrier_timeout": 3600.0,
+   "gpu_sample_ms": 200,
+   "no_sampler": false,
+   "rh": "unknown",
+   "max_running": null,
+   "out_dir": null,
+   "server_log": "/mnt/data/neuron/sglang-3090-r112-20260911/sglang-server-e.log",
+   "launch_script": "/mnt/data/neuron/sglang-3090-r112-20260911/launch-e-20260912.sh",
+   "cell_launcher": "/mnt/data/neuron/sglang-3090-r112-20260911/launch-p2b0.sh",
+   "nonce": "20260912-091533",
+   "dry_run": true,
+   "run": false
+  },
+  "driver_sha256": "db8c5d11889d2e5824a817f1e83833dad8fcd297c22bbacc9f74c3d55f3ae744",
+  "launch_script": {
+   "path": "/mnt/data/neuron/sglang-3090-r112-20260911/launch-e-20260912.sh",
+   "present": true,
+   "sha256": "d24195b9a66c832226d8956ac6c79c168fbc92c4b67de44c0e1485847ab3c651",
+   "expected_sha256": "d24195b9a66c832226d8956ac6c79c168fbc92c4b67de44c0e1485847ab3c651",
+   "matches_contract": true
+  },
+  "completion_set": {
+   "requests_total": 48,
+   "completed": 48,
+   "bad_http": 0,
+   "finish_reasons": {
+    "length": 48
+   },
+   "by_phase": {
+    "prime": {
+     "total": 8,
+     "completed": 8,
+     "bad_http": 0
+    },
+    "measure": {
+     "total": 40,
+     "completed": 40,
+     "bad_http": 0
+    }
+   }
+  }
+ },
+ "window": {
+  "start_mono_ns": 1012000000,
+  "end_mono_ns": 1286000000,
+  "duration_s": 0.274,
+  "source": "measure_rows"
+ },
+ "client": {
+  "requests": {
+   "total": 48,
+   "measure": 40,
+   "completed_measure": 40,
+   "bad_http": 0
+  },
+  "completion_set": {
+   "requests_total": 48,
+   "completed": 48,
+   "bad_http": 0,
+   "finish_reasons": {
+    "length": 48
+   }
+  },
+  "scenario_counts": {
+   "L2-restore": 10,
+   "RH-staged-L3": 10,
+   "cold-L3": 10,
+   "L1-hit": 10
+  },
+  "ttft_s": {
+   "L2-restore": {
+    "count": 10,
+    "p50": 0.001,
+    "p95": 0.001,
+    "p99": 0.001,
+    "min": 0.001,
+    "max": 0.001,
+    "mean": 0.001
+   },
+   "overall": {
+    "count": 40,
+    "p50": 0.001,
+    "p95": 0.001,
+    "p99": 0.001,
+    "min": 0.001,
+    "max": 0.001,
+    "mean": 0.001
+   },
+   "RH-staged-L3": {
+    "count": 10,
+    "p50": 0.001,
+    "p95": 0.001,
+    "p99": 0.001,
+    "min": 0.001,
+    "max": 0.001,
+    "mean": 0.001
+   },
+   "cold-L3": {
+    "count": 10,
+    "p50": 0.001,
+    "p95": 0.001,
+    "p99": 0.001,
+    "min": 0.001,
+    "max": 0.001,
+    "mean": 0.001
+   },
+   "L1-hit": {
+    "count": 10,
+    "p50": 0.001,
+    "p95": 0.001,
+    "p99": 0.001,
+    "min": 0.001,
+    "max": 0.001,
+    "mean": 0.001
+   }
+  },
+  "tftt_s": {
+   "L2-restore": {
+    "count": 10,
+    "p50": 0.003,
+    "p95": 0.003,
+    "p99": 0.003,
+    "min": 0.003,
+    "max": 0.003,
+    "mean": 0.003
+   },
+   "overall": {
+    "count": 40,
+    "p50": 0.003,
+    "p95": 0.003,
+    "p99": 0.003,
+    "min": 0.003,
+    "max": 0.003,
+    "mean": 0.003
+   },
+   "RH-staged-L3": {
+    "count": 10,
+    "p50": 0.003,
+    "p95": 0.003,
+    "p99": 0.003,
+    "min": 0.003,
+    "max": 0.003,
+    "mean": 0.003
+   },
+   "cold-L3": {
+    "count": 10,
+    "p50": 0.003,
+    "p95": 0.003,
+    "p99": 0.003,
+    "min": 0.003,
+    "max": 0.003,
+    "mean": 0.003
+   },
+   "L1-hit": {
+    "count": 10,
+    "p50": 0.003,
+    "p95": 0.003,
+    "p99": 0.003,
+    "min": 0.003,
+    "max": 0.003,
+    "mean": 0.003
+   }
+  },
+  "aggregate_output_tps": 583.9416,
+  "request_throughput": 145.9854,
+  "tokens_coverage": {
+   "rows_with_completion_tokens": 40,
+   "completed_measure_rows": 40
+  },
+  "classification_basis": "usage.prompt_tokens_details.cached_tokens / sglext.cached_tokens_details{device,host,storage}; RH-staged vs cold from ready_host<=admission.v2 by rid"
+ },
+ "server": {
+  "counts_raw": {
+   "M1": 48,
+   "M2": 48,
+   "M3": 0,
+   "admission": 48,
+   "ready_host": 48,
+   "ready_stage": 0
+  },
+  "queue_lead_q1": {
+   "dist": {
+    "count": 48,
+    "unit": "ns",
+    "p50_ns": 6000000.0,
+    "p50_ms": 6.0,
+    "p95_ns": 6000000.0,
+    "p95_ms": 6.0,
+    "p99_ns": 6000000.0,
+    "p99_ms": 6.0,
+    "min_ns": 6000000.0,
+    "min_ms": 6.0,
+    "max_ns": 6000000.0,
+    "max_ms": 6.0,
+    "mean_ns": 6000000.0,
+    "mean_ms": 6.0
+   },
+   "n": 48,
+   "seam": "admission_monotonic_ns - enqueue_mono_ns"
+  },
+  "stage_q2": {
+   "dist": {
+    "count": 48,
+    "unit": "ns",
+    "p50_ns": 8000000.0,
+    "p50_ms": 8.0,
+    "p95_ns": 8000000.0,
+    "p95_ms": 8.0,
+    "p99_ns": 8000000.0,
+    "p99_ms": 8.0,
+    "min_ns": 1000000.0,
+    "min_ms": 1.0,
+    "max_ns": 8000000.0,
+    "max_ms": 8.0,
+    "mean_ns": 6541666.7,
+    "mean_ms": 6.5417
+   },
+   "n": 48,
+   "seam": "ready_monotonic_ns - prefetch_issue_mono_ns"
+  },
+  "gaps": {
+   "q1": {
+    "enqueue_rids": 48,
+    "admission_rids": 48,
+    "no_admission_v2": 0,
+    "admission_not_after_enqueue": 0
+   },
+   "q2": {
+    "prefetch_attempts": 48,
+    "ready_host_attempts": 48,
+    "issue_without_ready_host": 0,
+    "ready_host_without_issue": 0
+   }
+  }
+ },
+ "idle": {
+  "idle_util_threshold": 10.0,
+  "join_tolerance_ms": 250.0,
+  "measure_window": {
+   "start_mono_ns": 1012000000,
+   "end_mono_ns": 1286000000,
+   "duration_s": 0.274
+  },
+  "gpu_samples_in_window": 120,
+  "metrics_samples_in_window": 120,
+  "attributed_s": 0.274,
+  "gpu_idle_total": {
+   "fraction": 0.403361,
+   "duration_s": 0.110521,
+   "n_idle_samples": 48,
+   "seam": "nvidia-smi utilization_gpu < threshold"
+  },
+  "cache_induced_gpu_idle": {
+   "fraction": 0.201681,
+   "duration_s": 0.055261,
+   "n_samples": 24,
+   "seam": "gpu util < threshold AND nearest /metrics sample within tolerance has num_queue_reqs > 0"
+  }
+ },
+ "reconciliation": {
+  "decode_s": 0.12,
+  "restore_wait": "not computable",
+  "queue_wait": "not computable",
+  "compute": "not computable",
+  "residual_s": "not computable",
+  "residual_reason": "cannot reconcile while restore_wait, queue_wait, compute remain not computable (R71 3.4)",
+  "cache_induced_gpu_idle_s": 0.055261
+ },
+ "total_throughput": "not computable",
+ "total_throughput_reason": "authoritative definition pending (plan.md:98; R71 option T4); MUST NOT be replaced by aggregate_output_tps or any derivative",
+ "not_computable": {
+  "idle.reconciliation.restore_wait": "no per-request WAIT_CAPACITY enter/exit duration seam (R71 3.4)",
+  "idle.reconciliation.queue_wait": "no request enqueue timestamp seam on the decode path (R71 3.4)",
+  "idle.reconciliation.compute": "no per-request prefill forward duration seam (R71 3.4)"
+ },
+ "provenance": {
+  "join": {
+   "path": "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/.memory/phase2-hicache-design/work/P2B0-bundle/dry-run/join.jsonl",
+   "sha256": "b97422df56be66bdc0f9b66d91c1458233d38a10c9cec52c2c24d3f9c4d0cea0"
+  },
+  "gpu": {
+   "path": "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/.memory/phase2-hicache-design/work/P2B0-bundle/dry-run/gpu.csv",
+   "sha256": "3d07a3b3378b1f3333938278a4843509197e2096781217482241cc3319945f15"
+  },
+  "metrics": {
+   "path": "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/.memory/phase2-hicache-design/work/P2B0-bundle/dry-run/metrics.csv",
+   "sha256": "f5ed766f438d8ae7e91ffac15fe442db48174239840eb1fcbe4253f748582914"
+  },
+  "server_log": {
+   "path": "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/.memory/phase2-hicache-design/work/P2B0-bundle/dry-run/server-log-window.log",
+   "start_line": 1,
+   "end_line": 192
+  },
+  "analyzer": {
+   "path": "/home/dev-codex/workspaces/3rdparty/sglang-3090-24g-opt/.memory/phase2-hicache-design/work/P2B0-bundle/p2b0_analyze.py",
+   "sha256": "d0526ebcdf8bcd6c962994de69475f53875c35af8fbe06ac7b0b45403c5e7c81"
+  }
+ },
+ "generated_mono_ns": 44740037833922,
+ "generated_at": "2026-09-12T09:15:33+0800"
+}

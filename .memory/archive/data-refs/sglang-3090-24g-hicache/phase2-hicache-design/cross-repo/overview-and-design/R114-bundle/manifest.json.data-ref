@@ -1,0 +1,8 @@
+source_repo=sglang-3090-24g-hicache
+source_path=phase2-hicache-design/cross-repo/overview-and-design/R114-bundle/manifest.json
+source_branch=3090-24g-hicache
+source_head=1d039c94b31a1409233483f85fee8d68d64c55cb
+source_git_state=??
+bytes=1852
+sha256=6b70d92427b67a86321df9466286a7c938fe8fa4734e8290b84375808eab0bf1
+stored_path=data/sglang-3090-24g-hicache/6b/6b70d92427b67a86321df9466286a7c938fe8fa4734e8290b84375808eab0bf1.json
