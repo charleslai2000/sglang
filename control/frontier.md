@@ -1,10 +1,10 @@
 # Frontier
 
 ## falcon-h1-3090-hicache-perf
-- R16C multi-turn performance and profiling milestone — ACTIVE
-  - frontier: Matched c1/c4/c8 and representative c8 Prefill/Decode profiles complete; exact historical prompts/source absent, residual 371.2→316.6 tok/s UNKNOWN. Review and commit only R16C deliverables; leave unrelated dirty changes untouched.
-  - task: control/falcon-h1-3090-hicache-perf/tasks/R16C-multiturn-profile.md
-  - unblock/reopen: clean baseline `481f2b485`; RTX3090 idle; use exclusive GPU lock.
+- R17 throughput, cache KPI and optimization — ACTIVE (R17-METRICS incomplete / not accepted)
+  - frontier: NCU synthetic smoke only; no scheduler hardware counters. V2 profiles diagnostic only; full workload matrix and phase-split clean rates remain open. Host c8 t5 had 120/120 success but zero L1/L2/L3 restored tokens; D→H backup is not H→D restore. Need verified Host reuse/restore, matched cold/warm matrix, scheduler counters and profile-backed A/B. L3 `NOT_QUALIFIED`. See `runs/R17-20261012T0100Z/R17-METRICS-STATUS.md`.
+  - task: control/falcon-h1-3090-hicache-perf/tasks/R17-throughput-cache-kpi.md
+  - unblock/reopen: isolated worktree at pushed R16C baseline `6f612b030`; RTX3090 owner lock and idle check.
 
 ## falcon-h1-3090-hicache-perf
 - T001 Falcon FULL+MAMBA L2/L3 lifecycle and performance validation — ACTIVE
