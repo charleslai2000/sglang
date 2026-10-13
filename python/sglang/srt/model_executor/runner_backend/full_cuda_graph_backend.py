@@ -152,8 +152,39 @@ class FullCudaGraphBackend(BaseCudaGraphBackend):
         static_forward_batch: ForwardBatch,
         **kwargs,
     ) -> Any:
-        with graph_pool_replay_scope():
-            self._graphs[shape_key].replay()
+        profiler = getattr(static_forward_batch, "t002_cupti_ranges", None) or getattr(
+            self._cuda_graph_runner, "t002_cupti_ranges", None
+        )
+        expected_mode = (
+            static_forward_batch.forward_mode.is_decode()
+            or static_forward_batch.forward_mode.is_extend()
+        )
+        finalize_after = getattr(static_forward_batch, "t002_cupti_finalize_after", False)
+        expected_graph = getattr(static_forward_batch, "t002_cupti_expected_graph", None)
+        if (
+            profiler is not None
+            and expected_mode
+            and getattr(static_forward_batch, "t002_cupti_metadata", None) is not None
+            and expected_graph == repr(shape_key)
+        ):
+            metadata = static_forward_batch.t002_cupti_metadata
+            profiler.arm_window()
+            event_pair = getattr(static_forward_batch, "t002_cupti_event_pair", None)
+            if event_pair is not None:
+                event_pair[0].record(torch.cuda.current_stream())
+            profiler.begin(*metadata, graph=repr(shape_key))
+            try:
+                with graph_pool_replay_scope():
+                    self._graphs[shape_key].replay()
+            finally:
+                if event_pair is not None:
+                    event_pair[1].record(torch.cuda.current_stream())
+                profiler.end()
+            if finalize_after and expected_graph == repr(shape_key):
+                self._cuda_graph_runner.t002_cupti_finalize_pending = True
+        else:
+            with graph_pool_replay_scope():
+                self._graphs[shape_key].replay()
         return self._outputs[shape_key]
 
     def cleanup(self) -> None:

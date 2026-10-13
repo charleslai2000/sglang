@@ -1,0 +1,8 @@
+Status: ACTIVE
+Work area: experiments
+Objective: 在主线实现并执行独立确定性 Falcon Forward CUPTI Range Harness，完成 Prefill EXTEND 1K/4K 与 Decode CUDA Graph b1/b2/b4/b8/b16 七种真实 Forward、每形状至少三次独立测量、报告、回归及精确 allowlist commit/push。
+Inputs: `goal.md`/`plan.md`；冻结 Falcon 模型/revision/GPTQ；主线真实 ModelRunner、HybridReqToTokenPool/KV/Mamba 与 Full CUDA Graph；CUDA 12.9 CUPTI helper。
+Completion: 七形状各三次独立有效真实Forward，记录 CUDA Event、CUPTI GPU Duration/DRAM bytes、SM/Tensor counters、batch/Graph/state/output、Pass/dropped、P50/P95/CV和raw evidence；报告Event/CUPTI边界、profiling output parity和限制；必要回归通过，RTX3090清理，必要文件精确allowlist commit/push。
+Result: 七种真实Falcon Forward已完成，各三次独立process测量。b1直接继承有效r17/r18/r19。最终样本及完整矩阵见 `../report.md`。核心集：Prefill1K `runs/p1-stable-r0..r2.json`；Prefill4K `runs/p4-final-r0..r2.json`；Decode b1 `runs/decode-b1-r17..r19.json`；b2/b4/b8/b16 `runs/d{2,4,8,16}-final-r0..r2.json`。Parity sessions分别验证profiling ON/OFF：Decode与Prefill1K logits bitwise相同；Prefill4K最终重复两次bitwise相同，另一次最大绝对差0.452953但argmax一致，已在report注明。每个最终新session `passes=1,dropped=0,expected_range_count=1`；decode记录实际Graph ShapeKey/Mamba pool；prefill identity为EAGER_EXTEND。早期Prefill1K样本组中一个370.618ms/69.45% SM Active离群样本被保留并明确排除整组，stable三样本用于结果。DRAM吞吐按同一Forward bytes/对应Event逐样本计算；CUPTI duration单独列。核心GA102计数器配置单Pass。无生产Forward/cache语义变化，post-forward finalize sync仅在离线Harness。SM86环境下 Forward metrics单测15 passed，py_compile与diff-check通过。RTX3090空闲(1MiB)。
+Performance matrix and per-sample statistics: see `../report.md`; raw measurement and parity evidence: `../runs/`.
+Remaining: 最终审查报告/数据、完成必要回归、精确stage并提交/推送；不得纳入无关dirty/untracked文件，也不得stage包含其他goal变更的 `control/frontier.md`。
