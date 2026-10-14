@@ -19,4 +19,4 @@
 6. 必要回归通过，精确allowlist commit/push，GPU清理。
 
 ## Current result
-尚未启动T003新GPU采样。已有可复用证据和明确限制详见`plan.md`；阶段A-E表格与raw index建在`report.md`，不把历史数值伪报为本次结果。
+T003已完成一次c8及一次c16 Nsight/FPM 40×128 workload capture，并更新`report.md` A–E。Nsight SQLite含NVTX、CUDA runtime/kernel、graph-node及1kHz GPU metrics；FPM与动态step NVTX匹配c8 661/664、c16 403/406。窗口kernel interval union分别13.4872/17.0924s与10.0477/13.3152s；异步CUDA Graph尚未可信地逐轮归属，Scheduler CPU、step idle原因、queue wait及launch delay保持UNKNOWN。HiCache L2/L3 current-mainline恢复尚未qualified，损失排名/优化A-B未运行。详细边界、结果和raw paths见`plan.md`及`report.md`。

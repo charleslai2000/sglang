@@ -1,23 +1,28 @@
 # T003 当前计划
 
 ## Reusable evidence
-- T002 CUPTI离线矩阵已在commit `48d6e1ef1c4ff82c4258afe77916352143478676`完成并推送；7种Forward每形状三独立session。复用报告 `control/falcon-h1-3090-cupti-forward/report.md` 与`runs/`，不得重测。
-- T002异常定点复核：Prefill4K `p4-final-r0` profiling-vs-unprofiled max abs logits diff `0.4529533386`，argmax仍相同；`r1/r2` exact，另一次相同fixture ON/OFF parity trial也exact。差异仅出现于一对执行，原因现有证据无法唯一定位，不能声称CUPTI导致；需检查GPTQ/GPU数值确定性/模型状态和是否只是接近argmax的低幅值分量差。Prefill1K离群 `p1-final-r2` Event 370.618ms、CUPTI 370.077ms、SM Active 69.45%、DRAM peak 32.68%；其它被排除的同组三样本及稳定重采均值约284–287ms、SM Active约92%，说明整次异常GPU工作进度变慢，不是Event与CUPTI计时口径彼此矛盾；原因UNKNOWN。其为三trial首组中一个sample；保留原始run，稳定独立三样本用于主统计，并未删除/伪称单次异常不存在。Event/CUPTI时间差跨行Prefill约0.05–0.16%、Decode约2.75–4.32%，反映不同计量边界，应分别报告，尚无证据表明某方错误。
-- R17当前HEAD NCU `R17-NCU-HARDWARE-MATRIX.md`有代表Marlin/BF16/Mamba/Decode Attention kernel counters；不提供整阶段/逐轮GPU union，不重采通过的NCU和clean TPS。
-- R17 Nsight 1kHz/FPM报告`R17-GPU-PER-STEP-TIMELINE.md`已有40×128相同workload观测：c8墙钟17.2449s/output 296.900 tok/s，FPM forward event sum17.0661s、runner remainder估算0.17876s、API queue均值47.85ms；c16墙钟13.4028s/output382.010 tok/s、FPM forward event sum13.2231s、runner remainder估算0.17969s、API queue均值301.70ms。GPU_METRICS/Kernels总数有证据，但动态step NVTX capture此前未触发，故上述 remainder不等于kernel-union idle、mean API queue不是每step queue wait，既有观测与clean吞吐差也不是matched开销A/B。
-- Nsight复用材料：`run_nsys_falcon.py`已经配置trace cuda/nvtx、Graph node与1kHz GPU metrics；动态inner step range完整message为`sglang.step;worker=...;iter=...`，capture trigger尝试只写前缀`sglang.step`因此未触发。Nsight 2025.1.3帮助确认`--capture-range=nvtx`的trigger按range message；修复需通过静态外层capture marker触发/停止，内层动态step marker仅供ID join。现有workload driver和同库capture机制优先复用，无需新框架。
-- HiCache R15已有backup/ACK和durability，但目标node detach未发生（device_detach_seen=false、component_tiers=[]、expected_release_count=0、queues empty）；因此根因不在ACK队列未排空已被排除。R7C旧run不能代当前current-mainline H→D认证；L3 readback未闭合。
-- 工作区branch HEAD/remote `3090-24g-hicache @ aba9da99b1641e83e21075333168ca18563e0af9`。既有Runtime/cache/frontier大量dirty及untracked实验资产需保护，不准reset/clean。
+- T002 CUPTI离线矩阵已在commit `48d6e1ef1c4ff82c4258afe77916352143478676`完成并推送；7种Forward每形状三独立session。复用报告`control/falcon-h1-3090-cupti-forward/report.md`与`runs/`，不得重测。
+- T002异常定点复核：Prefill4K `p4-final-r0` profiling-vs-unprofiled max abs logits diff `0.4529533386`，argmax仍相同；`r1/r2` exact，另一次相同fixture ON/OFF parity trial也exact。差异只出现在一对执行，原因无法唯一定位，不能声称CUPTI导致。Prefill1K离群 `p1-final-r2` Event 370.618ms、CUPTI 370.077ms、SM Active 69.45%、DRAM peak 32.68%；稳定组约284–287ms、SM Active约92%，说明整次GPU工作进度变慢；原因UNKNOWN。Event/CUPTI时间差是不同测量边界，应分别报告。
+- R17 NCU `R17-NCU-HARDWARE-MATRIX.md`提供代表性kernel counters，但不代表整阶段/逐轮GPU union；不重采已验收NCU和clean TPS。
+- R17旧Nsight/FPM c8/c16总窗口观测可作历史参考，不能替代kernel union/per-step queue/idle，也不是matched profiling-clean对照。
+- HiCache R15 backup/ACK和durability已通过，但目标node device detach未发生（`device_detach_seen=false`、`component_tiers=[]`、`expected_release_count=0`、queues empty）。R7C旧run不等于当前主线Host restore认证；L3 readback未闭合。
+- 工作树 `3090-24g-hicache`；本Goal记录commit `cf9ab2fed2c113dd16347f910d8b6c32c1d660d9`已推送。其它Runtime/cache/frontier dirty及untracked实验资产须保护，不得reset/clean或宽泛stage。
+
+## Established results
+- 新capture短验证及同一40×128 c8/c16 Nsight/FPM workload完成：`runs/t003-nsys-c8-t94-n40/`和`runs/t003-nsys-c16-t95-n40/`。SQLite包含NVTX、CUDA runtime/kernel、CUDA graph-node、GPU_METRICS；GPU metrics以1kHz配置采集。
+- FPM iteration与step NVTX标记相交：c8 661/664（缺12/143/536），c16 403/406（缺14/147/278）。在线Decode实际batch：c8 b1=8、b8=640；c16 b1=8、b8=128、b16=256。
+- workload-window Nsight kernel interval union：c8 13.4872s / 17.0924s = 78.91%；c16 10.0477s / 13.3152s = 75.46%。同窗口no-kernel intervals分别3.6053s/3.2675s。它们仅为整窗口kernel timeline统计；不得解释为Scheduler idle或按step归因。异步CUDA Graph replay尚不能可靠映射到单个step；旧runtime-launch-start join不合格。
+- 全卡workload-window GPU metrics：c8/c16 SMs Active均值64.98%/65.04%，Tensor Active 13.92%/14.50%，DRAM read throughput 43.61%/39.73%，write 6.25%/8.10%。不映射到请求或step。
+- profiling 40×128观测c8 17.0924s/299.548 tok/s，c16 13.3152s/384.523 tok/s；不是clean-run matched A/B。细节见`report.md`。
 
 ## Decisive frontier
-1. T002异常定点复核已完成，无GPU。保留所述UNKNOWN并在report给出准确证据/口径。
-2. 修正并验证Nsight trigger：复用当前run driver加固定外层NVTX capture gate，范围覆盖R17 workload期间；内层动态step names仍带worker/iter/stage/batch/token。做一次短c8请求验证，要求SQLite有NVTX_EVENTS、CUDA runtime/kernel/graph和GPU_METRICS；FPM iteration可与step range exactly join，graph launch可通过correlation连接到kernel intervals，且范围capture确实自动关闭。短验证通过后以同一40×128负载采c8/c16，避免重采T002/NCU/TPS。
-3. 输出per-step实际batch/Graph、forward GPU event、kernel interval union、Scheduler CPU边界、API/request queue、Launch Delay、Idle定义、tokens/throughput。Kernel duration不可直接求和成Busy；分辨GPU event时长和union overlap。
-4. 并行查HiCache实际detach owner/lifecycle code against R15 evidence及当前dirty diff，复用R7C/R11驱动；只在确认代码路径/修复后做小范围真实L2验证，先FULL+MAMBA完整correctness、Host-only match、H2D complete/GPU ready；继而独立L3 read-back、物理设备与page cache分层。历史D→H ACK不重验。
-5. 基于已join c8/c16和Cache数据确认瓶颈排序；只对明确证据支持的瓶颈做相同workload优化A/B，保存correctness。
-6. 定向回归、报告、gpu cleanup后精确allowlist commit/push；其它用户dirty工作不进stage。
+1. 在线profiling结果和A–E报告已更新。Per-step kernel busy/idle、Scheduler CPU、queue wait、launch delay仍UNKNOWN；不重采T002/NCU/TPS。
+2. 主要下一步：核查当前dirty Runtime与R15实际detach未发生链路及ownership；复用R7C/R11既有驱动，确认代码路径后尝试当前主线L2 FULL+MAMBA Host-only→H2D/GPU Ready正确性；随后独立闭合L3 read-back，区分OS page cache与物理I/O。
+3. 仅当从现有记录或定向分析可建立可信的异步Graph replay→step identity时，继续逐轮GPU归属；否则保留UNKNOWN。
+4. 只有数据足以排序损失来源后才做同负载优化A/B。完成必要回归、报告与GPU cleanup后，精确allowlist本Goal成果commit/push，不stage其它dirty资产。
 
 ## Unknowns
-- 目前没有T003新在线测量；R17已有Nsight没有step markers join，C表命中和D表loss仍UNKNOWN/NOT_RUN。
-- R15 detach失败的直接调用链根因仍未定；当前dirty changes不能默认代表已修复。
-- Prefill4K低幅度logits差与Prefill1K单次SM/GPU slowdown尚无唯一cause。
+- 异步CUDA Graph replay与单step间的完整kernel归属、step级GPU idle原因、Scheduler CPU、queue wait和launch delay。
+- 当前主线L2 Host restore及L3 read-back真实性能/正确性、有效命中、saved-prefill与净收益。
+- loss ranking与任何优化/A-B结论。
+- Prefill4K低幅logits差与Prefill1K单次GPU slowdown的唯一原因。
