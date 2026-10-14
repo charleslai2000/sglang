@@ -19,4 +19,4 @@
 6. 必要回归通过，精确allowlist commit/push，GPU清理。
 
 ## Current result
-T003已完成一次c8及一次c16 Nsight/FPM 40×128 workload capture，并更新`report.md` A–E。Nsight SQLite含NVTX、CUDA runtime/kernel、graph-node及1kHz GPU metrics；FPM与动态step NVTX匹配c8 661/664、c16 403/406。窗口kernel interval union分别13.4872/17.0924s与10.0477/13.3152s；异步CUDA Graph尚未可信地逐轮归属，Scheduler CPU、step idle原因、queue wait及launch delay保持UNKNOWN。HiCache L2/L3 current-mainline恢复尚未qualified，损失排名/优化A-B未运行。详细边界、结果和raw paths见`plan.md`及`report.md`。
+T003已完成c8/c16 Nsight/FPM 40×128 capture并将A–E报告升级为逐轮Graph association结果。以CUDA GraphLaunch Runtime correlationId→kernel活动并经同TID唯一NVTX iteration range归属，窗口内569/569（c8）与340/340（c16）Graph replay均闭合；非Graph Decode尾段与FPM缺失Prefill均从CUDA记录分类。Scheduler纯CPU active、queue wait和纯driver launch成本仍UNKNOWN。HiCache L2/L3 current-mainline恢复尚未qualified，基于当前cache证据的优化A-B未运行。详细边界和raw paths见`plan.md`及`report.md`。
