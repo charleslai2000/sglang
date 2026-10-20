@@ -14,6 +14,8 @@
 - Complete relevant CPU regressions and ownership review. This session's focused pytest collection failed before tests because the active environment's `sgl_kernel` does not export `fp8_scaled_mm`; prior matching `/tmp` overlays are no longer present. Do not report the current rerun as passing or alter/build/copy kernels merely to mask the mismatch.
 - Selectively stage, inspect staged diff, commit and push only independently reviewed T004 fixture, report, and proven-owned runner/driver changes. Do not include broad shared Runtime patches or unrelated dirty files. Verify remote SHA and enumerate remaining status. Keep T004 ACTIVE and Queue Prefetch unaccepted.
 
+- **T005 carry-over, not production-qualified:** optional prefetch timestamp `None` caused `prefetch_io_aux_func` to exit on `int(None)`. The None-preserving consumer correction, null queue-wait behavior, dirty-source identity, targeted tests and integration boundary are handed off in `runs/T004-FALCON-20261016/T004-WORKER-OPTIONAL-TIMESTAMP-HANDOFF-20261020.md`. T004 integration must include the guard and regression with its existing worker telemetry consumer; do not ship the telemetry consumer without the guard. The fix remains only in the shared dirty worktree and must not be called deployed/production PASS.
+
 ## Validation in this continuation
 - `python3 -m py_compile` passed for `driver.py`, `run_nsys_timeline.py`, `analyze_seed_gpu_join.py`, and `collect_fpm_timeline.py`.
 - `git diff --check` and `git diff --cached --check` passed for the reviewed patch.
