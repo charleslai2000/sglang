@@ -5,6 +5,12 @@
   - frontier: Commit `3d90660dc28bc538e42b038654e8dc14bf43c96b` freezes one valid high-pressure L0 ON/OFF pair, complete A/B/C/D ledger and control status; pushed to origin at the same SHA. Four measured RIDs per arm hit 2,048 FULL KV + MAMBA pages; A decodes 1,024 outputs. B/C/D produce one token each; Prefill batching differs (ON shared batch-3; OFF batch-1 plus batch-2), so no net performance claim. Busy Union is not GPU-exclusive time; timestamped Host-ready and H2D→dependent-kernel edge remain NOT_CAPTURED/NOT_VERIFIED. Next: obtain/freeze authorized same-revision Falcon no-cache oracle/tolerance, run long multi-round FULL+MAMBA correctness, and additional sufficiently matched long-output performance repetitions if still authorized. Preserve 52 tracked dirty paths and 5,241 untracked entries; GPU lock required. Physical-media attribution, correctness acceptance and performance benefit remain open.
   - task: queued-prefetch-host-ready/tasks/T002-falcon-rhba1-acceptance.md
 
+## falcon-rtx3090-t005
+- T001-bottleneck-and-optimization Worker production fix integration — BLOCKED
+  - frontier: c8/c32 RTX3090 profiler and clean measurements are complete; stop optimization recommended (c8 435.65±1.97 TPS, c32 732.93±2.72, active batch capped16). Evidence/control commits `9da9238a3111aec525e4341acc19081cb24a85d1` and `49f8fa9c4d0d3c6735746ca3931d4973945c9678` pushed and origin verified. Worker fix is verified but cannot safely commit alone: the `int(None)` consumer exists only inside uncommitted T004 worker instrumentation in `cache_controller.py`, while HEAD lacks that consumer; staging the whole mixed hunk would absorb unaccepted T004 changes. Need split/authorize that exact owned hunk or apply an authorized narrow patch. All unrelated dirty paths remain untouched.
+  - task: control/falcon-rtx3090-t005/tasks/T001-bottleneck-and-optimization.md
+  - unblock/reopen: Resolve ownership of the existing T004 worker instrumentation hunk or authorize a separate minimal fix against HEAD.
+
 ## falcon-h1-3090-online-hicache
 - T001-online-forward-and-hicache-loss Falcon 在线GPU损失与HiCache有效恢复 — ACTIVE
   - frontier: c8/c16 Decode Graph-to-step与窗口指标已写入A–E。R15 node 26首次barrier早于Host ACK，记录无detach、队列空；这不能证明ACK后detach路径失败。dirty MAMBA/tree-core leaf-membership patch仍是候选且定向test受sgl_kernel依赖阻塞。核查eviction/ownership后复用R7C/R11验证当前主线L2→L3；不进行GPU操作，待资源协调。
