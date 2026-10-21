@@ -255,6 +255,14 @@ inputs/
 *.ncu-rep
 *.nvcudmp
 
+# Control records are textual; run outputs and caches must live outside the checkout.
+control/**/runs/**
+!control/**/runs/**/*.md
+!control/**/runs/**/*.py
+!control/**/runs/**/*.sh
+!control/**/runs/**/.gitignore
+control/**/__pycache__/
+
 # setuptools-scm generated version file
 python/sglang/_version.py
 python/kernel.lock
