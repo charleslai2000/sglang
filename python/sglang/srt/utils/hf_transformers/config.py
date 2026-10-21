@@ -48,6 +48,32 @@ def _set_architectures(config, arch_name):
     config.update({"architectures": [arch_name]})
 
 
+def _apply_gemma4_text_attention_overrides(config):
+    """Normalize text-only Gemma4 global/SWA shapes from its checkpoint fields.
+
+    Multimodal Gemma4 applies the equivalent transform to ``config.text_config``.
+    A ``gemma4_text`` checkpoint is its own text config and must take this path
+    before ModelConfig derives per-layer attention modules.
+    """
+    if getattr(config, "model_type", None) != "gemma4_text":
+        return
+    global_head_dim = getattr(config, "global_head_dim", None)
+    global_kv_heads = getattr(config, "num_global_key_value_heads", None)
+    # Config objects can be reused by ModelConfig/parser helpers, so preserve
+    # a normalized SWA value if this function is reached again.
+    if not hasattr(config, "swa_head_dim"):
+        config.swa_head_dim = config.head_dim
+    if not hasattr(config, "swa_v_head_dim"):
+        config.swa_v_head_dim = config.swa_head_dim
+    if not hasattr(config, "swa_num_key_value_heads"):
+        config.swa_num_key_value_heads = config.num_key_value_heads
+    if global_head_dim is not None:
+        config.head_dim = global_head_dim
+    if global_kv_heads is not None:
+        config.num_key_value_heads = global_kv_heads
+    config.v_head_dim = getattr(config, "v_head_dim", config.head_dim)
+
+
 def _apply_deepseek_ocr_overrides(config, model):
     _override_v_head_dim_if_zero(config)
     _set_architectures(config, "DeepseekOCRForCausalLM")
@@ -117,7 +143,11 @@ class HfModelConfigParser(ModelConfigParserBase):
 
         text_config = get_hf_text_config(config=config)
 
-        if isinstance(model, str) and text_config is not None:
+        if (
+            isinstance(model, str)
+            and text_config is not None
+            and text_config is not config
+        ):
             items = (
                 text_config.items()
                 if hasattr(text_config, "items")
@@ -160,6 +190,7 @@ class HfModelConfigParser(ModelConfigParserBase):
 
         if config.model_type in (
             "gemma4",
+            "gemma4_text",
             "gemma4_assistant",
             "gemma4_unified",
             "gemma4_unified_assistant",
@@ -167,7 +198,11 @@ class HfModelConfigParser(ModelConfigParserBase):
             # Gemma4 configs use base attributes for SWA layers and `global_*`
             # variants for full-attention layers.  SGLang expects the opposite:
             # base = full-attention, `swa_*` = sliding-window overrides.
-            text_config = config.text_config
+            text_config = (
+                config
+                if config.model_type == "gemma4_text"
+                else config.text_config
+            )
             global_head_dim = getattr(text_config, "global_head_dim", None)
             global_kv_heads = getattr(text_config, "num_global_key_value_heads", None)
 
@@ -198,6 +233,7 @@ class HfModelConfigParser(ModelConfigParserBase):
         if config.model_type == "longcat_flash":
             _set_architectures(config, "LongcatFlashForCausalLM")
 
+        _apply_gemma4_text_attention_overrides(config)
         return config
 
 

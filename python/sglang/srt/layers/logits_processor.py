@@ -15,6 +15,7 @@
 
 import dataclasses
 import logging
+import os
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -153,6 +154,7 @@ class LogitsProcessorOutput:
 
     # Scheduler-local output copied alongside the ordinary generation result.
     auxiliary_device_output: Optional[DeviceAuxiliaryOutput] = None
+    gemma4_forward_batch: Optional[ForwardBatch] = None
 
 
 @dataclasses.dataclass
@@ -193,6 +195,9 @@ class LogitsMetadata:
     is_prefill_only: bool = False
 
     mm_input_embeds: Optional[torch.Tensor] = None
+    gemma4_capture_logits: Optional[List[torch.Tensor]] = None
+    gemma4_logits_path: Optional[str] = None
+    gemma4_forward_batch: Optional[ForwardBatch] = None
 
     # DRAFT_EXTEND_V2: when set, lm_head runs only on these rows (see
     # EagleDraftExtendInput.select_index).
@@ -253,6 +258,9 @@ class LogitsMetadata:
             global_num_tokens_for_logprob_gpu=forward_batch.global_num_tokens_for_logprob_gpu,
             dp_padding_mode=DpPaddingMode.SUM_LEN,
             mm_input_embeds=forward_batch.mm_input_embeds,
+            gemma4_forward_batch=forward_batch,
+            gemma4_capture_logits=([] if os.environ.get("SGLANG_GEMMA4_CAPTURE_LOGITS") == "1" else None),
+            gemma4_logits_path=(os.environ.get("SGLANG_GEMMA4_LOGITS_FILE") if os.environ.get("SGLANG_GEMMA4_CAPTURE_LOGITS") == "1" else None),
             draft_extend_select_index=draft_extend_select_index,
         )
 
@@ -353,7 +361,10 @@ class LogitsProcessor(nn.Module):
         multi_item_delimiter_indices = None
         if isinstance(logits_metadata, ForwardBatch):
             multi_item_delimiter_indices = logits_metadata.multi_item_delimiter_indices
-            logits_metadata = LogitsMetadata.from_forward_batch(logits_metadata)
+            source_forward_batch = logits_metadata
+            logits_metadata = LogitsMetadata.from_forward_batch(source_forward_batch)
+        else:
+            source_forward_batch = logits_metadata.gemma4_forward_batch
 
         # Autotune dummy run discards this output. `is False` not `not`: None
         # means no autotune pass, which must not skip. Placed before the MIS /
@@ -405,6 +416,30 @@ class LogitsProcessor(nn.Module):
         if not logits_metadata.extend_return_logprob:
             # Compute logits for both input and sampled tokens.
             logits = self._get_logits(pruned_states, lm_head, logits_metadata)
+            if (
+                os.environ.get("SGLANG_GEMMA4_CAPTURE_LOGITS") == "1"
+                and logits_metadata.gemma4_capture_logits is not None
+                and not torch.cuda.is_current_stream_capturing()
+            ):
+                logits_metadata.gemma4_capture_logits.append(logits.detach().float())
+                if logits_metadata.gemma4_logits_path:
+                    fb = source_forward_batch
+                    rid = fb.rids[0] if fb is not None and fb.rids else "unknown-rid"
+                    rec = {
+                        "rid": rid,
+                        "forward_mode": logits_metadata.forward_mode.name,
+                        "input_ids": fb.input_ids.detach().cpu() if fb is not None else None,
+                        "positions": fb.positions.detach().cpu() if fb is not None else None,
+                        "shape": tuple(logits.shape),
+                        "dtype": str(logits.dtype),
+                        "boundary": "lm_head_logits_after_vocab_gather_before_sampling",
+                        "output": logits.detach().float().cpu(),
+                    }
+                    output_path = (
+                        f"{logits_metadata.gemma4_logits_path}."
+                        f"{rid}.{logits_metadata.forward_mode.name.lower()}"
+                    )
+                    torch.save(rec, output_path)
             sampled_logits = (
                 logits[sample_indices] if sample_indices is not None else logits
             )

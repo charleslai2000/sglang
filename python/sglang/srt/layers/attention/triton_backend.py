@@ -1336,6 +1336,17 @@ class TritonAttnBackend(AttentionBackend):
             k_buffer, v_buffer = pool.get_kv_buffer(layer.layer_id)
             k = k_buffer[cache_loc]
             v = v_buffer[cache_loc]
+            # Shared KV is read from the physical cache. FP8 cache values are
+            # stored divided by the layer scales; restore both the attention
+            # compute dtype and the original values before extend attention.
+            # `.to()` allocates compute-dtype tensors when KV is FP8, so the
+            # in-place scale restoration cannot mutate the cache.
+            if k.dtype != q.dtype:
+                k = k.to(q.dtype)
+                v = v.to(q.dtype)
+                # The Triton extend kernels consume dequant scales for cached
+                # prefix blocks. Keep the freshly read shared K/V in cache
+                # representation and let those kernels apply the scale once.
         elif k is None or v is None:
             raise ValueError("Both k and v should be None or not None")
         else:

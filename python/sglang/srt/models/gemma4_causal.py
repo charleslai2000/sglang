@@ -13,6 +13,7 @@
 # ==============================================================================
 
 import logging
+import os
 import re
 from typing import Iterable, List, Optional, Set, Tuple, Union
 
@@ -1009,6 +1010,25 @@ class Gemma4TextModel(PreTrainedModel):
                 **kwargs,
             )
             hidden_states = layer_outputs[0]
+            if (
+                os.environ.get("SGLANG_GEMMA4_CAPTURE_LAYERS") == "1"
+                and not torch.cuda.is_current_stream_capturing()
+            ):
+                path = os.environ.get("SGLANG_GEMMA4_LAYERS_FILE")
+                if path:
+                    rid = forward_batch.rids[0] if forward_batch.rids else "unknown-rid"
+                    record = {
+                        "rid": rid,
+                        "layer": layer_idx,
+                        "forward_mode": forward_batch.forward_mode.name,
+                        "input_ids": forward_batch.input_ids.detach().cpu(),
+                        "positions": positions.detach().cpu(),
+                        "shape": tuple(hidden_states.shape),
+                        "dtype": str(hidden_states.dtype),
+                        "boundary": "decoder_layer_output_including_residual_ple_and_scalar",
+                        "output": hidden_states.detach().float().cpu(),
+                    }
+                    torch.save(record, f"{path}.layer{layer_idx}")
             # Gemma4DecoderLayer.forward always returns (hidden_states, None);
             # the residual is fused inside the layer, so nothing to thread.
 
@@ -1033,7 +1053,45 @@ class Gemma4TextModel(PreTrainedModel):
         if num_layers in self.layers_to_capture:
             aux_hidden_states.append(hidden_states)
 
+        if (
+            os.environ.get("SGLANG_GEMMA4_CAPTURE_LAYERS") == "1"
+            and not torch.cuda.is_current_stream_capturing()
+        ):
+            path = os.environ.get("SGLANG_GEMMA4_LAYERS_FILE")
+            if path:
+                rid = forward_batch.rids[0] if forward_batch.rids else "unknown-rid"
+                record = {
+                    "rid": rid,
+                    "layer": num_layers - 1,
+                    "forward_mode": forward_batch.forward_mode.name,
+                    "input_ids": forward_batch.input_ids.detach().cpu(),
+                    "positions": positions.detach().cpu(),
+                    "shape": tuple(hidden_states.shape),
+                    "dtype": str(hidden_states.dtype),
+                    "boundary": "last_decoder_layer_prenorm_output_before_final_rmsnorm",
+                    "output": hidden_states.detach().float().cpu(),
+                }
+                torch.save(record, f"{path}.prenorm")
         hidden_states = self.norm(hidden_states)
+        if (
+            os.environ.get("SGLANG_GEMMA4_CAPTURE_LAYERS") == "1"
+            and not torch.cuda.is_current_stream_capturing()
+        ):
+            path = os.environ.get("SGLANG_GEMMA4_LAYERS_FILE")
+            if path:
+                rid = forward_batch.rids[0] if forward_batch.rids else "unknown-rid"
+                record = {
+                    "rid": rid,
+                    "layer": num_layers - 1,
+                    "forward_mode": forward_batch.forward_mode.name,
+                    "input_ids": forward_batch.input_ids.detach().cpu(),
+                    "positions": positions.detach().cpu(),
+                    "shape": tuple(hidden_states.shape),
+                    "dtype": str(hidden_states.dtype),
+                    "boundary": "final_rmsnorm_output",
+                    "output": hidden_states.detach().float().cpu(),
+                }
+                torch.save(record, f"{path}.finalnorm")
 
         if len(aux_hidden_states) == 0:
             return hidden_states
