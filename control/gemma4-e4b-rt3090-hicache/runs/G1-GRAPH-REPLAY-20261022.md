@@ -1,0 +1,7 @@
+# G1 CUDA Graph replay evidence — 2026-10-22
+
+Real E5M2 service: `/data/sglang-hicache/gemma4/runs/20261022T053500Z-g1-graph-replay/`, pinned official W4A16 checkpoint, RTX 3090, decode CUDA Graph bs1. Four rounds of four concurrent `/v1/completions` requests all returned success with 8 requested output tokens each (the short model generation repeated its default completion text). The target `DecodeCudaGraphRunner.execute()` path is instrumented by `SGLANG_LOG_DECODE_GRAPH_KEY`; service log records nine explicit lines `Decode graph replay: worker=target key_size=1 (bs) mode=DECODE raw_bs=1` at 05:35:48–05:35:50, after successful graph capture. This is direct real-request **decode replay path evidence**, unlike startup capture alone. Per-round replay counters in the driver are cumulative and remain 9 because logger output buffering delayed visibility; the 9 underlying server log lines are authoritative.
+
+This proves graph replay executes for actual bs1 decode requests and returns successful API responses. It is not an independent eager-vs-graph numerical parity sweep, nor graph replay at C2/C4/C8 (actual requests were concurrent but logged replay key size bs1 and scheduled individually). E5M2 vs BF16 at the SWA boundary still has a greedy mismatch at 513 tokens; this graph result does not override it.
+
+GPU was released after service stop (1 MiB used). Full server/client log and request driver are retained in the run directory.
