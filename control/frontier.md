@@ -2,7 +2,7 @@
 
 ## gemma4-e4b-rtx3090-hicache
 - T001-gemma4-w4a16-fp8kv-service-and-capacity Official W4A16 + FP8 KV Gemma4 RTX3090 service acceptance — ACTIVE
-  - frontier: Capture UUID/RID/token-range association and its N514 prefill-only runtime test are validated (6 component boundaries, zero cached tokens, no Decode); CPU regressions pass. Commit/push these Gemma-only artifacts first. N514 final-token BF16 residual grows from 1.457% at L16 to 2.059% at L17 and 8.055% at full-attention L23; N512 final-token largest increment is L23, with a distinct position504 anomaly around L20. These are not operation-level defect evidence. Next align N514 L17 projection/norm/p-RoPE/attention/O/FFN/PLE with HF, then minimal N512 L23/L20 probes as evidence dictates. Continue E5M2/shared-scale/SWA, Graph parity, API, concurrency/capacity/performance qualification; G1 ACTIVE, NOT ACCEPTED.
+  - frontier: Capture association repair pushed at `14fc12ca711e60fb0e10d5bf86588baacabdf28b`; proportional RoPE fix/test/report pushed at `93704a1c5efd145d50d0d316e6b2aa81795c21e0` (remote verified). Real BF16/E5M2 N512/514 GPU logits still mismatch HF. N514 data is complete 514 rows; apparent 271 belongs to separate RID/UUID legal EXTEND selected by an unrestricted analysis glob, not chunk/truncation. Same-input layer16-to-layer17 boundary is exact. HF replay now guards identity/range, but operation boundary comparison remains unmatched; next capture pre/post fused QKV projection, norm and RoPE on identical inputs. Graph eager parity, E5M2/shared-SWA, long-context, G32 prefill and C16 capacity/throughput qualification remain open. G1 ACTIVE, NOT ACCEPTED.
   - task: control/gemma4-e4b-rtx3090-hicache/tasks/T001-gemma4-w4a16-fp8kv-service-and-capacity.md
 
 ## queued-prefetch-host-ready
