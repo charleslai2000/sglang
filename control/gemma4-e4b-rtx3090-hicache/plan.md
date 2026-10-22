@@ -1,6 +1,7 @@
 # Current plan — Gemma 4 E4B / RTX 3090
 
 ## Established
+- Post-RoPE frozen-prompt N512/N514 BF16 vs exact-input HF full-logit comparisons were rerun from locked actual GPU service; both fail the already-frozen guard (max/mean/rel-L2 3.06548/.504850/.209645 and 2.92209/1.350244/.259888; Top-10 and greedy both differ). Exact RID/Forward/model/token/prefix evidence is in `runs/G1-REPAIR-AND-BASELINE-20261022.md`. N514 271 rows remain attributed to a separate valid Forward selected by a glob. Exact PLE capture now works for full N512/N514; HF same-op replay is not yet valid, so do not modify math from it.
 - Dedicated branch `3090-gemma4-e4b-hicache` is on local HEAD `93704a1c5efd145d50d0d316e6b2aa81795c21e0`; direct `git ls-remote --heads origin 3090-gemma4-e4b-hicache` returned the same SHA. The RoPE fix/test/report were committed narrowly; other control and historical Gemma/Falcon changes remain unstaged/uncommitted. Preserve all unrelated/Falcon dirty state.
 - Pinned official checkpoint revision `6cd26aaa2357fb2bad8c51699a7558a4d1a965bb`, model.safetensors SHA-256 `19d89d2a4b3e401a3eae75ec08ab112810421a036c91d8c8226b686be7fe0c5d`. Actual service and matched forwards ran with W4A16 and BF16/E5M2 cache under the RTX3090 lock. GPU returned idle (0%, 1 MiB; no server process at latest check).
 - Strict short BF16 same-RID/input/positions 1–8 HF comparison: full-vocabulary logit max/mean/RMSE/rel-L2 `.434781/.060466/.076381/.013648`, top-10 exact, greedy 108==108. This is diagnostic only; no tolerance frozen.
@@ -11,8 +12,8 @@
 - Actual req_to_token/full-to-SWA/window-index and owner 18/23 raw cache/scales remain uncaptured. The source now has one uncommitted line changing Global Attention RoPE selection to the checkpoint's required proportional type. CPU operator parity passes exactly; GPU model service not yet run. G1 remains NOT ACCEPTED.
 
 ## Decisive frontier
-1. N514 same-input layer replay: HF and SGLang post-RoPE Q/K/V agree to rel-L2 .00138/.00121/.000144 and attention-head output to .00345, while complete layer17 output differs rel-L2 .3570. Compare post-attention norm/residual, pre-FFN, MLP, post-FFN/PLE; keep N512 layer23 and position504 follow-up exact. The apparent 271-token capture was a separate RID/UUID legal prefill selected by a glob; N514 artifacts all hold 514 rows and are not truncated/chunked.
-2. Run eager-vs-real-Graph numerical parity and finish E5M2/shared-KV/SWA boundary/long-decode checks.
+1. N512/N514 BF16/HF frozen-prompt comparisons fail post-RoPE (full-logit errors and mismatched Top-10/greedy; exact table in `runs/G1-REPAIR-AND-BASELINE-20261022.md`). PLE tensors are now complete and exact-Forward bound. Next validate per-op HF parity using exact PLE inputs; only repair demonstrated defects. Do not extend diagnosis from invalid prior replay.
+2. Run eager-vs-real-Graph numerical parity and finish E5M2/shared-KV/SWA boundary/long-decode checks; N513 E5M2/BF16 greedy differs.
 3. Establish actual G32 Prefill TPS/latency repeatable baseline and C16 resource/throughput stress with occupancy/memory evidence; prior API matrix is noisy, C1/C2/C4/C8 one-shot decode only.
 2. Run explicit eager-vs-real-CUDA-Graph comparison on same BF16 prompts with manifests proving Graph replay (bs1) and compare logits/tokens, then repeat E5M2 where applicable. The graph-enabled N514 service completed but replay wasn't proven from request log yet.
 3. Capture nonzero-prefix SWA membership and owner K/V scales. Continue E5M2 long-context/shared-KV/decode, streaming/stop/server-cancel, concurrency, memory/KV-capacity/OOM, and repeated performance qualification.

@@ -1002,6 +1002,43 @@ class Gemma4TextModel(PreTrainedModel):
                 per_layer_input = per_layer_inputs[:, layer_idx, :]
             else:
                 per_layer_input = None
+            if (
+                os.environ.get("SGLANG_GEMMA4_CAPTURE_PLE") == "1"
+                and not torch.cuda.is_current_stream_capturing()
+                and layer_idx == int(os.environ.get("GEMMA4_PLE_CAPTURE_LAYER", "-1"))
+                and per_layer_input is not None
+                and forward_batch.gemma4_forward_id is not None
+                and forward_batch.forward_mode.is_extend()
+            ):
+                path = os.environ.get("GEMMA4_PLE_CAPTURE_FILE")
+                forward_id = forward_batch.gemma4_forward_id
+                if not path or not forward_id:
+                    raise RuntimeError("Gemma4 PLE capture requires output path and Forward UUID")
+                if forward_batch.batch_size != 1 or per_layer_input.shape[0] != forward_batch.input_ids.numel():
+                    raise RuntimeError("Gemma4 PLE tensor is not aligned with the single-request Forward range")
+                if positions.numel() != per_layer_input.shape[0]:
+                    raise RuntimeError("Gemma4 PLE rows do not align with Forward positions")
+                record = {
+                    "schema": 1,
+                    "boundary": "decoder_layer_per_layer_input",
+                    "forward_id": forward_id,
+                    "rid": [forward_batch.rids[0]],
+                    "model_identity": json.loads(os.environ.get("GEMMA4_MODEL_IDENTITY", "{}")),
+                    "layer": layer_idx,
+                    "forward_mode": forward_batch.forward_mode.name,
+                    "batch_size": forward_batch.batch_size,
+                    "batch_slot_offsets": torch.tensor([0], dtype=torch.int64),
+                    "input_ids": forward_batch.input_ids.detach().cpu(),
+                    "positions": positions.detach().cpu(),
+                    "extend_seq_lens": forward_batch.extend_seq_lens.detach().cpu() if forward_batch.extend_seq_lens is not None else None,
+                    "extend_prefix_lens": forward_batch.extend_prefix_lens.detach().cpu() if forward_batch.extend_prefix_lens is not None else None,
+                    "shape": tuple(per_layer_input.shape),
+                    "dtype": str(per_layer_input.dtype),
+                    "value": per_layer_input.detach().float().cpu(),
+                }
+                from sglang.srt.utils.gemma4_capture import save_gemma4_capture
+
+                save_gemma4_capture(record, f"{path}.{forward_id}.ple.{layer_idx}")
             layer = self.layers[layer_idx]
             layer_outputs = layer(
                 positions=positions,

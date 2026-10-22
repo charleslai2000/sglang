@@ -9,7 +9,12 @@ def post(url,payload):
  req=urllib.request.Request(url,data=json.dumps(payload).encode(),headers={'Content-Type':'application/json'});return json.loads(urllib.request.urlopen(req,timeout=600).read())
 rows=[]
 for n in [510,511,512,513,514]:
- g=torch.Generator().manual_seed(20261022+n);prompt=torch.randint(1,262000,(n,),generator=g).tolist();prompt[:8]=ids;per=base/f'n{n}';per.mkdir(exist_ok=True);req={'prompt':prompt,'max_tokens':1,'temperature':0.0};outs={}
+ previous=Path('/data/sglang-hicache/gemma4/runs/20261022T065916Z-e5m2-swa-boundary')/f'n{n}'/'bf16-request.json'
+ prompt=json.loads(previous.read_text())['prompt'] if previous.is_file() else None
+ if prompt is None:raise RuntimeError(f'no frozen exact prompt for boundary length {n}: {previous}')
+ if hashlib.sha256(json.dumps(prompt,separators=(',',':')).encode()).hexdigest()!=json.loads((previous.parent/'comparison.json').read_text()).get('prompt_sha256',hashlib.sha256(json.dumps(prompt,separators=(',',':')).encode()).hexdigest()):
+  raise RuntimeError(f'frozen prompt identity mismatch at N={n}')
+ per=base/f'n{n}';per.mkdir(exist_ok=True);req={'prompt':prompt,'max_tokens':1,'temperature':0.0};outs={}
  for mode,url in urls.items():
   (per/f'{mode}-request.json').write_text(json.dumps(req)+'\n');resp=post(url,req);(per/f'{mode}-response.json').write_text(json.dumps(resp,indent=2)+'\n');rid=resp.get('meta_info',{}).get('id',resp.get('id'));deadline=time.time()+60;capt=None
   while time.time()<deadline:

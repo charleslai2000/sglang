@@ -15,7 +15,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from compressed_tensors.quantization.lifecycle.forward import dequantize
+from compressed_tensors.compressors import ModelCompressor
 from transformers import AutoModelForCausalLM
 import transformers.models.gemma4.modeling_gemma4 as hf_module
 
@@ -38,66 +38,34 @@ ids, positions = previous["input_ids"].tolist(), previous["positions"].tolist()
 hidden = previous["output"].float()
 if ids != manifest["input_ids"] or positions != manifest["positions"] or hidden.shape[0] != n:
     raise RuntimeError("preceding-layer capture does not match exact Forward manifest")
-component_root = run / "components" / "component"
-component_pattern = f"component.{manifest['rid'][0]}.{forward_id}.layer{layer_id}.attention_norm_input.json"
-component_path = component_root / component_pattern
-if not component_path.is_file():
-    raise RuntimeError(f"missing same-Forward component input: {component_path}")
-component = json.loads(component_path.read_text())
-for field, expected in (("forward_id", forward_id), ("rid", manifest["rid"][0]), ("forward_mode", "EXTEND")):
-    if component.get(field) != expected:
-        raise RuntimeError(f"component {field} mismatch: {component.get(field)!r} != {expected!r}")
-if component.get("extend_seq_lens") != [n] or component.get("extend_prefix_lens") != [0]:
-    raise RuntimeError(f"component is not a fresh full prefill: {component.get('extend_seq_lens')}, {component.get('extend_prefix_lens')}")
-if component.get("step_input_ids") != ids or component.get("step_positions") != positions:
-    raise RuntimeError("component IDs/positions differ from layer-output manifest")
-if component.get("shape", [None])[0] != n or len(component.get("value", [])) != n:
-    raise RuntimeError("component hidden-state rows do not match manifest token range")
-if component.get("query_token_range_in_request") != [0, n]:
-    raise RuntimeError("component does not cover the complete request query range")
+ple_path = service_root / f"forward.{forward_id}.ple.{layer_id}"
+ple_record = torch.load(ple_path, weights_only=True)
+for field, expected in (("forward_id", forward_id), ("rid", manifest["rid"]), ("forward_mode", "EXTEND")):
+    if ple_record.get(field) != expected:
+        raise RuntimeError(f"PLE {field} mismatch: {ple_record.get(field)!r} != {expected!r}")
+if ple_record.get("extend_seq_lens").tolist() != [n] or ple_record.get("extend_prefix_lens").tolist() != [0]:
+    raise RuntimeError("PLE tensor is not from the exact fresh full-prefill query range")
+if ple_record.get("input_ids").tolist() != ids or ple_record.get("positions").tolist() != positions:
+    raise RuntimeError("PLE IDs/positions differ from exact Forward manifest")
+per_layer_input = ple_record.get("value")
+if tuple(per_layer_input.shape) != (n, 256):
+    raise RuntimeError(f"unexpected exact-Forward PLE shape {tuple(per_layer_input.shape)}")
+
 
 model = AutoModelForCausalLM.from_pretrained(
     model_path, torch_dtype=torch.bfloat16, device_map="cpu", trust_remote_code=True, low_cpu_mem_usage=True
 ).eval()
+# Use compressed-tensors' complete official QAT decompression lifecycle. This
+# also leaves PLE embedding and context-projection weights in their dense form.
+ModelCompressor.from_compression_config(model.config.quantization_config).decompress_model(model)
 text_model = model.model.language_model
 layer = text_model.layers[layer_id]
 # Force the explicit eager text attention implementation so the patched operation
 # hook observes the actual attention operands/output rather than bypassing into SDPA.
 layer.self_attn.config._attn_implementation = "eager"
 
-# HF Transformers exposes packed int32 tensors. SGLang's official pack-quantized
-# loader uses unpack_cols: least-significant nibble first, int4 values are unsigned
-# with symmetric offset 8. Dequantization itself uses the compressed-tensors scheme.
-def dequantize_hf_pack_quantized_linear(linear):
-    if not hasattr(linear, "weight_packed"):
-        return
-    if not hasattr(linear, "weight_shape") or not hasattr(linear, "weight_scale"):
-        raise RuntimeError("packed HF linear lacks checkpoint shape/scales")
-    if linear.quantization_status.name != "COMPRESSED":
-        raise RuntimeError(f"unexpected quantization status: {linear.quantization_status}")
-    args = linear.quantization_scheme.weights
-    if args.num_bits != 4 or args.group_size != 32 or not args.symmetric or args.actorder is not None:
-        raise RuntimeError(f"unsupported HF packed scheme for replay: {args}")
-    rows, cols = (int(v) for v in linear.weight_shape.tolist())
-    packed = linear.weight_packed.detach().cpu().numpy().astype(np.uint32, copy=True)
-    if packed.shape != (rows, cols // 8):
-        raise RuntimeError(f"unexpected int4 packed shape {packed.shape} for {(rows, cols)}")
-    unpacked = np.empty((rows, cols), dtype=np.uint32)
-    for slot in range(8):
-        unpacked[:, slot::8] = packed & 0xF
-        packed >>= 4
-    q = torch.from_numpy(unpacked.astype(np.int32)) - 8
-    weight = dequantize(q, linear.weight_scale.detach().cpu(), args=args, dtype=torch.bfloat16)
-    if tuple(weight.shape) != (rows, cols) or not bool(torch.isfinite(weight).all()):
-        raise RuntimeError("dequantized HF packed weight has invalid shape or non-finite values")
-    del linear._parameters["weight_packed"]
-    del linear._parameters["weight_scale"]
-    del linear._parameters["weight_shape"]
-    linear.register_parameter("weight", torch.nn.Parameter(weight, requires_grad=False))
-
-for module in layer.modules():
-    if isinstance(module, torch.nn.Linear):
-        dequantize_hf_pack_quantized_linear(module)
+if any(hasattr(module, "weight_packed") for module in layer.modules() if isinstance(module, torch.nn.Module)):
+    raise RuntimeError("official compressed-tensors decompressor left packed target-layer weights")
 
 records = {}
 def save(name, tensor):
@@ -150,9 +118,12 @@ try:
     # attention_mask=None would permit future-token attention and invalidate it.
     causal_mask = torch.full((1, 1, n, n), float("-inf"), dtype=hidden_batched.dtype)
     causal_mask = torch.triu(causal_mask, diagonal=1)
+    per_layer = text_model.get_per_layer_inputs(torch.tensor([ids], dtype=torch.long), None)
+    if per_layer is None or per_layer.shape[1] != n or per_layer.shape[2] != text_model.config.num_hidden_layers:
+        raise RuntimeError("official HF PLE lookup does not align with the Forward token IDs/layers")
+    per_layer_input = per_layer[:, :, layer_id, :]
     with torch.inference_mode():
-        layer.hidden_size_per_layer_input = 0
-        layer(hidden_states=hidden_batched, per_layer_input=None,
+        layer(hidden_states=hidden_batched, per_layer_input=per_layer_input,
               position_embeddings=text_model.rotary_emb(hidden_batched, pos, layer.self_attn.layer_type),
               attention_mask=causal_mask, position_ids=pos, shared_kv_states={}, past_key_values=None)
 finally:
