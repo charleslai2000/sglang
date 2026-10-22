@@ -11,7 +11,9 @@
 - Actual req_to_token/full-to-SWA/window-index and owner 18/23 raw cache/scales remain uncaptured. The source now has one uncommitted line changing Global Attention RoPE selection to the checkpoint's required proportional type. CPU operator parity passes exactly; GPU model service not yet run. G1 remains NOT ACCEPTED.
 
 ## Decisive frontier
-1. Compare the captured N514 layer17 SGLang boundaries against HF's corresponding operation outputs on exact same inputs/positions and checkpoint weights. Find the first meaningful post-RoPE divergence, including fused qkv/norm, attention and residual/FFN/PLE; no 2% threshold shortcut. Capture N512 layer23 and position504/L20 only as evidence dictates.
+1. N514 same-input layer replay: HF and SGLang post-RoPE Q/K/V agree to rel-L2 .00138/.00121/.000144 and attention-head output to .00345, while complete layer17 output differs rel-L2 .3570. Compare post-attention norm/residual, pre-FFN, MLP, post-FFN/PLE; keep N512 layer23 and position504 follow-up exact. The apparent 271-token capture was a separate RID/UUID legal prefill selected by a glob; N514 artifacts all hold 514 rows and are not truncated/chunked.
+2. Run eager-vs-real-Graph numerical parity and finish E5M2/shared-KV/SWA boundary/long-decode checks.
+3. Establish actual G32 Prefill TPS/latency repeatable baseline and C16 resource/throughput stress with occupancy/memory evidence; prior API matrix is noisy, C1/C2/C4/C8 one-shot decode only.
 2. Run explicit eager-vs-real-CUDA-Graph comparison on same BF16 prompts with manifests proving Graph replay (bs1) and compare logits/tokens, then repeat E5M2 where applicable. The graph-enabled N514 service completed but replay wasn't proven from request log yet.
 3. Capture nonzero-prefix SWA membership and owner K/V scales. Continue E5M2 long-context/shared-KV/decode, streaming/stop/server-cancel, concurrency, memory/KV-capacity/OOM, and repeated performance qualification.
 4. Progressively commit only validated Gemma-owned fixes/evidence, verify remote SHA at each push, and keep G1 ACTIVE/NOT ACCEPTED until all correctness/features/capacity/performance conditions are met.

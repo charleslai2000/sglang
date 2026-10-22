@@ -61,6 +61,9 @@ model = AutoModelForCausalLM.from_pretrained(
 ).eval()
 text_model = model.model.language_model
 layer = text_model.layers[layer_id]
+# Force the explicit eager text attention implementation so the patched operation
+# hook observes the actual attention operands/output rather than bypassing into SDPA.
+layer.self_attn.config._attn_implementation = "eager"
 
 # HF Transformers exposes packed int32 tensors. SGLang's official pack-quantized
 # loader uses unpack_cols: least-significant nibble first, int4 values are unsigned
@@ -141,11 +144,17 @@ hf_module.apply_rotary_pos_emb = capture_rotary
 hf_module.eager_attention_forward = capture_attention
 try:
     pos = torch.tensor([positions], dtype=torch.long)
+    hidden_batched = hidden[None].to(torch.bfloat16)
+    # This exact N=514 request is a fresh causal prefill (prefix_len=0). A direct
+    # decoder-layer replay must supply the same causal mask as the full HF model;
+    # attention_mask=None would permit future-token attention and invalidate it.
+    causal_mask = torch.full((1, 1, n, n), float("-inf"), dtype=hidden_batched.dtype)
+    causal_mask = torch.triu(causal_mask, diagonal=1)
     with torch.inference_mode():
         layer.hidden_size_per_layer_input = 0
-    layer(hidden_states=hidden[None].to(torch.bfloat16), per_layer_input=None,
-              position_embeddings=text_model.rotary_emb(hidden[None].to(torch.bfloat16), pos, layer.self_attn.layer_type),
-              attention_mask=None, position_ids=pos, shared_kv_states={}, past_key_values=None)
+        layer(hidden_states=hidden_batched, per_layer_input=None,
+              position_embeddings=text_model.rotary_emb(hidden_batched, pos, layer.self_attn.layer_type),
+              attention_mask=causal_mask, position_ids=pos, shared_kv_states={}, past_key_values=None)
 finally:
     for handle in handles: handle.remove()
     hf_module.apply_rotary_pos_emb = original_apply
