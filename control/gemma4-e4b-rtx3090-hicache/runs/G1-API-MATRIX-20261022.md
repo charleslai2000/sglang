@@ -1,0 +1,7 @@
+# G1 API/concurrency smoke — 2026-10-22
+
+Real E5M2 Gemma service run `/data/sglang-hicache/gemma4/runs/20261022T052553Z-g1-api-matrix/`. W4A16 checkpoint loaded, E5M2 full pool 4096 tokens and SWA pool 3276 tokens allocated. Decode CUDA Graph batch-1 capture completed at startup (this is capture evidence only; **not** replay correctness). The API driver completed concurrent `/v1/completions` requests for C1/C2/C4/C8 (16 generated tokens each): all returned HTTP-success responses. Observed aggregate token/s: C1 55.61; C2 15.41; C4 9.61; C8 60.70. The non-monotonic observations and very short 16-token workload make this a smoke measurement, not a stable throughput characterization. Latency p50/max seconds: C1 `.286/.286`; C2 `2.076/2.076`; C4 `6.661/6.661`; C8 `2.105/2.108`.
+
+Stop behavior is **not verified**: request sent `stop=['f']`, but response emitted 64 completion tokens and ignored the intended stop case (the generation default repeated “short sentence about the sky”; the stop string was absent). Do not count that as successful Stop acceptance. Streaming, explicit cancellation/disconnect, C1/C2/C4/C8 stability/repetitions, meaningful throughput/latency, real CUDA Graph replay execution, capacity and SWA/Shared-KV numerical correctness remain unqualified. CUDA Graph capture at startup alone is insufficient.
+
+Raw server log, latency/client and per-case JSON are preserved in the run directory. GPU returned to 1 MiB after the service was stopped.
