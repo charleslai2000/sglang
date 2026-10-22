@@ -1,0 +1,5 @@
+# G1 stop/stream/cancel API result — 2026-10-22
+
+Real service run: `/data/sglang-hicache/gemma4/runs/20261022T053612Z-g1-stop-stream-cancel/`, E5M2 KV, raw-token OpenAI `/v1/completions`, actual RTX 3090. The exact next-token stop test used the known greedy token ID `108` as `stop_token_ids`; the response completed with the `stop` finish reason and the driver marked `stop_token_pass: true`. A 16-token streaming request delivered 16 chunks, a non-empty text delta, and a finish chunk; first chunk arrived in 0.144 s. For cancellation, the streaming client disconnected after first chunk of a 256-token generation; the server remained healthy (HTTP 200) and a subsequent request completed normally. This is client-disconnect/recovery evidence, not proof of a server-side cancel endpoint or that in-flight GPU work was immediately aborted.
+
+Raw response chunks and server logs are retained under the run directory. E5M2 decode was live; this does not verify graph replay because logs show actual input forwards as eager/`cuda graph: False`. The service was stopped and GPU returned to 1 MiB used.
