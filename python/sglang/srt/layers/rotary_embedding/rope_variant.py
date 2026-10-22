@@ -894,11 +894,11 @@ class Gemma4RotaryEmbedding(RotaryEmbedding):
         is_neox_style: bool,
         dtype: torch.dtype,
     ) -> None:
-        # Store angles before calling super().__init__
-        # rotary_dim is already scaled by partial_rotary_factor in get_rope
-        # For Gemma4: head_size=512, partial_rotary_factor=0.25 -> rotary_dim=128
-        self.rope_angles = rotary_dim // 2  # Number of rotation angles per half
-        self.nope_angles = (head_size // 2) - self.rope_angles  # Non-rotated per half
+        # get_rope() has already applied partial_rotary_factor to rotary_dim.
+        # Keep 64 rotating angle pairs, then pad to half-head width before the
+        # base NeoX cache duplicates cos/sin into the full 512-D layout.
+        self.rope_angles = rotary_dim // 2
+        self.nope_angles = head_size // 2 - self.rope_angles
 
         super().__init__(
             head_size,
@@ -917,17 +917,16 @@ class Gemma4RotaryEmbedding(RotaryEmbedding):
         freq_exponents = (
             torch.arange(0, 2 * self.rope_angles, 2, dtype=torch.float) / self.head_size
         )
-        inv_freq = 1.0 / (base**freq_exponents)
+        inv_freq_rotated = 1.0 / (base**freq_exponents)
 
-        # Zero-pad for non-rotated dims (identity rotation: cos=1, sin=0)
+        # HF _compute_proportional_rope_parameters returns 256 frequencies:
+        # 64 active + 192 zeros. The base NeoX cache then forms 512-wide cos
+        # and sin rows by duplicating each 256-wide vector.
         if self.nope_angles > 0:
-            inv_freq = torch.cat(
-                [
-                    inv_freq,
-                    torch.zeros(self.nope_angles, dtype=torch.float),
-                ]
+            inv_freq_rotated = torch.cat(
+                [inv_freq_rotated, torch.zeros(self.nope_angles, dtype=torch.float)]
             )
-        return inv_freq
+        return inv_freq_rotated
 
     def extra_repr(self) -> str:
         s = f"head_size={self.head_size}, rotary_dim={self.rotary_dim}"

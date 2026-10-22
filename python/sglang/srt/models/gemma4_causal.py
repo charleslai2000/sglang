@@ -404,7 +404,7 @@ class Gemma4Attention(nn.Module):
             rotary_dim=self.head_dim,
             max_position=max_position_embeddings,
             base=rope_parameters.get("rope_theta", 10000.0),
-            rope_scaling={"rope_type": rope_parameters.get("rope_type", "default")},
+            rope_scaling={"rope_type": rope_parameters["rope_type"] or "default"},
             partial_rotary_factor=rope_parameters.get("partial_rotary_factor", 1.0),
             is_neox_style=True,
         )
