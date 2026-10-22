@@ -28,6 +28,8 @@ ScheduleBatch -> ForwardBatch
 from __future__ import annotations
 
 import hashlib
+import os
+import uuid
 import warnings
 from dataclasses import dataclass
 from enum import IntEnum, auto
@@ -460,6 +462,8 @@ class ForwardBatch(ForwardBatchDeepSeekMHAMixin):
     can_run_decode_cuda_graph: bool = False
     can_run_dp_prefill_cuda_graph: bool = False
     global_forward_mode: Optional[ForwardMode] = None
+    # Unique invocation identity for opt-in Gemma diagnostic captures only.
+    gemma4_forward_id: Optional[str] = None
 
     # For two-batch overlap
     tbo_split_seq_index: Optional[int] = None
@@ -778,6 +782,7 @@ class ForwardBatch(ForwardBatchDeepSeekMHAMixin):
         ret = cls(
             # Required core inputs
             forward_mode=batch.forward_mode,
+            gemma4_forward_id=(uuid.uuid4().hex if os.environ.get("SGLANG_GEMMA4_CAPTURE_LAYERS") == "1" or os.environ.get("SGLANG_GEMMA4_CAPTURE_LOGITS") == "1" else None),
             batch_size=len(batch.seq_lens),
             input_ids=batch.input_ids,
             req_pool_indices=batch.req_pool_indices,

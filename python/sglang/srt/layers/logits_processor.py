@@ -14,6 +14,7 @@
 """Logits processing."""
 
 import dataclasses
+import json
 import logging
 import os
 from contextlib import contextmanager
@@ -422,11 +423,17 @@ class LogitsProcessor(nn.Module):
                 and not torch.cuda.is_current_stream_capturing()
             ):
                 logits_metadata.gemma4_capture_logits.append(logits.detach().float())
-                if logits_metadata.gemma4_logits_path:
+                if logits_metadata.gemma4_logits_path and source_forward_batch.gemma4_forward_id:
                     fb = source_forward_batch
                     rid = fb.rids[0] if fb is not None and fb.rids else "unknown-rid"
+                    forward_id = fb.gemma4_forward_id if fb is not None else None
+                    if not forward_id:
+                        raise RuntimeError("Gemma4 logits capture requires ForwardBatch UUID")
                     rec = {
-                        "rid": rid,
+                        "forward_id": forward_id,
+                        "model_identity": json.loads(os.environ.get("GEMMA4_MODEL_IDENTITY", "{}")),
+                        "rid": [rid],
+                        "batch_size": fb.batch_size,
                         "forward_mode": logits_metadata.forward_mode.name,
                         "input_ids": fb.input_ids.detach().cpu() if fb is not None else None,
                         "positions": fb.positions.detach().cpu() if fb is not None else None,
@@ -435,11 +442,30 @@ class LogitsProcessor(nn.Module):
                         "boundary": "lm_head_logits_after_vocab_gather_before_sampling",
                         "output": logits.detach().float().cpu(),
                     }
-                    output_path = (
-                        f"{logits_metadata.gemma4_logits_path}."
-                        f"{rid}.{logits_metadata.forward_mode.name.lower()}"
-                    )
-                    torch.save(rec, output_path)
+                    output_path = f"{logits_metadata.gemma4_logits_path}.{forward_id}.logits"
+                    from sglang.srt.utils.gemma4_capture import save_gemma4_capture
+
+                    save_gemma4_capture(rec, output_path)
+                    if os.environ.get("SGLANG_GEMMA4_CAPTURE_LAYERS") == "1":
+                        manifest = {
+                            "schema": 1,
+                            "status": "COMPLETE",
+                            "forward_id": forward_id,
+                            "model_identity": rec["model_identity"],
+                            "rid": rec["rid"],
+                            "forward_mode": rec["forward_mode"],
+                            "input_ids": rec["input_ids"].tolist(),
+                            "positions": rec["positions"].tolist(),
+                            "batch_size": rec["batch_size"],
+                            "batch_slot_offsets": [0],
+                            "layer_indices": list(range(42)),
+                            "boundaries": ["prenorm", "finalnorm", "logits"],
+                            "scheduler_step": None,
+                        }
+                        save_gemma4_capture(
+                            manifest,
+                            f"{logits_metadata.gemma4_logits_path}.{forward_id}.manifest",
+                        )
             sampled_logits = (
                 logits[sample_indices] if sample_indices is not None else logits
             )
