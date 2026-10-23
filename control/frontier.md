@@ -2,7 +2,7 @@
 
 ## gemma4-e4b-rtx3090-hicache
 - T001-gemma4-w4a16-fp8kv-service-and-capacity Official W4A16 + FP8 KV Gemma4 RTX3090 service acceptance — ACTIVE
-  - frontier: N512/N514 V2 worker captures and position-matched HF oracles are real. N514 vLLM tracks HF (rel-L2 .0453; Top-10/greedy match), SGLang diverges (.2599; mismatches), proving a Fork/runtime-specific case. Same-Forward layer residual rises from ~2% at L17 to 8.05% at L23 full-attention; next compare exact L23 Q/K/V, RoPE and attention boundaries before repair. N512 is position-sensitive and its greedy alone is inconclusive. G32 Prefill, Graph parity, E5M2/shared-SWA and other G1 acceptance remain. G1 ACTIVE, NOT ACCEPTED.
+  - frontier: Layer41 CLOSED. HF [41]=Layer40, [42]=post-FinalNorm; N514 FinalNorm rel-L2 .07316, logits .25989; official norm recomputation matches runtime. E5M2 N510..514 remains NOT ACCEPTED. Corrected no-cap C16 runs: stable `.94` allocates Full/SWA 306,166/244,932, peak 23,723 MiB; `.96` fails a real 100 MiB forward allocation. C16×16K and 32,767 each completed 16 independent requests (4,895/4,046 tok/s; zero retractions). Continue numerical repair, E5M2 Shared-KV/Decode and Graph correctness; G1 ACTIVE / NOT ACCEPTED.
   - task: control/gemma4-e4b-rtx3090-hicache/tasks/T001-gemma4-w4a16-fp8kv-service-and-capacity.md
 
 ## queued-prefetch-host-ready
