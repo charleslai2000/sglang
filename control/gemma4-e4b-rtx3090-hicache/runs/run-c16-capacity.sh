@@ -14,11 +14,11 @@ export SGLANG_CACHE_DIR=/data/sglang-hicache/gemma4/cache HF_HOME=/data/sglang-h
 import json,random,sys
 from pathlib import Path
 out=Path(sys.argv[1]); rng=random.Random(20261024)
-# 16 disjoint token spans for simultaneous cases, plus a separate long-context span.
+# Disjoint span per input slot; radix caching is disabled for independent requests.
 ids=[rng.randrange(1,261000) for _ in range(16*32769+32769)]
 (out/'frozen-ids.json').write_text(json.dumps({'seed':20261024,'ids':ids},separators=(',',':'))+'\n')
 PY
-(cd "$repo"; "$venv/bin/python" -m sglang.launch_server --model-path "$model" --trust-remote-code --host 127.0.0.1 --port 31046 --context-length 65536 --max-running-requests 16 --mem-fraction-static "${MEM_FRACTION_STATIC:-.94}" --kv-cache-dtype fp8_e5m2 --attention-backend triton --cuda-graph-max-bs-decode 16 --enable-metrics --log-level info) >"$out/server.log" 2>&1 & pid=$!
+(cd "$repo"; "$venv/bin/python" -m sglang.launch_server --model-path "$model" --trust-remote-code --host 127.0.0.1 --port 31046 --context-length 65536 --max-running-requests 16 --mem-fraction-static "${MEM_FRACTION_STATIC:-.94}" --chunked-prefill-size 2048 --max-prefill-tokens 16384 --disable-radix-cache --kv-cache-dtype fp8_e5m2 --attention-backend triton --cuda-graph-max-bs-decode 16 --enable-metrics --log-level info) >"$out/server.log" 2>&1 & pid=$!
 echo "$pid" >"$out/server.pid"
 nvidia-smi --query-gpu=timestamp,utilization.gpu,memory.used --format=csv --loop-ms=500 >"$out/gpu-samples.csv" & monitor=$!
 cleanup(){ kill -TERM "$monitor" 2>/dev/null || true; kill -TERM "$pid" 2>/dev/null || true; for _ in $(seq 1 60); do kill -0 "$pid" 2>/dev/null || break; sleep 2; done; pkill -TERM -P "$pid" 2>/dev/null || true; kill -TERM "$pid" 2>/dev/null || true; }
