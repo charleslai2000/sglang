@@ -2,7 +2,7 @@
 
 ## gemma4-e4b-rtx3090-hicache
 - T001-gemma4-w4a16-fp8kv-service-and-capacity Official W4A16 + FP8 KV Gemma4 RTX3090 service acceptance — ACTIVE
-  - frontier: N512/N514 V2 worker captures and per-runtime HF position-matched oracles are now real. At N514 vLLM tracks HF closely (rel-L2 .0453, Top-10/greedy match), while SGLang diverges materially (rel-L2 .2599, Top-10/greedy mismatch), proving this case is Fork/runtime-specific; exact operation/root cause is open. N512 both implementations deviate under their respective positions. Localize SGLang N514 residual, probe N512 position-conditioned difference, then repair only demonstrated defect; G32 Prefill baseline, Graph parity, E5M2/shared-SWA and remaining G1 acceptance remain. G1 ACTIVE, NOT ACCEPTED.
+  - frontier: N512/N514 V2 worker captures and position-matched HF oracles are real. N514 vLLM tracks HF (rel-L2 .0453; Top-10/greedy match), SGLang diverges (.2599; mismatches), proving a Fork/runtime-specific case. Same-Forward layer residual rises from ~2% at L17 to 8.05% at L23 full-attention; next compare exact L23 Q/K/V, RoPE and attention boundaries before repair. N512 is position-sensitive and its greedy alone is inconclusive. G32 Prefill, Graph parity, E5M2/shared-SWA and other G1 acceptance remain. G1 ACTIVE, NOT ACCEPTED.
   - task: control/gemma4-e4b-rtx3090-hicache/tasks/T001-gemma4-w4a16-fp8kv-service-and-capacity.md
 
 ## queued-prefetch-host-ready
