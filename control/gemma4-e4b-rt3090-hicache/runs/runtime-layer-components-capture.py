@@ -10,7 +10,13 @@ def capture(module, boundary, tensor, positions, forward_batch):
     if not path or forward_batch.batch_size != 1:
         return
     configured_layer = os.getenv("GEMMA4_COMPONENT_LAYER")
-    if configured_layer is not None and int(module.layer_id) != int(configured_layer):
+    configured_layers = os.getenv("GEMMA4_COMPONENT_LAYERS")
+    if configured_layers is not None and int(module.layer_id) not in {int(x) for x in configured_layers.split(",")}:
+        return
+    if configured_layers is None and configured_layer is not None and int(module.layer_id) != int(configured_layer):
+        return
+    min_tokens = int(os.getenv("GEMMA4_COMPONENT_MIN_TOKENS", "1"))
+    if forward_batch.input_ids.numel() < min_tokens:
         return
     layer_id = int(module.layer_id)
     rec = {
@@ -32,9 +38,26 @@ def capture(module, boundary, tensor, positions, forward_batch):
         "batch_slot": 0,
         "shape": list(tensor.shape),
         "dtype": str(tensor.dtype),
+        "model_identity": json.loads(os.environ.get("GEMMA4_MODEL_IDENTITY", "{}")),
+        "model_sha256": os.environ.get("GEMMA4_MODEL_SHA256"),
         "value": tensor.detach().float().cpu().tolist(),
     }
     rec["capture_scope"] = "scheduler_forward_tensor"
+    if hasattr(forward_batch, "forward_mode") and str(boundary).startswith(("extend_attention_fwd.", "extend_attention_fwd_unified.")):
+        rec["capture_scope"] = "triton_kernel_input"
+        rec["forward_mode"] = forward_batch.forward_mode.name
+        rec["model_identity"] = json.loads(os.environ.get("GEMMA4_MODEL_IDENTITY", "{}"))
+        rec["model_sha256"] = os.environ.get("GEMMA4_MODEL_SHA256")
+        rec["shape"] = list(tensor.shape)
+        rec["dtype"] = str(tensor.dtype)
+        rec["value"] = tensor.detach().float().cpu().tolist()
+        target = Path(path) / f"component.{rec['rid']}.{rec['forward_id']}.layer{layer_id}.{boundary}.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with target.open("x") as f:
+            json.dump(rec, f)
+            f.flush()
+            os.fsync(f.fileno())
+        return
     if tensor.shape[0] != positions.numel() or positions.numel() != forward_batch.input_ids.numel():
         raise RuntimeError(f"Gemma component capture range mismatch: layer={layer_id} boundary={boundary} tensor={tensor.shape[0]} positions={positions.numel()} input_ids={forward_batch.input_ids.numel()}")
     if forward_batch.gemma4_forward_id is None:
