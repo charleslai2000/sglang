@@ -1,0 +1,24 @@
+# G1 acceptance recommendation — 2026-10-25
+
+## Recommendation to Owner
+
+Recommend **limited acceptance of the demonstrated text-serving scope only**, not unconditional G1 ACCEPTED: pinned Gemma 4 E4B-it QAT W4A16 on RTX 3090 with E5M2 KV, the recorded text configuration and tested contexts/traffic. Keep G1's overall state **ACTIVE / NOT ACCEPTED** until Owner explicitly decides whether that limited scope is an acceptable product boundary and how to disposition the unchanged numerical gate. Do not modify any frozen tolerance.
+
+## Evidence-backed capability boundary
+
+- **Production path execution:** real pinned-checkpoint W4A16 text service runs on RTX 3090. For matched N=8/512/514 inputs, the official-source text compatibility runtime and Fork BF16 full `[1,262144]` logits were elementwise identical. This is pairwise execution parity for those inputs, not an HF correctness pass; upstream execution used a disclosed text-only constructor and reduced SM86 operator overlay, not an unmodified official package. See `G1-OFFICIAL-SM86-COMPAT-20261024.md`.
+- **Task quality:** the four official-template requests (short factual, arithmetic, 16,384-token mid-context synthetic needle, 32,768-token mid-context synthetic needle) returned exact answers under both BF16 and E5M2 KV, with turn-end stop 106. This is a limited task-set PASS only. It formally supersedes the earlier raw-prompt/forced-continuation needle-failure interpretation. The tasks do not establish broad model capability. See `G1-OFFICIAL-CHAT-QUALITY-20261025.md`.
+- **Execution mode parity:** E5M2 Eager and real CUDA Graph Decode replay produced exactly equal full logits for 24 steps on a 32-token prompt and for 16 steps across the SWA boundary. This establishes tested Eager/Graph execution parity, not FP8-vs-BF16 or HF correctness. See `G1-DECODE-LOGIT-CAPTURE-20261025.md`.
+- **Service/capacity:** reuse existing E5M2 multi-request, streaming/stop/cancel, `.94` highest tested stable KV allocation, C16×16K/32,767, and G32 prefill measurements. The `.94` run measured 882,618 Full and 14,353 SWA slots; C16 requests completed without retractions. These are measured service/capacity results, not correctness or performance guarantees beyond their recorded configs. See `G1-C16-CAPACITY-20261023.md`, `G32-PREFILL-BASELINE-20261023.md`, `G1-API-MATRIX-20261022.md`, and `G1-STOP-STREAM-CANCEL-20261022.md`.
+
+## Keep these numerical claims separate
+
+1. **BF16/HF guard remains FAILED.** Exact-position N512/N514 full logits exceed the existing frozen guard and differ in top-10/greedy as recorded in `G1-NUMERICAL-EVIDENCE.md`. The discrepancy has not been attributed to a production defect or reconciled through backend/precision equivalence. Do not call BF16/HF correctness accepted; do not hide or waive the failure.
+2. **E5M2 quantization effect is measured, not accepted.** For the official-template four tasks, paired same-history *first Decode* logit rel-L2 was `.08226`, `.08016`, `.01046`, `.01193`; Top-10 differed on the first three, while first-step greedy was equal. These are full-vocabulary vectors at the Decode input-token positions, not Prefill next-token output logits and not aggregates over generated continuation. Separately, the N510–514 same-prompt full-Prefill/output-row BF16-vs-E5M2 rel-L2 was `.06298`, `.07690`, `.10202`, `.08479`, `.09837`; E5M2 changed greedy at N513 and increased HF error at N514. Do not combine these different stages/positions into one statistic.
+3. **Residual risks:** no standalone frozen E5M2-vs-reference contract or broad quality evaluation is established; numerical perturbations can affect Top-10 and near-tied decisions, and N513 previously showed a greedy change. The measured four task PASS does not prove absence of user-visible FP8 loss. No direct Shared-KV/SWA cache semantic defect was demonstrated in the cited evidence; do not label a defect proven.
+
+## Minimal acceptance boundary for Owner disposition
+
+Owner may accept only this bounded operational claim: **the recorded single-node, text-only W4A16 + E5M2 service is deployable for the demonstrated request classes, decode-graph execution and `.94`/C16 workload envelope, with the explicit caveat that the BF16/HF numerical reference remains failed and FP8 logits are measurably perturbed.** Such limited acceptance must not mean numerical parity, general task-quality equivalence, multimodal support, arbitrary-load/capacity guarantees, or resolution of the HF discrepancy. If the product requires the original frozen BF16/HF guard to pass as a hard prerequisite, G1 must remain NOT ACCEPTED; retain that guard as FAILED without threshold changes.
+
+Owner decision required: whether this explicit, limited operational scope is acceptable while the BF16/HF failure remains unresolved, and whether the frozen numerical guard is a release-blocking requirement. Until then, no G1 ACCEPTED declaration.

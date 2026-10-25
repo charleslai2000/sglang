@@ -1,5 +1,7 @@
 # E5M2 task-quality comparison — 2026-10-25
 
+> **WITHDRAWN / SUPERSEDED:** The task conclusions below are invalid for model-capability or KV-quality attribution because the raw user prompts omitted the official Gemma 4 Chat Template and generation ignored normal turn-end, forcing 16 tokens. Formally withdraw the stated long-needle failures and the associated `.08355/.07693` task-logit statistics from task-quality conclusions; do not reuse them as capability evidence. Correct official-template comparison, with explicit first-Decode logit stage, is `G1-OFFICIAL-CHAT-QUALITY-20261025.md`. Bounded G1 acceptance recommendation is `G1-ACCEPTANCE-DECISION-20261025.md`.
+
 ## Method
 
 RTX 3090 runs under `/tmp/f1-r16b-gpu-exclusive.lock`; same pinned W4A16 checkpoint, one request at a time, no radix reuse, temperature zero, 16 generated tokens. Each forward captured full pre-sampling logits and actual graph-replay flag. Revision `6cd26aaa2357fb2bad8c51699a7558a4d1a965bb`; weights SHA-256 `19d89d2a4b3e401a3eae75ec08ab112810421a036c91d8c8226b686be7fe0c5d`.
