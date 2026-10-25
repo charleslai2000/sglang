@@ -1,0 +1,7 @@
+Status: DONE
+Work area: experiments
+Objective: Run official 541-item IFEval prompt-level strict evaluation on the pinned Gemma 4 checkpoint through SGLang Fork, separately with BF16 and E5M2 KV; retain per-item generations, official scores, paired differences, and qualified public-score comparison.
+Inputs: Official local dataset `/data/sglang-hicache/gemma4/ifeval/google_ifeval_train.jsonl` (SHA-256 `6a85310ca8ce15eff755aa08a3a4ff931c7e273e7515ebb3c492ea85fd8288f2`); lm-eval 0.4.13 bundled IFEval task/scorer; task assets in `../runs/`.
+Completion: Both arms run all 541 prompts on actual RTX 3090 under GPU lock with matched settings; retain outputs and scores; document limitations and preserve G1 numerical status.
+Result: Completed both arms sequentially under `/tmp/f1-r16b-gpu-exclusive.lock`. Harness prompt-level strict: BF16 439/541 (81.15%), E5M2 444/541 (82.07%); 43 paired outcomes differed (19 BF16-only, 24 E5M2-only). Complete per-item samples and service/harness logs: `/data/sglang-hicache/gemma4/runs/20261025T135106Z-ifeval-g1/`. Report: `../runs/IFEVAL-G1-20261025.md`. The independent scorer replay differs by one item per arm and remains unresolved; saved harness per-sample metrics agree with harness aggregates. GPU idle, 1 MiB, and no service listeners after cleanup.
+Remaining: None for this benchmark. This does not accept G1 or resolve the frozen BF16/HF numerical guard.
