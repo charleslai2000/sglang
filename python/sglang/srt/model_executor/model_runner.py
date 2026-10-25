@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import contextlib
 import inspect
+import json
 import logging
+import os
 import time
 from dataclasses import dataclass
 from typing import Optional, Union
@@ -1616,6 +1618,7 @@ class ModelRunner:
                     split_forward_count,
                 )
         output.expert_distribution_metrics = recorder_outputs.get("metrics")
+        self._capture_gemma4_decode_logits(output, forward_batch)
 
         no_copy_to_cpu = not get_schedule().disable_overlap_schedule
         if (
@@ -1651,6 +1654,87 @@ class ModelRunner:
             self.maybe_join_ep_ranks()
 
         return output
+
+    def _capture_gemma4_decode_logits(
+        self, output: ModelRunnerOutput, forward_batch: ForwardBatch
+    ) -> None:
+        """Optionally persist raw Gemma decode logits after forward and before sampling."""
+        if (
+            os.environ.get("SGLANG_GEMMA4_CAPTURE_DECODE_LOGITS") != "1"
+            or not self.is_generation
+            or not str(self.model_config.hf_config.model_type).startswith("gemma4")
+            or not forward_batch.forward_mode.is_decode()
+            or not isinstance(output.logits_output, LogitsProcessorOutput)
+            or output.logits_output.next_token_logits is None
+        ):
+            return
+
+        logits = output.logits_output.next_token_logits
+        # Graph replays return to host after their kernels complete; raw logits
+        # are cloned before the sampler mutates this tensor. Capturing is only
+        # enabled by an explicit diagnostic environment flag.
+        if logits.is_cuda and torch.cuda.is_current_stream_capturing():
+            raise RuntimeError("decode logits capture reached CUDA graph capture")
+
+        forward_id = forward_batch.gemma4_forward_id
+        if not forward_id:
+            raise RuntimeError("Gemma4 decode capture requires ForwardBatch UUID")
+        from sglang.srt.utils.gemma4_capture import save_gemma4_capture
+
+        base = os.environ.get("SGLANG_GEMMA4_DECODE_LOGITS_FILE")
+        if not base:
+            raise RuntimeError("SGLANG_GEMMA4_DECODE_LOGITS_FILE is required")
+        identity = json.loads(os.environ.get("GEMMA4_MODEL_IDENTITY", "{}"))
+
+        def host_values(tensor):
+            if tensor is None:
+                return None
+            return tensor.detach().cpu().tolist()
+
+        position = host_values(forward_batch.positions)
+        input_ids = host_values(forward_batch.input_ids)
+        seq_lens = host_values(forward_batch.seq_lens_cpu)
+        step = forward_batch.gemma4_decode_step
+        if step is None or any(value is None for value in (position, input_ids, seq_lens)):
+            raise RuntimeError("incomplete host decode metadata for Gemma4 capture")
+        if not (
+            len(step)
+            == len(position)
+            == len(input_ids)
+            == len(seq_lens)
+            == logits.shape[0]
+            == forward_batch.batch_size
+        ):
+            raise RuntimeError("Gemma4 decode capture batch metadata is not row-aligned")
+        record = {
+            "schema": 1,
+            "forward_id": forward_id,
+            "model_identity": identity,
+            "kv_cache_dtype": self.kv_cache_dtype_str,
+            "kv_pool_dtype": str(getattr(self.token_to_kv_pool_allocator, "dtype", None)),
+            "kv_full_capacity": getattr(self.token_to_kv_pool_allocator, "size_full", None),
+            "kv_swa_capacity": getattr(self.token_to_kv_pool_allocator, "size_swa", None),
+            "sliding_window": getattr(
+                getattr(getattr(self.model, "config", None), "text_config", self.model.config),
+                "sliding_window",
+                None,
+            ),
+            "rid": list(forward_batch.rids or []),
+            "forward_mode": forward_batch.forward_mode.name,
+            "decode_step": forward_batch.gemma4_decode_step,
+            "batch_size": forward_batch.batch_size,
+            "batch_slot": list(range(forward_batch.batch_size)),
+            "position": position,
+            "input_token_id": input_ids,
+            "seq_len_after_kv_write": seq_lens,
+            "seq_len_source": "host_mirror" if seq_lens is not None else None,
+            "cuda_graph_replay": bool(output.can_run_graph),
+            "logits_boundary": "post_model_runner_forward_pre_sampler_next_token_logits",
+            "logits_shape": list(logits.shape),
+            "logits_dtype": str(logits.dtype),
+            "logits": logits.detach().float().cpu(),
+        }
+        save_gemma4_capture(record, f"{base}.{forward_id}.decode")
 
     def _maybe_execute_deferred_mamba_cow_and_clear(
         self, forward_batch: ForwardBatch

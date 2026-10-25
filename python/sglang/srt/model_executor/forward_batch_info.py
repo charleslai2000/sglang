@@ -464,6 +464,8 @@ class ForwardBatch(ForwardBatchDeepSeekMHAMixin):
     global_forward_mode: Optional[ForwardMode] = None
     # Unique invocation identity for opt-in Gemma diagnostic captures only.
     gemma4_forward_id: Optional[str] = None
+    # Host-side append-only decode step number for opt-in Gemma captures.
+    gemma4_decode_step: Optional[List[int]] = None
 
     # For two-batch overlap
     tbo_split_seq_index: Optional[int] = None
@@ -782,7 +784,18 @@ class ForwardBatch(ForwardBatchDeepSeekMHAMixin):
         ret = cls(
             # Required core inputs
             forward_mode=batch.forward_mode,
-            gemma4_forward_id=(uuid.uuid4().hex if os.environ.get("SGLANG_GEMMA4_CAPTURE_LAYERS") == "1" or os.environ.get("SGLANG_GEMMA4_CAPTURE_LOGITS") == "1" else None),
+            gemma4_forward_id=(
+                uuid.uuid4().hex
+                if any(
+                    os.environ.get(name) == "1"
+                    for name in (
+                        "SGLANG_GEMMA4_CAPTURE_LAYERS",
+                        "SGLANG_GEMMA4_CAPTURE_LOGITS",
+                        "SGLANG_GEMMA4_CAPTURE_DECODE_LOGITS",
+                    )
+                )
+                else None
+            ),
             batch_size=len(batch.seq_lens),
             input_ids=batch.input_ids,
             req_pool_indices=batch.req_pool_indices,
@@ -823,6 +836,12 @@ class ForwardBatch(ForwardBatchDeepSeekMHAMixin):
             encoder_lens_cpu=batch.encoder_lens_cpu,
             lora_ids=[req.lora_id for req in batch.reqs],
             rids=[req.rid for req in batch.reqs],
+            gemma4_decode_step=(
+                [len(req.output_ids) for req in batch.reqs]
+                if os.environ.get("SGLANG_GEMMA4_CAPTURE_DECODE_LOGITS") == "1"
+                and batch.forward_mode.is_decode()
+                else None
+            ),
             # Compound (carry their own device tensors)
             sampling_info=batch.sampling_info,
             spec_info=batch.spec_info,
