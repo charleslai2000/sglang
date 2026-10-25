@@ -1,0 +1,56 @@
+{
+  "kernel": "6.8.0-147-generic",
+  "cmdline": "BOOT_IMAGE=/vmlinuz-6.8.0-147-generic root=UUID=92327a9a-dabf-4d28-a338-bc96b268f068 ro gpu_unlock.targets=0000:00:10.0 console=tty1 console=ttyS0",
+  "gpu": "NVIDIA GeForce RTX 3090",
+  "pci_bdf": "0000:00:10.0",
+  "power_limit_w": 350.0,
+  "stock_result_sha256": "38179e5a32fa56fee50c58d7e74ca2500492179b121b49466c0976d910ddeee4",
+  "unlocked_result_sha256": "d9f1740c02d0351e3c23986c6dc92525584d82d2916087c28fd387854a037403",
+  "input_x_sha256_equal": true,
+  "input_y_sha256_equal": true,
+  "reference_sha256_equal": true,
+  "precision": {
+    "fp16": {
+      "stock_tflops": 69.6381825179788,
+      "unlocked_tflops": 110.7656685845838,
+      "speedup": 1.5905881598214735,
+      "stock_median_ms": 15.788919067382812,
+      "unlocked_median_ms": 9.926465861002605,
+      "stock_rel_l2": 0.0003587949899560782,
+      "unlocked_rel_l2": 0.0003587949899560782,
+      "output_hashes_equal": true,
+      "all_repeats_same_output_stock": true,
+      "all_repeats_same_output_unlocked": true
+    },
+    "bf16": {
+      "stock_tflops": 70.92929339615789,
+      "unlocked_tflops": 114.88254364427364,
+      "speedup": 1.6196769789123067,
+      "stock_median_ms": 15.501516723632813,
+      "unlocked_median_ms": 9.570745849609375,
+      "stock_rel_l2": 0.00286845911870617,
+      "unlocked_rel_l2": 0.00286845911870617,
+      "output_hashes_equal": true,
+      "all_repeats_same_output_stock": true,
+      "all_repeats_same_output_unlocked": true
+    },
+    "tf32": {
+      "stock_tflops": 37.940513248098554,
+      "unlocked_tflops": 62.022502058816386,
+      "speedup": 1.6347301801966196,
+      "stock_median_ms": 28.9798828125,
+      "unlocked_median_ms": 17.72762451171875,
+      "stock_rel_l2": 0.00029387715880799595,
+      "unlocked_rel_l2": 0.00029387715880799595,
+      "output_hashes_equal": true,
+      "all_repeats_same_output_stock": true,
+      "all_repeats_same_output_unlocked": true
+    }
+  },
+  "telemetry": {
+    "temperature_c": 45,
+    "power_w": 120.809,
+    "sm_clock_mhz": 1905,
+    "mem_clock_mhz": 9501
+  }
+}

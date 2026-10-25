@@ -1,0 +1,4 @@
+fixed upstream commit af28cbbfd3d922a659227ecfb7369adfd924cf03
+package dkms sha256 c2e22ddd58569eb8e9fc65c910a7ce73990000bb27476391fab867aa1cae994f
+package firmware sha256 0cca79547492c173d23fb1c55437ef6a701ac76c92b408d3993817ae7bb656d7
+BDF 0000:00:10.0; power cap 350 W
