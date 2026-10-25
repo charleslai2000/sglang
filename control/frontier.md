@@ -2,7 +2,7 @@
 
 ## gemma4-e4b-rtx3090-hicache
 - T001-gemma4-w4a16-fp8kv-service-and-capacity Official W4A16 + FP8 KV Gemma4 RTX3090 service acceptance — ACTIVE
-  - frontier: Layer41 CLOSED. N514 FinalNorm rel-L2 .07316/logits .25989; no norm arithmetic defect. E5M2 remains NOT ACCEPTED. No-cap no-Radix C16 `.94`: Full/SWA 882,618/14,353 slots, 23,929 MiB peak; C16×16K/32,767 16/16 success at 4,935/4,090 tok/s, zero cache reuse/retractions. `.95` first Prefill OOM; `.96` first forward OOM. Continue BF16 end-to-end, E5M2 decode/shared-SWA and Graph correctness. G1 ACTIVE / NOT ACCEPTED.
+  - frontier: Decode capture commit `bd9a28461207a5f2636f433885c47c9d2918a433` is pushed and origin-matched. Short task output agrees; 16K/32K needle tasks fail under both modes; same-history first-step logit rel-L2 `.08355/.07693`, top-10 differs but greedy agrees. Separate 32K random continuation has initial `.02706` rel-L2 and greedy divergence at a near tie; subsequent histories diverge. No FP8 cache semantic defect is proven. Review concise task evidence and resolve Owner contract for long-context quality; preserve `.94`/C16/Prefill. G1 ACTIVE / NOT ACCEPTED.
   - task: control/gemma4-e4b-rtx3090-hicache/tasks/T001-gemma4-w4a16-fp8kv-service-and-capacity.md
 
 ## queued-prefetch-host-ready
