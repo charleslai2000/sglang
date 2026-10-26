@@ -2,7 +2,8 @@
 
 ## gemma4-e4b-rtx3090-hicache
 - T001-gemma4-w4a16-fp8kv-service-and-capacity Official W4A16 + FP8 KV Gemma4 RTX3090 service acceptance — ACTIVE
-  - frontier: T003 HF Oracle adjudication is DONE: per-device cache modes match exactly, but CPU/CUDA and SGLang/HF discrepancies remain unattributed; guard remains FAILED without threshold/math change. Report: `runs/G1-HF-ORACLE-ADJUDICATION-20261025.md`. Continue remaining G1 acceptance/Owner disposition without repeating closed work.
+  - frontier: T004 attributes the 81%→68% GSM8K change from old/new raw artifacts, checks public QUASAR protocol and finishes score/audit qualification; no new 1319×2 run absent proven necessity. Guard stays FAILED and unchanged.
+  - task: control/gemma4-e4b-rtx3090-hicache/tasks/T004-gsm8k-protocol-drift.md
   - task: control/gemma4-e4b-rtx3090-hicache/tasks/T001-gemma4-w4a16-fp8kv-service-and-capacity.md
 
 ## queued-prefetch-host-ready
