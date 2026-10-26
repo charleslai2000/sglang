@@ -1,6 +1,6 @@
 # T004 — GSM8K protocol drift attribution
 
-Status: ACTIVE
+Status: DONE
 Work area: repo root (offline analysis and narrowly scoped evaluation code)
 
 ## Objective
@@ -26,4 +26,4 @@ Adapter/YAML stop correction was tested with a separate real 12-request GPU prob
 Directly fetched QUASAR `EVAL.md`: downstream harness lm-eval 0.4.13 + vLLM 0.28.0, 8K context, five-shot lane `add_bos_token=True`; Google QAT W4A16 strict GSM8K 81.5% (n=1,319). Local evaluation shares lm-eval version, five-shot, dataset family/count, explicit BOS ID 2, greedy decoding and strict first-`####` extractor. Local runtime is SGLang rather than vLLM; local model config and service load default to BF16 compute with W4A16 linears, while QUASAR explicitly serves FP16. Public `EVAL.md` does not expose raw GSM8K generations or per-task effective stop list, so exact stop-boundary parity cannot be verified. Public 81.5% is a reported single Google QAT row, not the local paired cache-mode comparison. It is a useful close reference but not a protocol-identical reproduction; no direct parity claim is warranted.
 
 ## Remaining
-Commit and push only reviewed, scoped Gemma adapter/task/report changes using explicit path staging; verify remote SHA. Do not change production math/Guard, touch unrelated dirty paths, or run another full evaluation.
+None. Scoped commit `495dbb9e4b40cf551032e79459d66baefae42199` was pushed; `git ls-remote` reports the identical SHA. No new full evaluation was run. Unrelated dirty/Falcon state remains untouched.

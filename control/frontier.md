@@ -2,8 +2,8 @@
 
 ## gemma4-e4b-rtx3090-hicache
 - T001-gemma4-w4a16-fp8kv-service-and-capacity Official W4A16 + FP8 KV Gemma4 RTX3090 service acceptance — ACTIVE
-  - frontier: T004 attributes the 81%→68% GSM8K change from old/new raw artifacts, checks public QUASAR protocol and finishes score/audit qualification; no new 1319×2 run absent proven necessity. Guard stays FAILED and unchanged.
-  - task: control/gemma4-e4b-rtx3090-hicache/tasks/T004-gsm8k-protocol-drift.md
+  - frontier: GSM8K old/new 81%→68% drift attributed offline to omitted `Question:` stop; T004 completed and scoped repair pushed. Numerical HF guard remains FAILED; continue G1 acceptance without repeating closed experiments.
+  - task: control/gemma4-e4b-rtx3090-hicache/tasks/T001-gemma4-w4a16-fp8kv-service-and-capacity.md
   - task: control/gemma4-e4b-rtx3090-hicache/tasks/T001-gemma4-w4a16-fp8kv-service-and-capacity.md
 
 ## queued-prefetch-host-ready
