@@ -2,7 +2,7 @@
 
 ## gemma4-e4b-rtx3090-hicache
 - T001-gemma4-w4a16-fp8kv-service-and-capacity Official W4A16 + FP8 KV Gemma4 RTX3090 service acceptance — ACTIVE
-  - frontier: Full 1,319-item vLLM comparison completed with matched prompts and stop strings; score 1,067/1,319 versus SGLang BF16 896 and E5M2 892, but batching (vLLM up to 16 vs SGLang 1), eager/graph path and scheduler prevent engine-specific attribution. Report `runs/GSM8K-FULL-VLLM-20261027.md`; numerical HF guard remains FAILED; continue G1 acceptance.
+  - frontier: Full-set gap is recorded; selected vLLM C1 and SGLang Eager/Graph replays rule out batching and decode-Graph as causes only for two examples. Capture same-prompt prefill/first-decode logits with verified effective weights; no production defect localized yet. Report `runs/GSM8K-FULL-VLLM-20261027.md`; HF guard FAILED.
   - task: control/gemma4-e4b-rtx3090-hicache/tasks/T001-gemma4-w4a16-fp8kv-service-and-capacity.md
   - task: control/gemma4-e4b-rtx3090-hicache/tasks/T001-gemma4-w4a16-fp8kv-service-and-capacity.md
 
