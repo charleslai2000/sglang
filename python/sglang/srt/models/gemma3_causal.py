@@ -546,10 +546,16 @@ class Gemma3TextScaledWordEmbedding(nn.Embedding):
         embed_scale: Optional[float] = 1.0,
     ):
         super().__init__(num_embeddings, embedding_dim, padding_idx)
-        self.embed_scale = embed_scale
+        # Match Gemma 4 Transformers: the scalar is materialized in the
+        # embedding weight dtype before multiplication. Keeping a Python float
+        # here changes BF16/FP16 results (e.g. sqrt(2560) rounds to 50.5 in
+        # BF16, but the Python scalar otherwise multiplies at full precision).
+        self.register_buffer(
+            "embed_scale", torch.tensor(embed_scale, dtype=self.weight.dtype), persistent=False
+        )
 
     def forward(self, input_ids: torch.Tensor):
-        return super().forward(input_ids) * self.embed_scale
+        return super().forward(input_ids) * self.embed_scale.to(self.weight.dtype)
 
 
 class Gemma3TextModel(PreTrainedModel):
