@@ -2,7 +2,7 @@
 
 ## gemma4-e4b-rtx3090-hicache
 - T001-gemma4-w4a16-fp8kv-service-and-capacity Official W4A16 + FP8 KV Gemma4 RTX3090 service acceptance — ACTIVE
-  - frontier: GSM8K old/new 81%→68% drift attributed offline to omitted `Question:` stop; T004 completed and scoped repair pushed. Numerical HF guard remains FAILED; continue G1 acceptance without repeating closed experiments.
+  - frontier: Full 1,319-item vLLM comparison completed with matched prompts and stop strings; score 1,067/1,319 versus SGLang BF16 896 and E5M2 892, but batching (vLLM up to 16 vs SGLang 1), eager/graph path and scheduler prevent engine-specific attribution. Report `runs/GSM8K-FULL-VLLM-20261027.md`; numerical HF guard remains FAILED; continue G1 acceptance.
   - task: control/gemma4-e4b-rtx3090-hicache/tasks/T001-gemma4-w4a16-fp8kv-service-and-capacity.md
   - task: control/gemma4-e4b-rtx3090-hicache/tasks/T001-gemma4-w4a16-fp8kv-service-and-capacity.md
 
