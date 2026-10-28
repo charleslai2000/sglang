@@ -33,8 +33,8 @@ For both Ns, HF CUDA L17 replay loaded the official pinned model and applied its
 
 - L17 attention-norm input vs SGLang runtime tap is close (rel-L2 `1.431e-5` / `1.389e-5`; max abs `.03125`), consistent with fused RMSNorm rounding.
 - HF decompressed Q/K/V Linear vs SGLang Marlin Q/K/V on the replay input: Q `.00010485/.00010904`, K `.00010673/.00009752`, V `.00011706/.00010164` rel-L2 (N512/N514). Post-QKV per-head norm differences are each ~`1.4–1.6e-4`. These are backend arithmetic-scale differences, not a demonstrated weight/layout error; PLE Marlin loading equivalence was established separately in `G1-PLE-MARLIN-EQUIVALENCE-20261028.md`.
-- Comparing HF eager replay's attention-head output with SGLang Triton output gives rel-L2 `.003587` (N512) / `.003439` (N514), max abs `.03125`. This is **not** a same-Q/K/V direct attention-kernel comparison: HF replay uses its own decompressed QKV weights and numerics, and component capture does not include SGLang's post-RoPE q/k operands, actual kernel mask/index buffers, O-projection output, or SGLang residual-add intermediate. Therefore this delta cannot distinguish upstream QKV/RoPE/mask propagation from an attention-kernel difference. The attempt to recompute HF RoPE on the captured SGLang pre-RoPE Q/K did not pass shape validation against HF's consumed `[B,H,N,D]` tensors; no numerical result is claimed from it.
-- Subsequent HF replay boundaries (post-attention norm, pre-FFN norm, MLP, post-FFN norm and PLE branches) were captured, but their differences likewise include upstream QKV/attention output differences. They do not prove the first erroneous production operation.
+- The initial HF eager replay gave attention-head rel-L2 `.003587` (N512) / `.003439` (N514), max abs `.03125`, but was not same-Q/K/V and could not isolate attention. That result is superseded for operator localization by the same-operand comparison below.
+- HF replay post-attention/FFN/PLE boundaries were captured, but differ in upstream inputs and do not by themselves prove the first erroneous production operation.
 
 ## Same-operand attention closure
 
