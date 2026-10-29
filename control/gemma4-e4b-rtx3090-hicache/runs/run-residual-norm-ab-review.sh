@@ -64,14 +64,14 @@ PY
     read -r fid offset <<< "$selected"
     printf '%s\n' "$fid" > "$out/$arm/forward-id.txt"
     printf '%s\n' "$offset" > "$out/$arm/input-token-offset.txt"
-    "$venv/bin/python" "$repo/control/gemma4-e4b-rtx3090-hicache/runs/verify-forward-capture.py" \\
-        --base "$out/$arm/layers" --forward-id "$fid" \\
-        --expected-ids "$(cat "$ids_file")" \\
-        --expected-positions "$(cat "$positions_file")" --expected-rid "$rid" \\
-        --model-revision 6cd26aaa2357fb2bad8c51699a7558a4d1a965bb \\
-        --model-sha256 19d89d2a4b3e401a3eae75ec08ab112810421a036c91d8c8226b686be7fe0c5d \\
-        --expected-offset "$offset" --expected-layer-count "$layer_count" \\
-        --expected-hidden-size "$hidden_size" --expected-vocab-size "$vocab_size" \\
+    "$venv/bin/python" "$repo/control/gemma4-e4b-rtx3090-hicache/runs/verify-forward-capture.py" \
+        --base "$out/$arm/layers" --forward-id "$fid" \
+        --expected-ids "$(cat "$ids_file")" \
+        --expected-positions "$(cat "$positions_file")" --expected-rid "$rid" \
+        --model-revision 6cd26aaa2357fb2bad8c51699a7558a4d1a965bb \
+        --model-sha256 19d89d2a4b3e401a3eae75ec08ab112810421a036c91d8c8226b686be7fe0c5d \
+        --expected-offset "$offset" --expected-layer-count "$layer_count" \
+        --expected-hidden-size "$hidden_size" --expected-vocab-size "$vocab_size" \
         --manifest "$out/$arm/verified-capture.json"
     cleanup
 done
