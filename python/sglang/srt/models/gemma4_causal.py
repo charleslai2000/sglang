@@ -689,9 +689,22 @@ class Gemma4DecoderLayer(nn.Module):
         if self.enable_moe_block:
             # Fuse: hidden_states + residual -> residual; pre_ff_norm(residual) -> hidden_states
             # Also need raw (unfused) residual for router and pre_ff_norm_2
-            hidden_states, residual = self.pre_feedforward_layernorm(
-                hidden_states, residual
-            )
+            if os.environ.get("SGLANG_GEMMA4_BF16_RESIDUAL_NORM_AB") == "1":
+                # Diagnostic B only: materialize HF's activation-dtype residual boundary,
+                # then use the production norm kernel without modifying that residual.
+                residual_sum = (hidden_states.float() + residual.float()).to(
+                    hidden_states.dtype
+                )
+                norm_input = residual_sum.clone()
+                zero_residual = torch.zeros_like(norm_input)
+                hidden_states, _ = self.pre_feedforward_layernorm(
+                    norm_input, zero_residual
+                )
+                residual = residual_sum
+            else:
+                hidden_states, residual = self.pre_feedforward_layernorm(
+                    hidden_states, residual
+                )
             # For MoE: router and pre_ff_norm_2 need the unfused residual
             # (which is now updated to post_attn_out + old_residual)
             moe_input = residual
@@ -734,9 +747,22 @@ class Gemma4DecoderLayer(nn.Module):
             hidden_states = hidden_states_1 + hidden_states_2
         else:
             # Fuse: hidden_states + residual -> residual; pre_ff_norm(residual) -> hidden_states
-            hidden_states, residual = self.pre_feedforward_layernorm(
-                hidden_states, residual
-            )
+            if os.environ.get("SGLANG_GEMMA4_BF16_RESIDUAL_NORM_AB") == "1":
+                # Diagnostic B only: preserve the HF BF16 residual boundary for
+                # downstream PLE gating while normalizing an independent copy.
+                residual_sum = (hidden_states.float() + residual.float()).to(
+                    hidden_states.dtype
+                )
+                norm_input = residual_sum.clone()
+                zero_residual = torch.zeros_like(norm_input)
+                hidden_states, _ = self.pre_feedforward_layernorm(
+                    norm_input, zero_residual
+                )
+                residual = residual_sum
+            else:
+                hidden_states, residual = self.pre_feedforward_layernorm(
+                    hidden_states, residual
+                )
             hidden_states = self.mlp(hidden_states)
 
         if (

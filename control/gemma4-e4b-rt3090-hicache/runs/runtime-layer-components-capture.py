@@ -9,6 +9,10 @@ def capture(module, boundary, tensor, positions, forward_batch):
     path = os.getenv("GEMMA4_COMPONENT_STATE_FILE")
     if not path or forward_batch.batch_size != 1:
         return
+    if getattr(forward_batch, "gemma4_forward_id", None) is None:
+        return
+    if forward_batch.rids and str(forward_batch.rids[0]).startswith("HEALTH_CHECK"):
+        return
     configured_layer = os.getenv("GEMMA4_COMPONENT_LAYER")
     configured_layers = os.getenv("GEMMA4_COMPONENT_LAYERS")
     if configured_layers is not None and int(module.layer_id) not in {int(x) for x in configured_layers.split(",")}:

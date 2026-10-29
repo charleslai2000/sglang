@@ -30,6 +30,12 @@ if os.getenv("GEMMA4_RUNTIME_HOOK_ENABLE") == "1":
                     forward_batch._gemma4_logical_attention_layer = prior_logical_layer
         original_attn_forward = module.RadixAttention.forward
         def attention_with_capture(attn_layer, q, k, v, *args, **attn_kwargs):
+            if self.layer_id in component_layers:
+                capture(self, "q_after_rope_entering_attention", q, positions, forward_batch)
+                if k is not None:
+                    capture(self, "k_after_rope_entering_attention", k, positions, forward_batch)
+                if v is not None:
+                    capture(self, "v_entering_attention", v, positions, forward_batch)
             result = original_attn_forward(attn_layer, q, k, v, *args, **attn_kwargs)
             capture(self, "attention_output_heads", result, positions, forward_batch)
             return result
@@ -95,6 +101,9 @@ if os.getenv("GEMMA4_RUNTIME_HOOK_ENABLE") == "1":
             for handle in handles:
                 handle.remove()
         if watched:
+            if os.getenv("GEMMA4_CAPTURE_ALL_LAYER_OUTPUTS") != "1":
+                capture(self, "decoder_layer_output", result[0], positions, forward_batch)
+        if os.getenv("GEMMA4_CAPTURE_ALL_LAYER_OUTPUTS") == "1":
             capture(self, "decoder_layer_output", result[0], positions, forward_batch)
         return result
 
