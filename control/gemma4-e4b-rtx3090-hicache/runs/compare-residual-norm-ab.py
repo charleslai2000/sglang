@@ -104,25 +104,20 @@ def main():
     }
     for arm, data in arms.items():
         layer_metrics = []
-        # SGLang layer_output.i is post-decoder-layer i. HF hidden_states h1..h41
-        # are outputs for layers 0..40; h42 is post-FinalNorm and has its own boundary.
+        # Transformers 5's output-capture hook records each decoder layer's
+        # return; capture_outputs(tie_last_hidden_states=True) replaces the last
+        # item with Gemma4TextModel.last_hidden_state, which is post self.norm.
+        # Thus h1..h41 align with decoder outputs 0..40; h42 is post-finalnorm,
+        # not decoder output 41. The frozen artifact does not contain layer41's
+        # pre-norm input, so do not compare that boundary to an unrelated state.
         for i in range(41):
             ref = get_hidden(i + 1)
-            got = data["outputs"][i]
-            layer_metrics.append({"layer": i, **metrics(got, ref)})
-        prenorm_ref = oracle.get("layer41_prenorm")
-        if prenorm_ref is not None:
-            prenorm_ref = prenorm_ref.float().squeeze(0)
-            prenorm_metrics = metrics(data["prenorm"], prenorm_ref)
-        else:
-            prenorm_metrics = None
-        # HF hidden_states are emitted by decoder layers before the model-level
-        # final RMSNorm. Thus h1..h42 align with SGLang layer_output.0..41.
-        # h42 is not a post-finalnorm state in the pinned Transformers version.
-        ref_layer41 = get_hidden(42)
-        layer_metrics.append({"layer": 41, "boundary": "decoder_layer_output_pre_finalnorm",
-                              **metrics(data["outputs"][41], ref_layer41)})
-        final = None
+            layer_metrics.append({"layer": i, "boundary": "decoder_layer_output_pre_finalnorm",
+                                  **metrics(data["outputs"][i], ref)})
+        layer_metrics.append({"layer": 41, "boundary": "decoder_layer_output_pre_finalnorm_reference_unavailable"})
+        prenorm_metrics = None
+        final_ref = get_hidden(42)
+        final = metrics(data["finalnorm"], final_ref)
         logits_ref = oracle.get("logits", oracle.get("logits_last_token")).float().reshape(-1)
         logits_metrics = metrics(data["logits"], logits_ref)
         top = torch.topk(logits_ref, 2)
@@ -134,6 +129,7 @@ def main():
             "capture_sha256": data["capture_sha256"],
             "per_layer_vs_cpu_hf": layer_metrics,
             "finalnorm_vs_cpu_hf": final,
+            "finalnorm_hf_reference": "unavailable: frozen oracle has no separately captured final_norm_hidden_states" if final is None else "explicit final_norm_hidden_states",
             "logits_vs_cpu_hf": logits_metrics,
             "top1": {
                 "service": int(data["logits"].argmax()),
