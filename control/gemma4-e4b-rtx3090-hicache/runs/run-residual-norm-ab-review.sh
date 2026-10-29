@@ -6,6 +6,12 @@ repo=/home/ubuntu/workspaces/3rdparty/sglang-hicache
 venv=/home/ubuntu/venvs/sglang-3090
 model=/data/sglang-hicache/gemma4/model
 out=${GEMMA4_AB_OUT:?set GEMMA4_AB_OUT to a fresh external run directory}
+ids_file=${GEMMA4_AB_IDS_FILE:?set JSON array file of exact input token IDs}
+positions_file=${GEMMA4_AB_POSITIONS_FILE:?set JSON array file of exact positions}
+layer_count=${GEMMA4_AB_LAYER_COUNT:-42}
+hidden_size=${GEMMA4_AB_HIDDEN_SIZE:-2560}
+vocab_size=${GEMMA4_AB_VOCAB_SIZE:-262144}
+if [ -e "$out" ]; then echo "refusing non-fresh output directory: $out" >&2; exit 91; fi
 mkdir -p "$out"/{A,B,bootstrap}
 exec 9>/tmp/f1-r16b-gpu-exclusive.lock
 flock -n 9 || { echo 'GPU lock unavailable' >&2; exit 90; }
@@ -46,21 +52,27 @@ for arm in A B; do
         sleep 2
     done
     curl -fsS "http://127.0.0.1:$port/health" >/dev/null
-    printf '{"input_ids":[6974,886,2822,13315,1003,506,7217,236761],"sampling_params":{"temperature":0,"max_new_tokens":1}}' > "$out/$arm/request.json"
+    "$venv/bin/python" - "$ids_file" "$out/$arm/request.json" <<'PY'
+import json,sys
+ids=json.load(open(sys.argv[1]))
+json.dump({"input_ids":ids,"sampling_params":{"temperature":0,"max_new_tokens":1,"temperature":0.0,"seed":666360643}},open(sys.argv[2],"w"))
+PY
     curl -fsS -H 'Content-Type: application/json' -d @"$out/$arm/request.json" "http://127.0.0.1:$port/generate" > "$out/$arm/response.json"
     rid=$("$venv/bin/python" -c 'import json,sys; print(json.load(open(sys.argv[1]))["meta_info"]["id"])' "$out/$arm/response.json")
     printf '%s\n' "$rid" > "$out/$arm/request-rid.txt"
-    selected=$("$venv/bin/python" "$repo/control/gemma4-e4b-rtx3090-hicache/runs/select-bound-forward.py" "$out/$arm/layers" "$rid")
+    selected=$("$venv/bin/python" "$repo/control/gemma4-e4b-rtx3090-hicache/runs/select-bound-forward.py" "$out/$arm/layers" "$rid" --ids "$(cat "$ids_file")" --positions "$(cat "$positions_file")")
     read -r fid offset <<< "$selected"
     printf '%s\n' "$fid" > "$out/$arm/forward-id.txt"
     printf '%s\n' "$offset" > "$out/$arm/input-token-offset.txt"
     "$venv/bin/python" "$repo/control/gemma4-e4b-rtx3090-hicache/runs/verify-forward-capture.py" \\
         --base "$out/$arm/layers" --forward-id "$fid" \\
-        --expected-ids '[6974,886,2822,13315,1003,506,7217,236761]' \\
-        --expected-positions '[1,2,3,4,5,6,7,8]' --expected-rid "$rid" \\
+        --expected-ids "$(cat "$ids_file")" \\
+        --expected-positions "$(cat "$positions_file")" --expected-rid "$rid" \\
         --model-revision 6cd26aaa2357fb2bad8c51699a7558a4d1a965bb \\
         --model-sha256 19d89d2a4b3e401a3eae75ec08ab112810421a036c91d8c8226b686be7fe0c5d \\
-        --expected-offset "$offset" --manifest "$out/$arm/verified-capture.json"
+        --expected-offset "$offset" --expected-layer-count "$layer_count" \\
+        --expected-hidden-size "$hidden_size" --expected-vocab-size "$vocab_size" \\
+        --manifest "$out/$arm/verified-capture.json"
     cleanup
 done
 nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv > "$out/gpu-after.csv"
