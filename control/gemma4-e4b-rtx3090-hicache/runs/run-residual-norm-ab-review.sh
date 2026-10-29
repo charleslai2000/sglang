@@ -46,6 +46,7 @@ pid=''
 cleanup(){ if [ -n "$pid" ]; then kill -TERM "$pid" 2>/dev/null || true; for _ in $(seq 1 30); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done; pkill -TERM -P "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true; pid=''; fi; }
 trap cleanup EXIT INT TERM
 for arm in A B; do
+    arm_pid_file="$out/$arm/server.pid"
     port=31251
     if [ "$arm" = B ]; then
         port=31252
@@ -60,6 +61,7 @@ for arm in A B; do
     export SGLANG_GEMMA4_LOGITS_FILE="$out/$arm/layers"
     "$venv/bin/python" -m sglang.launch_server --model-path "$model" --trust-remote-code --host 127.0.0.1 --port "$port" --context-length "$context_length" --max-running-requests 1 --mem-fraction-static .82 --disable-radix-cache --kv-cache-dtype bf16 --attention-backend triton --cuda-graph-max-bs-decode 1 --skip-server-warmup --log-level info > "$out/$arm/server.log" 2>&1 &
     pid=$!
+    printf '%s\n' "$pid" > "$arm_pid_file"
     ready=0
     for _ in $(seq 1 240); do
         kill -0 "$pid" 2>/dev/null || { echo "$arm server exited" >&2; exit 2; }
@@ -73,9 +75,9 @@ import json,sys
 ids=json.load(open(sys.argv[1]));positions=json.load(open(sys.argv[2]))
 if not ids or len(ids)!=len(positions) or positions!=list(range(1,len(ids)+1)):
     raise SystemExit('Gemma4 service runner requires exact text positions 1..N')
-json.dump({"input_ids":ids,"sampling_params":{"temperature":0,"max_new_tokens":1,"seed":666360643}},open(sys.argv[3],"w"))
+json.dump({"input_ids":ids,"sampling_params":{"temperature":0,"max_new_tokens":1}},open(sys.argv[3],"w"))
 PY
-    curl -fsS -H 'Content-Type: application/json' -d @"$out/$arm/request.json" "http://127.0.0.1:$port/generate" > "$out/$arm/response.json"
+    if ! curl -fsS --retry 3 --retry-delay 2 -H 'Content-Type: application/json' -d @"$out/$arm/request.json" "http://127.0.0.1:$port/generate" > "$out/$arm/response.json"; then echo "$arm generate failed; preserving server and artifacts" >&2; exit 6; fi
     rid=$("$venv/bin/python" -c 'import json,sys; x=json.load(open(sys.argv[1])); print(x["meta_info"]["id"])' "$out/$arm/response.json")
     if [ -z "$rid" ]; then echo "$arm request RID missing" >&2; exit 4; fi
     printf '%s\n' "$rid" > "$out/$arm/request-rid.txt"
@@ -98,3 +100,7 @@ PY
     cleanup
 done
 nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv > "$out/gpu-after.csv"
+for port in 31251 31252; do
+    if fuser -n tcp "$port" >/dev/null 2>&1; then echo "port $port remains occupied after cleanup" >&2; exit 7; fi
+done
+if [ "$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | head -1 | tr -d ' ')" -gt 100 ]; then echo 'GPU memory remains allocated after cleanup' >&2; exit 8; fi

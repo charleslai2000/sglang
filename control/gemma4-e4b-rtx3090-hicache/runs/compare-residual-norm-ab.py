@@ -72,10 +72,10 @@ def main():
         outputs = [
             record(f"layer_output.{i}")["output"][off : off + args.n] for i in range(42)
         ]
-        outputs.insert(0, outputs[0].new_zeros((args.n, outputs[0].shape[-1])))
         prenorm = record("prenorm")["output"][off : off + args.n]
         finalnorm = record("finalnorm")["output"][off : off + args.n]
         logits = record("logits")["output"][-1].float()
+        torch.save(logits, root / "logits.pt")
         arms[arm] = {
             "rid": rid,
             "forward_id": fid,
@@ -104,7 +104,7 @@ def main():
         # SGLang layer_output.i is post-decoder-layer i; HF hidden_states[i+1] has that boundary.
         for i in range(42):
             ref = hs[i + 1].float().squeeze(0)
-            got = data["outputs"][i + 1]
+            got = data["outputs"][i]
             layer_metrics.append({"layer": i, **metrics(got, ref)})
         final = metrics(data["finalnorm"], hs[42].float().squeeze(0))
         logits_ref = oracle["logits"].float().reshape(-1)
@@ -137,7 +137,7 @@ def main():
         == int(arms["B"]["logits"].argmax()),
     }
     for i in range(42):
-        m = metrics(arms["B"]["outputs"][i + 1], arms["A"]["outputs"][i + 1])
+        m = metrics(arms["B"]["outputs"][i], arms["A"]["outputs"][i])
         result["ab"]["per_layer"].append({"layer": i, **m})
         if result["first_ab_layer_delta"] is None and m["max_abs"] != 0:
             result["first_ab_layer_delta"] = i
