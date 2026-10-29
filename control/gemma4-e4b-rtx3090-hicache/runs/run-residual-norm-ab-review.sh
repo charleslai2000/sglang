@@ -5,6 +5,8 @@ set -euo pipefail
 repo=/home/ubuntu/workspaces/3rdparty/sglang-hicache
 venv=/home/ubuntu/venvs/sglang-3090
 model=/data/sglang-hicache/gemma4/model
+hook=$repo/control/gemma4-e4b-rt3090-hicache/runs/runtime-layer-components.py
+if [ ! -f "$hook" ]; then echo "missing required capture hook: $hook" >&2; exit 92; fi
 out=${GEMMA4_AB_OUT:?set GEMMA4_AB_OUT to a fresh external run directory}
 ids_file=${GEMMA4_AB_IDS_FILE:?set JSON array file of exact input token IDs}
 positions_file=${GEMMA4_AB_POSITIONS_FILE:?set JSON array file of exact positions}
@@ -20,7 +22,7 @@ export PYTHONPATH="$out/bootstrap:$repo/control/gemma4-e4b-rt3090-hicache/runs:$
 export LD_LIBRARY_PATH="$venv/lib/python3.12/site-packages/torch/lib:/usr/local/cuda-12.9/lib64"
 export GEMMA4_RUNTIME_HOOK_ENABLE=1
 export GEMMA4_RUNTIME_HOOK_PATH="$repo/control/gemma4-e4b-rt3090-hicache/runs"
-export GEMMA4_RUNTIME_HOOK_INSTALL="$repo/control/gemma4-e4b-rt3090-hicache/runs/runtime-layer-components.py"
+export GEMMA4_RUNTIME_HOOK_INSTALL="$hook"
 export GEMMA4_COMPONENT_LAYERS=$(seq -s, 0 41) GEMMA4_CAPTURE_ALL_LAYER_OUTPUTS=1
 export GEMMA4_MODEL_IDENTITY='{"model_revision":"6cd26aaa2357fb2bad8c51699a7558a4d1a965bb","model_sha256":"19d89d2a4b3e401a3eae75ec08ab112810421a036c91d8c8226b686be7fe0c5d"}'
 export GEMMA4_MODEL_SHA256=19d89d2a4b3e401a3eae75ec08ab112810421a036c91d8c8226b686be7fe0c5d
