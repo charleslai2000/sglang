@@ -22,6 +22,8 @@ def main():
     positions = json.loads(args.positions)
     if not ids or len(ids) != len(positions):
         raise SystemExit("input IDs and positions must be non-empty and equal length")
+    if not all(isinstance(x, int) and not isinstance(x, bool) for x in ids + positions):
+        raise SystemExit("input IDs and positions must contain integers")
 
     base = args.base
     found = []
@@ -32,8 +34,10 @@ def main():
             continue
         if record.get("rid") != [args.rid] or record.get("forward_mode") != "EXTEND":
             continue
-        actual_ids = record.get("input_ids").tolist()
-        actual_positions = record.get("positions").tolist()
+        if not isinstance(record.get("input_ids"), torch.Tensor) or not isinstance(record.get("positions"), torch.Tensor):
+            continue
+        actual_ids = record["input_ids"].tolist()
+        actual_positions = record["positions"].tolist()
         if actual_ids == ids and actual_positions == positions:
             offset = 0
         elif (
@@ -68,6 +72,17 @@ def main():
             f"{base.name}.{fid}.manifest",
         ]
         if all((base.parent / name).is_file() for name in required):
+            try:
+                if any(
+                    torch.load(base.parent / f"{base.name}.{fid}.layer_output.{i}", map_location="cpu", weights_only=True).get("layer") != i
+                    for i in range(42)
+                ):
+                    continue
+                logits = torch.load(base.parent / f"{base.name}.{fid}.logits", map_location="cpu", weights_only=True)
+                if logits.get("forward_id") != fid or logits.get("rid") != [args.rid]:
+                    continue
+            except Exception:
+                continue
             found.append((fid, offset))
     if len(found) != 1:
         raise SystemExit(

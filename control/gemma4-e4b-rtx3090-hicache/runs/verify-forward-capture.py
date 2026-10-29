@@ -12,6 +12,9 @@ def main():
   base=Path(a.base);prefix=f'{base.name}.{a.forward_id}.';required={f'{prefix}layer_output.{i}' for i in range(a.expected_layer_count)}|{f'{prefix}prenorm',f'{prefix}finalnorm',f'{prefix}logits'};mp=base.parent/f'{base.name}.{a.forward_id}.manifest';actual={p.name for p in base.parent.glob(prefix+'*') if p.is_file() and not p.name.endswith('.sha256') and '.tmp.' not in p.name};ple_files={n for n in actual if n.startswith(prefix+'ple.')};allowed_ple=ple_files if a.allow_ple else set();input_records={n for n in actual if n==prefix+'inputs'};allowed_inputs=input_records if a.allow_input_record else set()
   if allowed_ple and any(not n[len(prefix+'ple.'):].isdigit() for n in allowed_ple):raise ValueError(f'invalid PLE artifact names: {sorted(allowed_ple)}')
   expected=required|{mp.name}
+  # Existing production layer-capture installs write PLE tensors under a
+  # separate components/ directory; only accept same-Forward PLE sidecars when
+  # explicitly requested. The runner's layers directory itself remains exact.
   if actual!=expected|allowed_ple|allowed_inputs:raise ValueError(f'artifact set mismatch missing={sorted(expected-actual)} extra={sorted(actual-expected-allowed_ple-allowed_inputs)}')
   m=json.loads(mp.read_text());ident={'model_revision':a.model_revision,'model_sha256':a.model_sha256};m_ids=m.get('input_ids',[]);m_positions=m.get('positions',[])
   for input_name in allowed_inputs:

@@ -38,10 +38,10 @@ def main():
     oracle = load(args.oracle)
     oracle_ids = oracle.get("input_ids")
     if isinstance(oracle_ids, torch.Tensor):
-        oracle_ids = oracle_ids.tolist()
+        oracle_ids = oracle_ids.reshape(-1).tolist()
     oracle_positions = oracle.get("positions")
     if isinstance(oracle_positions, torch.Tensor):
-        oracle_positions = oracle_positions.tolist()
+        oracle_positions = oracle_positions.reshape(-1).tolist()
     if (
         len(ids) != args.n
         or len(positions) != args.n
@@ -49,8 +49,10 @@ def main():
         or positions != oracle_positions
     ):
         raise SystemExit("frozen input/position differs from HF oracle")
-    if len(oracle["hidden_states"]) != 43:
+    if "hidden_states" not in oracle or len(oracle["hidden_states"]) != 43:
         raise SystemExit("expected HF hidden_states embeddings + 42 decoder outputs")
+    hidden = oracle["hidden_states"]
+    get_hidden = (lambda i: hidden[f"h{i}"].float().squeeze(0)) if isinstance(hidden, dict) else (lambda i: hidden[i].float().squeeze(0))
 
     arms = {}
     for arm in ("A", "B"):
@@ -74,7 +76,10 @@ def main():
         ]
         prenorm = record("prenorm")["output"][off : off + args.n]
         finalnorm = record("finalnorm")["output"][off : off + args.n]
-        logits = record("logits")["output"][-1].float()
+        logits_record = record("logits")
+        if logits_record.get("forward_id") != fid or logits_record.get("rid") != [rid] or logits_record.get("input_ids").tolist() != json.loads(args.ids.read_text()) or logits_record.get("positions").tolist() != positions:
+            raise SystemExit(f"{arm} logits Forward identity/boundary mismatch")
+        logits = logits_record["output"][-1].float()
         torch.save(logits, root / "logits.pt")
         arms[arm] = {
             "rid": rid,
@@ -97,17 +102,28 @@ def main():
         "arms": {},
         "first_ab_layer_delta": None,
     }
-    deltas = []
     for arm, data in arms.items():
-        hs = oracle["hidden_states"]
         layer_metrics = []
-        # SGLang layer_output.i is post-decoder-layer i; HF hidden_states[i+1] has that boundary.
-        for i in range(42):
-            ref = hs[i + 1].float().squeeze(0)
+        # SGLang layer_output.i is post-decoder-layer i. HF hidden_states h1..h41
+        # are outputs for layers 0..40; h42 is post-FinalNorm and has its own boundary.
+        for i in range(41):
+            ref = get_hidden(i + 1)
             got = data["outputs"][i]
             layer_metrics.append({"layer": i, **metrics(got, ref)})
-        final = metrics(data["finalnorm"], hs[42].float().squeeze(0))
-        logits_ref = oracle["logits"].float().reshape(-1)
+        prenorm_ref = oracle.get("layer41_prenorm")
+        if prenorm_ref is not None:
+            prenorm_ref = prenorm_ref.float().squeeze(0)
+            prenorm_metrics = metrics(data["prenorm"], prenorm_ref)
+        else:
+            prenorm_metrics = None
+        # HF hidden_states are emitted by decoder layers before the model-level
+        # final RMSNorm. Thus h1..h42 align with SGLang layer_output.0..41.
+        # h42 is not a post-finalnorm state in the pinned Transformers version.
+        ref_layer41 = get_hidden(42)
+        layer_metrics.append({"layer": 41, "boundary": "decoder_layer_output_pre_finalnorm",
+                              **metrics(data["outputs"][41], ref_layer41)})
+        final = None
+        logits_ref = oracle.get("logits", oracle.get("logits_last_token")).float().reshape(-1)
         logits_metrics = metrics(data["logits"], logits_ref)
         top = torch.topk(logits_ref, 2)
         svc_top = torch.topk(data["logits"], 2)
@@ -127,7 +143,7 @@ def main():
                 "oracle_top2": top.indices.tolist(),
                 "oracle_margin": float((top.values[0] - top.values[1]).item()),
             },
-            "prenorm_vs_oracle_layer41_pre_norm": "unavailable: frozen oracle does not contain an explicit layer41 pre-norm hook",
+            "prenorm_vs_oracle_layer41_pre_norm": prenorm_metrics,
         }
     result["ab"] = {
         "per_layer": [],
