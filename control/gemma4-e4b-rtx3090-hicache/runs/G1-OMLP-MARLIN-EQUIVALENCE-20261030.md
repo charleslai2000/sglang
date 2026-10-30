@@ -2,7 +2,7 @@
 
 ## Result
 
-**PASS — no O-projection/MLP packed-weight or scale mismatch found** for the captured layer-17 TP=2 runtime rank 0. The pinned checkpoint tensors, after SGLang's actual source orientation, gate/up fusion and production Marlin repack/scale permutation, are elementwise identical to the loaded SGLang Marlin buffers. This closes the specific effective-weight-layout hypothesis for these targets/layer; it does not certify every layer, operator arithmetic, HF-vs-SGLang outputs or G1 acceptance. No source correction was indicated.
+**PASS — no O-projection/MLP packed-weight or scale mismatch found** for the captured layer-17 single-GPU TP=1 runtime (the prior commit incorrectly labeled this TP=2). The pinned checkpoint tensors, after SGLang's actual source orientation, gate/up fusion and production Marlin repack/scale permutation, are elementwise identical to the loaded SGLang Marlin buffers. This closes the specific effective-weight-layout hypothesis for these targets/layer; it does not certify every layer, operator arithmetic, HF-vs-SGLang outputs or G1 acceptance. No source correction was indicated.
 
 ## Scope and method
 
@@ -10,7 +10,11 @@ Checkpoint: `google/gemma-4-E4B-it-qat-w4a16-ct`, revision `6cd26aaa2357fb2bad8c
 
 Reused the established layer-17 N512 path (the L17 causal full-attention Forward and existing same-input O/MLP operator evidence), PLE Marlin verification procedure, and actual SGLang `CompressedTensorsWNA16.process_weights_after_loading()` behavior. One locked GPU service run received the existing frozen 512-ID request and captured post-loader rank-0 Marlin parameters from layer 17: RID `c1816dcc1b9a4303b150ca25dec023bc`. The request returned HTTP 200 / one generated token. Snapshot is instance-bound to that runtime RID; `gemma4_forward_id` is unavailable at the outer model-forward seam (`null`), so it is not represented as an atomic operation-level forward capture.
 
-Compared the checkpoint's packed source tensors transformed using SGLang production `gptq_marlin_repack` and the source-defined `marlin_permute_scales` ordering against the captured runtime buffers. This uses the real stored pack-quantized layout and loader's Q/K/N and scale transformations, not a guessed Marlin inverse decoder. O projection retains full K/N parameter layout despite RowParallel execution; fused MLP `gate_up_proj` concatenates complete gate then up projections; `down_proj` retains its full parameter layout. TP rank/size are recorded as 0/2. Runtime shapes and target source mapping are preserved in the JSON artifact.
+Compared the checkpoint's packed source tensors transformed using SGLang production `gptq_marlin_repack` and the source-defined `marlin_permute_scales` ordering against the captured runtime buffers. This uses the real stored pack-quantized layout and loader's Q/K/N and scale transformations, not a guessed Marlin inverse decoder. O projection retains full K/N parameter layout despite RowParallel execution; fused MLP `gate_up_proj` concatenates complete gate then up projections; `down_proj` retains its full parameter layout. The capture script itself records only the literal `layer=17` and parameter tensors; it does not provide TP rank/size. The comparison driver erroneously hard-coded `tp_size=2` and `rank=0`, and its first draft sliced source tensors accordingly. That label and slicing were wrong. Reanalysis using the actual full TP=1 source tensors reproduces all six captured buffers exactly; the corrected JSON reports `tp_size=1`, `tp_rank=0` based on the logged server args. Runtime shapes and target source mapping are preserved in the JSON artifact.
+
+## Configuration audit and annotation correction
+
+The captured `server-retry.log` serializes effective `server_args` with `tp_size=1`, `pp_size=1`, `dp_size=1`, `device='cuda'`, `base_gpu_id=0`, `gpu_id_step=1`; CLI launch did not pass a TP override. SGLang's `ServerArgs.tp_size` default is 1. The same host exposes exactly one device, GPU 0, RTX 3090 UUID `GPU-2e3ed202-3655-d919-0a64-259209bc6587`; no `CUDA_VISIBLE_DEVICES` remapping was set in the launch environment. Thus world size is one. `capture_omlp_weights.py` reads `self.language_model.layers[17]` and dumps parameters but does not query or serialize TP rank/size. The comparison script originally hard-coded `rank=0` (correct rank by default) and erroneously `tp_size=2`, despite the logged `tp_size=1`; its source slicing and report label were therefore wrong. Re-running the same comparison with the full, unsliced checkpoint source and production repack/scale transforms reproduces all six runtime tensors exactly. No second GPU capture was needed: the captured service itself already used the requested single-GPU configuration.
 
 ## Exact comparisons
 
@@ -33,7 +37,7 @@ Close the layer-17 O-projection/MLP packed-weight/scales mismatch hypothesis as 
 
 External, local-only artifacts under `/data/sglang-hicache/gemma4/runs/20261030T-g1-omlp-weight-equivalence/`:
 - `sglang-layer17-marlin-weights.pt` — runtime snapshot, SHA-256 `20cc906dd8268fb11e4a716535d05e0a95b3170842118d937925ebeebe2171ab`.
-- `sglang-layer17-marlin-weights.comparison.json` — per-tensor counts, shape, hash and equality, SHA-256 `b81fd05afae37d7c535b9c5c48e8490d7462a142a41ddc972b22ee4d7dcc1af3`.
+- `sglang-layer17-marlin-weights.comparison.json` — corrected runtime configuration label (`tp_size=1`, `tp_rank=0`) plus per-tensor counts, shape, hash and equality; SHA-256 `c0d7b843ab4a420ea012e785d486ee0cf16a41a833800da71a658eebb69286d4`.
 - `compare_marlin_snapshot.py` — reproducible comparison driver calling production CUDA Marlin repack and the source scale permutation.
 - `bootstrap/capture_omlp_weights.py`, `bootstrap/sitecustomize.py` — one-shot narrowly scoped layer-17 capture hook.
 
