@@ -1,5 +1,10 @@
 # Frontier
 
+## gemma4-e4b-rtx3090-hicache-perf
+- T001-gemma4-bf16-decode-performance Gemma4 RTX3090 BF16 Decode performance baseline — DONE
+  - frontier: Online c1–c32 Output TPS and isolated Graph Forward b1–b16 are measured with scoped limitations recorded in `runs/GEMMA4-BF16-DECODE-BASELINE-20261031.md`; no additional GPU run authorized or required.
+  - task: control/gemma4-e4b-rtx3090-hicache-perf/tasks/T001-gemma4-bf16-decode-performance.md
+
 ## gemma4-e4b-rtx3090-hicache
 - T001-gemma4-w4a16-fp8kv-service-and-capacity Official W4A16 + FP8 KV Gemma4 RTX3090 service acceptance — ACTIVE
   - frontier: Full-set gap is recorded; selected vLLM C1 and SGLang Eager/Graph replays rule out batching and decode-Graph as causes only for two examples. Capture same-prompt prefill/first-decode logits with verified effective weights; no production defect localized yet. Report `runs/GSM8K-FULL-VLLM-20261027.md`; HF guard FAILED.

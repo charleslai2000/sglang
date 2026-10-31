@@ -1,0 +1,7 @@
+Status: DONE
+Work area: experiments
+Objective: Measure Gemma4 E4B W4A16/BF16-KV single-RTX3090 service performance and real CUDA Graph Decode Forward latency against frozen Falcon T005 reference.
+Inputs: `goal.md`, `plan.md`; Gemma G32/C16 evidence; Falcon T005 `B0-SUMMARY.md`; existing T002 offline CUPTI Graph harness; pinned local model/runtime and current branch.
+Completion: Online Output TPS matrix c1/2/4/8/16/24/32, three valid trials each with exact 256 outputs; actual active batch/Graph evidence and GPU aftermath. Separate isolated Graph Forward b1/2/4/8/16 CUDA Event results with its non-equivalent pool limitation. Preserve report/raw hashes and replay scripts; explicitly mark exact TTFT and online Forward time NOT MEASURED. Selectively commit/push only owned performance evidence and verify remote SHA. No production math/Oracle/guard/threshold changes; G1 remains FAILED / NOT ACCEPTED.
+Result: 状态MEASURED。在线Output TPS、隔离Decode Forward和各自适用范围见`runs/GEMMA4-BF16-DECODE-BASELINE-20261031.md`；服务c1–c32各三轮且256 token完整，真实GPU batch最大16，GPU退出后0%/1MiB。原始运行身份含HEAD声明，但未证明所有dirty源码均与HEAD一致；比对确认Gemma模型/ModelRunner/Decode Graph/Attention/量化核心路径无tracked dirty diff，仅存在独立T004 observability未跟踪文件及其他控制文档dirty，不能据此证明实际import树逐文件身份。精确TTFT与在线实际Forward时间未测得。c24下降保留观测、不推断或调度器修改。G1仍FAILED / NOT ACCEPTED。
+Remaining: 无本性能基线所要求且用户授权的补测。`/model_info`、逐replay ShapeKey、精确TTFT及在线实际Forward时间均保留为未采集/未测；按用户指示不重跑完整c1–c32、不启动GPU工作。
