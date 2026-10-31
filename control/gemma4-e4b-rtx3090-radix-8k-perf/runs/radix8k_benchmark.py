@@ -133,10 +133,16 @@ def post(ids, rid, output_tokens=OUTPUT):
     }
 
 
-def run(concurrency_only=None):
+def run(concurrency_only=None, selected_concurrencies=None):
     fixture = json.loads((OUT / "fixture.json").read_text())
     records = []
-    concurrencies = (concurrency_only,) if concurrency_only else tuple(c for c in CONCURRENCIES if c != 1)
+    concurrencies = (
+        (concurrency_only,)
+        if concurrency_only
+        else tuple(selected_concurrencies)
+        if selected_concurrencies
+        else tuple(c for c in CONCURRENCIES if c != 1)
+    )
     for c in concurrencies:
         if c == 1:
             continue
@@ -192,13 +198,19 @@ if __name__ == "__main__":
     parser.add_argument("--prime", action="store_true")
     parser.add_argument("--validate", action="store_true")
     parser.add_argument("--accepted-validation", action="store_true")
+    parser.add_argument("--concurrency", type=int, nargs="+", choices=CONCURRENCIES)
     args = parser.parse_args()
     if args.prepare:
         prepare(args.tokenizer)
     elif args.run:
         if not args.accepted_validation:
             parser.error("--run requires --accepted-validation after a separate 7168/1024+256 verification")
-        run(concurrency_only=1 if args.c1_only else None)
+        if args.c1_only and args.concurrency:
+            parser.error("--c1-only and --concurrency are mutually exclusive")
+        run(
+            concurrency_only=1 if args.c1_only else None,
+            selected_concurrencies=args.concurrency,
+        )
     elif args.prime or args.validate:
         fixture = json.loads((OUT / "fixture.json").read_text())
         name = "primer" if args.prime else "validation"
