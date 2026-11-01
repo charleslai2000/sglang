@@ -3,11 +3,6 @@
 ## gemma4-e4b-rtx3090-radix-8k-perf
   - task: control/gemma4-e4b-rtx3090-radix-8k-perf/tasks/T002-real-gpu-decode-batches-16-24-32.md
 
-## gemma4-e4b-rtx3090-g1-perf-convergence
-- T001-trace-and-prefill-convergence G1 trace关联与Prefill性能收敛 — ACTIVE
-  - frontier: Decode same-run 256-step关联及1K/4K/8K Prefill RID级CUDA Event/显存已补齐；执行最终脚本/数据回放、检查提交边界并完成远端SHA确认；不重跑batch32验证。
-  - task: control/gemma4-e4b-rtx3090-g1-perf-convergence/tasks/T001-trace-and-prefill-convergence.md
-
 ## gemma4-e4b-rtx3090-radix-8k-profiler
 - T001-profile-radix-prefill-decode Gemma4 Radix 8K Prefill/Decode profiler diagnosis — ACTIVE
   - frontier: Exact-hit Prefill reached batch 8; larger cohorts remain constrained by 16K-chunk OOM. Decode graph GPU event timings obtained for 16/24/32; improve request/step online TPOT correlation and assess graph-kernel expansion/NCU need before finalizing report.
