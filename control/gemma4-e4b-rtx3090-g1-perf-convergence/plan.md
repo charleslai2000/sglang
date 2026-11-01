@@ -1,0 +1,8 @@
+# Current plan
+
+- Reuse accepted no-profiler service run `20261031T145717Z-radix8k-prefix-benchmark`, profiler traces c16/c24/c32 `170655/170859/171035Z`, Prefill c16 batch8 trace `172407Z`; do not rerun batch32 validation.
+- Same-run Decode join: `RADIX8K_FWD` NVTX thread → `cudaGraphLaunch` runtime correlation → CUPTI graph replay; 256/256 forwards join for c16/c24/c32. Host dispatch and GPU execution remain distinct timing domains.
+- RID-labeled target-window Prefill cohort: c16/c24/c32 = 8/12/16 unique Prefill forwards, each 2 RIDs and 2,048 new tokens; exact RID union coverage 16/24/32. Batch8 archive has 16 accepted requests in two batch8 steps, not four. Counts concern the labeled target forwards, not every batch before/after capture. Safe chunk is 8192; 16,384 remains excluded after OOM.
+- New single-request 1K/4K/8K probes passed exact prompt/cache/output checks. RID-linked CUDA Events for `category=extend`, batch 1 measured 147.599/490.839/1043.633 ms = 6938/8345/7850 input tok/s; each record is paired with request metadata and Scheduler forward timing. NVML 100ms samples peak at 23,529 MiB whole-device used. Nsight GPU counter sampling is unavailable (`ERR_NVGPUCTRPERM`); no exclusive-utilization claim.
+- Combined analysis is in `runs/G1-PERFORMANCE-CONVERGENCE-20261101.md`; single-request method/results in `runs/PREFILL-SIZE-MEASUREMENTS-20261101.md`; raw archive `/data/sglang-hicache/gemma4/runs/20261101T-prefill-sizes/`. Next: commit the validated scoped files, push, verify remote SHA, then mark Task/Goal complete; no unrelated dirty paths touched.
+- G1 acceptance stays FAILED / NOT ACCEPTED; preserve dirty tree and scope any commit.
