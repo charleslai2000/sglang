@@ -38,6 +38,7 @@ from sglang.srt.distributed import (
 )
 from sglang.srt.layers.layernorm import Gemma4RMSNorm, RMSNorm
 from sglang.srt.layers.linear import (
+    ColumnParallelLinear,
     QKVParallelLinear,
     ReplicatedLinear,
     RowParallelLinear,
@@ -340,16 +341,35 @@ class Gemma4Attention(nn.Module):
 
         self.q_size = self.num_heads * self.head_dim
         self.kv_size = self.num_kv_heads * self.head_dim
-
-        self.qkv_proj = QKVParallelLinear(
-            hidden_size,
-            self.head_dim,
-            self.total_num_heads,
-            self.total_num_kv_heads,
-            bias=config.attention_bias,
-            quant_config=quant_config,
-            prefix=add_prefix("qkv_proj", prefix),
+        num_kv_shared_layers = getattr(config, "num_kv_shared_layers", 0)
+        first_kv_shared_layer_idx = config.num_hidden_layers - num_kv_shared_layers
+        self.is_kv_shared_layer = (
+            layer_id >= first_kv_shared_layer_idx and num_kv_shared_layers > 0
         )
+
+        if self.is_kv_shared_layer:
+            # Inter-layer KV sharing is distinct from attention_k_eq_v, which
+            # duplicates K into V within one full-attention layer. These layers
+            # own only Q weights; K/V come from kv_shared_layer_index.
+            self.q_proj = ColumnParallelLinear(
+                hidden_size,
+                self.q_size,
+                bias=config.attention_bias,
+                quant_config=quant_config,
+                prefix=add_prefix("q_proj", prefix),
+            )
+            self.qkv_proj = None
+        else:
+            self.q_proj = None
+            self.qkv_proj = QKVParallelLinear(
+                hidden_size,
+                self.head_dim,
+                self.total_num_heads,
+                self.total_num_kv_heads,
+                bias=config.attention_bias,
+                quant_config=quant_config,
+                prefix=add_prefix("qkv_proj", prefix),
+            )
         self.o_proj = RowParallelLinear(
             self.total_num_heads * self.head_dim,
             hidden_size,
@@ -362,9 +382,10 @@ class Gemma4Attention(nn.Module):
             self.head_dim,
             eps=config.rms_norm_eps,
         )
-        self.k_norm = Gemma4RMSNorm(
-            self.head_dim,
-            eps=config.rms_norm_eps,
+        self.k_norm = (
+            None
+            if self.is_kv_shared_layer
+            else Gemma4RMSNorm(self.head_dim, eps=config.rms_norm_eps)
         )
         self.v_norm = Gemma4RMSNorm(
             self.head_dim, eps=config.rms_norm_eps, scale_shift=0.0, with_scale=False
@@ -378,13 +399,7 @@ class Gemma4Attention(nn.Module):
                 rope_theta=10000.0,
             )
 
-        # KV sharing logic
-        num_kv_shared_layers = getattr(config, "num_kv_shared_layers", 0)
-        first_kv_shared_layer_idx = config.num_hidden_layers - num_kv_shared_layers
-        self.is_kv_shared_layer = (
-            layer_id >= first_kv_shared_layer_idx and num_kv_shared_layers > 0
-        )
-
+        # KV sharing source follows the last preceding layer of the same attention type.
         self.kv_shared_layer_index = None
         if num_kv_shared_layers > 0 and self.layer_id >= first_kv_shared_layer_idx:
             prev_layers = config.layer_types[:first_kv_shared_layer_idx]
@@ -430,8 +445,13 @@ class Gemma4Attention(nn.Module):
         forward_batch: ForwardBatch,
         **kwargs,
     ):
-        qkv, _ = self.qkv_proj(hidden_states)
-        q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
+        if self.is_kv_shared_layer:
+            q, _ = self.q_proj(hidden_states)
+            k = None
+            v = None
+        else:
+            qkv, _ = self.qkv_proj(hidden_states)
+            q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
 
         # Fused Q/K/V RMSNorm: replaces three separate norm kernels with one.
         # Preconditions for the fused path: tensors on CUDA or XPU (the kernel
@@ -442,7 +462,8 @@ class Gemma4Attention(nn.Module):
             self.is_kv_shared_layer and self.kv_shared_layer_index is not None
         )
         can_fuse_qkv_norm = (
-            (q.is_cuda or q.is_xpu)
+            k is not None
+            and (q.is_cuda or q.is_xpu)
             and self.q_norm.scale_shift == 0.0
             and self.k_norm.scale_shift == 0.0
             and not self.v_norm.with_scale
@@ -484,8 +505,7 @@ class Gemma4Attention(nn.Module):
             q = q.unflatten(-1, (self.num_heads, self.head_dim))
             q = self.q_norm(q)
             q = q.flatten(-2, -1)
-            if is_kv_shared:
-                k = None
+            if k is None:
                 v = None
             else:
                 k = k.unflatten(-1, (self.num_kv_heads, self.head_dim))
@@ -512,7 +532,8 @@ class Gemma4Attention(nn.Module):
             q, k = self.rotary_emb(positions, q, k, fused_set_kv_buffer_arg=fused_arg)
             k = k.unflatten(-1, (self.num_kv_heads, self.head_dim))
         else:
-            # Rotary embedding requires a key input; use zeros since KV is shared from another layer
+            # Rotary embedding requires a key input even when this layer reads KV
+            # from another layer, so supply a dummy key only for the Q RoPE transform.
             dummy_k = torch.zeros_like(q[:, : self.kv_size])
             q, _ = self.rotary_emb(positions, q, dummy_k)
 
@@ -551,7 +572,7 @@ class Gemma4DecoderLayer(nn.Module):
         layer_type = config.layer_types[layer_id]
         self.is_full_attention = layer_type == "full_attention"
         if self.is_full_attention:
-            head_dim = config.head_dim  # following sglang naming
+            head_dim = config.head_dim
         else:
             head_dim = getattr(config, "swa_head_dim", config.head_dim)
 
@@ -1483,35 +1504,45 @@ class Gemma4ForCausalLM(PreTrainedModel):
                     loaded_params.add(name)
                     break
                 else:
-                    for param_name, weight_name, shard_id in stacked_params_mapping:
+                    stacked_loaded = False
+                    if shared_layer_id is not None and orig_name.endswith(
+                        (".q_proj.qweight", ".q_proj.qweight_type")
+                    ):
                         name = orig_name
-                        if weight_name not in name:
-                            continue
-                        name = name.replace(weight_name, param_name)
-                        if name not in params_dict:
-                            continue
-                        param = params_dict[name]
-                        weight_loader = param.weight_loader
-                        weight_loader(param, loaded_weight, shard_id)
-                        if should_dup_k_to_v:
-                            weight_loader(param, loaded_weight, "v")
-                        loaded_params.add(name)
-                        break
-                    else:
-                        name = orig_name
-                        if name.endswith(".bias") and name not in params_dict:
-                            continue
-                        name = maybe_remap_kv_scale_name(name, params_dict)
-                        if name is None:
-                            continue
-                        if name not in params_dict:
-                            continue
-                        param = params_dict[name]
-                        weight_loader = getattr(
-                            param, "weight_loader", default_weight_loader
-                        )
-                        weight_loader(param, loaded_weight)
-                        loaded_params.add(name)
+                        if name in params_dict:
+                            param = params_dict[name]
+                            param.weight_loader(param, loaded_weight)
+                            loaded_params.add(name)
+                            stacked_loaded = True
+                    if not stacked_loaded:
+                        for param_name, weight_name, shard_id in stacked_params_mapping:
+                            name = orig_name
+                            if weight_name not in name:
+                                continue
+                            name = name.replace(weight_name, param_name, 1)
+                            if name not in params_dict:
+                                continue
+                            param = params_dict[name]
+                            param.weight_loader(param, loaded_weight, shard_id)
+                            if should_dup_k_to_v:
+                                param.weight_loader(param, loaded_weight, "v")
+                            loaded_params.add(name)
+                            stacked_loaded = True
+                            break
+                    if stacked_loaded:
+                        continue
+                    name = orig_name
+                    if name.endswith(".bias") and name not in params_dict:
+                        continue
+                    name = maybe_remap_kv_scale_name(name, params_dict)
+                    if name is None:
+                        continue
+                    if name not in params_dict:
+                        continue
+                    param = params_dict[name]
+                    weight_loader = getattr(param, "weight_loader", default_weight_loader)
+                    weight_loader(param, loaded_weight)
+                    loaded_params.add(name)
         unloaded_params = params_dict.keys() - loaded_params
         if unloaded_params:
             param_names = set(dict(self.named_parameters()).keys())
