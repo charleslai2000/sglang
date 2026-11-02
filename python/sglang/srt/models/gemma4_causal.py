@@ -340,6 +340,7 @@ class Gemma4Attention(nn.Module):
         self.head_dim = head_dim
 
         self.q_size = self.num_heads * self.head_dim
+        self.total_q_size = self.total_num_heads * self.head_dim
         self.kv_size = self.num_kv_heads * self.head_dim
         num_kv_shared_layers = getattr(config, "num_kv_shared_layers", 0)
         first_kv_shared_layer_idx = config.num_hidden_layers - num_kv_shared_layers
@@ -353,7 +354,7 @@ class Gemma4Attention(nn.Module):
             # own only Q weights; K/V come from kv_shared_layer_index.
             self.q_proj = ColumnParallelLinear(
                 hidden_size,
-                self.q_size,
+                self.total_q_size,
                 bias=config.attention_bias,
                 quant_config=quant_config,
                 prefix=add_prefix("q_proj", prefix),
@@ -1505,9 +1506,7 @@ class Gemma4ForCausalLM(PreTrainedModel):
                     break
                 else:
                     stacked_loaded = False
-                    if shared_layer_id is not None and orig_name.endswith(
-                        (".q_proj.qweight", ".q_proj.qweight_type")
-                    ):
+                    if orig_name.endswith((".q_proj.qweight", ".q_proj.qweight_type")):
                         name = orig_name
                         if name in params_dict:
                             param = params_dict[name]
