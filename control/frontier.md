@@ -19,11 +19,6 @@
   - task: control/gemma4-e4b-rtx3090-hicache/tasks/T001-gemma4-w4a16-fp8kv-service-and-capacity.md
   - task: control/gemma4-e4b-rtx3090-hicache/tasks/T001-gemma4-w4a16-fp8kv-service-and-capacity.md
 
-## g2-rtx3090-quasar-q4_0-fp8kv
-- T004-quasar-task-quality-paired-eval G2 QUASAR GSM8K quality and root-cause diagnosis — ACTIVE
-  - frontier: Fixed 14 HEAD-shadow BF16 run remains 2/14 with repetitive continuation; first-step distributions differ from CPU llama.cpp on 9/14 (mean JS 0.06761 nats). Investigate current-path Prefill/model computation; historical private overlay remains separate and must not be mixed. Teacher-forced Decode only if first steps align.
-  - task: control/g2-rtx3090-quasar-q4_0-fp8kv/tasks/T004-quasar-task-quality-paired-eval.md
-
 ## queued-prefetch-host-ready
 - T002-falcon-rhba1-acceptance Falcon T004 pipeline time, high-pressure efficiency and correctness — ACTIVE
   - frontier: Commit `3d90660dc28bc538e42b038654e8dc14bf43c96b` freezes one valid high-pressure L0 ON/OFF pair, complete A/B/C/D ledger and control status; pushed to origin at the same SHA. Four measured RIDs per arm hit 2,048 FULL KV + MAMBA pages; A decodes 1,024 outputs. B/C/D produce one token each; Prefill batching differs (ON shared batch-3; OFF batch-1 plus batch-2), so no net performance claim. Busy Union is not GPU-exclusive time; timestamped Host-ready and H2D→dependent-kernel edge remain NOT_CAPTURED/NOT_VERIFIED. Next: obtain/freeze authorized same-revision Falcon no-cache oracle/tolerance, run long multi-round FULL+MAMBA correctness, and additional sufficiently matched long-output performance repetitions if still authorized. **T005 carry-over requiring T004 integration:** worker can crash on optional `prefetch_issue_mono_ns=None`; None-preserving guard and regression handoff in `runs/T004-FALCON-20261016/T004-WORKER-OPTIONAL-TIMESTAMP-HANDOFF-20261020.md`. Integrate guard with existing dirty telemetry consumer and regression before production use; it is not committed/pushed or production PASS. Preserve 52 tracked dirty paths and 5,241 untracked entries; GPU lock required. Physical-media attribution, correctness acceptance and performance benefit remain open.
