@@ -21,7 +21,7 @@ Full call CUDA Event milliseconds, including Q8_1 activation conversion:
 | `blk.0.attn_output.weight` | 32,2560,2048 | 0.06861 (0.06656–0.08090) | 0.03072 (0.02963–0.03910) | 2.23× | 1.365% | 0.16542 | Yes |
 | `blk.0.attn_q.weight` | 32,2048,2560 | 0.07318 (0.07066–0.09939) | 0.03155 (0.03072–0.04198) | 2.32× | 1.532% | 0.08769 | Yes |
 
-The numeric differences reflect distinct quantization/tiling/reduction arithmetic. Gate FFN argmax changes; this is not sufficient numerical compatibility for substituting the donor. Separate runs' rerun timings were directionally consistent; second-run Q/O input seeds differed by shape, while gate used the same input. Raw paired data, inputs, hashes and trace are retained under `/data/sglang-hicache/g2-quasar-runs/20261112T-g2-quasar-q4-llama-mmq-compare-r1/` (and timing rerun `...-r2/`). Do not project isolated-kernel ratios to service performance or c32 wall-time gain.
+The numeric differences reflect distinct quantization/tiling/reduction arithmetic. Gate FFN argmax changes; this is not sufficient numerical compatibility for substituting the donor. A second run at `/data/sglang-hicache/g2-quasar-runs/20261112T-g2-quasar-q4-llama-mmq-compare-r2/` produced directionally consistent timings, but different Q/O activation seeds; only run1 is the source for the paired table. Its exact raw weights/inputs and SHA256s are recorded in `SHA256SUMS-LLAMA-MMQ-COMPARISON.txt`; complete timing/parity data and Nsight trace are under `/data/sglang-hicache/g2-quasar-runs/20261112T-g2-quasar-q4-llama-mmq-compare-r1/`. Do not project isolated-kernel ratios to service performance or c32 wall-time gain.
 
 ## Decision: bounded NO-GO
 
