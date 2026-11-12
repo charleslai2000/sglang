@@ -1,7 +1,13 @@
 # Frontier
 
 ## gemma4-e4b-rtx3090-radix-8k-perf
+- T002-real-gpu-decode-batches-16-24-32 — DONE
+  - frontier: Historical W4A16 actual batches 16/24/32 and separate QUASAR E5M2 current-workload matrix are recorded; no further action pending.
   - task: control/gemma4-e4b-rtx3090-radix-8k-perf/tasks/T002-real-gpu-decode-batches-16-24-32.md
+- T003-quasar-e5m2-current-model-matrix — DONE
+  - frontier: Current QUASAR E5M2 workload completed; historical W4A16 performance/source reproduction explicitly not claimed.
+  - task: control/gemma4-e4b-rtx3090-radix-8k-perf/tasks/T003-quasar-e5m2-current-model-matrix.md
+
 
 ## gemma4-e4b-rtx3090-radix-8k-profiler
 - T001-profile-radix-prefill-decode Gemma4 Radix 8K Prefill/Decode profiler diagnosis — ACTIVE

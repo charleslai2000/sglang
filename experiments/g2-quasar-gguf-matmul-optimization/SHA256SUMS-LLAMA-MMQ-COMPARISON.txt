@@ -1,0 +1,11 @@
+# Source model SHA256: 7d6269096c9acbce4422fd1aa3a249436b01288868961e48ca9bb2541997f669
+# Pinned llama.cpp source: ce8caa6e60a03093351d6016a818720e0d46f0fb
+# AOT SM86 common_ops.abi3.so SHA256: 22c9f5eb84e5e494df31f814aeffe5ba0aafb266fca2b56c99cfb5a3c1dea4c2
+# Run 1 exact weight and BF16-expanded FP32 input artifacts.
+77d96f7c8ed01b4a33e0ac35d91497815c75db301c0c3f6227f6c22362a34b13  blk.0.ffn_gate.weight.raw
+062e5aa50bfe655bba777f6b26fa4b1271c266fd39cabb5fc776c6b9a39ed750  blk.0.ffn_gate.weight_input_f32.raw
+4e004506aa48dccaf1c83dc596ae4980dc49d2d61e425cfaf414ea74275e6362  blk.0.attn_output.weight.raw
+062e5aa50bfe655bba777f6b26fa4b1271c266fd39cabb5fc776c6b9a39ed750  blk.0.attn_output.weight_input_f32.raw
+167d349632be4dca84d96fcb1105e5de3b2e235934b2729633eb19f033a886b6  blk.0.attn_q.weight.raw
+062e5aa50bfe655bba777f6b26fa4b1271c266fd39cabb5fc776c6b9a39ed750  blk.0.attn_q.weight_input_f32.raw
+# Exact inputs/weights are retained under /data/.../g2-quasar-q4-llama-mmq-compare-r1/weights/.

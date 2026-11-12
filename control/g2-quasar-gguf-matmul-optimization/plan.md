@@ -1,0 +1,6 @@
+# Current status
+
+- T001 DONE: `experiments/g2-quasar-gguf-matmul-optimization/FEASIBILITY-20261112.md` and `RESULTS-20261112.md` contain corrected profile semantics, runtime tensor/shape/routing map, source comparison, and limited RTX 3090 same-input kernel evidence.
+- c32 Q4_0 Linear projections use MMQ_A8; Q6_K is the vocabulary-sized tied output projection by unique tensor/grid match, strongly supported but not directly module-labeled. Cumulative Q6_K kernel elapsed share is 18.63%, not a wall-time share.
+- T002 DONE / NO-GO: `/experiments/g2-quasar-gguf-matmul-optimization/RESULTS-LLAMA-MMQ-COMPARISON-20261112.md` records the selected M32 c32 shapes, same raw Q4_0 weights and BF16-derived inputs, complete Q8_1-inclusive GPU timings, numeric parity, and Nsight-confirmed llama.cpp MMQ + stream-K fixup path. The donor was faster in isolation, but the Q4_0 FFN case changed argmax; therefore no compatible drop-in was established. No production integration or c32 service A/B.
+- No production changes or Q6_K conversion. T001's transformed Q6_K proposal remains pending architecture/Owner approval. T002 task-owned files are to be selectively committed/pushed; unrelated dirty files must remain untouched.
