@@ -46,8 +46,8 @@ int main(int argc, char **argv) {
     }
     std::sort(ms.begin(),ms.end());
     std::vector<float> out(N*M); ggml_backend_tensor_get(y, out.data(), 0, out.size()*sizeof(float));
-    printf("{\"K\":%lld,\"N\":%lld,\"M\":%lld,\"weight_bytes\":%zu,\"median_ms\":%.9f,\"p10_ms\":%.9f,\"p90_ms\":%.9f,\"output_first\":[",(long long)K,(long long)N,(long long)M,wbytes,ms[15],ms[3],ms[26]);
-    for (int i=0;i<8 && i<(int)out.size();i++) printf("%s%.9g",i?",":"",out[i]);
+    printf("{\"K\":%lld,\"N\":%lld,\"M\":%lld,\"weight_bytes\":%zu,\"median_ms\":%.9f,\"p10_ms\":%.9f,\"p90_ms\":%.9f,\"output\":[",(long long)K,(long long)N,(long long)M,wbytes,ms[15],ms[3],ms[26]);
+    for (int i=0;i<(int)out.size();i++) printf("%s%.9g",i?",":"",out[i]);
     printf("]}\n");
     ggml_backend_sched_free(sched); ggml_free(ctx); ggml_backend_free(backend); return 0;
 }

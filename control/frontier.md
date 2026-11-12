@@ -1,5 +1,10 @@
 # Frontier
 
+## g2-quasar-gguf-matmul-optimization
+- Owner disposition required — READY
+  - frontier: Numerical attribution shows donor more accurate vs independent FP32 reference on gate/O; actual Q8 buffers and production correctness criteria remain unverified. Await Owner decision before production follow-up.
+  - task: control/g2-quasar-gguf-matmul-optimization/tasks/T003-q4-0-numerical-attribution.md
+
 ## gemma4-e4b-rtx3090-radix-8k-perf
 - T002-real-gpu-decode-batches-16-24-32 — DONE
   - frontier: Historical W4A16 actual batches 16/24/32 and separate QUASAR E5M2 current-workload matrix are recorded; no further action pending.
