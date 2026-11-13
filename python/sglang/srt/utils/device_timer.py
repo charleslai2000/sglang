@@ -6,7 +6,9 @@ from typing import Callable, Deque, Dict, List, Optional
 import torch
 
 
-def device_timer_ctx(timer: Optional["DeviceTimer"], category: str):
+def device_timer_ctx(
+    timer: Optional["DeviceTimer"], category: str, rids=None, batch_size: int = 0
+):
     """Timing context for one forward segment; no-op when the timer is absent.
 
     A segment that skips this stays out of the fwd_occupancy numerator while
@@ -14,7 +16,11 @@ def device_timer_ctx(timer: Optional["DeviceTimer"], category: str):
     """
     if timer is None:
         return nullcontext()
-    return timer.wrap(metadata={"category": category})
+    return timer.wrap(metadata={
+        "category": category,
+        "rids": list(rids or []),
+        "batch_size": batch_size,
+    })
 
 
 class DeviceTimer:
@@ -50,7 +56,23 @@ class DeviceTimer:
             self._intervals.popleft()
             elapsed = interval.elapsed_time() / 1000.0
             for reporter in self._reporters:
-                reporter(t=elapsed, **interval.metadata)
+                if "rids" in interval.metadata:
+                    reporter(
+                        t=elapsed,
+                        category=interval.metadata["category"],
+                        batch_size=interval.metadata.get("batch_size", 0),
+                        rids=interval.metadata["rids"],
+                    )
+                else:
+                    reporter(t=elapsed, **interval.metadata)
+            rids = [r for r in interval.metadata.get("rids", []) if r.startswith("radix8k-perf-")]
+            if rids:
+                import logging
+                logging.getLogger(__name__).info(
+                    "RADIX8K_GPU_FORWARD rids=%s category=%s batch=%d gpu_s=%.9f",
+                    ",".join(rids), interval.metadata.get("category", "unknown"),
+                    interval.metadata.get("batch_size", len(rids)), elapsed,
+                )
 
 
 class GapTimer(DeviceTimer):

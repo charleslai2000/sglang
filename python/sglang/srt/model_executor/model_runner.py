@@ -22,6 +22,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional, Union
 
 import torch
@@ -227,7 +228,7 @@ from sglang.srt.utils import (
 )
 from sglang.srt.utils.device_timer import device_timer_ctx
 from sglang.srt.utils.nvtx_pytorch_hooks import PytHooks
-from sglang.srt.utils.nvtx_utils import profile_range
+from sglang.srt.utils.nvtx_utils import profile_range, radix8k_profiler_nvtx
 from sglang.srt.utils.offloader import (
     create_offloader,
     get_offloader,
@@ -1548,7 +1549,12 @@ class ModelRunner:
             forward_batch.split_index + forward_count,
             self.model_config.num_hidden_layers,
         )
-        with device_timer_ctx(self.device_timer, "split_prefill"):
+        with device_timer_ctx(
+            self.device_timer,
+            "split_prefill",
+            rids=forward_batch.rids or [],
+            batch_size=forward_batch.batch_size,
+        ):
             ret = self.model.forward_split_prefill(
                 forward_batch.input_ids,
                 forward_batch.positions,
@@ -1655,10 +1661,95 @@ class ModelRunner:
 
         return output
 
+    def _capture_g2_kv_runtime(self, forward_batch: ForwardBatch) -> None:
+        """Capture selected post-forward KV slots outside CUDA graph capture."""
+        target = os.environ.get("G2_KV_FORWARD_DIAG")
+        if not target or self.ps.tp_rank != 0:
+            return
+        if getattr(self, "_g2_kv_diag_captured", False):
+            return
+        expected_input_ids = os.environ.get("G2_KV_DIAG_INPUT_IDS")
+        if not expected_input_ids:
+            raise RuntimeError("G2_KV_DIAG_INPUT_IDS is required for diagnostic capture")
+        expected = json.loads(expected_input_ids)
+        actual = forward_batch.input_ids.detach().cpu().reshape(-1).tolist()
+        if actual != expected:
+            return
+        if torch.cuda.is_current_stream_capturing():
+            raise RuntimeError("G2 KV diagnostic cannot stage data during CUDA graph capture")
+        layer_id = int(os.environ.get("G2_KV_DIAG_LAYER", "0"))
+        text_model = getattr(self.model, "model", None)
+        layers = getattr(text_model, "layers", [])
+        layer = layers[layer_id]
+        attention = layer.self_attn.attn
+        allocator = self.token_to_kv_pool_allocator
+        pool = allocator.get_kvcache()
+        physical_slot = int(os.environ.get("G2_KV_DIAG_SLOT", "0"))
+        requested = getattr(forward_batch, "out_cache_loc", None)
+        if requested is not None and requested.numel():
+            physical_slot = int(requested.reshape(-1)[0].item())
+        physical_layer_id = int(attention.layer_id)
+        global_layer_id = int(getattr(layer, "layer_id", layer_id))
+        pool_layer_id = pool.layers_mapping[physical_layer_id][0]
+        is_swa = pool.layers_mapping[physical_layer_id][1]
+        pool_slot = physical_slot
+        if is_swa:
+            pool_slot = int(
+                allocator.translate_loc_from_full_to_swa(
+                    torch.tensor([physical_slot], device=self.device)
+                )[0].item()
+            )
+        key_buffer, value_buffer = pool.get_kv_buffer(global_layer_id)
+        if not 0 <= pool_slot < key_buffer.shape[0]:
+            raise IndexError(f"diagnostic slot {pool_slot} out of range")
+        raw_key = key_buffer[pool_slot].detach().cpu()
+        raw_value = value_buffer[pool_slot].detach().cpu()
+        try:
+            scale_key, scale_value = pool.get_kv_scale_buffer(global_layer_id)
+            raw_scale_key = scale_key.detach().cpu()
+            raw_scale_value = scale_value.detach().cpu()
+        except (AttributeError, NotImplementedError, TypeError):
+            raw_scale_key = raw_scale_value = None
+        from sglang.srt.utils.gemma4_capture import save_gemma4_capture
+
+        record = {
+            "schema": 1,
+            "pid": os.getpid(),
+            "kv_dtype": str(pool.dtype),
+            "pool_type": "swa" if is_swa else "full",
+            "pool_slot": pool_slot,
+            "physical_slot": physical_slot,
+            "layer_id": layer_id,
+            "physical_layer_id": physical_layer_id,
+            "global_layer_id": global_layer_id,
+            "pool_layer_id": pool_layer_id,
+            "shared": getattr(layer.self_attn, "is_kv_shared_layer", None),
+            "owner": getattr(layer.self_attn, "kv_shared_layer_index", None),
+            "effective_kv_owner_layer": physical_layer_id,
+            "full_to_swa_mapping_value": pool_slot if is_swa else None,
+            "k_scale": getattr(attention, "k_scale", None),
+            "v_scale": getattr(attention, "v_scale", None),
+            "k_scale_float": getattr(attention, "k_scale_float", None),
+            "v_scale_float": getattr(attention, "v_scale_float", None),
+            "key_dtype": str(raw_key.dtype),
+            "value_dtype": str(raw_value.dtype),
+            "key_scale_dtype": str(raw_scale_key.dtype) if raw_scale_key is not None else None,
+            "value_scale_dtype": str(raw_scale_value.dtype) if raw_scale_value is not None else None,
+            "key_scale_buffer_sample": raw_scale_key.reshape(-1)[:16] if raw_scale_key is not None else None,
+            "value_scale_buffer_sample": raw_scale_value.reshape(-1)[:16] if raw_scale_value is not None else None,
+            "key_sample": raw_key.reshape(-1)[:16],
+            "value_sample": raw_value.reshape(-1)[:16],
+            "input_ids": forward_batch.input_ids.detach().cpu(),
+            "positions": forward_batch.positions.detach().cpu(),
+        }
+        save_gemma4_capture(record, target)
+        self._g2_kv_diag_captured = True
+
     def _capture_gemma4_decode_logits(
         self, output: ModelRunnerOutput, forward_batch: ForwardBatch
     ) -> None:
         """Optionally persist raw Gemma decode logits after forward and before sampling."""
+        self._capture_g2_kv_runtime(forward_batch)
         if (
             os.environ.get("SGLANG_GEMMA4_CAPTURE_DECODE_LOGITS") != "1"
             or not self.is_generation
@@ -1816,12 +1907,17 @@ class ModelRunner:
                 self.hisparse_coordinator.num_real_reqs.fill_(forward_batch.batch_size)
 
             # Replay cuda graph if applicable
-            if can_run_graph:
-                ret = self.decode_cuda_graph_runner.execute(
-                    forward_batch,
-                    pp_proxy_tensors=pp_proxy_tensors,
-                )
-                return ModelRunnerOutput(logits_output=ret, can_run_graph=can_run_graph)
+            with radix8k_profiler_nvtx(
+                forward_batch,
+                can_run_graph,
+                forward_batch.batch_size if can_run_graph else None,
+            ):
+                if can_run_graph:
+                    ret = self.decode_cuda_graph_runner.execute(
+                        forward_batch,
+                        pp_proxy_tensors=pp_proxy_tensors,
+                    )
+                    return ModelRunnerOutput(logits_output=ret, can_run_graph=can_run_graph)
 
             # DP / MLP-sync padding + attn-tp normalization. Only the decode
             # cuda-graph path above pre-pads its static buffers and returns
@@ -1865,16 +1961,22 @@ class ModelRunner:
                 # TODO: the timing here is too broad -- it also includes
                 # load_batch time. Move it into the prefill cuda graph runner
                 # to capture only the model.forward part.
-                with device_timer_ctx(self.device_timer, category):
+                with radix8k_profiler_nvtx(forward_batch, True), device_timer_ctx(
+                    self.device_timer,
+                    category,
+                    rids=forward_batch.rids or [],
+                    batch_size=forward_batch.batch_size,
+                ):
                     ret = self.prefill_cuda_graph_runner.execute(
                         forward_batch, **kwargs
                     )
                 can_run_graph = True
             else:
                 # Eager: decode / extend / idle dispatched inside the runner.
-                ret = self.eager_runner.execute(
-                    forward_batch, pp_proxy_tensors=pp_proxy_tensors
-                )
+                with radix8k_profiler_nvtx(forward_batch, can_run_graph):
+                    ret = self.eager_runner.execute(
+                        forward_batch, pp_proxy_tensors=pp_proxy_tensors
+                    )
 
             if (
                 forward_batch.global_num_tokens_cpu is not None

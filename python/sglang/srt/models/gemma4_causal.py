@@ -438,6 +438,14 @@ class Gemma4Attention(nn.Module):
             quant_config=quant_config,
             prefix=add_prefix("attn", prefix),
         )
+        self.attn.g2_logical_layer_id = layer_id
+        self.attn.g2_kv_owner_layer = (
+            self.kv_shared_layer_index if self.is_kv_shared_layer else layer_id
+        )
+        self.attn.g2_is_kv_shared_layer = self.is_kv_shared_layer
+        if os.environ.get("G2_KV_TRACE"):
+            self.attn.k_scale_float = 1.0
+            self.attn.v_scale_float = 1.0
 
     def forward(
         self,
@@ -453,6 +461,13 @@ class Gemma4Attention(nn.Module):
         else:
             qkv, _ = self.qkv_proj(hidden_states)
             q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
+
+        if os.environ.get("G2_L5_CAPTURE") == "1":
+            from sglang.srt.utils.gemma4_capture import capture_l5_operator
+            capture_l5_operator("q_proj", self.layer_id, q, forward_batch, q_size=self.q_size, kv_size=self.kv_size, shared=self.is_kv_shared_layer)
+            if k is not None:
+                capture_l5_operator("k_proj", self.layer_id, k, forward_batch)
+                capture_l5_operator("v_proj", self.layer_id, v, forward_batch)
 
         # Fused Q/K/V RMSNorm: replaces three separate norm kernels with one.
         # Preconditions for the fused path: tensors on CUDA or XPU (the kernel
@@ -514,6 +529,13 @@ class Gemma4Attention(nn.Module):
                 v = v.unflatten(-1, (self.num_kv_heads, self.head_dim))
                 v = self.v_norm(v)
 
+        if os.environ.get("G2_L5_CAPTURE") == "1":
+            from sglang.srt.utils.gemma4_capture import capture_l5_operator
+            capture_l5_operator("q_normed", self.layer_id, q, forward_batch)
+            if k is not None:
+                capture_l5_operator("k_normed", self.layer_id, k, forward_batch)
+                capture_l5_operator("v_normed", self.layer_id, v, forward_batch)
+
         # Apply rotary embedding
         use_fused_kv = False
         if k is not None:
@@ -539,6 +561,11 @@ class Gemma4Attention(nn.Module):
             q, _ = self.rotary_emb(positions, q, dummy_k)
 
         q = q.unflatten(-1, (self.num_heads, self.head_dim))
+        if os.environ.get("G2_L5_CAPTURE") == "1":
+            from sglang.srt.utils.gemma4_capture import capture_l5_operator
+            capture_l5_operator("q_rope", self.layer_id, q, forward_batch, head_dim=self.head_dim, rotary_dim=self.rotary_emb.rotary_dim, rope_base=self.rotary_emb.base, rope_type=self.rotary_emb.__class__.__name__)
+            if k is not None:
+                capture_l5_operator("k_rope", self.layer_id, k, forward_batch)
         attn_output = self.attn(
             q,
             k,
@@ -546,9 +573,66 @@ class Gemma4Attention(nn.Module):
             forward_batch=forward_batch,
             save_kv_cache=not self.is_kv_shared_layer and not use_fused_kv,
         )
+        from sglang.srt.utils.gemma4_capture import capture_g2_kv_stage
+
+        capture_g2_kv_stage("attention_output", self.attn, forward_batch, q, attn_output)
+        if os.environ.get("G2_L5_CAPTURE") == "1":
+            from sglang.srt.utils.gemma4_capture import capture_l5_operator
+            capture_l5_operator("attention_output", self.layer_id, attn_output, forward_batch)
+        # Diagnostic-only counterfactual seam for the fixed G2 4K experiment.
+        # The replacement is applied before flattening/o_proj, at one logical
+        # layer and one token row; production behavior is unchanged unless the
+        # explicit environment variable is set.
+        replacement_path = os.environ.get("G2_4K_ATTN_REPLACE_FILE")
+        capture_path = os.environ.get("G2_4K_ATTN_OUTPUT_FILE")
+        capture_layer = int(os.environ.get("G2_4K_ATTN_REPLACE_LAYER", "17"))
+        capture_position = int(os.environ.get("G2_4K_ATTN_REPLACE_POSITION", "4095"))
+        capture_logical_layer = int(getattr(self.attn, "g2_logical_layer_id", self.attn.layer_id))
+        if capture_path and capture_logical_layer == capture_layer and not torch.cuda.is_current_stream_capturing():
+            positions_cpu = forward_batch.positions.detach().cpu().tolist()
+            rows = [i for i, p in enumerate(positions_cpu) if int(p) == capture_position]
+            if rows:
+                from sglang.srt.utils.gemma4_capture import save_gemma4_capture
+                save_gemma4_capture({"layer": capture_layer, "position": capture_position,
+                                     "input_id": int(forward_batch.input_ids[rows[0]].item()),
+                                     "output": attn_output[rows[0]:rows[0] + 1].detach().float().cpu()},
+                                    capture_path)
+        if (
+            replacement_path
+            and int(getattr(self.attn, "g2_logical_layer_id", self.attn.layer_id))
+            == int(os.environ.get("G2_4K_ATTN_REPLACE_LAYER", "17"))
+            and not torch.cuda.is_current_stream_capturing()
+        ):
+            positions_cpu = forward_batch.positions.detach().cpu().tolist()
+            rows = [i for i, p in enumerate(positions_cpu) if int(p) == int(os.environ.get("G2_4K_ATTN_REPLACE_POSITION", "4095"))]
+            if rows:
+                replacement = torch.load(replacement_path, map_location="cpu", weights_only=True)
+                value = replacement["output"] if isinstance(replacement, dict) else replacement
+                value = value.to(device=attn_output.device, dtype=attn_output.dtype)
+                if value.shape == (1, *attn_output.shape[1:]):
+                    value = value[0]
+                if tuple(value.shape) != tuple(attn_output.shape[1:]):
+                    raise RuntimeError(f"G2 attention replacement shape {tuple(value.shape)} does not match row {tuple(attn_output.shape[1:])}")
+                attn_output[rows] = value
+        applied_path = os.environ.get("G2_4K_ATTN_APPLIED_FILE")
+        if applied_path and capture_logical_layer == capture_layer and not torch.cuda.is_current_stream_capturing():
+            positions_cpu = forward_batch.positions.detach().cpu().tolist()
+            rows = [i for i, p in enumerate(positions_cpu) if int(p) == capture_position]
+            if rows:
+                from sglang.srt.utils.gemma4_capture import save_gemma4_capture
+                save_gemma4_capture({"layer": capture_layer, "position": capture_position,
+                                     "input_id": int(forward_batch.input_ids[rows[0]].item()),
+                                     "output": attn_output[rows[0]:rows[0] + 1].detach().float().cpu()},
+                                    applied_path)
         if attn_output.dim() == 3:
             attn_output = attn_output.flatten(-2, -1)
+        if os.environ.get("G2_L5_CAPTURE") == "1":
+            from sglang.srt.utils.gemma4_capture import capture_l5_operator
+            capture_l5_operator("o_proj_input", self.layer_id, attn_output, forward_batch)
         output, _ = self.o_proj(attn_output)
+        if os.environ.get("G2_L5_CAPTURE") == "1":
+            from sglang.srt.utils.gemma4_capture import capture_l5_operator
+            capture_l5_operator("o_proj", self.layer_id, output, forward_batch)
 
         return output
 
@@ -698,15 +782,38 @@ class Gemma4DecoderLayer(nn.Module):
         #   residual = h + residual (in-place)
         #   h = gemma_norm(residual)
         residual = hidden_states
+        if os.environ.get("G2_4K_BOUNDARY_FILE"):
+            from sglang.srt.utils.gemma4_capture import capture_g2_4k_boundary
 
+            capture_g2_4k_boundary("layer_input", self.layer_id, hidden_states, forward_batch)
+
+        # Optional single-layer diagnostic boundary capture; no arithmetic changes.
+        if os.environ.get("G2_L5_CAPTURE") == "1":
+            from sglang.srt.utils.gemma4_capture import capture_l5_operator
+            capture_l5_operator("block_input", self.layer_id, hidden_states, forward_batch)
         # Apply input layernorm
         hidden_states = self.input_layernorm(hidden_states)
+        if os.environ.get("G2_L5_CAPTURE") == "1":
+            from sglang.srt.utils.gemma4_capture import capture_l5_operator
+            capture_l5_operator("attn_normed_input", self.layer_id, hidden_states, forward_batch)
         hidden_states = self.self_attn(
             positions=positions,
             hidden_states=hidden_states,
             forward_batch=forward_batch,
         )
+        if os.environ.get("G2_4K_BOUNDARY_FILE"):
+            from sglang.srt.utils.gemma4_capture import capture_g2_4k_boundary
+
+            capture_g2_4k_boundary("attention_output", self.layer_id, hidden_states, forward_batch)
         hidden_states = self.post_attention_layernorm(hidden_states)
+        if os.environ.get("G2_L5_CAPTURE") == "1":
+            from sglang.srt.utils.gemma4_capture import capture_l5_operator
+            capture_l5_operator("post_attention_normed", self.layer_id, hidden_states, forward_batch)
+
+        if os.environ.get("G2_4K_BOUNDARY_FILE"):
+            from sglang.srt.utils.gemma4_capture import capture_g2_4k_boundary
+
+            capture_g2_4k_boundary("attention_output_normed", self.layer_id, hidden_states, forward_batch)
 
         if self.enable_moe_block:
             # Fuse: hidden_states + residual -> residual; pre_ff_norm(residual) -> hidden_states
@@ -768,6 +875,10 @@ class Gemma4DecoderLayer(nn.Module):
             # Combine branches
             hidden_states = hidden_states_1 + hidden_states_2
         else:
+            if os.environ.get("G2_L5_CAPTURE") == "1":
+                from sglang.srt.utils.gemma4_capture import capture_l5_operator
+                capture_l5_operator("pre_ff_normed", self.layer_id, hidden_states, forward_batch)
+                capture_l5_operator("pre_ff_residual", self.layer_id, residual, forward_batch)
             # Fuse: hidden_states + residual -> residual; pre_ff_norm(residual) -> hidden_states
             if os.environ.get("SGLANG_GEMMA4_BF16_RESIDUAL_NORM_AB") == "1":
                 # Diagnostic B only: preserve the HF BF16 residual boundary for
@@ -785,7 +896,18 @@ class Gemma4DecoderLayer(nn.Module):
                 hidden_states, residual = self.pre_feedforward_layernorm(
                     hidden_states, residual
                 )
+            if os.environ.get("G2_L5_CAPTURE") == "1":
+                from sglang.srt.utils.gemma4_capture import capture_l5_operator
+                capture_l5_operator("ffn_input", self.layer_id, hidden_states, forward_batch)
             hidden_states = self.mlp(hidden_states)
+
+        if os.environ.get("G2_L5_CAPTURE") == "1":
+            from sglang.srt.utils.gemma4_capture import capture_l5_operator
+            capture_l5_operator("ffn_output", self.layer_id, hidden_states, forward_batch)
+        if os.environ.get("G2_4K_BOUNDARY_FILE"):
+            from sglang.srt.utils.gemma4_capture import capture_g2_4k_boundary
+
+            capture_g2_4k_boundary("ffn_output", self.layer_id, hidden_states, forward_batch)
 
         if (
             not self.has_ple
@@ -809,14 +931,35 @@ class Gemma4DecoderLayer(nn.Module):
             if self.has_ple and per_layer_input is not None:
                 gate, _ = self.per_layer_input_gate(hidden_states)
                 gate = torch.nn.functional.gelu(gate, approximate="tanh")
+                if os.environ.get("G2_L5_CAPTURE") == "1":
+                    from sglang.srt.utils.gemma4_capture import capture_l5_operator
+                    capture_l5_operator("ple_gate", self.layer_id, gate, forward_batch)
+                    capture_l5_operator("ple_input", self.layer_id, per_layer_input, forward_batch)
                 gated_per_layer = gate * per_layer_input
+                if os.environ.get("G2_L5_CAPTURE") == "1":
+                    from sglang.srt.utils.gemma4_capture import capture_l5_operator
+                    capture_l5_operator("ple_gated_input", self.layer_id, gated_per_layer, forward_batch)
                 per_layer_contribution, _ = self.per_layer_projection(gated_per_layer)
+                if os.environ.get("G2_L5_CAPTURE") == "1":
+                    from sglang.srt.utils.gemma4_capture import capture_l5_operator
+                    capture_l5_operator("ple_projection", self.layer_id, per_layer_contribution, forward_batch)
                 per_layer_contribution = self.post_per_layer_input_norm(
                     per_layer_contribution
                 )
                 hidden_states = hidden_states + per_layer_contribution
+                if os.environ.get("G2_L5_CAPTURE") == "1":
+                    from sglang.srt.utils.gemma4_capture import capture_l5_operator
+                    capture_l5_operator("ple_contribution", self.layer_id, per_layer_contribution, forward_batch)
+                    capture_l5_operator("post_ple", self.layer_id, hidden_states, forward_batch)
 
             hidden_states = hidden_states * self.layer_scalar
+        if os.environ.get("G2_4K_BOUNDARY_FILE"):
+            from sglang.srt.utils.gemma4_capture import capture_g2_4k_boundary
+
+            capture_g2_4k_boundary("layer_output", self.layer_id, hidden_states, forward_batch)
+        if os.environ.get("G2_L5_CAPTURE") == "1":
+            from sglang.srt.utils.gemma4_capture import capture_l5_operator
+            capture_l5_operator("layer_output", self.layer_id, hidden_states, forward_batch)
         return hidden_states, None
 
 
@@ -869,12 +1012,29 @@ class Gemma4TextModel(PreTrainedModel):
                 )
 
         if self.pp_group.is_first_rank:
-            self.embed_tokens = Gemma4TextScaledWordEmbedding(
-                config.vocab_size,
-                config.hidden_size,
-                self.padding_idx,
-                embed_scale=self.config.hidden_size**0.5,  # embedded normalizer
-            )
+            if quant_config is not None and quant_config.get_name() == "gguf":
+                from sglang.srt.layers.vocab_parallel_embedding import VocabParallelEmbedding
+
+                self.embed_tokens = VocabParallelEmbedding(
+                    config.vocab_size,
+                    config.hidden_size,
+                    quant_config=quant_config,
+                    org_num_embeddings=config.vocab_size,
+                    prefix=add_prefix("embed_tokens", prefix),
+                    enable_tp=True,
+                )
+                self.embed_tokens.register_buffer(
+                    "embed_scale",
+                    torch.tensor(self.config.hidden_size**0.5),
+                    persistent=False,
+                )
+            else:
+                self.embed_tokens = Gemma4TextScaledWordEmbedding(
+                    config.vocab_size,
+                    config.hidden_size,
+                    self.padding_idx,
+                    embed_scale=self.config.hidden_size**0.5,  # embedded normalizer
+                )
         else:
             self.embed_tokens = PPMissingLayer()
 
@@ -883,12 +1043,29 @@ class Gemma4TextModel(PreTrainedModel):
             and self.hidden_size_per_layer_input
             and self.hidden_size_per_layer_input > 0
         ):
-            self.embed_tokens_per_layer = Gemma4TextScaledWordEmbedding(
-                self.vocab_size_per_layer_input,
-                config.num_hidden_layers * self.hidden_size_per_layer_input,
-                self.padding_idx,
-                embed_scale=self.hidden_size_per_layer_input**0.5,
-            )
+            if quant_config is not None and quant_config.get_name() == "gguf":
+                from sglang.srt.layers.vocab_parallel_embedding import VocabParallelEmbedding
+
+                self.embed_tokens_per_layer = VocabParallelEmbedding(
+                    self.vocab_size_per_layer_input,
+                    config.num_hidden_layers * self.hidden_size_per_layer_input,
+                    quant_config=quant_config,
+                    org_num_embeddings=self.vocab_size_per_layer_input,
+                    prefix=add_prefix("embed_tokens_per_layer", prefix),
+                    enable_tp=True,
+                )
+                self.embed_tokens_per_layer.register_buffer(
+                    "embed_scale",
+                    torch.tensor(self.hidden_size_per_layer_input**0.5),
+                    persistent=False,
+                )
+            else:
+                self.embed_tokens_per_layer = Gemma4TextScaledWordEmbedding(
+                    self.vocab_size_per_layer_input,
+                    config.num_hidden_layers * self.hidden_size_per_layer_input,
+                    self.padding_idx,
+                    embed_scale=self.hidden_size_per_layer_input**0.5,
+                )
 
             self.per_layer_model_projection = ReplicatedLinear(
                 self.hidden_size,
@@ -955,6 +1132,10 @@ class Gemma4TextModel(PreTrainedModel):
 
         # Get packed per-layer embeddings: (num_tokens, total_ple_dim)
         per_layer_embeds = self.embed_tokens_per_layer(per_layer_inputs_tokens)
+        if self.quant_config is not None and self.quant_config.get_name() == "gguf":
+            per_layer_embeds = per_layer_embeds * self.embed_tokens_per_layer.embed_scale.to(
+                dtype=per_layer_embeds.dtype, device=per_layer_embeds.device
+            )
 
         # Apply embed_scale (sqrt of per-layer hidden dim)
         # Already done in embedding layer
@@ -1025,6 +1206,10 @@ class Gemma4TextModel(PreTrainedModel):
 
             if input_ids is not None:
                 input_embeds = self.embed_tokens(input_ids)
+                if self.quant_config is not None and self.quant_config.get_name() == "gguf":
+                    input_embeds = input_embeds * self.embed_tokens.embed_scale.to(
+                        dtype=input_embeds.dtype, device=input_embeds.device
+                    )
                 per_layer_inputs = self.get_per_layer_inputs(input_ids)
             per_layer_inputs = self.project_per_layer_inputs(
                 input_embeds, per_layer_inputs
@@ -1088,6 +1273,31 @@ class Gemma4TextModel(PreTrainedModel):
 
                 save_gemma4_capture(record, f"{path}.{forward_id}.ple.{layer_idx}")
             layer = self.layers[layer_idx]
+            if (os.environ.get("SGLANG_GEMMA4_CAPTURE_LAYER_POSITIONS") == "1" or os.environ.get("G2_4K_BOUNDARY_ALL") == "1") and not torch.cuda.is_current_stream_capturing():
+                capture_env = os.environ.get("SGLANG_GEMMA4_LAYERS_FILE") or os.environ.get("G2_4K_BOUNDARY_FILE")
+                if capture_env and forward_batch.gemma4_forward_id:
+                    from sglang.srt.utils.gemma4_capture import save_gemma4_capture
+                    selected_positions = {2048, 2558, 2559, 3069, 3070, 3580, 3581, 4091, 4092, 4095}
+                    selected_layers = {0, 3, 4, 5, 11, 17, 23, 29, 35, 41}
+                    for capture_row, capture_pos in enumerate(positions.detach().cpu().tolist()):
+                        if layer_idx not in selected_layers:
+                            continue
+                        if int(capture_pos) in selected_positions and layer_idx in (0, 3, 4, 5, 11, 17, 23, 29, 35, 41):
+                            save_gemma4_capture({
+                                "forward_id": forward_batch.gemma4_forward_id,
+                                "model_identity": json.loads(os.environ.get("GEMMA4_MODEL_IDENTITY", "{}")),
+                                "layer": layer_idx, "input_id": int(forward_batch.input_ids[capture_row].item()),
+                                "position": int(capture_pos), "boundary": "layer_input",
+                                "value": hidden_states[capture_row:capture_row + 1].detach().float().cpu(),
+                            }, f"{capture_env}.{forward_batch.gemma4_forward_id}.layer{layer_idx}.pos{capture_pos}.input")
+                        if layer_idx in (0, 3, 4, 5, 11, 17, 23, 29, 35, 41) and int(capture_pos) in selected_positions:
+                            from sglang.srt.utils.gemma4_capture import save_gemma4_capture
+                            save_gemma4_capture({
+                                "forward_id": forward_batch.gemma4_forward_id,
+                                "layer": layer_idx, "position": int(capture_pos),
+                                "input_id": int(forward_batch.input_ids[capture_row].item()),
+                                "value": per_layer_input[capture_row:capture_row + 1].detach().float().cpu(),
+                            }, f"{capture_env}.{forward_batch.gemma4_forward_id}.layer{layer_idx}.pos{capture_pos}.ple")
             layer_outputs = layer(
                 positions=positions,
                 hidden_states=hidden_states,
@@ -1125,6 +1335,23 @@ class Gemma4TextModel(PreTrainedModel):
                     save_gemma4_capture(
                         record, f"{path}.{forward_id}.layer_output.{layer_idx}"
                     )
+                if os.environ.get("SGLANG_GEMMA4_CAPTURE_LAYER_POSITIONS") == "1" and not torch.cuda.is_current_stream_capturing():
+                    path = os.environ.get("SGLANG_GEMMA4_LAYERS_FILE")
+                    if path and forward_batch.gemma4_forward_id:
+                        rid = forward_batch.rids[0] if forward_batch.rids else "unknown-rid"
+                        selected_positions = {2048, 2558, 2559, 3069, 3070, 3580, 3581, 4091, 4092, 4095}
+                        for row_index, position in enumerate(positions.detach().cpu().tolist()):
+                            if int(position) not in selected_positions or layer_idx not in (0, 3, 4, 5, 11, 17, 23, 29, 35, 41):
+                                continue
+                            save_gemma4_capture({
+                                "forward_id": forward_batch.gemma4_forward_id,
+                                "model_identity": json.loads(os.environ.get("GEMMA4_MODEL_IDENTITY", "{}")),
+                                "rid": [rid], "layer": layer_idx,
+                                "forward_mode": forward_batch.forward_mode.name,
+                                "input_id": int(forward_batch.input_ids[row_index].item()),
+                                "position": int(position),
+                                "value": hidden_states[row_index:row_index + 1].detach().float().cpu(),
+                            }, f"{path}.{forward_batch.gemma4_forward_id}.layer{layer_idx}.pos{position}.output")
             # Gemma4DecoderLayer.forward always returns (hidden_states, None);
             # the residual is fused inside the layer, so nothing to thread.
 
@@ -1296,7 +1523,11 @@ class Gemma4ForCausalLM(PreTrainedModel):
         # which makes the default tie_weights crash.  load_weights routes the
         # checkpoint embedding into lm_head explicitly, so the tie is a no-op
         # here when PP is active.
-        if self.pp_group.world_size > 1:
+        if self.pp_group.world_size > 1 or (
+            self.quant_config is not None and self.quant_config.get_name() == "gguf"
+        ):
+            # GGUF's tied embedding is a packed qweight/qweight_type pair, not
+            # a dense `weight` parameter understood by Transformers.
             return
         super().tie_weights(*args, **kwargs)
 
@@ -1455,6 +1686,13 @@ class Gemma4ForCausalLM(PreTrainedModel):
             # MoE expert weights checked first (gate_up_proj contains "up_proj"
             # which would false-match the stacked dense MLP mapping).
             orig_name = name
+            shared_layer_id = None
+            if self.config.num_kv_shared_layers:
+                layer_match = re.search(r"layers\.(\d+)\.", orig_name)
+                if layer_match is not None:
+                    candidate = int(layer_match.group(1))
+                    if candidate >= self.config.num_hidden_layers - self.config.num_kv_shared_layers:
+                        shared_layer_id = candidate
 
             # 1) Per-expert checkpoint layout (compressed-tensors FP8 like
             #    RedHatAI/*-FP8-Dynamic, ModelOpt NVFP4 like

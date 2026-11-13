@@ -14,6 +14,11 @@ def ggml_mul_mat_vec_a8(
     return torch.ops.sgl_kernel.ggml_mul_mat_vec_a8.default(weight, x, quant_type, row)
 
 
+def gguf_q4_0_llama_mmq_m32(weight: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+    """Exact-pin llama.cpp Q4_0 stream-K MMQ for supported decode M32 shapes."""
+    return torch.ops.sgl_kernel.gguf_q4_0_llama_mmq_m32.default(weight, x)
+
+
 def ggml_mul_mat_a8(
     weight: torch.Tensor, x: torch.Tensor, quant_type: int, row: int
 ) -> torch.Tensor:

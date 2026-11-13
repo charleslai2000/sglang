@@ -34,10 +34,12 @@ from typing import Any, Callable, Dict, Optional
 
 from transformers import PretrainedConfig
 
+from sglang.srt.configs.gemma4_gguf import Gemma4GGUFTextConfig
 from sglang.srt.configs.muse_glimmer import MuseGlimmerConfig
 from sglang.srt.configs.qwen3_5 import Qwen3_5TextConfig
 
 GGUF_NATIVE_CONFIG_BUILDERS: Dict[str, Callable[[str], PretrainedConfig]] = {
+    "gemma4": Gemma4GGUFTextConfig.from_gguf,
     "muse-glimmer": MuseGlimmerConfig.from_gguf,
     # llama.cpp spells the Qwen3.5 archive architecture "qwen35"; the HF side of
     # the same checkpoint is the text backbone (``qwen3_5_text``).
@@ -86,6 +88,9 @@ _PRE_TOKENIZER_REGEX = {
     ),
     "gpt-4o": _GPT4O_SPLIT_REGEX,
     "llama4": _GPT4O_SPLIT_REGEX,
+    # The model label is corrected below when only `tokenizer.ggml.model`
+    # is available: Gemma4 uses SentencePiece-style BPE, not a GPT regex.
+    "gemma4": _GPT4O_SPLIT_REGEX,
     # LLAMA_VOCAB_PRE_TYPE_QWEN35 from llama.cpp src/llama-vocab.cpp. The HF
     # tokenizer.json expresses the same split case-insensitively; llama.cpp
     # expands it because its regex engine has no inline ``(?i:...)``.
@@ -162,7 +167,10 @@ def build_gguf_tokenizer(gguf_path: str, **kwargs: Any):
     token_types = [int(t) for t in meta["tokenizer.ggml.token_type"]]
     merges = [tuple(m.split(" ", 1)) for m in meta["tokenizer.ggml.merges"]]
 
-    pre_name = meta.get("tokenizer.ggml.pre")
+    has_pre_tokenizer = meta.get("tokenizer.ggml.pre") is not None
+    pre_name = meta.get("tokenizer.ggml.pre") or meta.get("tokenizer.ggml.model")
+    if not has_pre_tokenizer and pre_name == "gpt2":
+        pre_name = "gemma4"
     if pre_name not in _PRE_TOKENIZER_REGEX:
         raise ValueError(
             f"No pre-tokenizer regex known for tokenizer.ggml.pre={pre_name!r}; "
@@ -209,39 +217,63 @@ def build_gguf_tokenizer(gguf_path: str, **kwargs: Any):
             }
             for i in special_ids
         ],
-        "normalizer": None,
-        "pre_tokenizer": {
-            "type": "Sequence",
-            "pretokenizers": [
-                {
-                    "type": "Split",
-                    "pattern": {"Regex": _PRE_TOKENIZER_REGEX[pre_name]},
-                    "behavior": "Isolated",
-                    "invert": False,
-                },
-                {
-                    "type": "ByteLevel",
-                    "add_prefix_space": False,
-                    "trim_offsets": True,
-                    "use_regex": False,
-                },
-            ],
-        },
+        "normalizer": (
+            {"type": "Replace", "pattern": {"String": " "}, "content": "▁"}
+            if pre_name == "gemma4"
+            else None
+        ),
+        "pre_tokenizer": (
+            {
+                "type": "Split",
+                "pattern": {"String": " "},
+                "behavior": "MergedWithPrevious",
+                "invert": False,
+            }
+            if pre_name == "gemma4"
+            else {
+                "type": "Sequence",
+                "pretokenizers": [
+                    {
+                        "type": "Split",
+                        "pattern": {"Regex": _PRE_TOKENIZER_REGEX[pre_name]},
+                        "behavior": "Isolated",
+                        "invert": False,
+                    },
+                    {
+                        "type": "ByteLevel",
+                        "add_prefix_space": False,
+                        "trim_offsets": True,
+                        "use_regex": False,
+                    },
+                ],
+            }
+        ),
         "post_processor": None,
-        "decoder": {
-            "type": "ByteLevel",
-            "add_prefix_space": True,
-            "trim_offsets": True,
-            "use_regex": True,
-        },
+        "decoder": (
+            {
+                "type": "Sequence",
+                "decoders": [
+                    {"type": "Replace", "pattern": {"String": "▁"}, "content": " "},
+                    {"type": "ByteFallback"},
+                    {"type": "Fuse"},
+                ],
+            }
+            if pre_name == "gemma4"
+            else {
+                "type": "ByteLevel",
+                "add_prefix_space": True,
+                "trim_offsets": True,
+                "use_regex": True,
+            }
+        ),
         "model": {
             "type": "BPE",
             "dropout": None,
-            "unk_token": None,
+            "unk_token": tokens[3],
             "continuing_subword_prefix": None,
             "end_of_word_suffix": None,
-            "fuse_unk": False,
-            "byte_fallback": False,
+            "fuse_unk": True,
+            "byte_fallback": True,
             "ignore_merges": True,
             "vocab": vocab,
             "merges": [list(m) for m in merges],

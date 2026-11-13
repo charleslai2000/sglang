@@ -1,0 +1,6 @@
+Pinned source: llama.cpp ce8caa6e60a03093351d6016a818720e0d46f0fb
+Donor CUDA algorithm headers are copied verbatim from ggml/src/ggml-cuda.
+ggml public/runtime-facing headers are reduced compatibility stubs for the AOT leaf.
+Original donor header copyright/license notices are retained.
+
+`quantize.cu` contains the verbatim MMQ Q8_1 template and dispatcher range extracted from the pinned commit's `ggml/src/ggml-cuda/quantize.cu`, wrapped in `llama_donor` to avoid symbols colliding with the SGLang AOT quantizer. Original surrounding copyright/license header retained below.

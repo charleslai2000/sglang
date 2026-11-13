@@ -432,6 +432,8 @@ TORCH_LIBRARY_FRAGMENT(sgl_kernel, m) {
 
   m.def("ggml_mul_mat_a8(Tensor W, Tensor X, int type, SymInt row) -> Tensor");
   m.impl("ggml_mul_mat_a8", torch::kCUDA, &ggml_mul_mat_a8);
+  m.def("gguf_q4_0_llama_mmq_m32(Tensor W, Tensor X) -> Tensor");
+  m.impl("gguf_q4_0_llama_mmq_m32", torch::kCUDA, &gguf_q4_0_llama_mmq_m32);
 
   m.def(
       "ggml_moe_a8(Tensor X, Tensor W, "

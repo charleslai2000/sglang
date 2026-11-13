@@ -68,6 +68,33 @@ _NULL_CONTEXT = nullcontext()
 
 
 @contextmanager
+def radix8k_profiler_nvtx(forward_batch, can_run_graph=None, graph_bucket=None):
+    """Opt-in, identity-rich NVTX range for bounded Gemma4 Radix profiling."""
+    import os
+
+    if os.environ.get("SGLANG_RADIX8K_PROFILER_NVTX") != "1":
+        yield
+        return
+
+    try:
+        import nvtx
+    except ImportError:
+        yield
+        return
+
+    rids = ",".join(forward_batch.rids or [])
+    step = forward_batch.profiler_forward_iter
+    mode = forward_batch.forward_mode.name
+    graph = int(bool(can_run_graph))
+    label = (
+        f"RADIX8K_FWD step={step} mode={mode} batch={forward_batch.batch_size} "
+        f"graph={graph} bucket={graph_bucket} rids={rids}"
+    )
+    with nvtx.annotate(label, color="blue"):
+        yield
+
+
+@contextmanager
 def _profile_range_impl(
     debug_name: str, color: Optional[str], record: bool, nvtx_enabled: bool
 ):

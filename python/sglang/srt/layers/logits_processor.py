@@ -422,9 +422,20 @@ class LogitsProcessor(nn.Module):
                 and logits_metadata.gemma4_capture_logits is not None
                 and not torch.cuda.is_current_stream_capturing()
             ):
-                logits_metadata.gemma4_capture_logits.append(logits.detach().float())
+                # Snapshot immediately: `_get_logits` may return a reusable graph
+                # buffer, and later sampling/logprob forwards can overwrite it before
+                # the deferred diagnostic writer serializes the capture.
+                logits_metadata.gemma4_capture_logits.append(logits.detach().float().clone())
                 if logits_metadata.gemma4_logits_path and source_forward_batch.gemma4_forward_id:
                     fb = source_forward_batch
+                    from sglang.srt.utils.gemma4_capture import snapshot_gemma4_logits_capture
+
+                    snapshot = snapshot_gemma4_logits_capture(logits, fb)
+                    capture_input_ids = snapshot["input_ids"]
+                    capture_positions = snapshot["positions"]
+                    capture_extend_seq_lens = snapshot["extend_seq_lens"]
+                    capture_extend_prefix_lens = snapshot["extend_prefix_lens"]
+                    capture_extend_seq_lens_cpu = snapshot["extend_seq_lens_cpu"]
                     rid = fb.rids[0] if fb is not None and fb.rids else "unknown-rid"
                     forward_id = fb.gemma4_forward_id if fb is not None else None
                     if not forward_id:
@@ -435,17 +446,17 @@ class LogitsProcessor(nn.Module):
                         "rid": [rid],
                         "batch_size": fb.batch_size,
                         "forward_mode": logits_metadata.forward_mode.name,
-                        "input_ids": fb.input_ids.detach().cpu() if fb is not None else None,
-                        "positions": fb.positions.detach().cpu() if fb is not None else None,
-                        "extend_seq_lens": fb.extend_seq_lens.detach().cpu() if fb.extend_seq_lens is not None else None,
-                        "extend_seq_lens_cpu": fb.extend_seq_lens_cpu,
-                        "extend_prefix_lens": fb.extend_prefix_lens.detach().cpu() if fb.extend_prefix_lens is not None else None,
-                        "positions_start": int(fb.positions[0].item()) if fb.positions.numel() else None,
-                        "positions_end": int(fb.positions[-1].item()) if fb.positions.numel() else None,
+                        "input_ids": capture_input_ids,
+                        "positions": capture_positions,
+                        "extend_seq_lens": capture_extend_seq_lens,
+                        "extend_seq_lens_cpu": capture_extend_seq_lens_cpu,
+                        "extend_prefix_lens": capture_extend_prefix_lens,
+                        "positions_start": int(capture_positions[0].item()) if capture_positions.numel() else None,
+                        "positions_end": int(capture_positions[-1].item()) if capture_positions.numel() else None,
                         "shape": tuple(logits.shape),
                         "dtype": str(logits.dtype),
                         "boundary": "lm_head_logits_after_vocab_gather_before_sampling",
-                        "output": logits.detach().float().cpu(),
+                        "output": snapshot["output"],
                     }
                     output_path = f"{logits_metadata.gemma4_logits_path}.{forward_id}.logits"
                     from sglang.srt.utils.gemma4_capture import save_gemma4_capture

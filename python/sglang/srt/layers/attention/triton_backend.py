@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, List, Optional
 
+import os
 import torch
 import triton
 
@@ -176,6 +177,7 @@ class TritonAttnBackend(AttentionBackend):
         self.extend_attention_fwd_unified = torch.compiler.disable(
             extend_attention_fwd_unified
         )
+        self.g2_counterfactual_extend_attention_fwd_unified = self.extend_attention_fwd_unified
         self.build_unified_kv_indices = torch.compiler.disable(build_unified_kv_indices)
         # Split-KV EAGLE-verify kernel; enabled below once topk is known (valid only at topk == 1).
         self.verify_splitkv_fwd = torch.compiler.disable(verify_splitkv_fwd)
@@ -1347,6 +1349,19 @@ class TritonAttnBackend(AttentionBackend):
                 # The Triton extend kernels consume dequant scales for cached
                 # prefix blocks. Keep the freshly read shared K/V in cache
                 # representation and let those kernels apply the scale once.
+            from sglang.srt.utils.gemma4_capture import capture_g2_kv_stage
+
+            capture_g2_kv_stage(
+                "attention_read_shared" if getattr(layer, "g2_is_kv_shared_layer", False) else "attention_read",
+                layer,
+                forward_batch,
+                q,
+                k,
+                v,
+                pool,
+                getattr(self, "token_to_kv_pool_allocator", None),
+            )
+
         elif k is None or v is None:
             raise ValueError("Both k and v should be None or not None")
         else:
@@ -1357,9 +1372,7 @@ class TritonAttnBackend(AttentionBackend):
                     self.forward_metadata.swa_out_cache_loc,
                     full_loc=self.forward_metadata.out_cache_loc_full_physical,
                 )
-                if layer.k_scale is None:
-                    self._set_kv_buffer(forward_batch, layer, loc_info, k, v)
-                elif self.use_mla:
+                if self.use_mla:
                     # For MLA, scale K manually before storing since MLATokenToKVPool
                     # doesn't accept scale parameters. Clone to protect k from mutation
                     # since it's used later in the attention kernel.
@@ -1371,6 +1384,11 @@ class TritonAttnBackend(AttentionBackend):
                         v,
                     )
                 else:
+                    pool = self.token_to_kv_pool
+                    allocator = self.token_to_kv_pool_allocator
+                    from sglang.srt.utils.gemma4_capture import capture_g2_kv_stage
+
+                    capture_g2_kv_stage("pre_write", layer, forward_batch, q, k, v, pool, allocator)
                     self._set_kv_buffer(
                         forward_batch,
                         layer,
@@ -1380,6 +1398,21 @@ class TritonAttnBackend(AttentionBackend):
                         layer.k_scale,
                         layer.v_scale,
                     )
+                    capture_g2_kv_stage("post_write", layer, forward_batch, q, None, None, pool, allocator)
+                    loc = forward_batch.out_cache_loc
+                    if isinstance(pool, SWAKVPool) and pool.layers_mapping[layer.layer_id][1]:
+                        loc = pool.translate_loc_from_full_to_swa(loc)
+                    elif self._translate_kv_loc is not None:
+                        loc = self._translate_kv_loc(loc)
+                    kb, vb = pool.get_kv_buffer(layer.layer_id)
+                    read_k_scale = getattr(layer, "k_scale_float", None) or 1.0
+                    read_v_scale = getattr(layer, "v_scale_float", None) or 1.0
+                    if os.environ.get("G2_4K_KV_WRITE_FILE") and not torch.cuda.is_current_stream_capturing():
+                        from sglang.srt.utils.gemma4_capture import capture_g2_4k_current_kv
+                        capture_g2_4k_current_kv(layer, loc, kb, vb, k, v, forward_batch)
+                    read_k = kb[loc].to(q.dtype) * read_k_scale
+                    read_v = vb[loc].to(q.dtype) * read_v_scale
+                    capture_g2_kv_stage("attention_read", layer, forward_batch, q, read_k, read_v, pool, allocator)
 
         logits_soft_cap = logit_capping_mod(layer.logit_capping_method, layer.logit_cap)
 
@@ -1405,6 +1438,9 @@ class TritonAttnBackend(AttentionBackend):
 
         # Deterministic mode: use unified 1-stage kernel
         if self.enable_deterministic:
+            if os.environ.get("G2_4K_ATTN_BACKEND_CAPTURE") and int(getattr(layer, "g2_logical_layer_id", layer.layer_id)) == 17 and not torch.cuda.is_current_stream_capturing():
+                from sglang.srt.utils.gemma4_capture import save_gemma4_capture
+                save_gemma4_capture({"q": q.view(-1, layer.tp_q_head_num, layer.qk_head_dim).detach().cpu(), "k_current": None if k is None else k.detach().cpu(), "v_current": None if v is None else v.detach().cpu(), "kv_indptr": self.forward_metadata.kv_indptr.detach().cpu(), "kv_indices": self.forward_metadata.kv_indices.detach().cpu(), "window_kv_indptr": self.forward_metadata.window_kv_indptr.detach().cpu(), "window_kv_indices": self.forward_metadata.window_kv_indices.detach().cpu() if self.forward_metadata.window_kv_indices is not None else None, "sm_scale": float(layer.scaling), "k_scale": float(layer.k_scale_float or 1.0), "v_scale": float(layer.v_scale_float or 1.0), "causal": causal, "sliding_window_size": int(layer.sliding_window_size or -1), "logit_cap": float(logits_soft_cap or 0.0), "custom_mask": self.forward_metadata.custom_mask, "mask_indptr": self.forward_metadata.mask_indptr, "qo_indptr": self.forward_metadata.qo_indptr.detach().cpu(), "max_len_extend": int(self.forward_metadata.max_extend_len), "page_size": int(self.page_size), "pool_k_shape": tuple(self.token_to_kv_pool.get_key_buffer(layer.layer_id).shape), "pool_v_shape": tuple(self.token_to_kv_pool.get_value_buffer(layer.layer_id).shape), "pool_k_stride": tuple(self.token_to_kv_pool.get_key_buffer(layer.layer_id).stride()), "pool_v_stride": tuple(self.token_to_kv_pool.get_value_buffer(layer.layer_id).stride())}, os.environ["G2_4K_ATTN_BACKEND_CAPTURE"])
             return self._forward_extend_unified(
                 q,
                 o,
@@ -1437,6 +1473,13 @@ class TritonAttnBackend(AttentionBackend):
         else:
             k_descale = 1.0
             v_descale = 1.0
+
+        if os.environ.get("G2_4K_ATTN_BACKEND_CAPTURE") and int(getattr(layer, "g2_logical_layer_id", layer.layer_id)) == 17 and not torch.cuda.is_current_stream_capturing() and forward_batch.positions.numel() == 2048 and int(forward_batch.positions[0].item()) == 2048 and int(forward_batch.positions[-1].item()) == 4095 and not __import__("pathlib").Path(os.environ["G2_4K_ATTN_BACKEND_CAPTURE"]).exists():
+            ptr = kv_indptr.detach().cpu().tolist()
+            slots = kv_indices[ptr[0]:ptr[1]].detach()
+            kbuf, vbuf = self.token_to_kv_pool.get_kv_buffer(layer.layer_id)
+            from sglang.srt.utils.gemma4_capture import save_gemma4_capture
+            save_gemma4_capture({"layer": 17, "positions": forward_batch.positions.detach().cpu(), "input_ids": forward_batch.input_ids.detach().cpu(), "q": q.view(-1, layer.tp_q_head_num, layer.qk_head_dim).detach().cpu(), "current_k": k.contiguous().detach().cpu(), "current_v": v.contiguous().detach().cpu(), "kv_dtype": str(kbuf.dtype), "k_scale": float(k_descale), "v_scale": float(v_descale), "sm_scale": float(layer.scaling), "sliding_window_size": int(sliding_window_size), "prefix_slots": slots.cpu(), "prefix_k_raw": kbuf[slots].detach().cpu(), "prefix_v_raw": vbuf[slots].detach().cpu(), "kv_indptr": kv_indptr.detach().cpu(), "kv_indices": kv_indices[:int(kv_indptr[-1].item())].detach().cpu(), "qo_indptr": self.forward_metadata.qo_indptr.detach().cpu(), "causal": causal, "custom_mask": self.forward_metadata.custom_mask, "mask_indptr": self.forward_metadata.mask_indptr, "window_kv_offsets": window_kv_offsets, "max_len_extend": int(self.forward_metadata.max_extend_len), "page_size": int(self.page_size), "logit_cap": float(logits_soft_cap or 0.0), "xai_temperature_len": int(layer.xai_temperature_len), "score_mod": score_mod, "aux_tensors": aux_tensors, "pool_k_shape": tuple(kbuf.shape), "pool_v_shape": tuple(vbuf.shape), "pool_k_stride": tuple(kbuf.stride()), "pool_v_stride": tuple(vbuf.stride())}, os.environ["G2_4K_ATTN_BACKEND_CAPTURE"])
 
         # Split-KV EAGLE-verify fast path (ROCm/Triton). On target-verify
         # (topk=1 causal chain), run the bandwidth-efficient split-KV kernel
@@ -1484,6 +1527,88 @@ class TritonAttnBackend(AttentionBackend):
         ):
             return o
 
+        if (
+            os.environ.get("G2_4K_ATTN_FILE")
+            and os.environ.get("G2_4K_ATTN_SNAPSHOT") == "1"
+            and not self.enable_deterministic
+            and int(getattr(layer, "g2_logical_layer_id", layer.layer_id))
+            == int(os.environ.get("G2_4K_ATTN_LAYER", "4"))
+        ):
+            from sglang.srt.utils.gemma4_capture import capture_g2_4k_attention_input
+
+            capture_g2_4k_attention_input(
+                layer, q.view(-1, layer.tp_q_head_num, layer.qk_head_dim),
+                k.contiguous(), v.contiguous(), self.token_to_kv_pool,
+                kv_indptr, kv_indices, k_descale, v_descale,
+                sliding_window_size, layer.scaling, forward_batch,
+            )
+        if os.environ.get("G2_4K_ATTN_BACKEND_CAPTURE") and int(getattr(layer, "g2_logical_layer_id", layer.layer_id)) == 17 and not torch.cuda.is_current_stream_capturing() and forward_batch.positions.numel() == 2048 and int(forward_batch.positions[0].item()) == 2048 and int(forward_batch.positions[-1].item()) == 4095 and not __import__("pathlib").Path(os.environ["G2_4K_ATTN_BACKEND_CAPTURE"]).exists():
+            ptr = kv_indptr.detach().cpu().tolist()
+            slots = kv_indices[ptr[0]:ptr[1]].detach()
+            kbuf, vbuf = self.token_to_kv_pool.get_kv_buffer(layer.layer_id)
+            from sglang.srt.utils.gemma4_capture import save_gemma4_capture
+            save_gemma4_capture({"layer": 17, "positions": forward_batch.positions.detach().cpu(),
+                "input_ids": forward_batch.input_ids.detach().cpu(),
+                "q": q.view(-1, layer.tp_q_head_num, layer.qk_head_dim).detach().cpu(),
+                "current_k": k.contiguous().detach().cpu(), "current_v": v.contiguous().detach().cpu(),
+                "kv_dtype": str(kbuf.dtype), "k_scale": float(k_descale), "v_scale": float(v_descale),
+                "sm_scale": float(layer.scaling), "sliding_window_size": int(sliding_window_size),
+                "prefix_slots": slots.cpu(), "prefix_k_raw": kbuf[slots].detach().cpu(),
+                "prefix_v_raw": vbuf[slots].detach().cpu(), "kv_indptr": kv_indptr.detach().cpu(),
+                "kv_indices": kv_indices[:int(kv_indptr[-1].item())].detach().cpu(),
+                "qo_indptr": self.forward_metadata.qo_indptr.detach().cpu(),
+                "causal": causal, "custom_mask": self.forward_metadata.custom_mask,
+                "mask_indptr": self.forward_metadata.mask_indptr,
+                "window_kv_offsets": window_kv_offsets,
+                "max_len_extend": int(self.forward_metadata.max_extend_len),
+                "page_size": int(self.page_size), "logit_cap": float(logits_soft_cap or 0.0),
+                "xai_temperature_len": int(layer.xai_temperature_len),
+                "score_mod": score_mod, "aux_tensors": aux_tensors,
+                "pool_k_shape": tuple(kbuf.shape), "pool_v_shape": tuple(vbuf.shape),
+                "pool_k_stride": tuple(kbuf.stride()), "pool_v_stride": tuple(vbuf.stride())}, os.environ["G2_4K_ATTN_BACKEND_CAPTURE"])
+        if os.environ.get("G2_4K_ATTN_PROBE_FILE") and not self.enable_deterministic and int(getattr(layer, "g2_logical_layer_id", layer.layer_id)) == int(os.environ.get("G2_4K_ATTN_PROBE_LAYER", "0")):
+            from sglang.srt.utils.gemma4_capture import save_gemma4_capture
+            probe_base = os.environ["G2_4K_ATTN_PROBE_FILE"]
+            probe_positions = {int(x) for x in os.environ.get("G2_4K_ATTN_PROBE_POSITIONS", "2048,2558,2559").split(",") if x}
+            probe_rows = [i for i, p in enumerate(forward_batch.positions.detach().cpu().tolist()) if p in probe_positions]
+            if probe_rows and forward_batch.positions.numel() == 2048 and int(forward_batch.positions[0].item()) == 2048 and int(forward_batch.positions[-1].item()) == 4095:
+                ptr = kv_indptr.detach().cpu().tolist()
+                slots = kv_indices[ptr[0]:ptr[1]].detach()
+                kbuf, vbuf = self.token_to_kv_pool.get_kv_buffer(layer.layer_id)
+                record = {"layer": int(getattr(layer, "g2_logical_layer_id", layer.layer_id)), "positions": forward_batch.positions[probe_rows].detach().cpu(), "q": q.view(-1, layer.tp_q_head_num, layer.qk_head_dim).detach().cpu(), "q_full": q.view(-1, layer.tp_q_head_num, layer.qk_head_dim).detach().cpu(), "probe_rows": torch.tensor(probe_rows, dtype=torch.int64), "query_row_indices": torch.tensor(probe_rows, dtype=torch.int64), "prefix_slots": slots.cpu(), "prefix_k_raw": kbuf[slots].detach().cpu(), "prefix_v_raw": vbuf[slots].detach().cpu(), "prefix_k_dequant": (kbuf[slots].to(q.dtype) * float(k_descale)).detach().cpu(), "prefix_v_dequant": (vbuf[slots].to(q.dtype) * float(v_descale)).detach().cpu(), "current_k": k.contiguous().detach().cpu(), "current_v": v.contiguous().detach().cpu(), "kv_dtype": str(kbuf.dtype), "k_scale": float(k_descale), "v_scale": float(v_descale), "sm_scale": float(layer.scaling), "sliding_window_size": int(sliding_window_size), "prefix_lens": forward_batch.extend_prefix_lens.detach().cpu(), "extend_lens": forward_batch.extend_seq_lens.detach().cpu(), "window_offsets": self.forward_metadata.window_kv_offsets.detach().cpu() if self.forward_metadata.window_kv_offsets is not None else None, "window_kv_indptr": self.forward_metadata.window_kv_indptr.detach().cpu(), "window_kv_indices": self.forward_metadata.window_kv_indices[:int(self.forward_metadata.window_kv_indptr[-1].item())].detach().cpu() if self.forward_metadata.window_kv_indices is not None else None}
+                record["kv_indptr"] = kv_indptr.detach().cpu()
+                record["kv_indices"] = kv_indices[:int(kv_indptr[-1].item())].detach().cpu()
+                if os.environ.get("G2_4K_ATTN_PROBE_FULL_Q") == "1":
+                    record["q_full"] = q.view(-1, layer.tp_q_head_num, layer.qk_head_dim).detach().cpu()
+                    record["qo_indptr"] = self.forward_metadata.qo_indptr.detach().cpu()
+                    record["max_extend_len"] = int(self.forward_metadata.max_extend_len)
+                    record["pool_k_shape"] = tuple(kbuf.shape)
+                    record["pool_v_shape"] = tuple(vbuf.shape)
+                    record["pool_k_stride"] = tuple(kbuf.stride())
+                    record["pool_v_stride"] = tuple(vbuf.stride())
+                    record["production_call"] = {"causal": causal, "custom_mask": self.forward_metadata.custom_mask is not None, "mask_indptr": None if self.forward_metadata.mask_indptr is None else self.forward_metadata.mask_indptr.detach().cpu(), "skip_prefix_custom_mask": True, "logit_cap": float(logits_soft_cap or 0.0), "page_size": int(self.page_size), "xai_temperature_len": int(layer.xai_temperature_len), "score_mod": score_mod is not None, "sinks": sinks is not None, "q_strides": tuple(q.view(-1, layer.tp_q_head_num, layer.qk_head_dim).stride()), "k_strides": tuple(k.stride()), "v_strides": tuple(v.stride()), "o_strides": tuple(o.view(-1, layer.tp_q_head_num, layer.v_head_dim).stride())}
+                target = f"{probe_base}.layer{record['layer']}.pt"
+                save_gemma4_capture(record, target)
+        capture = os.environ.get("G2_KV_TRACE")
+        if capture and forward_batch.input_ids.numel() == 512:
+            from sglang.srt.utils.gemma4_capture import capture_g2_attention_input
+
+            capture_g2_attention_input(
+                layer,
+                q.view(-1, layer.tp_q_head_num, layer.qk_head_dim),
+                k.contiguous(),
+                v.contiguous(),
+                self.token_to_kv_pool.get_key_buffer(layer.layer_id),
+                self.token_to_kv_pool.get_value_buffer(layer.layer_id),
+                self.forward_metadata.qo_indptr,
+                kv_indptr,
+                kv_indices,
+                causal,
+                sliding_window_size,
+                layer.scaling,
+                k_descale,
+                v_descale,
+            )
         self.extend_attention_fwd(
             q.view(-1, layer.tp_q_head_num, layer.qk_head_dim),
             k.contiguous(),
@@ -1511,6 +1636,42 @@ class TritonAttnBackend(AttentionBackend):
             aux_tensors=aux_tensors,
             extend_seq_lens_cpu=forward_batch.extend_seq_lens_cpu,
         )
+        if os.environ.get("G2_ATTN_OPERATOR_PROBE_FILE"):
+            from sglang.srt.utils.gemma4_capture import capture_g2_attention_operator_probe
+            capture_g2_attention_operator_probe(
+                layer, q.view(-1, layer.tp_q_head_num, layer.qk_head_dim),
+                k, v, o.view(-1, layer.tp_q_head_num, layer.v_head_dim),
+                forward_batch, self.token_to_kv_pool, kv_indptr, kv_indices,
+                causal, sliding_window_size, layer.scaling, logits_soft_cap, k_descale,
+                v_descale, window_kv_offsets=window_kv_offsets,
+                custom_mask=self.forward_metadata.custom_mask,
+                mask_indptr=self.forward_metadata.mask_indptr,
+                qo_indptr=self.forward_metadata.qo_indptr,
+                score_mod=score_mod, aux_tensors=aux_tensors,
+                page_size=self.page_size,
+                xai_temperature_len=layer.xai_temperature_len,
+            )
+        if os.environ.get("G2_4K_ATTN_SNAPSHOT") == "1" and os.environ.get("G2_4K_BOUNDARY_ALL") == "1" and not self.enable_deterministic and int(getattr(layer, "g2_logical_layer_id", layer.layer_id)) == int(os.environ.get("G2_4K_ATTN_LAYER", "4")) and forward_batch.positions.numel() == 2048 and int(forward_batch.positions[0].item()) == 2048:
+            from sglang.srt.utils.gemma4_capture import capture_g2_4k_attention_output
+
+            capture_g2_4k_attention_output(layer, o.view(-1, layer.tp_q_head_num, layer.v_head_dim), forward_batch)
+            if os.environ.get("G2_4K_ATTN_PROBE_FILE"):
+                probe_path = os.environ["G2_4K_ATTN_PROBE_FILE"]
+                selected = {int(x) for x in os.environ.get("G2_4K_ATTN_PROBE_POSITIONS", "2048,2558,2559").split(",") if x}
+                probe_rows = [i for i, p in enumerate(forward_batch.positions.detach().cpu().tolist()) if p in selected]
+                if probe_rows:
+                    from sglang.srt.utils.gemma4_capture import save_gemma4_capture
+                    output = o.view(-1, layer.tp_q_head_num, layer.v_head_dim)
+                    positions = forward_batch.positions.detach().cpu().tolist()
+                    outputs = {int(position): output[row_index:row_index + 1].detach().float().cpu() for row_index, position in enumerate(positions) if int(position) in selected}
+                    target = f"{probe_path}.layer{int(getattr(layer, 'g2_logical_layer_id', layer.layer_id))}.outputs.pt"
+                    save_gemma4_capture({"outputs": outputs}, target)
+        if capture and forward_batch.input_ids.numel() == 512:
+            from sglang.srt.utils.gemma4_capture import capture_g2_attention_output
+
+            capture_g2_attention_output(
+                layer, o.view(-1, layer.tp_q_head_num, layer.v_head_dim)
+            )
         return o
 
     def _forward_extend_dcp(
@@ -1779,17 +1940,24 @@ class TritonAttnBackend(AttentionBackend):
             v_descale = 1.0
 
         # Call unified kernel
-        self.extend_attention_fwd_unified(
-            q.view(-1, layer.tp_q_head_num, layer.qk_head_dim),
-            o.view(-1, layer.tp_q_head_num, layer.v_head_dim),
-            self.token_to_kv_pool.get_key_buffer(layer.layer_id),
-            self.token_to_kv_pool.get_value_buffer(layer.layer_id),
+        q_kernel = q.view(-1, layer.tp_q_head_num, layer.qk_head_dim)
+        o_kernel = o.view(-1, layer.tp_q_head_num, layer.v_head_dim)
+        key_buffer = self.token_to_kv_pool.get_key_buffer(layer.layer_id)
+        value_buffer = self.token_to_kv_pool.get_value_buffer(layer.layer_id)
+        if os.environ.get("G2_4K_ATTN_BACKEND_CAPTURE") and int(getattr(layer, "g2_logical_layer_id", layer.layer_id)) == 17 and not torch.cuda.is_current_stream_capturing():
+            from sglang.srt.utils.gemma4_capture import save_gemma4_capture
+            save_gemma4_capture({"q": q_kernel.detach().cpu(), "k_buffer": key_buffer.detach().cpu(), "v_buffer": value_buffer.detach().cpu(), "kv_indptr": kv_indptr.detach().cpu(), "kv_indices": kv_indices.detach().cpu(), "prefix_lens": prefix_lens.detach().cpu(), "sm_scale": float(layer.scaling), "k_scale": float(k_descale), "v_scale": float(v_descale), "causal": causal, "sliding_window_size": int(sliding_window_size), "logit_cap": float(logits_soft_cap or 0.0), "custom_mask": self.forward_metadata.custom_mask, "mask_indptr": self.forward_metadata.mask_indptr, "max_len_extend": int(self.forward_metadata.max_extend_len), "page_size": int(self.page_size)}, os.environ["G2_4K_ATTN_BACKEND_CAPTURE"])
+        self.g2_counterfactual_extend_attention_fwd_unified(
+            q_kernel,
+            o_kernel,
+            key_buffer,
+            value_buffer,
             k_descale,
             v_descale,
             self.forward_metadata.qo_indptr,
             unified_kv_indptr,
             unified_kv_indices,
-            prefix_lens,
+            prefix_lens.to(torch.int32),
             self.forward_metadata.max_extend_len,
             custom_mask=self.forward_metadata.custom_mask,
             mask_indptr=self.forward_metadata.mask_indptr,
@@ -1804,7 +1972,6 @@ class TritonAttnBackend(AttentionBackend):
             score_mod=score_mod,
             aux_tensors=aux_tensors,
         )
-
         return o
 
     def forward_decode(
@@ -1884,6 +2051,29 @@ class TritonAttnBackend(AttentionBackend):
         # The triton kernel's // Lv stride trick requires attn_logits.shape[-1]
         # to exactly match the layer's v_head_dim.
         attn_logits = self.forward_metadata.attn_logits
+        if (
+            forward_batch.forward_mode.is_decode()
+            and os.environ.get("G2_KV_TRACE")
+        ):
+            from sglang.srt.utils.gemma4_capture import capture_g2_kv_stage
+
+            pool = self.token_to_kv_pool
+            cache_loc = forward_batch.out_cache_loc
+            if isinstance(pool, SWAKVPool) and pool.layers_mapping[layer.layer_id][1]:
+                cache_loc = pool.translate_loc_from_full_to_swa(cache_loc)
+            elif self._translate_kv_loc is not None:
+                cache_loc = self._translate_kv_loc(cache_loc)
+            kb, vb = pool.get_kv_buffer(layer.layer_id)
+            read_k, read_v = kb[cache_loc], vb[cache_loc]
+            read_k = read_k.to(q.dtype) * k_descale
+            read_v = read_v.to(q.dtype) * v_descale
+
+            capture_g2_kv_stage(
+                "decode_attention_read", layer, forward_batch,
+                q.view(-1, layer.tp_q_head_num, layer.qk_head_dim),
+                read_k, read_v, pool, self.token_to_kv_pool_allocator,
+            )
+
         if (
             self.forward_metadata.swa_attn_logits is not None
             and layer.v_head_dim == self.swa_v_head_dim

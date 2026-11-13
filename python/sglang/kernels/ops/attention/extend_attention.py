@@ -592,8 +592,11 @@ def _fwd_kernel(
                 mask=mask_n[:, None] & mask_dv[None, :],
                 other=0.0,
             )
-            p = p.to(v.dtype)
-            acc = acc * re_scale[:, None] + tl.dot(p, v) * v_scale
+            if BF16_KV_COMPUTE:
+                acc = acc * re_scale[:, None] + tl.dot(p.to(tl.bfloat16), v.to(tl.bfloat16)) * v_scale
+            else:
+                p = p.to(v.dtype)
+                acc = acc * re_scale[:, None] + tl.dot(p, v) * v_scale
 
             e_max = n_e_max
 
@@ -1179,7 +1182,10 @@ def _fwd_kernel_unified(
                 other=0.0,
             )
 
-            qk = tl.dot(q.to(k.dtype), k)
+            if BF16_KV_COMPUTE:
+                qk = tl.dot(q.to(tl.bfloat16), k.to(tl.bfloat16))
+            else:
+                qk = tl.dot(q.to(k.dtype), k)
             if BLOCK_DPE > 0:
                 if PAGE_SIZE == 1:
                     offs_kpe = (
@@ -1199,7 +1205,10 @@ def _fwd_kernel_unified(
                     mask=mask_n[None, :],
                     other=0.0,
                 )
-                qk += tl.dot(qpe.to(kpe.dtype), kpe)
+                if BF16_KV_COMPUTE:
+                    qk += tl.dot(qpe.to(tl.bfloat16), kpe.to(tl.bfloat16))
+                else:
+                    qk += tl.dot(qpe.to(kpe.dtype), kpe)
 
             qk *= sm_scale_withk
 

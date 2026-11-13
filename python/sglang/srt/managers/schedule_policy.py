@@ -1498,7 +1498,6 @@ class PrefillAdder:
                     len(req.prefix_indices), len(req.full_untruncated_fill_ids)
                 )
                 self.can_run_list.append(req)
-
                 self._req_inc_lock_ref(req)
                 self._update_prefill_budget(
                     prefix_len,

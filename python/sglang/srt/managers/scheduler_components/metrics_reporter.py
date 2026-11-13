@@ -209,7 +209,15 @@ class SchedulerMetricsReporter:
             def _wrap_execution_reporter(**kwargs):
                 self._device_timer_window_gpu_time += kwargs["t"]
                 if self.enable_metrics:
-                    self.metrics_collector.increment_forward_execution_seconds(**kwargs)
+                    # Request identity is profiling metadata, not a Prometheus label.
+                    metric_kwargs = {
+                        key: value
+                        for key, value in kwargs.items()
+                        if key in ("category", "t", "dp_cooperation_info")
+                    }
+                    self.metrics_collector.increment_forward_execution_seconds(
+                        **metric_kwargs
+                    )
 
             self.forward_pass_device_timer = DeviceTimer(
                 reporter=_wrap_execution_reporter,

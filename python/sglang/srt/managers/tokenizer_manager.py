@@ -2222,6 +2222,8 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
                 continue
 
             # Build meta_info and return value
+            if recv_obj.time_stats is not None:
+                scheduler_stats = recv_obj.time_stats[i]
             meta_info = {
                 "id": rid,
                 "finish_reason": recv_obj.finished_reasons[i],
@@ -2460,6 +2462,16 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
                     )
                 state.time_stats.set_finished_time()
                 meta_info["e2e_latency"] = state.time_stats.get_e2e_latency()
+                if rid.startswith("radix8k-perf-"):
+                    meta_info.update(
+                        state.time_stats.convert_to_output_meta_info(
+                            completion_tokens=len(state.output_ids)
+                        )
+                    )
+                    meta_info["first_token_ts"] = (
+                        convert_time_to_realtime(state.time_stats.first_token_time)
+                        if state.time_stats.first_token_time > 0 else None
+                    )
 
                 if get_spec().speculative_algorithm:
                     self._calculate_spec_decoding_metrics(meta_info, recv_obj, i)

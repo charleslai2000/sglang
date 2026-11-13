@@ -1452,7 +1452,10 @@ class DecodeCudaGraphRunner(BaseCudaGraphRunner):
         pp_proxy_tensors: Optional[PPProxyTensors] = None,
     ) -> Union[LogitsProcessorOutput, PPProxyTensors]:
         timer_ctx = device_timer_ctx(
-            self.model_runner.device_timer, forward_batch.forward_mode.name.lower()
+            self.model_runner.device_timer,
+            forward_batch.forward_mode.name.lower(),
+            rids=forward_batch.rids or [],
+            batch_size=forward_batch.batch_size,
         )
         shared_read_ends = self._resolve_shared_read_ends(
             self._replay_attn_backend(), forward_batch.forward_mode

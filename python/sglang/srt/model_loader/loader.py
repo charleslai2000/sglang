@@ -3158,6 +3158,13 @@ class GGUFModelLoader(BaseModelLoader):
 
         config = model_config.hf_config
         model_type = config.model_type
+        if hasattr(config, "_gguf_path"):
+            from sglang.srt.utils.hf_transformers.gguf_native import (
+                read_gguf_architecture,
+            )
+
+            if read_gguf_architecture(config._gguf_path) == "gemma4":
+                model_type = "gemma4_text"
         name_map_builder = GGUF_HF_NAME_MAP_BUILDERS.get(model_type)
         if name_map_builder is not None:
             name_map = name_map_builder(config)
@@ -3225,6 +3232,10 @@ class GGUFModelLoader(BaseModelLoader):
             text_config.gdn_v_head_layout = "tiled"
         gguf_weights_map = self._get_gguf_weights_map(model_config, local_model_path)
         # we can only know if tie word embeddings after mapping weights
+        model_config.hf_config._gguf_path = local_model_path
+        model_config.hf_config._gguf_name_map = gguf_weights_map
+        model_config.hf_config.quantization_config = {"quant_method": "gguf"}
+        model_config.quantization = "gguf"
         if "lm_head.weight" in get_gguf_extra_tensor_names(
             local_model_path, gguf_weights_map
         ):

@@ -8846,6 +8846,18 @@ def run_scheduler_process(
         display_dp_rank=display_dp_rank,
         display_moe_ep_rank=display_moe_ep_rank,
     )
+    # Opt-in process-local capture control: this process owns the CUDA context.
+    if os.environ.get("SGLANG_RADIX8K_PROFILER_NVTX") == "1":
+        import signal
+
+        def _radix8k_capture_start(_signum, _frame):
+            torch.cuda.cudart().cudaProfilerStart()
+
+        def _radix8k_capture_stop(_signum, _frame):
+            torch.cuda.cudart().cudaProfilerStop()
+
+        signal.signal(signal.SIGUSR1, _radix8k_capture_start)
+        signal.signal(signal.SIGUSR2, _radix8k_capture_stop)
     parent_process = psutil.Process().parent()
 
     # Set up tracing

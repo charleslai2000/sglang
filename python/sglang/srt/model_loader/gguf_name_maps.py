@@ -28,6 +28,11 @@ from typing import Callable, Dict
 
 from transformers import PretrainedConfig
 
+from sglang.srt.model_loader.gemma4_gguf import (
+    build_gemma4_name_map,
+    validate_gemma4_gguf_coverage,
+)
+
 # Sandwich naming: ffn_norm is the pre-FFN norm.
 _MUSE_GLIMMER_LAYER_TENSORS = {
     "attn_norm": "input_layernorm",
@@ -182,6 +187,7 @@ def validate_qwen35_gguf_coverage(
 # not the GGUF ``general.architecture`` that GGUF_NATIVE_CONFIG_BUILDERS uses:
 # llama.cpp spells the arch "muse-glimmer" while the HF config says "muse_glimmer".
 GGUF_HF_NAME_MAP_BUILDERS: Dict[str, Callable[[PretrainedConfig], Dict[str, str]]] = {
+    "gemma4_text": build_gemma4_name_map,
     "muse_glimmer": build_muse_glimmer_name_map,
     "qwen3_5_text": build_qwen35_name_map,
 }
@@ -189,5 +195,6 @@ GGUF_HF_NAME_MAP_BUILDERS: Dict[str, Callable[[PretrainedConfig], Dict[str, str]
 GGUF_HF_NAME_MAP_VALIDATORS: Dict[
     str, Callable[[str, Dict[str, str], PretrainedConfig], None]
 ] = {
+    "gemma4_text": validate_gemma4_gguf_coverage,
     "qwen3_5_text": validate_qwen35_gguf_coverage,
 }

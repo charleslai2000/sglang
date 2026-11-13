@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from contextlib import AbstractContextManager, contextmanager
 from functools import partial
+from threading import local
 from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 
 import torch
@@ -46,6 +47,13 @@ if TYPE_CHECKING:
     from sglang.srt.model_executor.runner.shape_key import ShapeKey
 
 
+_capture_tls = local()
+
+
+def get_active_full_cuda_graph_backend():
+    return getattr(_capture_tls, "backend", None)
+
+
 class FullCudaGraphBackend(BaseCudaGraphBackend):
     """One torch.cuda.CUDAGraph per shape; attention metadata is
     captured inside the graph. Memory-saver-aware.
@@ -64,6 +72,8 @@ class FullCudaGraphBackend(BaseCudaGraphBackend):
         self._device_module = cuda_graph_runner.device_module
         self._tp_group = cuda_graph_runner.model_runner.tp_group
         self._capture_stream: Optional[torch.cuda.Stream] = None
+        self._t004_active_graph = None
+        self._t004_capture_warmup = False
         self._memory_saver_adapter: Optional[Any] = TorchMemorySaverAdapter.create(
             enable=enable_memory_saver
             and get_bool_env_var("SGLANG_MEMORY_SAVER_CUDA_GRAPH")
@@ -104,15 +114,20 @@ class FullCudaGraphBackend(BaseCudaGraphBackend):
 
         # Two warmups so kernels are loaded and one-time setup is paid before capture.
         # post_warmup_hook lets the attention backend reset state that warmup mutated.
-        for _ in range(2):
-            self._device_module.synchronize()
-            self._tp_group.barrier()
-            forward_fn()
-            if profiler is not None:
-                profiler.step()
-            if post_warmup_hook is not None:
-                post_warmup_hook()
-
+        self._t004_capture_warmup = True
+        _capture_tls.backend = self
+        try:
+            for _ in range(2):
+                self._device_module.synchronize()
+                self._tp_group.barrier()
+                forward_fn()
+                if profiler is not None:
+                    profiler.step()
+                if post_warmup_hook is not None:
+                    post_warmup_hook()
+        finally:
+            _capture_tls.backend = None
+            self._t004_capture_warmup = False
         graph = torch.cuda.CUDAGraph()
 
         graph_ctx: Callable[..., AbstractContextManager]
@@ -131,7 +146,13 @@ class FullCudaGraphBackend(BaseCudaGraphBackend):
             graph_pool_capture_scope(),
             graph_ctx(cuda_graph=graph, pool=self._pool, stream=self._capture_stream),
         ):
-            out = forward_fn()
+            self._t004_active_graph = graph
+            _capture_tls.backend = self
+            try:
+                out = forward_fn()
+            finally:
+                _capture_tls.backend = None
+                self._t004_active_graph = None
 
         if profiler is not None:
             profiler.step()

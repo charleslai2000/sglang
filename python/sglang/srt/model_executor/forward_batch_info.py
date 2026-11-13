@@ -466,6 +466,8 @@ class ForwardBatch(ForwardBatchDeepSeekMHAMixin):
     gemma4_forward_id: Optional[str] = None
     # Host-side append-only decode step number for opt-in Gemma captures.
     gemma4_decode_step: Optional[List[int]] = None
+    # Opt-in Nsight timeline identity from ScheduleBatch.forward_iter.
+    profiler_forward_iter: Optional[int] = None
 
     # For two-batch overlap
     tbo_split_seq_index: Optional[int] = None
@@ -823,6 +825,11 @@ class ForwardBatch(ForwardBatchDeepSeekMHAMixin):
             can_run_decode_cuda_graph=batch.can_run_decode_cuda_graph,
             can_run_dp_prefill_cuda_graph=batch.can_run_dp_prefill_cuda_graph,
             global_forward_mode=batch.global_forward_mode,
+            profiler_forward_iter=(
+                batch.forward_iter
+                if os.environ.get("SGLANG_RADIX8K_PROFILER_NVTX") == "1"
+                else None
+            ),
             is_prefill_only=batch.is_prefill_only,
             spec_algorithm=batch.spec_algorithm,
             capture_hidden_mode=capture_hidden_mode,

@@ -1,4 +1,5 @@
 from .gguf import (
+    gguf_q4_0_llama_mmq_m32,
     ggml_dequantize,
     ggml_moe_a8,
     ggml_moe_a8_vec,

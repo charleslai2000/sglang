@@ -259,7 +259,12 @@ class EagerRunner(BaseRunner):
         # FIXME: add pp_proxy_tensors arg to all models
         kwargs = model_runner._pp_kwargs(pp_proxy_tensors)
 
-        ctx = device_timer_ctx(model_runner.device_timer, "decode")
+        ctx = device_timer_ctx(
+            model_runner.device_timer,
+            "decode",
+            rids=forward_batch.rids or [],
+            batch_size=forward_batch.batch_size,
+        )
 
         with ctx, pdmux_ctx:
             return model_runner.model.forward(
@@ -337,7 +342,12 @@ class EagerRunner(BaseRunner):
             if forward_batch.forward_mode.is_target_verify()
             else "extend"
         )
-        with device_timer_ctx(model_runner.device_timer, category):
+        with device_timer_ctx(
+            model_runner.device_timer,
+            category,
+            rids=forward_batch.rids or [],
+            batch_size=forward_batch.batch_size,
+        ):
             pcg_runner = model_runner.prefill_cuda_graph_runner
             if (
                 _is_hip

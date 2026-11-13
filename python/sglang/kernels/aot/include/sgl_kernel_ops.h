@@ -731,6 +731,7 @@ torch::Tensor
 ggml_dequantize(torch::Tensor W, int64_t type, int64_t m, int64_t n, std::optional<at::ScalarType> const& dtype);
 
 torch::Tensor ggml_mul_mat_vec_a8(torch::Tensor W, torch::Tensor X, int64_t type, int64_t row);
+torch::Tensor gguf_q4_0_llama_mmq_m32(torch::Tensor W, torch::Tensor X);
 
 torch::Tensor ggml_mul_mat_a8(torch::Tensor W, torch::Tensor X, int64_t type, int64_t row);
 

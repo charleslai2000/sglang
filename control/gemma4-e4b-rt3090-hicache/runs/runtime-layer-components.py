@@ -100,9 +100,8 @@ if os.getenv("GEMMA4_RUNTIME_HOOK_ENABLE") == "1":
         finally:
             for handle in handles:
                 handle.remove()
-        if watched:
-            if os.getenv("GEMMA4_CAPTURE_ALL_LAYER_OUTPUTS") != "1":
-                capture(self, "decoder_layer_output", result[0], positions, forward_batch)
+        if watched and os.getenv("GEMMA4_CAPTURE_ALL_LAYER_OUTPUTS") != "1":
+            capture(self, "decoder_layer_output", result[0], positions, forward_batch)
         if os.getenv("GEMMA4_CAPTURE_ALL_LAYER_OUTPUTS") == "1":
             capture(self, "decoder_layer_output", result[0], positions, forward_batch)
         return result

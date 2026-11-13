@@ -3,8 +3,12 @@
 # Adapted from: https://github.com/vllm-project/vllm/blob/ab3e80042eac24dd362408e6d63ad98768046359/vllm/model_executor/layers/quantization/gguf.py
 from __future__ import annotations
 
+import atexit
+import json
 import logging
+import os
 import warnings
+from collections import Counter
 from typing import TYPE_CHECKING, Any, List, Optional
 
 import gguf
@@ -39,6 +43,89 @@ _is_hip = is_hip()
 _is_xpu = is_xpu()
 _is_musa = is_musa()
 _is_npu = is_npu()
+_GGUF_DISPATCH_DIAG = Counter()
+_GGUF_LINEAR_DISPATCH_DIAG = Counter()
+_GGUF_EXTEND_PROBE_RECORDS = []
+_GGUF_EXTEND_PROBE_CAPTURED = False
+
+
+def _trace_linear_dispatch(layer, x, qweight, qweight_type):
+    if os.environ.get("SGLANG_GGUF_DISPATCH_TRACE") != "1":
+        return
+    if _q4_0_fp32_diag_enabled() and qweight_type == WeightType.Q4_0:
+        route = "fp32_dequant_gemm"
+    elif qweight_type in IMATRIX_QUANT_TYPES:
+        route = "mmvq_a8" if x.shape[0] <= (8 if qweight.shape[0] > 5120 else 16) else "mmq_a8"
+    elif qweight_type in MMVQ_QUANT_TYPES:
+        route = "mmvq_a8" if x.shape[0] <= (2 if qweight.shape[0] > 5120 else 6) else "mmq_a8"
+    elif qweight_type in DEQUANT_TYPES:
+        route = "dequant_gemm"
+    elif qweight_type in UNQUANTIZED_TYPES:
+        route = "dense_matmul"
+    else:
+        route = "unsupported"
+    layer_name = getattr(layer, "prefix", layer.__class__.__name__)
+    x_shape, weight_shape, x_dtype = tuple(x.shape), tuple(qweight.shape), str(x.dtype)
+    _GGUF_LINEAR_DISPATCH_DIAG[(layer_name, x_shape, weight_shape, x_dtype,
+                                int(qweight_type), route)] += 1
+    trace_path = os.environ.get("SGLANG_GGUF_DISPATCH_TRACE_FILE")
+    if trace_path:
+        from pathlib import Path
+
+        target = Path(trace_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with target.open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps({"layer": layer_name, "x_shape": x_shape,
+                                     "weight_shape": weight_shape, "x_dtype": x_dtype,
+                                     "qweight_type": int(qweight_type),
+                                     "dispatch": route}) + "\n")
+
+
+def _write_gguf_dispatch_trace():
+    path = os.environ.get("SGLANG_GGUF_DISPATCH_TRACE_FILE")
+    probe_path = os.environ.get("SGLANG_GGUF_EXTEND_PROBE_FILE")
+    if not (path and _GGUF_DISPATCH_DIAG) and not (probe_path and _GGUF_EXTEND_PROBE_RECORDS):
+        return
+    if path and _GGUF_DISPATCH_DIAG:
+        from pathlib import Path
+
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "kernel_dispatch": [
+                {
+                    "x_shape": list(key[0]),
+                    "x_dtype": key[1],
+                    "dispatch": key[2],
+                    "qweight_type": int(key[3]),
+                    "count": count,
+                }
+                for key, count in sorted(
+                    _GGUF_DISPATCH_DIAG.items(), key=lambda item: repr(item[0])
+                )
+            ],
+            "linear_dispatch": [
+                {
+                    "layer": key[0],
+                    "x_shape": list(key[1]),
+                    "weight_shape": list(key[2]),
+                    "x_dtype": key[3],
+                    "qweight_type": key[4],
+                    "dispatch": key[5],
+                    "count": count,
+                }
+                for key, count in sorted(
+                    _GGUF_LINEAR_DISPATCH_DIAG.items(), key=lambda item: repr(item[0])
+                )
+            ],
+        }
+        target.write_text(json.dumps(payload, indent=2))
+    if probe_path and _GGUF_EXTEND_PROBE_RECORDS:
+        torch.save(_GGUF_EXTEND_PROBE_RECORDS, probe_path)
+
+
+atexit.register(_write_gguf_dispatch_trace)
+
 
 if _is_cuda:
     from sgl_kernel import moe_align_block_size, moe_sum
@@ -189,9 +276,39 @@ def dequantize_gguf_weight(
     return ggml_dequantize(qweight, qweight_type, *shape, dtype)
 
 
+_T004_HITS = Counter()
+
+
 def fused_mul_mat_gguf(
-    x: torch.Tensor, qweight: torch.Tensor, qweight_type: int
+    x: torch.Tensor,
+    qweight: torch.Tensor,
+    qweight_type: int,
+    *,
+    force_fp32_dequant_gemm: bool = False,
 ) -> torch.Tensor:
+    if qweight_type == WeightType.Q4_0 and os.environ.get("SGLANG_GGUF_Q4_0_LLAMA_MMQ") == "1" and tuple(x.shape) == (32, x.shape[1]):
+        from sgl_kernel.quantization import gguf_q4_0_llama_mmq_m32
+
+        if x.is_cuda and x.dtype == torch.bfloat16 and x.is_contiguous() and qweight.is_cuda and qweight.dtype == torch.uint8 and qweight.is_contiguous():
+            n, packed_k = qweight.shape
+            if packed_k == x.shape[1] // 32 * 18 and n in (2048, 2560, 4096, 10240):
+                donor_out = gguf_q4_0_llama_mmq_m32(qweight, x)
+                _T004_HITS[(tuple(x.shape), tuple(qweight.shape))] += 1
+                return donor_out
+    if force_fp32_dequant_gemm and qweight_type == WeightType.Q4_0:
+        if not x.is_cuda:
+            raise ValueError("FP32 GGUF diagnostic path requires CUDA tensors")
+        # Keep both source tensors intact. TF32 is disabled for the GEMM and
+        # the result is explicitly cast back to the input activation dtype,
+        # matching the production linear output boundary.
+        weight = dequantize_gguf_weight(qweight, qweight_type, torch.float32)
+        previous_tf32 = torch.backends.cuda.matmul.allow_tf32
+        try:
+            torch.backends.cuda.matmul.allow_tf32 = False
+            y = x.to(torch.float32) @ weight.to(torch.float32).T
+        finally:
+            torch.backends.cuda.matmul.allow_tf32 = previous_tf32
+        return y.to(dtype=x.dtype)
     if qweight_type in IMATRIX_QUANT_TYPES:
         mmvq_safe = 8 if qweight.shape[0] > 5120 else 16
     else:
@@ -199,18 +316,26 @@ def fused_mul_mat_gguf(
     # HACK: when doing chunked prefill we don't generate output tokens
     # so input to logits generator is empty which causes invalid parameter
     if x.shape[0] == 0:
+        if os.environ.get("SGLANG_GGUF_DISPATCH_TRACE") == "1":
+            _GGUF_DISPATCH_DIAG[(tuple(x.shape), str(x.dtype), "empty", qweight_type)] += 1
         return torch.empty(x.shape[0], qweight.shape[0], dtype=x.dtype, device=x.device)
     # there is no need to call any kernel for fp16/bf16
     if qweight_type in UNQUANTIZED_TYPES:
         return x @ qweight.T
     # enable MMVQ in contiguous batching with batch_size=1
     if x.shape[0] <= mmvq_safe and qweight_type in MMVQ_QUANT_TYPES:
+        if os.environ.get("SGLANG_GGUF_DISPATCH_TRACE") == "1":
+            _GGUF_DISPATCH_DIAG[(tuple(x.shape), str(x.dtype), "mmvq_a8", qweight_type)] += 1
         y = ggml_mul_mat_vec_a8(qweight, x, qweight_type, qweight.shape[0])
     # Use MMQ Kernel if it's available (standard + k-quants)
     elif qweight_type in MMQ_QUANT_TYPES:
+        if os.environ.get("SGLANG_GGUF_DISPATCH_TRACE") == "1":
+            _GGUF_DISPATCH_DIAG[(tuple(x.shape), str(x.dtype), "mmq_a8", qweight_type)] += 1
         y = ggml_mul_mat_a8(qweight, x, qweight_type, qweight.shape[0])
     # If there is no available MMQ kernel, fallback to dequantize
     elif qweight_type in DEQUANT_TYPES:
+        if os.environ.get("SGLANG_GGUF_DISPATCH_TRACE") == "1":
+            _GGUF_DISPATCH_DIAG[(tuple(x.shape), str(x.dtype), "dequant_gemm", qweight_type)] += 1
         weight = dequantize_gguf_weight(qweight, qweight_type, x.dtype)
         y = x @ weight.T
     else:
@@ -220,6 +345,10 @@ def fused_mul_mat_gguf(
         qweight_type = WeightType(qweight_type)
         raise NotImplementedError(f"Unsupported GGUF quantization type: {qweight_type}")
     return y
+
+
+def _q4_0_fp32_diag_enabled() -> bool:
+    return os.environ.get("SGLANG_GGUF_Q4_0_FP32_DEQUANT_GEMM") == "1"
 
 
 def fused_moe_gguf(
@@ -410,8 +539,6 @@ class GGUFLinearMethod(LinearMethodBase):
             raise ValueError(
                 f"Unsupported GGUF quantization type {qweight_type} in layer {layer}."
             )
-        # For MergedColumnParallelLinear and QKVParallelLinear, we need to
-        # materialize the padded weight parameter for CUDA Graph compatibility.
         self._create_padded_weight_param(layer)
         self._match_dense_weight_dtype(layer)
 
@@ -474,28 +601,80 @@ class GGUFLinearMethod(LinearMethodBase):
         x: torch.Tensor,
         bias: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        global _GGUF_EXTEND_PROBE_CAPTURED
         shard_id = layer.qweight.shard_id
 
-        if shard_id:
-            # dequantize shard weights respectively
+        qweight = layer.qweight
+        if shard_id and hasattr(qweight, "shard_offset_map"):
+            # Padded fused GGUF shards have explicit offsets and per-shard
+            # quantization types. A lone shard is stored as a plain matrix.
             shard_id = _ordered_gguf_shard_ids(shard_id)
-            qweight = layer.qweight
             result = []
             for idx in shard_id:
-                start, end, offset = layer.qweight.shard_offset_map[idx]
+                start, end, offset = qweight.shard_offset_map[idx]
                 qweight_type = layer.qweight_type.shard_weight_type[idx]
-                result.append(
-                    fused_mul_mat_gguf(
-                        x, qweight[start:end, :offset].contiguous(), qweight_type
-                    )
+                _trace_linear_dispatch(
+                    layer, x, qweight[start:end, :offset], qweight_type
                 )
+                shard_weight = qweight[start:end, :offset].contiguous()
+                shard_output = fused_mul_mat_gguf(
+                    x,
+                    shard_weight,
+                    qweight_type,
+                    force_fp32_dequant_gemm=_q4_0_fp32_diag_enabled(),
+                )
+                if (
+                    os.environ.get("SGLANG_GGUF_EXTEND_PROBE_FILE")
+                    and layer.__class__.__name__ == "QKVParallelLinear"
+                    and x.shape[0] == int(os.environ.get("SGLANG_GGUF_EXTEND_PROBE_ROWS", "-1"))
+                    and len(_GGUF_EXTEND_PROBE_RECORDS) < 3
+                ):
+                    _GGUF_EXTEND_PROBE_CAPTURED = True
+                    _GGUF_EXTEND_PROBE_RECORDS.append({
+                        "layer": str(getattr(layer, "prefix", "")),
+                        "shard_id": str(idx),
+                        "x": x.detach().cpu(),
+                        "qweight": shard_weight.detach().cpu(),
+                        "qweight_type": int(qweight_type),
+                        "output": shard_output.detach().cpu(),
+                        "x_shape": tuple(x.shape),
+                        "weight_shape": tuple(shard_weight.shape),
+                        "x_dtype": str(x.dtype),
+                        "weight_dtype": str(shard_weight.dtype),
+                        "env_fp32_optin": _q4_0_fp32_diag_enabled(),
+                    })
+                    torch.save(_GGUF_EXTEND_PROBE_RECORDS,
+                               os.environ["SGLANG_GGUF_EXTEND_PROBE_FILE"])
+                    torch.save(_GGUF_EXTEND_PROBE_RECORDS,
+                               os.environ["SGLANG_GGUF_EXTEND_PROBE_FILE"])
+                result.append(shard_output)
             out = torch.cat(result, axis=1)
         else:
-            qweight = layer.qweight
             qweight_type = layer.qweight_type.weight_type
-            out = fused_mul_mat_gguf(x, qweight, qweight_type)
+            _trace_linear_dispatch(layer, x, qweight, qweight_type)
+            out = fused_mul_mat_gguf(
+                x, qweight, qweight_type,
+                force_fp32_dequant_gemm=_q4_0_fp32_diag_enabled(),
+            )
         if bias is not None:
             out.add_(bias)
+        capture_path = os.environ.get("SGLANG_GGUF_EXTEND_PROBE_FILE")
+        if (
+            capture_path
+            and not shard_id
+            and layer.__class__.__name__ == "QKVParallelLinear"
+            and x.shape[0] == int(os.environ.get("SGLANG_GGUF_EXTEND_PROBE_ROWS", "-1"))
+            and not _GGUF_EXTEND_PROBE_CAPTURED
+        ):
+            _GGUF_EXTEND_PROBE_CAPTURED = True
+            _GGUF_EXTEND_PROBE_RECORDS.append({
+                "layer": str(getattr(layer, "prefix", "")),
+                "x": x.detach().cpu(), "qweight": qweight.detach().cpu(),
+                "qweight_type": int(qweight_type), "output": out.detach().cpu(),
+                "x_shape": tuple(x.shape), "weight_shape": tuple(qweight.shape),
+                "x_dtype": str(x.dtype), "weight_dtype": str(qweight.dtype),
+                "env_fp32_optin": _q4_0_fp32_diag_enabled(),
+            })
         return out
 
 
@@ -623,6 +802,23 @@ class GGUFEmbeddingMethod(GGUFLinearMethod):
         return apply_gguf_embedding(
             x, qweight, qweight_type, hidden_size, dtype=self.params_dtype
         )
+
+    def apply(
+        self,
+        layer: torch.nn.Module,
+        x: torch.Tensor,
+        bias: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        from sglang.srt.layers.vocab_parallel_embedding import VocabParallelEmbedding
+
+        if isinstance(layer, VocabParallelEmbedding):
+            out = fused_mul_mat_gguf(
+                x, layer.qweight, layer.qweight_type.weight_type
+            )
+            if bias is not None:
+                out.add_(bias)
+            return out
+        return super().apply(layer, x, bias)
 
 
 class GGUFUninitializedParameter(UninitializedParameter):
