@@ -1,23 +1,12 @@
 # Frontier
 
 ## g2-quasar-gguf-matmul-optimization
-- Owner disposition required — READY
-  - frontier: Numerical attribution shows donor more accurate vs independent FP32 reference on gate/O; actual Q8 buffers and production correctness criteria remain unverified. Await Owner decision before production follow-up.
-  - task: control/g2-quasar-gguf-matmul-optimization/tasks/T003-q4-0-numerical-attribution.md
-
-## gemma4-e4b-rtx3090-radix-8k-perf
-- T002-real-gpu-decode-batches-16-24-32 — DONE
-  - frontier: Historical W4A16 actual batches 16/24/32 and separate QUASAR E5M2 current-workload matrix are recorded; no further action pending.
-  - task: control/gemma4-e4b-rtx3090-radix-8k-perf/tasks/T002-real-gpu-decode-batches-16-24-32.md
-- T003-quasar-e5m2-current-model-matrix — DONE
-  - frontier: Current QUASAR E5M2 workload completed; historical W4A16 performance/source reproduction explicitly not claimed.
-  - task: control/gemma4-e4b-rtx3090-radix-8k-perf/tasks/T003-quasar-e5m2-current-model-matrix.md
+- T004-q4-0-mmq-integration-c32-ab — DEFERRED
+  - frontier: User halted T004 before its independent AOT operator achieved numerical correctness; retain dirty code/evidence without further build or GPU activity.
+  - task: control/g2-quasar-gguf-matmul-optimization/tasks/T004-q4-0-mmq-integration-c32-ab.md
+  - unblock/reopen: explicit user authorization to resume T004
 
 
-## gemma4-e4b-rtx3090-radix-8k-profiler
-- T001-profile-radix-prefill-decode Gemma4 Radix 8K Prefill/Decode profiler diagnosis — ACTIVE
-  - frontier: Exact-hit Prefill reached batch 8; larger cohorts remain constrained by 16K-chunk OOM. Decode graph GPU event timings obtained for 16/24/32; improve request/step online TPOT correlation and assess graph-kernel expansion/NCU need before finalizing report.
-  - task: control/gemma4-e4b-rtx3090-radix-8k-profiler/tasks/T001-profile-radix-prefill-decode.md
 
 ## gemma4-e4b-rtx3090-hicache-perf
 - T001-gemma4-bf16-decode-performance Gemma4 RTX3090 BF16 Decode performance baseline — DONE
@@ -25,9 +14,10 @@
   - task: control/gemma4-e4b-rtx3090-hicache-perf/tasks/T001-gemma4-bf16-decode-performance.md
 
 ## gemma4-e4b-rtx3090-hicache
-- T001-gemma4-w4a16-fp8kv-service-and-capacity Official W4A16 + FP8 KV Gemma4 RTX3090 service acceptance — ACTIVE
-  - frontier: Full-set gap is recorded; selected vLLM C1 and SGLang Eager/Graph replays rule out batching and decode-Graph as causes only for two examples. Capture same-prompt prefill/first-decode logits with verified effective weights; no production defect localized yet. Report `runs/GSM8K-FULL-VLLM-20261027.md`; HF guard FAILED.
+- T001-gemma4-w4a16-fp8kv-service-and-capacity — DEFERRED
+  - frontier: User halted this E4B acceptance line pending safe branch finalization; preserve its dirty implementation/evidence and do not resume numerical or service work now.
   - task: control/gemma4-e4b-rtx3090-hicache/tasks/T001-gemma4-w4a16-fp8kv-service-and-capacity.md
+  - unblock/reopen: explicit user authorization to resume E4B acceptance
   - task: control/gemma4-e4b-rtx3090-hicache/tasks/T001-gemma4-w4a16-fp8kv-service-and-capacity.md
 
 ## queued-prefetch-host-ready

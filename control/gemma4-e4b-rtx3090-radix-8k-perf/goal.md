@@ -1,10 +1,10 @@
-# Gemma4 RTX3090 Radix 7K-hit / 8K-context performance
+# Gemma4 RTX3090 Radix Prefix-Hit performance
 
 ## Goal
-Measure BF16-KV W4A16 online service with exact 7,168-token Radix L1 prefix hit and 1,024-token new suffix, total 8,192-token prompt, 256 generated tokens; concurrency c1/2/4/8/16/24/32. Report cache verification, prefill timing boundary, decode TPS/TPOT, E2E and capacity.
+Measure fixed 7,168-token Radix L1 prefix hit + 1,024-token extend, 8,192-token prompt, greedy 256-token output at concurrency c1/2/4/8/16/24/32 on RTX3090. Historical W4A16/BF16-KV remains the reference; later model/runtime variants must be identified as separate observations, not silently attributed.
 
 ## Constraints
-Single RTX3090 TP1, Triton, decode CUDA Graph, Radix Cache ON; HiCache L2/L3 OFF. Greedy, max_running_requests=16, no production math/cache/scheduler/performance-path changes. Reuse current worktree and existing service/metrics; preserve unrelated dirty/untracked files. All GPU work requires `/tmp/f1-r16b-gpu-exclusive.lock`; do not override another holder.
+TP1, Triton, GPU Radix L1, no Host/Disk HiCache substitution. Record actual server Decode batch and CUDA Graph separately from client concurrency. Preserve dirty worktree and exact source/model/instrumentation identities. GPU workloads hold `/tmp/f1-r16b-gpu-exclusive.lock`.
 
 ## Completion
-Each accepted run must have Scheduler/Cache-derived exact prefix hit=7168 and newly-prefilled=1024, full prompt=8192; record request/correlation IDs and actual decode/cache position evidence. At least warmup plus three valid trials per supported concurrency; invalid hit lengths excluded. Report separately measurable prefill, decode-only aggregate TPS, total Output TPS, TPOT/E2E, active GPU batch/Graph and GPU peak memory. State unmeasurable timing boundaries explicitly; archive source/config/artifact hashes and replay scripts; selective commit/push and verify remote SHA. G1 remains FAILED / NOT ACCEPTED.
+Every accepted run verifies exact cache/prompt/output lengths from client and Scheduler; at least warmup plus three valid trials; records Prefill/Decode CUDA Event boundaries, client throughput, TTFT/E2E, graph/batch evidence and GPU peak; preserves raw evidence and hashes; cleans up server, port, GPU and lock. Comparisons disclose any model, cache dtype, source, instrumentation, or config mismatch.

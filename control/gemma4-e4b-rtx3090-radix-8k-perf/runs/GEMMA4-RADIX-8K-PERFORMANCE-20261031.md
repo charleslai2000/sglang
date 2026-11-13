@@ -22,7 +22,44 @@ Output TPS is the 256×client-concurrency tokens divided by observed round wall 
 
 ## Timing and resource boundary
 
-Request metadata includes `prefill_finished_time`, `first_token_ts`, E2E, and request receipt, so TTFT/E2E are available per request. There is no standalone per-request Prefill-only elapsed interval: `ReqTimeStats.forward_duration` covers the combined request forward work and is not a prefill-only measure. The added CUDA-event timing records batch GPU time, not per-request attribution. Consequently no standalone Prefill TPS or per-request GPU-forward time is claimed here.
+Request metadata includes `prefill_finished_time`, `first_token_ts`, E2E, and request receipt, so TTFT/E2E are available per request. Existing DeviceTimer CUDA Events in the archived server logs do provide actual `extend` batch execution intervals. The report below extracts these without apportioning multi-RID batches. `extend` timing brackets runner execution (and for prefill CUDA graph paths can include batch loading); it is not a kernel-only counter or host Scheduler wall time. No per-request time is inferred from a multi-RID batch.
+
+### Newly Prefilled 1,024 Tokens: CUDA Event Time
+
+Scheduler `ReqTimeStats` and Prefill batch lines prove 7,168 cached + 1,024 new tokens for these requests. The `RADIX8K_GPU_FORWARD category=extend` CUDA-event logs correlate by RID and record elapsed GPU-stream time for the batch. For batch=1 events with one RID, the elapsed interval is exactly associated with that one-RID extend batch. For batch=2 events listing two RIDs, the duration belongs to the joint batch and is **not** divided between requests.
+
+| Client concurrency | Actual extend batch | Requests/RIDs in event | Event count across warmup + 3 rounds | Mean CUDA-event time (ms) | Observed range (ms) |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 1 | 1 | 4 | 168.743 | 168.572–169.059 |
+| 2 | 1 | 1 | 8 | 168.759 | 167.819–169.824 |
+| 4 | 1 | 1 | 8 | 169.555 | 168.697–171.150 |
+| 4 | 2 | 2 | 4 | 324.571 | 323.365–327.145 |
+| 8 | 1 | 1 | 8 | 178.054 | 169.612–233.748 |
+| 8 | 2 | 2 | 12 | 325.325 | 323.376–331.334 |
+| 16 | 1 | 1 | 4 | 170.994 | 169.980–171.668 |
+| 16 | 2 | 2 | 30 | 326.238 | 324.146–329.044 |
+| 24 | 1 | 1 | 2 | 173.123 | 172.644–173.603 |
+| 24 | 2 | 2 | 47 | 328.226 | 325.262–335.786 |
+| 32 | 1 | 1 | 8 | 172.833 | 172.344–173.605 |
+| 32 | 2 | 2 | 60 | 329.363 | 327.870–331.932 |
+
+These are observed extend-forward batch times, not decomposed attention-only time. Batch=2 means about twice the single-batch interval in this workload, but it remains one measured batch interval for two requests. The c1 run had four accepted c1 matrix extends, all batch=1 and one RID. The matrix run contributes c2–c32 entries. The separate long-prefix primer's chunked uncached Prefill comprised four batch=1 extend events; it is not the 1,024-token new-suffix event and is excluded from the table.
+
+### Decode-only Aggregate TPS
+
+Define decode-only aggregate TPS as `sum(batch_size for measured decode CUDA Events) / sum(gpu_s for those same decode CUDA Events)`. The numerator is the number of generated decode-token positions represented by the events; the denominator is summed event intervals, **not wall time**. Warmup rounds and extend/prefill events are excluded. The event includes the runner's Decode execution interval (the timer wraps `load_batch` plus execution; the model log says Gemma4 prefill CUDA Graph is disabled by its multimodal auto-disable rule, while Decode CUDA Graph is enabled); it does not add host Scheduler queue/dispatch duration as a separate numerator or wall-time denominator. Host work can affect when events are enqueued, so this is not a claim that the GPU was continuously busy throughout each interval. It is distinct from round Output TPS and response-metadata per-request decode throughput.
+
+| Client concurrency | Decode batch size(s) | Decode tokens, measured rounds | Summed CUDA Event seconds | Decode-only aggregate TPS |
+|---:|---:|---:|---:|---:|
+| 1 | 1 | 768 | 6.804835 | 112.86 |
+| 2 | 2 | 1,536 | 6.867755 | 223.65 |
+| 4 | 4 | 3,072 | 7.015306 | 437.90 |
+| 8 | 8 | 6,144 | 8.048942 | 763.33 |
+| 16 | 16 | 12,288 | 10.277258 | 1,195.65 |
+| 24 | 8 and 16 | 18,432 | 18.460615 | 998.45 |
+| 32 | 16 | 24,576 | 20.629183 | 1,191.32 |
+
+The c24 denominator includes batches of 8 and 16 as actually recorded. At c32 the scheduler emitted batch-16 events that represent tokens across the active requests; numerator counts 16 token positions per event. This metric does not amortize requests against concurrent wall time.
 
 GPU sampling every 500 ms recorded peak memory 22,957 MiB and peak utilization 100%. The serving scheduler's decode GPU batch never exceeded 16; client concurrency reached 32. GPU and service were cleanly stopped after the run and the exclusive lock released.
 
@@ -40,3 +77,4 @@ GPU sampling every 500 ms recorded peak memory 22,957 MiB and peak utilization 1
 - `gpu-samples.csv`, `gpu-after.csv`: resource samples and cleanup snapshot.
 - `fixture.json`, `fixture.sha256`: exact natural-token-ID prefix/suffix fixture.
 - Runner sources: `../runs/launch_radix8k.sh`, `../runs/radix8k_benchmark.py`.
+- Existing-event postprocessor (no GPU, no new tracing): `../runs/analyze_radix8k_events.py`.
