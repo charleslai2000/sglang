@@ -1336,6 +1336,13 @@ class TritonAttnBackend(AttentionBackend):
             k_buffer, v_buffer = pool.get_kv_buffer(layer.layer_id)
             k = k_buffer[cache_loc]
             v = v_buffer[cache_loc]
+            # FP8 KV is stored in the pool, while Gemma's shared-KV
+            # attention consumes values in the query compute dtype. Keep the
+            # cache representation for the kernel's descale path, but ensure
+            # the gathered tensors are accepted by the attention kernels.
+            if k.dtype != q.dtype:
+                k = k.to(q.dtype)
+                v = v.to(q.dtype)
         elif k is None or v is None:
             raise ValueError("Both k and v should be None or not None")
         else:
