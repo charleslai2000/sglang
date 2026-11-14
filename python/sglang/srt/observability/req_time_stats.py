@@ -497,6 +497,17 @@ class APIServerReqTimeStats(ReqTimeStatsBase):
             meta_info["api_server_dispatch_finish_ts"] = convert_time_to_realtime(
                 self.api_server_dispatch_finish_time
             )
+        if self.first_token_time > 0.0:
+            meta_info["first_token_ts"] = convert_time_to_realtime(
+                self.first_token_time
+            )
+        if (
+            scheduler_time_stats is not None
+            and scheduler_time_stats.prefill_finished_time > 0.0
+        ):
+            meta_info["prefill_finished_time"] = convert_time_to_realtime(
+                scheduler_time_stats.prefill_finished_time
+            )
         if self.response_sent_to_client_time > 0.0:
             meta_info["response_sent_to_client_ts"] = convert_time_to_realtime(
                 self.response_sent_to_client_time

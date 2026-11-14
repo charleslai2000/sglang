@@ -207,7 +207,17 @@ class ClippableGLUParallelLinear(nn.Module):
         # expects per-shard loading.  Wrap the original weight_loader so that
         # a call *without* shard_id (the generic load_weights path) splits
         # automatically.
-        orig_loader = self.linear.weight.weight_loader
+        # Quantized schemes may register ``weight_packed`` instead of
+        # ``weight``. The fused checkpoint still needs the same output-shard
+        # split; wrap whichever parameter owns the loader.
+        fused_param = getattr(self.linear, "weight", None)
+        if fused_param is None:
+            fused_param = getattr(self.linear, "weight_packed", None)
+        if fused_param is None or not hasattr(fused_param, "weight_loader"):
+            raise RuntimeError(
+                f"{prefix}: fused linear has no loadable weight parameter"
+            )
+        orig_loader = fused_param.weight_loader
 
         def _fused_weight_loader(param, loaded_weight, loaded_shard_id=None):
             if loaded_shard_id is not None:
@@ -216,7 +226,10 @@ class ClippableGLUParallelLinear(nn.Module):
             orig_loader(param, loaded_weight[:half], 0)
             orig_loader(param, loaded_weight[half:], 1)
 
-        self.linear.weight.weight_loader = _fused_weight_loader
+        if isinstance(getattr(type(fused_param), "weight_loader", None), property):
+            fused_param._weight_loader = _fused_weight_loader
+        else:
+            fused_param.weight_loader = _fused_weight_loader
 
         self.input_min = nn.parameter.Buffer(torch.tensor(-_INF), persistent=False)
         self.input_max = nn.parameter.Buffer(torch.tensor(_INF), persistent=False)
