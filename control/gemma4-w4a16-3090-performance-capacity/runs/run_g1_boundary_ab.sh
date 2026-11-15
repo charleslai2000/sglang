@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 ROOT=/home/ubuntu/workspaces/3rdparty/sglang-hicache; VENV=/home/ubuntu/venvs/sglang-3090; DATA=/data/sglang-hicache/gemma4; MODEL=$DATA/model; OUT=$DATA/runs/20261115T-g1-e5m2-boundary-new; LOCK=/tmp/f1-r16b-gpu-exclusive.lock; AOT=/data/sglang-hicache/g2-quasar-runs/20261110T-g2-postrope-e5m2-quality/aot-sm86-package; OVERLAY=$ROOT/control/gemma4-w4a16-3090-performance-capacity/runs/overlay
-[[ $(git -C "$ROOT" rev-parse HEAD) == 88b911a7e2f0e1362df262b17b342e3bf1a53ab1 ]]
+[[ $(git -C "$ROOT" rev-parse HEAD) == 08bd909bbe ]]
 [[ $(sha256sum "$MODEL/model.safetensors" | awk '{print $1}') == 19d89d2a4b3e401a3eae75ec08ab112810421a036c91d8c8226b686be7fe0c5d ]]
 [[ $(sha256sum "$AOT/sgl_kernel/sm86/common_ops.abi3.so" | awk '{print $1}') == 22c9f5eb84e5e494df31f814aeffe5ba0aafb266fca2b56c99cfb5a3c1dea4c2 ]]
 [[ $(sha256sum "$OVERLAY/sglang/kernels/ops/attention/extend_attention.py" | awk '{print $1}') == 69a9f59d6817b3947feb38639d47c690e82947ead0e9af50a0200f02a4b34d4e ]]
