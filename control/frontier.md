@@ -5,6 +5,10 @@
   - frontier: 用户确认接受约0.91pp GSM8K损失并关闭数值专项；既有E5M2/eager/Decode Graph证据保留，不再扩充数值对照。
   - task: control/gemma4-w4a16-3090-performance-capacity/tasks/T004-bos-e5m2-and-numerical-closure.md
 
+## gemma4-g1-prod-e5m2
+- T005-e5m2-production-readiness Gemma4 W4A16 + E5M2 KV修正生产就绪验收 — ACTIVE
+  - frontier: 共享前缀C32后scheduler idle invariant出现11个child-backed/parent-unbacked违规并退出，故该HiCache/Extent配置正确性NO-GO；用户接受的E5M2质量损失不是理由。L2/L3请求命中与bs32 CUDA Graph尚未证明；等待GPU锁可用和先解决tree-core生命周期缺陷后再做有限验证，不强清锁、不触碰Falcon数据。
+  - task: control/gemma4-w4a16-3090-performance-capacity/tasks/T005-e5m2-production-readiness.md
 ## gemma4-w4a16-g1-baseline-restoration
 - T003-g1-gsm8k-baseline-restoration Gemma4 W4A16 BF16-KV GSM8K正确率基线恢复 — ACTIVE
   - frontier: Gemma BOS(2)漏加修复后，全量同checkpoint/backend/scorer BF16-KV GSM8K为1,079/1,319 (81.804%)，较原始高183题；逐题审计通过。全量vLLM对照为1,068/1,319，SGLang/vLLM token IDs一致950/1,319 (72.0%)；低分根因恢复PASS，跨引擎数值/逐token一致性NOT ACCEPTED，369题生成有差异且未取完整对齐logits。E5M2及N512/513/514独立守卫不变。
