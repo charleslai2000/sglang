@@ -31,6 +31,7 @@ r = post(
         "temperature": 0,
         "top_p": 1,
         "logprobs": 1,
+        "echo": True,
         "return_token_ids": True,
         "skip_special_tokens": False,
         "ignore_eos": True,
