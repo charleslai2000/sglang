@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Capture first-step full logits and a real continuous greedy decode."""
+"""Request new fixed boundary probes with generation IDs and per-token logprobs."""
 
 import argparse, json, urllib.request
 from pathlib import Path
@@ -23,39 +23,34 @@ f = json.loads(Path(a.fixture).read_text())
 ids = f["token_ids"]
 assert len(ids) == f["n"] and ids[0] == 2
 r = post(
-    a.url + "/generate",
+    a.url + "/v1/completions",
     {
-        "input_ids": ids,
-        "sampling_params": {
-            "temperature": 0,
-            "max_new_tokens": 32,
-            "ignore_eos": True,
-            "stop": [],
-        },
-        "return_logprob": True,
-        "logprob_start_len": -1,
-        "top_logprobs_num": 0,
+        "model": "gemma4",
+        "prompt": ids,
+        "max_tokens": 32,
+        "temperature": 0,
+        "top_p": 1,
+        "logprobs": 1,
+        "return_token_ids": True,
+        "skip_special_tokens": False,
+        "ignore_eos": True,
+        "stop": [],
     },
 )
-files = sorted(Path(a.output).parent.glob("captured-*.pt"))
-if not files:
-    raise RuntimeError("pre-sampling full-logits capture missing")
-import torch
-
-logits = torch.load(files[0], map_location="cpu", weights_only=True).float().flatten()
-if logits.numel() < 250000:
-    raise RuntimeError(f"expected vocab logits, got {tuple(logits.shape)}")
-logp = torch.log_softmax(logits, dim=-1)
-greedy = int(logits.argmax())
+choice = r["choices"][0]
+lp = choice.get("logprobs") or {}
 result = {
     "probe_class": f["probe_class"],
     "n": f["n"],
     "dtype": a.dtype,
     "fixture": str(a.fixture),
-    "first_step_logits": logits.tolist(),
-    "greedy_token": greedy,
-    "greedy_logprob": float(logp[greedy]),
-    "continuous_response": r,
-    "capture_file": str(files[0]),
+    "prompt_token_ids": choice.get("prompt_token_ids"),
+    "generated_token_ids": choice.get("token_ids"),
+    "generated_text": choice.get("text"),
+    "token_logprobs": lp.get("token_logprobs"),
+    "top_logprobs": lp.get("top_logprobs"),
+    "finish_reason": choice.get("finish_reason"),
 }
-Path(a.output).write_text(json.dumps(result) + "\n")
+if result["prompt_token_ids"] != ids:
+    raise RuntimeError("service prompt echo mismatch")
+Path(a.output).write_text(json.dumps(result, indent=2) + "\n")

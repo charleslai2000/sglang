@@ -5,6 +5,8 @@ from sglang.srt.layers.logits_processor import LogitsProcessor
 
 original = LogitsProcessor.forward
 path = os.environ["G1_LOGITS_CAPTURE"]
+if not path:
+    raise RuntimeError("G1_LOGITS_CAPTURE must name a private output prefix")
 count = 0
 
 
