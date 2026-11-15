@@ -32,6 +32,9 @@ class GSM8KGemmaCompletions(LM):
         self.timeout = int(timeout)
         self._max_gen_toks = int(max_gen_toks)
         self._seed = int(seed)
+        # lm-eval API-model arguments may include add_bos_token; this adapter
+        # enforces Gemma's required BOS irrespective of tokenizer defaults.
+        self.add_bos_token = True
         self.tokenizer = AutoTokenizer.from_pretrained(
             tokenizer, trust_remote_code=trust_remote_code
         )
@@ -61,7 +64,14 @@ class GSM8KGemmaCompletions(LM):
         return self._max_gen_toks
 
     def tok_encode(self, text, **kwargs):
-        return self.tokenizer.encode(text, add_special_tokens=True)
+        ids = self.tokenizer.encode(text, add_special_tokens=False)
+        if self.add_bos_token:
+            bos = self.tokenizer.bos_token_id
+            if bos is None:
+                raise RuntimeError("Gemma BOS requested, but tokenizer has no bos_token_id")
+            if not ids or ids[0] != bos:
+                ids = [bos, *ids]
+        return ids
 
     def tok_decode(self, tokens, **kwargs):
         return self.tokenizer.decode(tokens, skip_special_tokens=False)
@@ -72,6 +82,8 @@ class GSM8KGemmaCompletions(LM):
         reqs = list(requests_)
         out = []
         audit_path = os.environ.get("GSM8K_STOP_AUDIT")
+        source_sha = os.environ.get("GSM8K_SOURCE_SHA")
+        prompt_protocol = os.environ.get("GSM8K_PROMPT_PROTOCOL", "gemma-explicit-bos-v1")
         for start in range(0, len(reqs), 16):
             wave = reqs[start : start + 16]
 
@@ -110,6 +122,8 @@ class GSM8KGemmaCompletions(LM):
                 raw = choice.get("text", "")
                 record = {
                     "doc_id": getattr(req, "doc_id", None),
+                    "prompt_protocol": prompt_protocol,
+                    "source_sha": source_sha,
                     "prompt_ids": ids,
                     "prompt_sha256": hashlib.sha256(
                         json.dumps(ids, separators=(",", ":")).encode()

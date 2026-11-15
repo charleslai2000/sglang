@@ -1,5 +1,9 @@
 # Frontier
 
+## gemma4-w4a16-g1-baseline-restoration
+- T003-g1-gsm8k-baseline-restoration Gemma4 W4A16 BF16-KV GSM8K正确率基线恢复 — ACTIVE
+  - frontier: Gemma BOS(2)漏加修复后，全量同checkpoint/backend/scorer BF16-KV GSM8K为1,079/1,319 (81.804%)，较原始高183题；逐题审计通过。全量vLLM对照为1,068/1,319，SGLang/vLLM token IDs一致950/1,319 (72.0%)；低分根因恢复PASS，跨引擎数值/逐token一致性NOT ACCEPTED，369题生成有差异且未取完整对齐logits。E5M2及N512/513/514独立守卫不变。
+  - task: control/gemma4-w4a16-3090-performance-capacity/tasks/T003-g1-gsm8k-baseline-restoration.md
 ## queued-prefetch-host-ready
 - T002-falcon-rhba1-acceptance Falcon T004 pipeline time, high-pressure efficiency and correctness — ACTIVE
   - frontier: Commit `3d90660dc28bc538e42b038654e8dc14bf43c96b` freezes one valid high-pressure L0 ON/OFF pair, complete A/B/C/D ledger and control status; pushed to origin at the same SHA. Four measured RIDs per arm hit 2,048 FULL KV + MAMBA pages; A decodes 1,024 outputs. B/C/D produce one token each; Prefill batching differs (ON shared batch-3; OFF batch-1 plus batch-2), so no net performance claim. Busy Union is not GPU-exclusive time; timestamped Host-ready and H2D→dependent-kernel edge remain NOT_CAPTURED/NOT_VERIFIED. Next: obtain/freeze authorized same-revision Falcon no-cache oracle/tolerance, run long multi-round FULL+MAMBA correctness, and additional sufficiently matched long-output performance repetitions if still authorized. **T005 carry-over requiring T004 integration:** worker can crash on optional `prefetch_issue_mono_ns=None`; None-preserving guard and regression handoff in `runs/T004-FALCON-20261016/T004-WORKER-OPTIONAL-TIMESTAMP-HANDOFF-20261020.md`. Integrate guard with existing dirty telemetry consumer and regression before production use; it is not committed/pushed or production PASS. Preserve 52 tracked dirty paths and 5,241 untracked entries; GPU lock required. Physical-media attribution, correctness acceptance and performance benefit remain open.

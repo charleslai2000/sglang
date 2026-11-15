@@ -37,6 +37,8 @@ def main():
         x = audits[int(sample["doc_id"])]
         assert x["raw_completion"] == sample["resps"][0][0]
         sample["audit"] = {
+            "prompt_protocol": x["prompt_protocol"],
+            "source_sha": x["source_sha"],
             "request_id": x["request_id"],
             "prompt_ids": x["prompt_ids"],
             "prompt_sha256": x["prompt_sha256"],

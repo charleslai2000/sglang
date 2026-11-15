@@ -1,5 +1,10 @@
 # Current plan
 
+## G1 W4A16 + BF16-KV GSM8K restoration — in progress
+
+- Root cause of 67.93% baseline established: Gemma BOS=2 was omitted from every prompt because tokenizer config has `add_bos_token=false`. Custom adapter now explicitly prepends BOS; full same-checkpoint/backend/scorer BF16-KV run completed at **1,079/1,319 (81.804%)**, +183 answers / +13.874 pp. All prompts start BOS; 1,319 output IDs/text/stop/score joins independently verified; all stopped normally (1,297 Question, 22 EOS). Evidence `/data/sglang-hicache/gemma4/runs/20261115T-g1-bf16-gsm8k-explicit-bos/`; report `runs/G1-INITIAL-AUDIT-20261114.md`.
+- Historical Oct. 30 corrected score was 1,070/1,319; raw traces unavailable; corrected run is +9 items. Full same-checkpoint vLLM 0.32.1 explicit-BOS/BF16-KV reference scored 1,068/1,319 (80.970%) vs SGLang 1,079/1,319 (81.804%), −11 answers/−0.834 pp; exact token IDs on 950/1,319 and divergent on 369. Root-cause restoration PASS; cross-engine token/numerical parity remains NOT ACCEPTED; no full aligned logits/attribution. Evidence `/data/sglang-hicache/gemma4/runs/20261115T-g1-bf16-gsm8k-explicit-bos/vllm-reference/`. Public vLLM 0.28 not reproduced. E5M2 and N512/513/514 guards unchanged.
+
 ## GSM8K W4A16 BF16/E5M2 paired quality — complete
 
 - Full 1,319-item official GSM8K pair completed on checkpoint-pinned current source. BF16 896/1,319 (67.930%), E5M2 890/1,319 (67.475%); paired cells both-correct 829, both-wrong 362, BF16-only 67, E5M2-only 61. E5M2−BF16 −0.455 pp, paired bootstrap 95% CI [−2.199,+1.213] pp (20,000, seed 20261114). No statistically clear task-quality change detected; not proof of numerical equivalence.

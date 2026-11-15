@@ -53,6 +53,9 @@ def main():
             audit = audits[arm][doc_id]
             assert sample["resps"][0][0] == audit["raw_completion"]
             assert sample["audit"]["prompt_ids"] == audit["prompt_ids"]
+            assert sample["audit"]["prompt_protocol"] == "gemma-explicit-bos-v1"
+            assert audit["prompt_ids"][0] == 2
+            assert sample["audit"]["source_sha"]
             assert sample["audit"]["output_ids"] == audit["response_token_ids"]
             assert sample["audit"]["finish_reason"] == audit["finish_reason"]
             assert sample["audit"]["matched_stop"] == audit["matched_stop"]
