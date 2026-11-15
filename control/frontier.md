@@ -2,7 +2,7 @@
 
 ## gemma4-g1-e5m2-postbos-numerical-closure
 - T004-bos-e5m2-and-numerical-closure Gemma4 E5M2 post-BOS GSM8K与N512-514数值闭环 — READY
-  - frontier: 显式BOS E5M2配对全量完成：1,067/1,319；与BF16配对Δ−0.910 pp (95% CI [−2.350,+0.531])，772条生成序列不同。仍需构造有明确标签的新N512/513/514输入，对BF16/E5M2首步logits、selected-token logprob和连续decode进行受控对照；历史原始输入缺失，禁止称重放。E5M2保持NOT ACCEPTED，T004 Q4 MMQ仍暂停。
+  - frontier: E5M2/BF16 post-BOS GSM8K pair完成；已用现有eager captures对N512/513/514测logit/top-margin/shared-token logprob误差；真实Decode Graph bs1配对中三组32-token输出一致，selected-logprob mean-abs delta 0.0157–0.0289、max 0.176–0.343。证据已推送于`fc034d4`之前加本地后续变更；当前需要先提交/推送本轮graph配对结果。用三样本误差分布制定容差之后再决定E5M2验收，保持NOT ACCEPTED。
   - task: control/gemma4-w4a16-3090-performance-capacity/tasks/T004-bos-e5m2-and-numerical-closure.md
 ## gemma4-w4a16-g1-baseline-restoration
 - T003-g1-gsm8k-baseline-restoration Gemma4 W4A16 BF16-KV GSM8K正确率基线恢复 — ACTIVE
