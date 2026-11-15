@@ -30,9 +30,8 @@ for n in (512, 513, 514):
     lcp = 0
     while lcp < min(len(bt), len(et)) and bt[lcp] == et[lcp]:
         lcp += 1
-    # Teacher-forced continuation uses identical generated BF16 tokens evaluated in each dtype.
-    btf = logprobs(b["first_step_logits"], bt)
-    etf = logprobs(e["first_step_logits"], bt)
+    # The full first-step distribution provides the selected-token logprob at step 1.
+    # Later logprobs below are each arm's actual continuous decode outputs.
     res.append(
         {
             "n": n,
@@ -55,11 +54,12 @@ for n in (512, 513, 514):
                 if lcp < min(len(bt), len(et))
                 else None,
                 "generated_logprob_length": {"bf16": len(b_lp), "e5m2": len(e_lp)},
-                "teacher_forced_bf16_prefix_lp_delta_firststep": etf[0] - btf[0]
-                if bt
-                else None,
-                "teacher_forced_selected_logprobs": {"bf16": b_lp, "e5m2": e_lp},
-                "note": "API output logprobs are on each dtype’s own free-running tokens; model-level same-token logprob replay beyond initial prefix has not yet been performed.",
+                "bf16_logprobs": b_lp,
+                "e5m2_logprobs": e_lp,
+                "aligned_prefix_logprob_deltas_e5m2_minus_bf16": [
+                    e_lp[i] - b_lp[i] for i in range(lcp) if i < len(b_lp) and i < len(e_lp)
+                ],
+                "note": "Logprobs align only while output tokens match; after first divergence the token histories differ. Full same-token teacher-forced per-step replay is not captured."
             },
         }
     )

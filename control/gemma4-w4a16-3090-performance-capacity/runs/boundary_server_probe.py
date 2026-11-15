@@ -71,6 +71,7 @@ out = {
     "generated_token_ids": c.get("token_ids"),
     "generated_text": c.get("text"),
     "generated_token_logprobs": lp.get("token_logprobs"),
+    "generated_token_texts": lp.get("tokens"),
     "finish_reason": c.get("finish_reason"),
 }
 Path(a.output).write_text(json.dumps(out) + "\n")
