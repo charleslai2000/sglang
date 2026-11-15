@@ -14,7 +14,7 @@ if prefix:
         global _counter
         out = _original(self, *args, **kwargs)
         logits = out.next_token_logits
-        if logits is not None:
+        if logits is not None and not torch.cuda.is_current_stream_capturing():
             _counter += 1
             fb = args[3] if len(args) > 3 else kwargs.get("logits_metadata")
             lens = getattr(fb, "extend_seq_lens_cpu", None)
