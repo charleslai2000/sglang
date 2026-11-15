@@ -36,6 +36,7 @@ for n in (512, 513, 514):
     res.append(
         {
             "n": n,
+            "reference": "HF same checkpoint required but not yet captured",
             "first_step": {
                 "bf16_greedy": bg,
                 "e5m2_greedy": eg,

@@ -1,12 +1,15 @@
-"""Test-only launcher to save each pre-sampling next-token logits tensor."""
+"""Test-only launcher to save pre-sampling logits in an isolated diagnostic run."""
 
-import os, runpy, sys, torch
+import os, sys, torch
 from sglang.srt.layers.logits_processor import LogitsProcessor
+from sglang.srt.server_args import prepare_server_args
+from sglang.srt.plugins import load_plugins
+from sglang.srt.utils import kill_process_tree
 
-original = LogitsProcessor.forward
-path = os.environ["G1_LOGITS_CAPTURE"]
+path = os.environ.get("G1_LOGITS_CAPTURE")
 if not path:
     raise RuntimeError("G1_LOGITS_CAPTURE must name a private output prefix")
+original = LogitsProcessor.forward
 count = 0
 
 
@@ -27,5 +30,11 @@ def hooked(self, *args, **kwargs):
 
 
 LogitsProcessor.forward = hooked
-sys.argv = ["sglang.launch_server", *sys.argv[1:]]
-runpy.run_module("sglang.launch_server", run_name="__main__")
+load_plugins()
+server_args = prepare_server_args(sys.argv[1:])
+try:
+    from sglang.launch_server import run_server
+
+    run_server(server_args)
+finally:
+    kill_process_tree(os.getpid(), include_parent=False)
