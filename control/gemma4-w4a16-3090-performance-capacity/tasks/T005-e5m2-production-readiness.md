@@ -1,0 +1,9 @@
+# T005 — G1-PROD E5M2 production readiness
+
+Status: COMPLETE — production NO-GO
+Work area: control/gemma4-w4a16-3090-performance-capacity
+Objective: Evaluate current Gemma4 E4B W4A16 + E5M2 KV candidate for production readiness in existing RTX3090 workspace; reuse existing BF16/E5M2 evidence; do not rerun BF16, HF, GSM8K or numerical comparisons. Perform only authorized E5M2 real-service verification and issue GO/NO-GO, with runnable config.
+Inputs: existing explicit-BOS E5M2 GSM8K report, E5M2 numerical/graph evidence, W4A16 BF16 service/performance/capacity and Radix evidence. Existing branch/workspace and GPU lock `/tmp/f1-r16b-gpu-exclusive.lock`.
+Completion: E5M2 current runtime reviewed and exercised for true CUDA Graph Decode, c4/c8/c16/c32, cache reuse/eviction/recompute, cancellation/resource cleanup, relevant HiCache L2/L3 if configured, 8K/64K (131K only where existing evidence is reusable), and >=60-min representative mixed stability; report measured metrics and comparability, limitations and GO/NO-GO; commit/push relevant result/config only; release GPU, ports and lock. No deployment.
+Result: E5M2-only real-service assessment completed. 60-minute mixed run 576/576 successful; C32 8K and 65,278-token prompts 32/32 each with 32-token output; HTTP stream cancellation returned abort; Radix reuse exercised; CUDA Graph full decode confirmed live. HiCache L2/L3 were disabled/not tested and E5M2 numerical acceptance remains NOT ACCEPTED. Production decision: NO-GO; BF16 KV remains default. Full measurements/config: `runs/G1-PRODUCTION-READINESS-E5M2-20261115.md`.
+Cleanup: Sent SIGTERM to the service launcher after all tests; its EXIT trap drained/stopped the model and GPU sampler. Verified no service/monitor processes, port 31401 closed, GPU 0% / 1 MiB, and exclusive lock free.

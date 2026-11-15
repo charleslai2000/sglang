@@ -47,14 +47,15 @@ def snapshot(kind, tag):
 
 def send(ids, tag, gate):
     gate.wait()
+    output_tokens = int(os.environ.get("W4A16_CAPACITY_OUTPUT_TOKENS", "256"))
     body = {
         "rid": tag,
         "input_ids": [ids],
         "sampling_params": {
             "temperature": 0,
             "top_p": 1,
-            "max_new_tokens": 256,
-            "min_new_tokens": 256,
+            "max_new_tokens": output_tokens,
+            "min_new_tokens": output_tokens,
             "ignore_eos": True,
         },
         "return_token_ids": True,
@@ -75,7 +76,7 @@ def send(ids, tag, gate):
         n = int(meta.get("completion_tokens", len(out)))
         row = {
             "rid": meta.get("id", tag),
-            "ok": n >= 256 and (not out or len(out) >= 256),
+            "ok": n >= output_tokens and (not out or len(out) >= output_tokens),
             "prompt_tokens": len(ids),
             "output_tokens": n,
             "elapsed_s": time.perf_counter() - t,
@@ -83,7 +84,7 @@ def send(ids, tag, gate):
         }
         snapshot("complete", tag)
         if not row["ok"]:
-            row["error"] = "fewer than 256 generated tokens"
+            row["error"] = f"fewer than {output_tokens} generated tokens"
         return row
     except Exception as e:
         return {
@@ -131,7 +132,7 @@ def main():
                 "all_32_succeeded": len(good) == 32,
                 "all_real_prefill": all(r["prompt_tokens"] == length for r in rows),
                 "all_decode_ge_256": len(good) == 32
-                and all(r["output_tokens"] >= 256 for r in good),
+                and all(r["output_tokens"] >= int(os.environ.get("W4A16_CAPACITY_OUTPUT_TOKENS", "256")) for r in good),
                 "aggregate_active_kv_tokens_at_full_admission": 32 * length,
                 "burst_wall_s": wall,
                 "request_latency_p50_s": statistics.median(
@@ -147,6 +148,7 @@ def main():
                 and rec["all_decode_ge_256"]
                 else "FAIL"
             )
+            rec["output_tokens_per_request"] = int(os.environ.get("W4A16_CAPACITY_OUTPUT_TOKENS", "256"))
             results.append(rec)
             (OUT / f"c32-capacity-{length}-r{rnd}.json").write_text(
                 json.dumps(rec, indent=2) + "\n"
@@ -163,7 +165,7 @@ def main():
             {
                 "status": "MEASURED",
                 "model": "W4A16 safetensors",
-                "kv_dtype": "bf16",
+                "kv_dtype": os.environ.get("KV_CACHE_DTYPE", "bf16"),
                 "concurrency": 32,
                 "context_lengths": LENGTHS,
                 "rounds_per_length": ROUNDS,
