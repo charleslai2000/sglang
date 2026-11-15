@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Request new fixed boundary probes with generation IDs and per-token logprobs."""
+"""Run new fixed boundary prompts with IDs and per-token logprobs."""
 
 import argparse, json, urllib.request
 from pathlib import Path
@@ -32,26 +32,26 @@ r = post(
         "top_p": 1,
         "logprobs": 1,
         "echo": True,
-        "return_token_ids": True,
-        "skip_special_tokens": False,
         "ignore_eos": True,
         "stop": [],
+        "return_token_ids": True,
+        "skip_special_tokens": False,
     },
 )
-choice = r["choices"][0]
-lp = choice.get("logprobs") or {}
+c = r["choices"][0]
+lp = c.get("logprobs") or {}
 result = {
     "probe_class": f["probe_class"],
     "n": f["n"],
     "dtype": a.dtype,
     "fixture": str(a.fixture),
-    "prompt_token_ids": choice.get("prompt_token_ids"),
-    "generated_token_ids": choice.get("token_ids"),
-    "generated_text": choice.get("text"),
-    "token_logprobs": lp.get("token_logprobs"),
-    "top_logprobs": lp.get("top_logprobs"),
-    "finish_reason": choice.get("finish_reason"),
+    "prompt_token_ids": c.get("prompt_token_ids"),
+    "generated_token_ids": c.get("token_ids"),
+    "generated_text": c.get("text"),
+    "generated_token_logprobs": lp.get("token_logprobs"),
+    "generated_token_texts": lp.get("tokens"),
+    "finish_reason": c.get("finish_reason"),
 }
 if result["prompt_token_ids"] != ids:
-    raise RuntimeError("service prompt echo mismatch")
-Path(a.output).write_text(json.dumps(result, indent=2) + "\n")
+    raise RuntimeError("completion endpoint prompt echo mismatch")
+Path(a.output).write_text(json.dumps(result) + "\n")
