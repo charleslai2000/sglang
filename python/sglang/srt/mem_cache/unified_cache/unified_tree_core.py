@@ -19,8 +19,9 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import threading
 from array import array
-from collections import defaultdict
+from collections import defaultdict, deque
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Any, Callable, NamedTuple, Optional, Sequence
 
@@ -96,6 +97,28 @@ logger = logging.getLogger(__name__)
 # overflows int64 with plain (non-wrapping) arithmetic in the Rust port, and
 # the TP consistency check can still all_reduce [digest, -digest] in int64.
 _RECLAIM_DIGEST_MASK = (1 << 42) - 1
+
+# Optional process-local diagnostic, disabled unless explicitly armed by the
+# caller. It records node identity/shape and FULL-host presence only.
+_TREE_LIFECYCLE_TRACE_ENABLED = os.environ.get("SGLANG_TREE_LIFECYCLE_TRACE") == "1"
+_TREE_LIFECYCLE_TRACE_CAPACITY = 4096
+_TREE_LIFECYCLE_TRACE_LOCK = threading.Lock()
+_TREE_LIFECYCLE_TRACE = deque(maxlen=_TREE_LIFECYCLE_TRACE_CAPACITY)
+_TREE_LIFECYCLE_TRACE_REPORTED = False
+
+
+def _tree_lifecycle_trace(event: dict[str, Any]) -> None:
+    global _TREE_LIFECYCLE_TRACE_REPORTED
+    if not _TREE_LIFECYCLE_TRACE_ENABLED:
+        return
+    with _TREE_LIFECYCLE_TRACE_LOCK:
+        _TREE_LIFECYCLE_TRACE.append(event)
+        if event.get("first_violation") and not _TREE_LIFECYCLE_TRACE_REPORTED:
+            _TREE_LIFECYCLE_TRACE_REPORTED = True
+            snapshot = list(_TREE_LIFECYCLE_TRACE)
+        else:
+            return
+    logger.error("Tree lifecycle first FULL-host prefix violation: %s", snapshot)
 
 
 class StorageBackupSpec(NamedTuple):
@@ -531,6 +554,55 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         # value that never moved means the L3 coverage the parked rid
         # missed on is unchanged, so NO_L3 parks do NOT clear.
         self._l3_publish_epoch = 0
+        self._lifecycle_trace_sequence = 0
+
+    def _trace_full_host_transition(
+        self,
+        operation: str,
+        node: Optional[UnifiedTreeNode],
+        before: Optional[bool],
+        *,
+        parent_id: Optional[NodeId] = None,
+    ) -> None:
+        if not _TREE_LIFECYCLE_TRACE_ENABLED or node is None:
+            return
+        after = node.backuped
+        self._lifecycle_trace_sequence += 1
+        parent = node.parent
+        parent_id = parent.id if parent is not None else parent_id
+        event = {
+            "seq": self._lifecycle_trace_sequence,
+            "operation": operation,
+            "node_id": node.id,
+            "parent_id": parent_id,
+            "key_len": len(node.key) if node.key is not None else 0,
+            "full_host_before": before,
+            "full_host_after": after,
+        }
+        violating_child = None
+        if not self.is_write_back:
+            if (
+                parent is not None
+                and parent is not self.root_node
+                and after
+                and not parent.backuped
+            ):
+                violating_child = node
+            elif not after and node is not self.root_node:
+                violating_child = next(
+                    (
+                        child
+                        for child in node.children.values()
+                        if child.backuped
+                    ),
+                    None,
+                )
+        violated = violating_child is not None
+        if violated:
+            event["first_violation"] = True
+            event["violating_child_id"] = violating_child.id
+            event["violating_parent_id"] = node.id if violating_child is not node else parent.id
+        _tree_lifecycle_trace(event)
 
     def node_by_id(self, node_id: NodeId) -> UnifiedTreeNode:
         """Resolve a NodeId back to its tree node.
@@ -1132,6 +1204,8 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
     def _split_node(
         self, key: RadixKey, child: UnifiedTreeNode, split_len: int
     ) -> tuple[UnifiedTreeNode, Optional[CacheAction | ComponentAction]]:
+        old_child_parent = child.parent
+        old_child_host = child.backuped
         new_node = self._new_node(priority=child.priority)
         new_node.children = {key[split_len:].child_key(self.page_size): child}
         new_node.parent = child.parent
@@ -1188,6 +1262,18 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         self._update_evictable_leaf_sets(child)
         # Only the new fragment needs qualifying; the child keeps its id.
         self._update_duplicate_tracking(new_node)
+        self._trace_full_host_transition(
+            "split_new_prefix",
+            new_node,
+            False,
+            parent_id=old_child_parent.id if old_child_parent else None,
+        )
+        self._trace_full_host_transition("split_old_child", child, old_child_host)
+        self._trace_full_host_transition(
+            "split_old_parent",
+            old_child_parent,
+            old_child_parent.backuped if old_child_parent is not None else None,
+        )
         return new_node, action
 
     def _add_new_node(
@@ -1655,6 +1741,7 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         """Free only the Full host layer; aux host slices stay under their own
         pools' LRU (a host-only aux slice may be a sole copy)."""
         assert self._can_reclaim_full_host_duplicate(node)
+        before_host = node.backuped
         self.kv_events.record_remove(node, medium=StorageMedium.CPU)
         self._evict_component_and_detach_lru(
             node,
@@ -1664,6 +1751,7 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
             device_frees=device_frees,
             host_frees=host_frees,
         )
+        self._trace_full_host_transition("duplicate_host_clear", node, before_host)
         self.write_back_duplicate_reclaim_digest = (
             self.write_back_duplicate_reclaim_digest * 1000003 + node.id + 1
         ) & _RECLAIM_DIGEST_MASK
@@ -1681,6 +1769,7 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         assert self._is_host_leaf(node), f"node {node.id} is not an H-leaf"
 
         self.kv_events.record_remove(node, medium=StorageMedium.CPU)
+        before_host = node.backuped
         for comp in self.components:
             _, hf = self._evict_component_and_detach_lru(
                 node,
@@ -1691,6 +1780,7 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
                 host_frees=host_frees,
             )
             tracker[comp.component_type] += hf
+        self._trace_full_host_transition("host_leaf_evict", node, before_host)
         self.evictable_host_leaves.discard(node)
         self._remove_leaf_from_parent(node)
         self._iteratively_delete_tombstone_leaf(node, tracker, device_frees, host_frees)
@@ -1821,6 +1911,8 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         return True
 
     def _remove_leaf_from_parent(self, node: UnifiedTreeNode):
+        before_host = node.backuped
+        parent = node.parent
         for component in self.components:
             component.discard_deleted_session_leaf(node)
 
@@ -1830,6 +1922,9 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         # Deleted nodes must not linger in duplicate tracking as ghosts.
         self.full_host_duplicates.pop(node.id, None)
         self._unregister_node(node)
+        self._trace_full_host_transition(
+            "detach_delete", node, before_host, parent_id=parent.id if parent else None
+        )
 
     def _evict_component_and_detach_lru(
         self,
@@ -1840,9 +1935,12 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         target: EvictLayer = EvictLayer.DEVICE,
         tracker: Optional[dict[ComponentType, int]] = None,
     ) -> tuple[int, int]:
+        before_host = node.backuped
         device_freed, host_freed = comp.evict_component(
             node, target=target, device_frees=device_frees, host_frees=host_frees
         )
+        if EvictLayer.HOST in target and before_host != node.backuped:
+            self._trace_full_host_transition("component_host_evict", node, before_host)
         if tracker is not None:
             if EvictLayer.DEVICE in target:
                 tracker[comp.component_type] += device_freed
@@ -2037,6 +2135,7 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         new_node.key = key
         new_node.hash_value = hash_value
         new_node.component_data[BASE_COMPONENT_TYPE].host_value = host_value.clone()
+        self._trace_full_host_transition("host_refill_new_node", new_node, False)
         node.children[child_key] = new_node
         self._update_evictable_leaf_sets(new_node)
         self._update_evictable_leaf_sets(node)
@@ -2504,6 +2603,7 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         node = self.node_by_id(node_id)
         cache_actions: list[CacheAction | ComponentAction] = []
         if host_indices.numel() > 0:
+            before_host = node.backuped
             kv_xfer = PoolTransfer(name=PoolName.KV, host_indices=host_indices)
             self.components_by_type[BASE_COMPONENT_TYPE].commit_hicache_transfer(
                 node,
@@ -2511,6 +2611,7 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
                 transfers=[kv_xfer],
                 cache_actions=cache_actions,
             )
+            self._trace_full_host_transition("backup_commit", node, before_host)
         for ct, xfers in comp_xfers.items():
             self.components_by_type[ct].commit_hicache_transfer(
                 node,
