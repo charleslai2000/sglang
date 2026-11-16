@@ -850,13 +850,14 @@ class TestUnifiedRadixCacheEagleHiCacheStorageKey(CustomTestCase):
 
 
 class TestUnifiedRadixCacheKVEvents(CustomTestCase):
-    cfg = CacheConfig(page_size=2, kv_size=64, max_context_len=64)
+    cfg = CacheConfig(page_size=2, kv_size=4096, max_context_len=4096)
 
     def _insert(self, cache, allocator, tokens):
         key = RadixKey(array("q", tokens))
         value = allocator.alloc(len(tokens))
         self.assertIsNotNone(value)
-        return cache.insert(InsertParams(key=key, value=value[: len(key)]))
+        cache.insert(InsertParams(key=key, value=value[: len(key)]))
+        return cache.match_prefix(MatchPrefixParams(key=key)).last_device_node
 
     def _stored_events(self, cache, medium=None):
         events = [e for e in cache.take_events() if isinstance(e, BlockStored)]
@@ -985,6 +986,86 @@ class TestUnifiedRadixCacheKVEvents(CustomTestCase):
         cache.evict_host(len(seq))
         removed_cpu = self._removed_events(cache, StorageMedium.CPU)
         self.assertCountEqual(self._event_hashes(removed_cpu), stored_hashes)
+
+    def test_hicache_backup_split_repeated_shape_and_host_reclaim(self):
+        """Real TreeCore backup, repeated splits and eviction preserve prefix state."""
+        cfg = CacheConfig(page_size=1, kv_size=2048, max_context_len=2048)
+        cache, allocator, _ = build_fixture(cfg, enable_kv_cache_events=True)
+        self._init_hicache(cache)
+        # Scaled [768, 1, 255] analogue of the incident's [1536, 1, 511].
+        base = list(range(1, 1025))
+        self._insert(cache, allocator, base)
+        leaf = self._leaf_for(cache, base)
+        self.assertGreater(_write_backup(cache, leaf, write_back=False), 0)
+        cache.writing_check(write_back=False)
+        cache.sanity_check()
+
+        # First actual radix split: backed-up original node retains its ID as
+        # suffix; fresh prefix is also backed from its redistributed host slice.
+        branch = base[:768] + [9001]
+        self._insert(cache, allocator, branch)
+        match = cache.match_prefix(MatchPrefixParams(key=RadixKey(array("q", base))))
+        suffix = match.last_device_node
+        prefix = _node_parent(cache, suffix)
+        self.assertEqual(_node_key_length(cache, prefix), 768)
+        self.assertEqual(_node_key_length(cache, suffix), 256)
+        self.assertIsNotNone(_host_value(cache, prefix, ComponentType.FULL))
+        self.assertIsNotNone(_host_value(cache, suffix, ComponentType.FULL))
+        cache.sanity_check()
+
+        # Split the suffix at one token, creating the same three-part topology.
+        branch = base[:769] + [9002]
+        self._insert(cache, allocator, branch)
+        match = cache.match_prefix(MatchPrefixParams(key=RadixKey(array("q", base))))
+        tail = match.last_device_node
+        middle = _node_parent(cache, tail)
+        prefix = _node_parent(cache, middle)
+        self.assertEqual(
+            [_node_key_length(cache, n) for n in (prefix, middle, tail)],
+            [768, 1, 255],
+        )
+        for node_id in (prefix, middle, tail):
+            self.assertIsNotNone(_host_value(cache, node_id, ComponentType.FULL))
+        cache.sanity_check()
+
+        # Demote the backed-up host chain through the normal device eviction
+        # API, producing genuine host-only H-leaves before host reclamation.
+        cache.evict(EvictParams(num_tokens=1024))
+        cache.sanity_check()
+        tail = cache.match_prefix(
+            MatchPrefixParams(key=RadixKey(array("q", base)))
+        ).last_host_node
+        self.assertNotEqual(tail, cache.root_node_handle())
+        # Pin every other H-leaf so the real host-eviction walk must reclaim
+        # the target tail. This uses normal lock and eviction APIs, not raw state.
+        root = cache.tree_core.root_node_handle()
+        stack = list(_node_children(cache, root))
+        h_leaves = []
+        while stack:
+            node_id = stack.pop()
+            stack.extend(_node_children(cache, node_id))
+            if cache.tree_core.is_host_evictable_leaf(node_id):
+                h_leaves.append(node_id)
+        h_leaves = [
+            node_id
+            for node_id in cache.tree_core.get_all_node_ids()
+            if cache.tree_core.is_host_evictable_leaf(node_id)
+        ]
+        self.assertIn(tail, h_leaves)
+        pinned = [node_id for node_id in h_leaves if node_id != tail]
+        for node_id in pinned:
+            cache.inc_host_lock_ref(node_id)
+        evicted = cache.evict_host(255)
+        self.assertGreaterEqual(evicted, 255)
+        if cache.tree_core.contains_node(tail):
+            self.assertIsNone(_host_value(cache, tail, ComponentType.FULL))
+        else:
+            self.assertFalse(cache.tree_core.contains_node(tail))
+        self.assertTrue(cache.tree_core.contains_node(middle))
+        cache.sanity_check()
+        for node_id in pinned:
+            if cache.tree_core.contains_node(node_id):
+                cache.dec_host_lock_ref(node_id)
 
     def test_hicache_split_pending_write_through_publishes_fragments(self):
         cache, allocator, _ = build_fixture(self.cfg, enable_kv_cache_events=True)
