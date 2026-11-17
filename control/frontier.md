@@ -7,7 +7,7 @@
 
 ## gemma4-g1-prod-e5m2
 - T005-e5m2-production-readiness Gemma4 W4A16 + E5M2 KV修正生产就绪验收 — ACTIVE
-  - frontier: 2026-11-17 minimal request先验证startup→5秒fully-idle→production on_idle sanity PASS→cleanup；后两次原fixture/config C32均32/32、44.47/44.36s，5秒idle、sanity PASS、cleanup 0。第二轮导出789有序事件（67 backup commits、131 TreeCore splits及262个对应component callbacks），无host leaf eviction/违规。修复了此前server_info AttributeError阻断。两次PASS不解释历史11项parent-prefix故障；failed HEAD d7e092a、passing HEAD ccf6088，旧run无事件序列。下一步比较两revision间相关改动和first-failure日志；P0-B独立未解，L2/L3请求恢复/bs32 graph未验收。
+  - frontier: 2026-11-17 核验成功C32逐请求source：shared prefix 63,488 tokens均L1 device（host=0/storage=0）；789-event Trace见67 backup commits/131 TreeCore splits，但无host eviction，L3 `restore_backup`仅durability write，非GPU restore。idle sanity PASS并不满足分层恢复门。原失败source HEAD d7e092a，当前checkout db185be；成功runtime来自editable `/home/ubuntu/workspaces/3rdparty/sglang`，SOURCE_HEAD 4f41f5b且137 dirty paths、缓存核心有550行净改动；失败worktree已丢失，成功run source digest与当前文件不匹配。成功runtime包含后续生产变更7d4186945d/22eddb20f0，不能称差异只有diagnostics。P0-A仍历史NO-GO，P0-B未证实恢复。下一步若继续必须冻结runtime身份，真实触发Host压力/eviction、L2与L3 request-source restore→GPU→decode、Frontier waiter恢复，并保留C32 idle sanity；GO/NO-GO报告`runs/G1-P0-REAL-LIFECYCLE-20261117.md`。
   - task: control/gemma4-w4a16-3090-performance-capacity/tasks/T005-e5m2-production-readiness.md
 ## gemma4-w4a16-g1-baseline-restoration
 - T003-g1-gsm8k-baseline-restoration Gemma4 W4A16 BF16-KV GSM8K正确率基线恢复 — ACTIVE
