@@ -71,7 +71,7 @@ echo 'service_ready=1' >> "$OUT/lifecycle.status"
 
 "$VENV/bin/python" "$ROOT/control/gemma4-w4a16-3090-performance-capacity/runs/g1_shared_prefix_hicache.py" \
   --action batch --fixture "$FIXTURE" --out "$OUT/c32" --count 32 \
-  --prefix-tokens 63488 --total-tokens 65536 --new-tokens 32 \
+  --prefix-tokens 63488 --total-tokens 65536 --new-tokens "${G1_P0_TRACE_NEW_TOKENS:-32}" \
   > "$OUT/c32/driver.stdout" 2> "$OUT/c32/driver.stderr"
 echo 'client_requests_complete=32' >> "$OUT/lifecycle.status"
 
