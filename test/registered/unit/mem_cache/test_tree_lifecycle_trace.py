@@ -19,16 +19,25 @@ class TreeLifecycleTraceTests(unittest.TestCase):
         self.enabled = tree_mod._TREE_LIFECYCLE_TRACE_ENABLED
         self.records = tree_mod._TREE_LIFECYCLE_TRACE
         self.reported = tree_mod._TREE_LIFECYCLE_TRACE_REPORTED
+        self.counts = tree_mod._TREE_LIFECYCLE_TRACE_COUNTS
+        self.total = tree_mod._TREE_LIFECYCLE_TRACE_TOTAL
+        self.violation = tree_mod._TREE_LIFECYCLE_TRACE_VIOLATION
         self.lock = tree_mod._TREE_LIFECYCLE_TRACE_LOCK
         self.capacity = tree_mod._TREE_LIFECYCLE_TRACE_CAPACITY
         tree_mod._TREE_LIFECYCLE_TRACE_ENABLED = True
         tree_mod._TREE_LIFECYCLE_TRACE = deque(maxlen=self.capacity)
         tree_mod._TREE_LIFECYCLE_TRACE_REPORTED = False
+        tree_mod._TREE_LIFECYCLE_TRACE_COUNTS.clear()
+        tree_mod._TREE_LIFECYCLE_TRACE_TOTAL = 0
+        tree_mod._TREE_LIFECYCLE_TRACE_VIOLATION = False
 
     def tearDown(self):
         tree_mod._TREE_LIFECYCLE_TRACE_ENABLED = self.enabled
         tree_mod._TREE_LIFECYCLE_TRACE = self.records
         tree_mod._TREE_LIFECYCLE_TRACE_REPORTED = self.reported
+        tree_mod._TREE_LIFECYCLE_TRACE_COUNTS = self.counts
+        tree_mod._TREE_LIFECYCLE_TRACE_TOTAL = self.total
+        tree_mod._TREE_LIFECYCLE_TRACE_VIOLATION = self.violation
         tree_mod._TREE_LIFECYCLE_TRACE_LOCK = self.lock
 
     def _core(self):
@@ -62,6 +71,8 @@ class TreeLifecycleTraceTests(unittest.TestCase):
         self.assertTrue(event["full_host_after"])
         self.assertNotIn("first_violation", event)
         self.assertFalse(tree_mod._TREE_LIFECYCLE_TRACE_REPORTED)
+        self.assertEqual(tree_mod._TREE_LIFECYCLE_TRACE_COUNTS["split_old_child"], 1)
+        self.assertEqual(tree_mod._TREE_LIFECYCLE_TRACE_TOTAL, 1)
 
     def test_first_illegal_transition_logs_bounded_order_and_only_once(self):
         core, parent, child = self._core()
@@ -72,6 +83,7 @@ class TreeLifecycleTraceTests(unittest.TestCase):
             child.component_data[ComponentType.FULL].host_value = object()
             core._trace_full_host_transition("backup_commit", child, False)
             self.assertTrue(error.called)
+            self.assertTrue(tree_mod._TREE_LIFECYCLE_TRACE_VIOLATION)
             self.assertTrue(tree_mod._TREE_LIFECYCLE_TRACE[-1]["first_violation"])
             self.assertEqual(
                 tree_mod._TREE_LIFECYCLE_TRACE[-1]["operation"], "backup_commit"
@@ -89,6 +101,7 @@ class TreeLifecycleTraceTests(unittest.TestCase):
             for i in range(5):
                 core._trace_full_host_transition(f"op{i}", child, False)
             self.assertEqual(len(tree_mod._TREE_LIFECYCLE_TRACE), 3)
+            self.assertEqual(tree_mod._TREE_LIFECYCLE_TRACE_TOTAL, 5)
             self.assertEqual(
                 [event["operation"] for event in tree_mod._TREE_LIFECYCLE_TRACE],
                 ["op2", "op3", "op4"],

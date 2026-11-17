@@ -16,12 +16,13 @@ cache for cache-level logic, but the TreeCore itself never touches it.
 
 from __future__ import annotations
 
+import atexit
 import logging
 import os
 import sys
 import threading
 from array import array
-from collections import defaultdict, deque
+from collections import Counter, defaultdict, deque
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Any, Callable, NamedTuple, Optional, Sequence
 
@@ -105,20 +106,56 @@ _TREE_LIFECYCLE_TRACE_CAPACITY = 4096
 _TREE_LIFECYCLE_TRACE_LOCK = threading.Lock()
 _TREE_LIFECYCLE_TRACE = deque(maxlen=_TREE_LIFECYCLE_TRACE_CAPACITY)
 _TREE_LIFECYCLE_TRACE_REPORTED = False
+_TREE_LIFECYCLE_TRACE_COUNTS: Counter[str] = Counter()
+_TREE_LIFECYCLE_TRACE_TOTAL = 0
+_TREE_LIFECYCLE_TRACE_VIOLATION = False
+
+
+def _log_tree_lifecycle_trace_summary() -> None:
+    if not _TREE_LIFECYCLE_TRACE_ENABLED:
+        return
+    with _TREE_LIFECYCLE_TRACE_LOCK:
+        events = list(_TREE_LIFECYCLE_TRACE)
+        counts = dict(_TREE_LIFECYCLE_TRACE_COUNTS)
+        total = _TREE_LIFECYCLE_TRACE_TOTAL
+        violation = _TREE_LIFECYCLE_TRACE_VIOLATION
+    if violation:
+        logger.error(
+            "G1_P0_TREE_TRACE_VIOLATION_SEQUENCE %s",
+            events,
+        )
+        return
+    logger.info(
+        "G1_P0_TREE_TRACE_SUMMARY total=%d buffered=%d operations=%s first_violation=%s",
+        total,
+        len(events),
+        counts,
+        _TREE_LIFECYCLE_TRACE_REPORTED,
+    )
+
+
+if _TREE_LIFECYCLE_TRACE_ENABLED:
+    atexit.register(_log_tree_lifecycle_trace_summary)
 
 
 def _tree_lifecycle_trace(event: dict[str, Any]) -> None:
-    global _TREE_LIFECYCLE_TRACE_REPORTED
+    global _TREE_LIFECYCLE_TRACE_REPORTED, _TREE_LIFECYCLE_TRACE_TOTAL
+    global _TREE_LIFECYCLE_TRACE_VIOLATION
     if not _TREE_LIFECYCLE_TRACE_ENABLED:
         return
     with _TREE_LIFECYCLE_TRACE_LOCK:
         _TREE_LIFECYCLE_TRACE.append(event)
+        _TREE_LIFECYCLE_TRACE_COUNTS[event.get("operation", "unknown")] += 1
+        _TREE_LIFECYCLE_TRACE_TOTAL += 1
+        if event.get("first_violation"):
+            _TREE_LIFECYCLE_TRACE_VIOLATION = True
         if event.get("first_violation") and not _TREE_LIFECYCLE_TRACE_REPORTED:
             _TREE_LIFECYCLE_TRACE_REPORTED = True
             snapshot = list(_TREE_LIFECYCLE_TRACE)
         else:
-            return
-    logger.error("Tree lifecycle first FULL-host prefix violation: %s", snapshot)
+            snapshot = None
+    if snapshot is not None:
+        logger.error("Tree lifecycle first FULL-host prefix violation: %s", snapshot)
 
 
 class StorageBackupSpec(NamedTuple):
@@ -555,6 +592,7 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         # missed on is unchanged, so NO_L3 parks do NOT clear.
         self._l3_publish_epoch = 0
         self._lifecycle_trace_sequence = 0
+        self._lifecycle_last_check_sequence = 0
 
     def _trace_full_host_transition(
         self,
@@ -597,12 +635,54 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
                     ),
                     None,
                 )
-        violated = violating_child is not None
-        if violated:
+        if violating_child is not None:
             event["first_violation"] = True
             event["violating_child_id"] = violating_child.id
-            event["violating_parent_id"] = node.id if violating_child is not node else parent.id
+            event["violating_parent_id"] = (
+                node.id if violating_child is not node else parent.id
+            )
         _tree_lifecycle_trace(event)
+
+    @property
+    def lifecycle_trace_violation(self) -> bool:
+        return _TREE_LIFECYCLE_TRACE_VIOLATION
+
+    def dump_lifecycle_trace(self) -> list[dict[str, Any]]:
+        """Return this core's buffered metadata-only lifecycle events."""
+        with _TREE_LIFECYCLE_TRACE_LOCK:
+            return list(_TREE_LIFECYCLE_TRACE)
+
+    def get_lifecycle_trace_counts(self) -> dict[str, int]:
+        with _TREE_LIFECYCLE_TRACE_LOCK:
+            return dict(_TREE_LIFECYCLE_TRACE_COUNTS)
+
+    def _trace_check_full_host_invariant(self, operation: str) -> None:
+        """Check FULL host parent-prefix invariant after a lifecycle mutation."""
+        if not _TREE_LIFECYCLE_TRACE_ENABLED or self.is_write_back:
+            return
+        # Exact traversal makes this intentionally diagnostic-only: the trace
+        # is opt-in and runs only at lifecycle mutation seams.
+        for parent in self._collect_all_nodes():
+            for child in parent.children.values():
+                if (
+                    parent is not self.root_node
+                    and child.backuped
+                    and not parent.backuped
+                ):
+                    self._lifecycle_trace_sequence += 1
+                    _tree_lifecycle_trace({
+                        "seq": self._lifecycle_trace_sequence,
+                        "operation": operation,
+                        "node_id": child.id,
+                        "parent_id": parent.id,
+                        "key_len": len(child.key) if child.key is not None else 0,
+                        "full_host_before": None,
+                        "full_host_after": child.backuped,
+                        "parent_full_host": parent.backuped,
+                        "first_violation": True,
+                        "violation_detected_after_mutation": True,
+                    })
+                    return
 
     def node_by_id(self, node_id: NodeId) -> UnifiedTreeNode:
         """Resolve a NodeId back to its tree node.
@@ -1274,6 +1354,7 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
             old_child_parent,
             old_child_parent.backuped if old_child_parent is not None else None,
         )
+        self._trace_check_full_host_invariant("split_node")
         return new_node, action
 
     def _add_new_node(
@@ -1781,6 +1862,7 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
             )
             tracker[comp.component_type] += hf
         self._trace_full_host_transition("host_leaf_evict", node, before_host)
+        self._trace_check_full_host_invariant("host_leaf_evict")
         self.evictable_host_leaves.discard(node)
         self._remove_leaf_from_parent(node)
         self._iteratively_delete_tombstone_leaf(node, tracker, device_frees, host_frees)
@@ -2137,6 +2219,7 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         new_node.component_data[BASE_COMPONENT_TYPE].host_value = host_value.clone()
         self._trace_full_host_transition("host_refill_new_node", new_node, False)
         node.children[child_key] = new_node
+        self._trace_check_full_host_invariant("host_refill_insert")
         self._update_evictable_leaf_sets(new_node)
         self._update_evictable_leaf_sets(node)
         result.inserted_host_node = new_node.id
@@ -2612,6 +2695,7 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
                 cache_actions=cache_actions,
             )
             self._trace_full_host_transition("backup_commit", node, before_host)
+            self._trace_check_full_host_invariant("backup_commit")
         for ct, xfers in comp_xfers.items():
             self.components_by_type[ct].commit_hicache_transfer(
                 node,

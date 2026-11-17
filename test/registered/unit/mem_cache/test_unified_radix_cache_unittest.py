@@ -7,7 +7,7 @@ import tempfile
 import time
 import unittest
 from array import array
-from collections import defaultdict
+from collections import Counter, defaultdict, deque
 from dataclasses import dataclass, replace
 from typing import Optional
 from unittest import mock
@@ -70,6 +70,7 @@ from sglang.srt.mem_cache.unified_cache.components.tree_component import (
 )
 from sglang.srt.mem_cache.unified_cache.storage_attachment import StorageAttachment
 from sglang.srt.mem_cache.unified_cache.tree_core_registry import _TREE_CORE_REGISTRY
+from sglang.srt.mem_cache.unified_cache import unified_tree_core as tree_mod
 from sglang.srt.mem_cache.unified_cache.unified_tree_core import UnifiedTreeCore
 from sglang.srt.mem_cache.unified_cache.unified_tree_core_interface import (
     DecSwaLockOnlyResult,
@@ -1066,6 +1067,21 @@ class TestUnifiedRadixCacheKVEvents(CustomTestCase):
         for node_id in pinned:
             if cache.tree_core.contains_node(node_id):
                 cache.dec_host_lock_ref(node_id)
+
+        with mock.patch.object(tree_mod, "_TREE_LIFECYCLE_TRACE_ENABLED", True), mock.patch.object(
+            tree_mod, "_TREE_LIFECYCLE_TRACE", deque(maxlen=4096),
+        ), mock.patch.object(tree_mod, "_TREE_LIFECYCLE_TRACE_COUNTS", Counter()), mock.patch.object(
+            tree_mod, "_TREE_LIFECYCLE_TRACE_TOTAL", 0,
+        ), mock.patch.object(tree_mod, "_TREE_LIFECYCLE_TRACE_VIOLATION", False):
+            core = cache.tree_core
+            core._trace_full_host_transition("split_probe", core.node_by_id(prefix), False)
+            core._trace_full_host_transition("backup_commit_probe", core.node_by_id(middle), False)
+            core._trace_full_host_transition("host_clear_probe", core.node_by_id(middle), True)
+            counts = core.get_lifecycle_trace_counts()
+            self.assertEqual(counts["split_probe"], 1)
+            self.assertEqual(counts["backup_commit_probe"], 1)
+            self.assertEqual(counts["host_clear_probe"], 1)
+            self.assertEqual(len(core.dump_lifecycle_trace()), 3)
 
     def test_hicache_split_pending_write_through_publishes_fragments(self):
         cache, allocator, _ = build_fixture(self.cfg, enable_kv_cache_events=True)

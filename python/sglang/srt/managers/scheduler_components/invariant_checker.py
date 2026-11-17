@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from collections import deque
 from dataclasses import dataclass, field
 from typing import (
@@ -467,7 +468,52 @@ class SchedulerInvariantChecker:
             and (self.is_hybrid_swa and self.tree_cache.supports_swa())
             or (self.is_hybrid_ssm and self.tree_cache.supports_mamba())
         ):
-            self.tree_cache.sanity_check()
+            trace = os.environ.get("SGLANG_TREE_LIFECYCLE_TRACE") == "1"
+            trigger_path = os.environ.get("G1_P0_SANITY_TRIGGER", "")
+            triggered = bool(
+                trace
+                and trigger_path
+                and os.path.exists(trigger_path)
+                and os.environ.get("G1_P0_SANITY_TRIGGERED") == "1"
+            )
+            if trace:
+                logger.info(
+                    "G1_P0_SANITY_CHECK_BEGIN phase=%s",
+                    "triggered_idle" if triggered else "startup_or_idle",
+                )
+            try:
+                # Never gate startup sanity on an HTTP-triggered marker: the
+                # scheduler check runs before the HTTP server can become ready.
+                self.tree_cache.sanity_check()
+            except BaseException as exc:
+                if trace:
+                    logger.error(
+                        "G1_P0_SANITY_CHECK_RESULT status=FAIL exception=%s: %s",
+                        type(exc).__name__,
+                        exc,
+                    )
+                    if triggered:
+                        logger.error(
+                            "G1_P0_SANITY_TRIGGERED_RESULT status=FAIL exception=%s: %s",
+                            type(exc).__name__,
+                            exc,
+                        )
+                    marker = os.environ.get("G1_P0_SANITY_RESULT_MARKER")
+                    if marker and triggered:
+                        with open(marker, "a", encoding="utf-8") as result_file:
+                            result_file.write(
+                                f"G1_P0_SANITY_TRIGGERED_RESULT status=FAIL exception={type(exc).__name__}: {exc}\n"
+                            )
+                raise
+            else:
+                if trace and triggered:
+                    logger.info("G1_P0_SANITY_TRIGGERED_RESULT status=PASS")
+                    marker = os.environ.get("G1_P0_SANITY_RESULT_MARKER")
+                    if marker:
+                        with open(marker, "a", encoding="utf-8") as result_file:
+                            result_file.write(
+                                "G1_P0_SANITY_TRIGGERED_RESULT status=PASS\n"
+                            )
 
 
 def create_scheduler_watchdog(
