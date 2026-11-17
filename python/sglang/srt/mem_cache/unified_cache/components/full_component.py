@@ -152,6 +152,31 @@ class FullComponent(TreeComponent):
                 :split_len
             ].clone()
             child_cd.host_value = child_cd.host_value[split_len:].clone()
+        from sglang.srt.mem_cache.unified_cache.unified_tree_core import (
+            _tree_lifecycle_trace,
+        )
+
+        _tree_lifecycle_trace(
+            {
+                "operation": "full_component_split_parent",
+                "node_id": new_parent.id,
+                "parent_id": new_parent.parent.id if new_parent.parent else None,
+                "key_length": len(new_parent.key),
+                "before_full_host": False,
+                "after_full_host": new_parent.backuped,
+            }
+        )
+        _tree_lifecycle_trace(
+            {
+                "operation": "full_component_split_child",
+                "node_id": child.id,
+                "parent_id": child.parent.id if child.parent else None,
+                "key_length": len(child.key),
+                "before_full_host": child_cd.host_value is not None,
+                "after_full_host": child.backuped,
+            }
+        )
+        self.tree_core._trace_check_full_host_invariant("full_component_split")
 
     def evict_component(
         self,
@@ -174,10 +199,16 @@ class FullComponent(TreeComponent):
             # cd.value = None
 
         # Host layer
+        before_host = node.backuped
         if EvictLayer.HOST in target and cd.host_value is not None:
             host_freed = len(cd.host_value)
             host_frees[self.component_type].append(cd.host_value)
             cd.host_value = None
+        if before_host != node.backuped:
+            self.tree_core._trace_full_host_transition(
+                "full_component_evict", node, before_host
+            )
+            self.tree_core._trace_check_full_host_invariant("full_component_evict")
         return freed, host_freed
 
     def eviction_priority(self, is_leaf: bool) -> int:
@@ -402,7 +433,14 @@ class FullComponent(TreeComponent):
 
         if phase == CacheTransferPhase.BACKUP_HOST:
             if transfers and transfers[0].host_indices is not None:
+                before_host = node.backuped
                 node.component_data[ct].host_value = transfers[0].host_indices.clone()
+                self.tree_core._trace_full_host_transition(
+                    "full_component_backup_commit", node, before_host
+                )
+                self.tree_core._trace_check_full_host_invariant(
+                    "full_component_backup_commit"
+                )
 
         elif phase == CacheTransferPhase.LOAD_BACK:
             if not transfers or transfers[0].device_indices is None:

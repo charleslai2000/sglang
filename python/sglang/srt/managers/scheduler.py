@@ -7792,40 +7792,13 @@ class Scheduler(
                 self.invariant_checker._report_leak("pool", "\n".join(messages))
             self.invariant_checker._check_req_pool()
 
-        # Tree sanity normally runs on every idle poll. In explicit P0 trace
-        # mode, wait for the scheduler's full-idle predicate and run once only.
-        # Production behavior without the opt-in diagnostic is unchanged.
+        # Preserve the production idle sanity path: on_idle() is reached after
+        # the scheduler found no batch, and its is_fully_idle gate above has
+        # already passed. Trace mode labels this check without adding a trigger.
         trace_mode = os.environ.get("SGLANG_TREE_LIFECYCLE_TRACE") == "1"
-        sanity_trigger = os.environ.get("G1_P0_SANITY_TRIGGER", "")
-        triggered_sanity = bool(sanity_trigger and os.path.exists(sanity_trigger))
-        run_tree_check = not trace_mode or (
-            not getattr(self, "_g1_p0_idle_sanity_completed", False)
-            or triggered_sanity
-        )
-        if trace_mode and run_tree_check:
-            run_tree_check = self.is_fully_idle()
-        if run_tree_check:
-            if trace_mode:
-                logger.info("G1_P0_SCHEDULER_HICACHE_QUIESCENT")
-            self.invariant_checker._check_tree_cache()
-            if trace_mode:
-                if triggered_sanity:
-                    try:
-                        os.unlink(sanity_trigger)
-                    except FileNotFoundError:
-                        pass
-                self._g1_p0_idle_sanity_completed = True
-                logger.info("G1_P0_SCHEDULER_IDLE_CYCLE_COMPLETE")
-                marker = os.environ.get("G1_P0_SANITY_RESULT_MARKER")
-                if marker:
-                    with open(marker, "a", encoding="utf-8") as result_file:
-                        result_file.write(
-                            "G1_P0_SCHEDULER_IDLE_CYCLE_COMPLETE\n"
-                        )
-                        if triggered_sanity:
-                            result_file.write(
-                                "G1_P0_SANITY_TRIGGERED_IDLE_CYCLE_COMPLETE\n"
-                            )
+        if trace_mode:
+            os.environ["G1_P0_SANITY_PHASE"] = "production_on_idle"
+        self.invariant_checker._check_tree_cache()
 
         # metrics every 30s
         self.metrics_reporter._maybe_log_idle_metrics()
@@ -8077,15 +8050,18 @@ class Scheduler(
                         if getattr(tc, "buffer_pipeline", None) is not None
                         else True
                     ),
-                    "lifecycle_trace_count": len(tc.dump_lifecycle_trace())
-                    if hasattr(tc, "dump_lifecycle_trace")
-                    else 0,
-                    "lifecycle_trace_events": tc.dump_lifecycle_trace()
-                    if getattr(tc, "lifecycle_trace_violation", False)
+                    "lifecycle_trace_count": len(unified_tree_core._TREE_LIFECYCLE_TRACE),
+                    "lifecycle_trace_events": list(unified_tree_core._TREE_LIFECYCLE_TRACE)
+                    if unified_tree_core._TREE_LIFECYCLE_TRACE_VIOLATION
                     else [],
-                    "lifecycle_trace_violation": getattr(tc, "lifecycle_trace_violation", False),
+                    "lifecycle_trace_violation": unified_tree_core._TREE_LIFECYCLE_TRACE_VIOLATION,
                     "lifecycle_trace_total": unified_tree_core._TREE_LIFECYCLE_TRACE_TOTAL,
                     "lifecycle_trace_operations": dict(unified_tree_core._TREE_LIFECYCLE_TRACE_COUNTS),
+                    "lifecycle_trace_first_violation_reported": unified_tree_core._TREE_LIFECYCLE_TRACE_REPORTED,
+                    "running": len(self.running_batch.reqs),
+                    "waiting": len(self.waiting_queue),
+                    "result_queue": len(self.result_queue) if self.enable_overlap else 0,
+                    "ongoing_backup": len(tc.ongoing_backup),
                 }
         draft_graph_memory_usage = (
             None if self.draft_worker is None else self.draft_worker.graph_memory_usage

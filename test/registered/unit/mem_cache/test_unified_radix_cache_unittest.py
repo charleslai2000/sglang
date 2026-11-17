@@ -990,6 +990,31 @@ class TestUnifiedRadixCacheKVEvents(CustomTestCase):
 
     def test_hicache_backup_split_repeated_shape_and_host_reclaim(self):
         """Real TreeCore backup, repeated splits and eviction preserve prefix state."""
+        trace_state = (
+            tree_mod._TREE_LIFECYCLE_TRACE_ENABLED,
+            tree_mod._TREE_LIFECYCLE_TRACE,
+            tree_mod._TREE_LIFECYCLE_TRACE_COUNTS,
+            tree_mod._TREE_LIFECYCLE_TRACE_TOTAL,
+            tree_mod._TREE_LIFECYCLE_TRACE_REPORTED,
+            tree_mod._TREE_LIFECYCLE_TRACE_VIOLATION,
+        )
+
+        def restore_trace_state():
+            (tree_mod._TREE_LIFECYCLE_TRACE_ENABLED,
+             tree_mod._TREE_LIFECYCLE_TRACE,
+             tree_mod._TREE_LIFECYCLE_TRACE_COUNTS,
+             tree_mod._TREE_LIFECYCLE_TRACE_TOTAL,
+             tree_mod._TREE_LIFECYCLE_TRACE_REPORTED,
+             tree_mod._TREE_LIFECYCLE_TRACE_VIOLATION) = trace_state
+
+        self.addCleanup(restore_trace_state)
+        tree_mod._TREE_LIFECYCLE_TRACE_ENABLED = True
+        tree_mod._TREE_LIFECYCLE_TRACE = deque(maxlen=tree_mod._TREE_LIFECYCLE_TRACE_CAPACITY)
+        tree_mod._TREE_LIFECYCLE_TRACE_COUNTS = Counter()
+        tree_mod._TREE_LIFECYCLE_TRACE_TOTAL = 0
+        tree_mod._TREE_LIFECYCLE_TRACE_REPORTED = False
+        tree_mod._TREE_LIFECYCLE_TRACE_VIOLATION = False
+
         cfg = CacheConfig(page_size=1, kv_size=2048, max_context_len=2048)
         cache, allocator, _ = build_fixture(cfg, enable_kv_cache_events=True)
         self._init_hicache(cache)
@@ -1082,6 +1107,11 @@ class TestUnifiedRadixCacheKVEvents(CustomTestCase):
             self.assertEqual(counts["backup_commit_probe"], 1)
             self.assertEqual(counts["host_clear_probe"], 1)
             self.assertEqual(len(core.dump_lifecycle_trace()), 3)
+
+        counts = core.get_lifecycle_trace_counts()
+        self.assertGreater(counts.get("backup_commit", 0), 0)
+        self.assertGreater(counts.get("split_new_prefix", 0), 0)
+        self.assertGreater(counts.get("host_leaf_evict", 0), 0)
 
     def test_hicache_split_pending_write_through_publishes_fragments(self):
         cache, allocator, _ = build_fixture(self.cfg, enable_kv_cache_events=True)

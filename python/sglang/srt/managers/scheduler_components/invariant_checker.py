@@ -61,6 +61,9 @@ class SchedulerInvariantChecker:
     recent_busy_msgs: Deque[str] = field(
         default_factory=lambda: deque(maxlen=BUSY_MEM_CHECK_LOG_RING_SIZE)
     )
+    _g1_p0_phase_checks: set[str] = field(default_factory=set)
+    _g1_p0_result_phases: set[str] = field(default_factory=set)
+    _g1_p0_marker_phases: set[str] = field(default_factory=set)
 
     @staticmethod
     def _check_pool_invariant(
@@ -469,50 +472,46 @@ class SchedulerInvariantChecker:
             or (self.is_hybrid_ssm and self.tree_cache.supports_mamba())
         ):
             trace = os.environ.get("SGLANG_TREE_LIFECYCLE_TRACE") == "1"
-            trigger_path = os.environ.get("G1_P0_SANITY_TRIGGER", "")
-            triggered = bool(
-                trace
-                and trigger_path
-                and os.path.exists(trigger_path)
-                and os.environ.get("G1_P0_SANITY_TRIGGERED") == "1"
-            )
-            if trace:
-                logger.info(
-                    "G1_P0_SANITY_CHECK_BEGIN phase=%s",
-                    "triggered_idle" if triggered else "startup_or_idle",
-                )
+            phase = os.environ.get("G1_P0_SANITY_PHASE", "startup_or_unspecified")
+            if trace and phase not in self._g1_p0_phase_checks:
+                self._g1_p0_phase_checks.add(phase)
+                logger.info("G1_P0_SANITY_CHECK_BEGIN phase=%s", phase)
             try:
                 # Never gate startup sanity on an HTTP-triggered marker: the
                 # scheduler check runs before the HTTP server can become ready.
                 self.tree_cache.sanity_check()
             except BaseException as exc:
                 if trace:
-                    logger.error(
-                        "G1_P0_SANITY_CHECK_RESULT status=FAIL exception=%s: %s",
-                        type(exc).__name__,
-                        exc,
+                    phase = os.environ.get(
+                        "G1_P0_SANITY_PHASE", "startup_or_unspecified"
                     )
-                    if triggered:
-                        logger.error(
-                            "G1_P0_SANITY_TRIGGERED_RESULT status=FAIL exception=%s: %s",
-                            type(exc).__name__,
-                            exc,
-                        )
+                    if phase not in self._g1_p0_phase_checks:
+                        self._g1_p0_phase_checks.add(phase)
+                        logger.info("G1_P0_SANITY_CHECK_BEGIN phase=%s", phase)
+                    logger.error(
+                        "G1_P0_SANITY_CHECK_RESULT phase=%s status=FAIL exception=%s: %s",
+                        phase, type(exc).__name__, exc,
+                    )
                     marker = os.environ.get("G1_P0_SANITY_RESULT_MARKER")
-                    if marker and triggered:
+                    self._g1_p0_result_phases.add(phase)
+                    if marker and phase not in self._g1_p0_marker_phases:
+                        self._g1_p0_marker_phases.add(phase)
                         with open(marker, "a", encoding="utf-8") as result_file:
                             result_file.write(
-                                f"G1_P0_SANITY_TRIGGERED_RESULT status=FAIL exception={type(exc).__name__}: {exc}\n"
+                                f"G1_P0_SANITY_CHECK_RESULT phase={phase} status=FAIL exception={type(exc).__name__}: {exc}\n"
                             )
                 raise
             else:
-                if trace and triggered:
-                    logger.info("G1_P0_SANITY_TRIGGERED_RESULT status=PASS")
+                if trace and phase not in self._g1_p0_result_phases:
+                    self._g1_p0_result_phases.add(phase)
+                    logger.info(
+                        "G1_P0_SANITY_CHECK_RESULT phase=%s status=PASS", phase
+                    )
                     marker = os.environ.get("G1_P0_SANITY_RESULT_MARKER")
                     if marker:
                         with open(marker, "a", encoding="utf-8") as result_file:
                             result_file.write(
-                                "G1_P0_SANITY_TRIGGERED_RESULT status=PASS\n"
+                                f"G1_P0_SANITY_CHECK_RESULT phase={phase} status=PASS\n"
                             )
 
 
