@@ -1024,6 +1024,7 @@ class TestUnifiedRadixCacheKVEvents(CustomTestCase):
         leaf = self._leaf_for(cache, base)
         self.assertGreater(_write_backup(cache, leaf, write_back=False), 0)
         cache.writing_check(write_back=False)
+        self.assertFalse(cache.tree_core.lifecycle_trace_violation)
         cache.sanity_check()
 
         # First actual radix split: backed-up original node retains its ID as
@@ -1037,6 +1038,7 @@ class TestUnifiedRadixCacheKVEvents(CustomTestCase):
         self.assertEqual(_node_key_length(cache, suffix), 256)
         self.assertIsNotNone(_host_value(cache, prefix, ComponentType.FULL))
         self.assertIsNotNone(_host_value(cache, suffix, ComponentType.FULL))
+        self.assertFalse(cache.tree_core.lifecycle_trace_violation)
         cache.sanity_check()
 
         # Split the suffix at one token, creating the same three-part topology.
@@ -2899,6 +2901,103 @@ class UnifiedRadixCacheSuite:
         for n in self._path_chain(cache, node):
             hashes.extend(cache.tree_core.get_hash_values(n))
         return hashes
+
+    def test_hicache_l3_gap_backup_failure_stops_before_child_and_retries(self):
+        """A failed ancestor D->H backup must not publish its child to L3."""
+        if self._skip_unsupported_hicache_test():
+            return
+        if self.cfg.has_mamba or self.cfg.has_swa or self.cfg.page_size not in (1, 4, 16):
+            self.skipTest("incident regression uses FULL-only page-size-one topology")
+        storage_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, storage_dir, ignore_errors=True)
+        regression_cfg = replace(
+            self.cfg,
+            kv_size=max(self.cfg.kv_size, 4096),
+            max_context_len=max(self.cfg.max_context_len, 4096),
+        )
+        cache, allocator, req_to_token_pool = build_fixture(regression_cfg)
+        self._init_hicache(
+            cache, storage_backend="file", storage_dir=storage_dir, prefetch_threshold=1
+        )
+
+        prefix = list(range(1, 1537))
+        child_tokens = prefix + list(range(10000, 10000 + self.cfg.page_size))
+        filler_seq = list(range(5000, 5000 + 400))
+        seq_fill = list(range(15000, 15000 + 256))
+        fill_key = RadixKey(array("q", seq_fill))
+        fill_value = allocator.alloc(len(seq_fill))
+        self.assertIsNotNone(fill_value)
+        cache.insert(InsertParams(key=fill_key, value=fill_value[: len(fill_key)]))
+        prefix_key = RadixKey(array("q", prefix))
+        prefix_value = allocator.alloc(len(prefix))
+        self.assertIsNotNone(prefix_value)
+        cache.insert(InsertParams(key=prefix_key, value=prefix_value[: len(prefix_key)]))
+        filler_key = RadixKey(array("q", filler_seq))
+        filler_value = allocator.alloc(len(filler_seq))
+        self.assertIsNotNone(filler_value)
+        cache.insert(InsertParams(key=filler_key, value=filler_value[: len(filler_key)]))
+        parent = cache.match_prefix(
+            MatchPrefixParams(key=RadixKey(array("q", prefix)))
+        ).last_device_node
+        child_value = allocator.alloc(len(child_tokens))
+        self.assertIsNotNone(child_value)
+        cache.insert(
+            InsertParams(
+                key=RadixKey(array("q", child_tokens)),
+                value=child_value[: len(child_tokens)],
+            )
+        )
+        child = cache.match_prefix(
+            MatchPrefixParams(key=RadixKey(array("q", child_tokens)))
+        ).last_device_node
+        self.assertEqual(_node_key_length(cache, parent), 1536)
+        self.assertEqual(_node_key_length(cache, child), self.cfg.page_size)
+        self.assertFalse(cache.tree_core.is_backuped(parent))
+        self.assertFalse(cache.tree_core.is_backuped(child))
+
+        # Constrain only this test's Host capacity: the 1536-token parent is
+        # impossible to allocate but the one-token child still fits. Do not
+        # monkeypatch the backup executor; exercise its real allocator result.
+        host_pool = cache.cache_controller.mem_pool_host
+        spare = host_pool.available_size() - self.cfg.page_size
+        self.assertGreater(spare, 0)
+        filler = host_pool.alloc(spare)
+        self.assertIsNotNone(filler)
+        self.assertLess(host_pool.available_size(), _node_key_length(cache, parent))
+        self.assertGreaterEqual(
+            host_pool.available_size(), self.cfg.page_size
+        )
+        backend = cache.cache_controller.storage_backend
+        available_before_failed_attempt = host_pool.available_size()
+        cache.evict_host = mock.Mock(return_value=0)
+        cache.write_backup_storage(child)
+        self.assertEqual(host_pool.available_size(), available_before_failed_attempt)
+        self.assertFalse(cache.ongoing_write_through)
+        self.assertFalse(cache._pending_storage_writes)
+        self.assertEqual(
+            cache.tree_core.node_by_id(child).component_data[ComponentType.FULL].host_lock_ref,
+            0,
+        )
+        self.assertFalse(cache.tree_core.is_backuped(parent))
+        self.assertFalse(cache.tree_core.is_backuped(child))
+        # A zero transfer result is failure propagation's observable outcome:
+        # no storage write is scheduled until the ancestor succeeds.
+        self.assertFalse(cache.tree_core.is_storage_written(child))
+        self.assertFalse(cache.tree_core.is_storage_persisted(child))
+        page_hashes = self._all_page_hashes(cache, child)
+        self.assertEqual(backend.batch_exists(page_hashes), 0)
+
+        host_pool.free(filler)
+        cache.write_backup_storage(child)
+        cache._drain_write_through_acks()
+        cache._flush_pending_storage_writes()
+        self._flush_l3_backups(cache)
+        self.assertTrue(cache.tree_core.is_backuped(parent))
+        self.assertTrue(cache.tree_core.is_backuped(child))
+        self.assertTrue(cache.tree_core.is_storage_persisted(parent))
+        self.assertTrue(cache.tree_core.is_storage_persisted(child))
+        self.assertEqual(backend.batch_exists(page_hashes), len(page_hashes))
+        cache.sanity_check()
 
     def test_hicache_l3_write_storage(self):
         """D->H->L3 offload: every KV page lands in the file storage backend."""

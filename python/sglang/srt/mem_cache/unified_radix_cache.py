@@ -5016,7 +5016,13 @@ class UnifiedRadixCache(BasePrefixCache):
                 ) is None:
                     self._storage_gap_skipped_d2h_count += 1
                     continue
-                self._execute_and_commit_kv_backup(BackupKV([nid]), write_back=False)
+                backed_up_tokens = self._execute_and_commit_kv_backup(
+                    BackupKV([nid]), write_back=False
+                )
+                if backed_up_tokens <= 0 and not self.tree_core.is_backuped(nid):
+                    # Do not persist descendants past an ancestor whose D->H
+                    # transfer failed; retry the gap after capacity recovers.
+                    return
         # The D->H backups above evict_host when host space is tight; host
         # eviction deletes host-only leaves, which may be gap nodes. Re-filter
         # before the drain and L3 writes.
