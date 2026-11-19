@@ -110,6 +110,41 @@ from sglang.srt.utils.common import human_readable_int
 
 logger = logging.getLogger(__name__)
 
+
+def _extent_read_context(extra_info, pool: str) -> Optional[dict[str, Any]]:
+    """Extract only the bounded request identity used for restore-read joins."""
+    details = getattr(extra_info, "extra_info", None)
+    if not isinstance(details, dict) or not details.get("rid"):
+        return None
+    return {
+        "rid": str(details["rid"]),
+        "attempt_id": details.get("attempt_id"),
+        "pool": str(details.get("pool", pool)),
+        "operation": str(details.get("operation", "prefetch_restore")),
+    }
+
+
+def _log_extent_read(context, keys_n, requested, physical, preads, succeeded):
+    """Log request-scoped aggregate Extent reads, never keys or cache data."""
+    if not context:
+        return
+    logger.info(
+        "[P3] ts_ms=%d evt=extent_read rid=%s attempt_id=%s operation=%s "
+        "component=%s keys_n=%d succeeded_keys=%d requested_bytes=%d "
+        "physical_bytes=%d preads=%d",
+        int(time.time() * 1000),
+        context["rid"],
+        context.get("attempt_id") or "none",
+        context["operation"],
+        context["pool"],
+        keys_n,
+        succeeded,
+        requested,
+        physical,
+        preads,
+    )
+
+
 # B1 fixed default (ledger: 64MiB tier of the 64/128 decision); env-switchable.
 _DEFAULT_EXTENT_SIZE = 64 << 20
 # B3 single-file layout: 64 GiB sparse preallocation per rank/suffix.
@@ -1517,6 +1552,14 @@ class ExtentFileBackend(HiCacheStorage):
         self._stats["last_batch_requested_bytes"] = requested
         self._stats["last_batch_physical_bytes"] = physical
         self._stats["last_batch_preads"] = preads
+        _log_extent_read(
+            _extent_read_context(extra_info, "kv"),
+            len(keys),
+            requested,
+            physical,
+            preads,
+            sum(bool(o and v) for o, v in zip(ok, verify_ok)),
+        )
         return [o and v for o, v in zip(ok, verify_ok)]
 
     def batch_set_v1(
@@ -1908,7 +1951,12 @@ class ExtentFileBackend(HiCacheStorage):
                     )
                 continue
             storage_keys = [self._component_key(transfer.name, k) for k in keys]
-            pages = self._read_pages(storage_keys)
+            pages = self._read_pages(
+                storage_keys,
+                read_context=_extent_read_context(
+                    extra_info, getattr(transfer.name, "value", transfer.name)
+                ),
+            )
             dummy = host_pool.get_dummy_flat_data_page()
             per_key = []
             for i, page in enumerate(pages):
@@ -2039,7 +2087,9 @@ class ExtentFileBackend(HiCacheStorage):
 
     # ---- core aggregated IO ----
 
-    def _read_pages(self, keys: List[str]) -> List[Optional[memoryview]]:
+    def _read_pages(
+        self, keys: List[str], read_context: Optional[dict[str, Any]] = None
+    ) -> List[Optional[memoryview]]:
         """Aggregate-read pages: one pread per merged exact range.
 
         Snapshot refs under the lock -> pread each merged range without the
@@ -2108,6 +2158,14 @@ class ExtentFileBackend(HiCacheStorage):
         self._stats["last_batch_requested_bytes"] = requested
         self._stats["last_batch_physical_bytes"] = physical
         self._stats["last_batch_preads"] = preads
+        _log_extent_read(
+            read_context,
+            len(keys),
+            requested,
+            physical,
+            preads,
+            sum(page is not None for page in out),
+        )
         return out
 
     # ---- reclaim-time live-ref relocation ----

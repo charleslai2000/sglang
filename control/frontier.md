@@ -5,14 +5,21 @@
   - frontier: 用户确认接受约0.91pp GSM8K损失并关闭数值专项；既有E5M2/eager/Decode Graph证据保留，不再扩充数值对照。
   - task: control/gemma4-w4a16-3090-performance-capacity/tasks/T004-bos-e5m2-and-numerical-closure.md
 
+## gemma4-g1-hicache-tier-lifecycle-20261119
+- T001-deterministic-tier-lifecycle Gemma4 deterministic HiCache L1/L2/L3 lifecycle and Frontier recovery — ACTIVE
+  - frontier: Authorized pressure is max-total 139264 / HiCache 8 decimal GB / fresh Extent 32 GiB (startup-only Host Full/SWA 186012/148810 > GPU 139264/111411). Offline runner/wrapper edits now preserve one service, gate per-RID source/Extent/ready/Decode, require a real Radix trace, and order Frontier records; 7 CPU evidence tests, syntax, fixture and diff checks pass. No generation workload has run. Next finish offline phase/cleanup validation, then resource checks and bounded pressure qualification; keep production C32 separate.
+  - task: control/gemma4-g1-hicache-tier-lifecycle-20261119/tasks/T001-deterministic-tier-lifecycle.md
+
 ## gemma4-g1-prod-e5m2
 - T005-e5m2-production-readiness Gemma4 W4A16 + E5M2 KV修正生产就绪验收 — ACTIVE
   - frontier: 2026-11-17 核验成功C32逐请求source：shared prefix 63,488 tokens均L1 device（host=0/storage=0）；789-event Trace见67 backup commits/131 TreeCore splits，但无host eviction，L3 `restore_backup`仅durability write，非GPU restore。idle sanity PASS并不满足分层恢复门。原失败source HEAD d7e092a，当前checkout db185be；成功runtime来自editable `/home/ubuntu/workspaces/3rdparty/sglang`，SOURCE_HEAD 4f41f5b且137 dirty paths、缓存核心有550行净改动；失败worktree已丢失，成功run source digest与当前文件不匹配。成功runtime包含后续生产变更7d4186945d/22eddb20f0，不能称差异只有diagnostics。P0-A仍历史NO-GO，P0-B未证实恢复。下一步若继续必须冻结runtime身份，真实触发Host压力/eviction、L2与L3 request-source restore→GPU→decode、Frontier waiter恢复，并保留C32 idle sanity；GO/NO-GO报告`runs/G1-P0-REAL-LIFECYCLE-20261117.md`。
   - task: control/gemma4-w4a16-3090-performance-capacity/tasks/T005-e5m2-production-readiness.md
+
 ## gemma4-w4a16-g1-baseline-restoration
 - T003-g1-gsm8k-baseline-restoration Gemma4 W4A16 BF16-KV GSM8K正确率基线恢复 — ACTIVE
   - frontier: Gemma BOS(2)漏加修复后，全量同checkpoint/backend/scorer BF16-KV GSM8K为1,079/1,319 (81.804%)，较原始高183题；逐题审计通过。全量vLLM对照为1,068/1,319，SGLang/vLLM token IDs一致950/1,319 (72.0%)；低分根因恢复PASS，跨引擎数值/逐token一致性NOT ACCEPTED，369题生成有差异且未取完整对齐logits。E5M2及N512/513/514独立守卫不变。
   - task: control/gemma4-w4a16-3090-performance-capacity/tasks/T003-g1-gsm8k-baseline-restoration.md
+
 ## queued-prefetch-host-ready
 - T002-falcon-rhba1-acceptance Falcon T004 pipeline time, high-pressure efficiency and correctness — ACTIVE
   - frontier: Commit `3d90660dc28bc538e42b038654e8dc14bf43c96b` freezes one valid high-pressure L0 ON/OFF pair, complete A/B/C/D ledger and control status; pushed to origin at the same SHA. Four measured RIDs per arm hit 2,048 FULL KV + MAMBA pages; A decodes 1,024 outputs. B/C/D produce one token each; Prefill batching differs (ON shared batch-3; OFF batch-1 plus batch-2), so no net performance claim. Busy Union is not GPU-exclusive time; timestamped Host-ready and H2D→dependent-kernel edge remain NOT_CAPTURED/NOT_VERIFIED. Next: obtain/freeze authorized same-revision Falcon no-cache oracle/tolerance, run long multi-round FULL+MAMBA correctness, and additional sufficiently matched long-output performance repetitions if still authorized. **T005 carry-over requiring T004 integration:** worker can crash on optional `prefetch_issue_mono_ns=None`; None-preserving guard and regression handoff in `runs/T004-FALCON-20261016/T004-WORKER-OPTIONAL-TIMESTAMP-HANDOFF-20261020.md`. Integrate guard with existing dirty telemetry consumer and regression before production use; it is not committed/pushed or production PASS. Preserve 52 tracked dirty paths and 5,241 untracked entries; GPU lock required. Physical-media attribution, correctness acceptance and performance benefit remain open.

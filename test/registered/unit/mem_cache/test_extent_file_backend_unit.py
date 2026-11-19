@@ -37,6 +37,7 @@ except ImportError:
 
 from sglang.srt.mem_cache.hicache_storage import (
     HiCacheStorageConfig,
+    HiCacheStorageExtraInfo,
     PoolHitPolicy,
     PoolName,
     PoolTransfer,
@@ -2211,6 +2212,34 @@ class TestExtentV1ZeroCopy(ExtentBackendTestBase):
             keys + ["never-written"], self._host_indices(self.num_pages + 1)
         )
         self.assertEqual(results, [True] * self.num_pages + [False])
+
+    def test_v1_read_logs_request_correlated_extent_read_without_keys(self):
+        self._fill_pool()
+        keys = self._make_keys(self.num_pages)
+        indices = self._host_indices(self.num_pages)
+        self.assertTrue(all(self.backend.batch_set_v1(keys, indices)))
+        with mock.patch(
+            "sglang.srt.mem_cache.storage.extent.extent_file_backend.logger.info"
+        ) as log_info:
+            result = self.backend.batch_get_v1(
+                keys,
+                indices,
+                extra_info=HiCacheStorageExtraInfo(
+                    extra_info={"rid": "restore-rid", "attempt_id": "a1", "pool": "kv"}
+                ),
+            )
+        self.assertEqual(result, [True] * self.num_pages)
+        args = next(
+            call.args
+            for call in log_info.call_args_list
+            if "evt=extent_read" in call.args[0]
+        )
+        self.assertIn("rid=%s", args[0])
+        self.assertIn("requested_bytes=%d", args[0])
+        self.assertIn("physical_bytes=%d", args[0])
+        self.assertIn("restore-rid", args)
+        self.assertIn("a1", args)
+        self.assertNotIn(keys[0], " ".join(map(str, args)))
 
     def test_v1_read_one_pread_per_extent(self):
         backend = ExtentFileBackend(

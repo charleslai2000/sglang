@@ -7,6 +7,7 @@ ROOT=/home/ubuntu/workspaces/3rdparty/sglang-hicache; VENV=/home/ubuntu/venvs/sg
 if [[ ${G1_GPU_LOCK_HELD:-0} != 1 ]]; then
   exec 9>"$LOCK"
   flock -n 9 || { echo GPU_LOCK_BUSY >&2; exit 90; }
+  export G1_GPU_LOCK_HELD=1
 fi
 ss -ltn|grep -q ":$PORT\\b" && { echo PORT_BUSY >&2; exit 91; } || true
 mkdir -p "$OUT"; export PYTHONNOUSERSITE=1 PYTHONPATH="$ROOT/control/gemma4-w4a16-3090-performance-capacity/runs:$AOT:$ROOT/python:$VENV/lib/python3.12/site-packages:$ROOT/python/sglang/kernels/aot/python:$OVERLAY" LD_LIBRARY_PATH="$VENV/lib/python3.12/site-packages/torch/lib:/usr/local/cuda-12.9/lib64" SGLANG_CACHE_DIR="$DATA/cache" HF_HOME="$DATA/cache/hf-home" HF_DATASETS_CACHE="$DATA/cache/datasets"; cd "$ROOT"
@@ -45,18 +46,47 @@ with open(sys.argv[2], "w") as stream:
     stream.write("\n")
 print(json.dumps(identity, sort_keys=True))
 PY
-: "${G1_PROD_KV:=fp8_e5m2}"; : "${G1_PROD_CONTEXT:=8192}"; : "${G1_PROD_MAX_RUNNING:=32}"; : "${G1_PROD_MEM_FRACTION:=.94}"; : "${G1_PROD_GRAPH_BS:=32}"; : "${G1_PROD_RADIX:=on}"; : "${G1_PROD_HICACHE:=off}"; : "${G1_PROD_HICACHE_SIZE:=1}"; : "${G1_PROD_L3_DIR:=$OUT/l3-extent}"
-ARGS=(--model-path "$MODEL" --trust-remote-code --host 127.0.0.1 --port "$PORT" --context-length "$G1_PROD_CONTEXT" --max-running-requests "$G1_PROD_MAX_RUNNING" --max-total-tokens 262144 --mem-fraction-static "$G1_PROD_MEM_FRACTION" --kv-cache-dtype "$G1_PROD_KV" --attention-backend triton --cuda-graph-backend-decode full --cuda-graph-max-bs-decode "$G1_PROD_GRAPH_BS" --log-level info --enable-metrics)
+: "${G1_PROD_KV:=fp8_e5m2}"; : "${G1_PROD_CONTEXT:=8192}"; : "${G1_PROD_MAX_RUNNING:=32}"; : "${G1_PROD_MAX_TOTAL_TOKENS:=262144}"; : "${G1_PROD_MEM_FRACTION:=.94}"; : "${G1_PROD_GRAPH_BS:=32}"; : "${G1_PROD_RADIX:=on}"; : "${G1_PROD_HICACHE:=off}"; : "${G1_PROD_HICACHE_SIZE:=1}"; : "${G1_PROD_L3_DIR:=$OUT/l3-extent}"
+: "${G1_PROD_EXTENT_SIZE:=67108864}"; : "${G1_PROD_EXTENT_FILE_SIZE:=4294967296}"; : "${G1_PROD_EXTENT_MAX_SIZE:=$G1_PROD_EXTENT_FILE_SIZE}"; : "${G1_PROD_EXTENT_MIN_FREE_SPACE:=10737418240}"
+ARGS=(--model-path "$MODEL" --trust-remote-code --host 127.0.0.1 --port "$PORT" --context-length "$G1_PROD_CONTEXT" --max-running-requests "$G1_PROD_MAX_RUNNING" --max-total-tokens "$G1_PROD_MAX_TOTAL_TOKENS" --mem-fraction-static "$G1_PROD_MEM_FRACTION" --kv-cache-dtype "$G1_PROD_KV" --attention-backend triton --cuda-graph-backend-decode full --cuda-graph-max-bs-decode "$G1_PROD_GRAPH_BS" --log-level info --enable-metrics)
+if [[ ${G1_PROD_EXPORT_REQUEST_METRICS:-off} == on ]]; then ARGS+=(--export-metrics-to-file --export-metrics-to-file-dir "$OUT/request-metrics"); fi
 [[ $G1_PROD_RADIX == on ]] || ARGS+=(--disable-radix-cache)
 if [[ ${G1_PROD_WARMUP:-on} == off ]]; then ARGS+=(--skip-server-warmup); fi
 if [[ $G1_PROD_HICACHE == on ]]; then
   mkdir -p "$G1_PROD_L3_DIR"
-  EXTENT_CONFIG=$(printf '{"storage_dir":"%s","extent_size":67108864,"file_size":4294967296,"max_size":4294967296,"min_free_space":10737418240}' "$G1_PROD_L3_DIR")
+  EXTENT_CONFIG=$(printf '{"storage_dir":"%s","extent_size":%s,"file_size":%s,"max_size":%s,"min_free_space":%s}' "$G1_PROD_L3_DIR" "$G1_PROD_EXTENT_SIZE" "$G1_PROD_EXTENT_FILE_SIZE" "$G1_PROD_EXTENT_MAX_SIZE" "$G1_PROD_EXTENT_MIN_FREE_SPACE")
   ARGS+=(--enable-hierarchical-cache --hicache-size "$G1_PROD_HICACHE_SIZE" --hicache-storage-backend extent --hicache-storage-backend-extra-config "$EXTENT_CONFIG" --hicache-write-policy write_through --hicache-io-backend kernel --hicache-mem-layout page_first --hicache-host-memory-mode cache --hicache-storage-prefetch-policy wait_complete)
 fi
-printf '%q ' "${ARGS[@]}" > "$OUT/launch-argv.txt"; printf '\nkv=%s\ncontext=%s\nmax_running=%s\nmem_fraction=%s\ngraph_bs=%s\nradix=%s\nhicache=%s\nhicache_size=%s\nwarmup=%s\nl3_dir=%s\nsource_head=%s\n' "$G1_PROD_KV" "$G1_PROD_CONTEXT" "$G1_PROD_MAX_RUNNING" "$G1_PROD_MEM_FRACTION" "$G1_PROD_GRAPH_BS" "$G1_PROD_RADIX" "$G1_PROD_HICACHE" "$G1_PROD_HICACHE_SIZE" "${G1_PROD_WARMUP:-on}" "$G1_PROD_L3_DIR" "$(git rev-parse HEAD)" > "$OUT/manifest.txt"
-export G1_LOGITS_CAPTURE=; "$VENV/bin/python" -m sglang.launch_server "${ARGS[@]}" > "$OUT/server.log" 2>&1 & PID=$!; MON=; GPU_MON=; cleanup(){ set +e; [[ -z ${MON:-} ]] || { kill -TERM "$MON" 2>/dev/null; wait "$MON" 2>/dev/null; }; [[ -z ${GPU_MON:-} ]] || { kill -TERM "$GPU_MON" 2>/dev/null; wait "$GPU_MON" 2>/dev/null; }; [[ -z ${PID:-} ]] || { kill -TERM "$PID" 2>/dev/null; for _ in $(seq 1 60); do kill -0 "$PID" 2>/dev/null || break; sleep 1; done; pkill -TERM -P "$PID" 2>/dev/null; kill -TERM "$PID" 2>/dev/null; wait "$PID" 2>/dev/null; }; nvidia-smi --query-gpu=timestamp,utilization.gpu,memory.used --format=csv,noheader > "$OUT/gpu-after.csv"; ss -ltnp|grep ":$PORT\\b" > "$OUT/port-after.txt" 2>&1 || true; }; trap cleanup EXIT
-trap 'exit 0' TERM
+printf '%q ' "${ARGS[@]}" > "$OUT/launch-argv.txt"; printf '\nkv=%s\ncontext=%s\nmax_running=%s\nmax_total_tokens=%s\nmem_fraction=%s\ngraph_bs=%s\nradix=%s\nhicache=%s\nhicache_size_gb=%s\nrequest_metrics_export=%s\nextent_size_bytes=%s\nextent_file_size_bytes=%s\nextent_max_size_bytes=%s\nextent_min_free_bytes=%s\nwarmup=%s\nl3_dir=%s\nsource_head=%s\n' "$G1_PROD_KV" "$G1_PROD_CONTEXT" "$G1_PROD_MAX_RUNNING" "$G1_PROD_MAX_TOTAL_TOKENS" "$G1_PROD_MEM_FRACTION" "$G1_PROD_GRAPH_BS" "$G1_PROD_RADIX" "$G1_PROD_HICACHE" "$G1_PROD_HICACHE_SIZE" "${G1_PROD_EXPORT_REQUEST_METRICS:-off}" "$G1_PROD_EXTENT_SIZE" "$G1_PROD_EXTENT_FILE_SIZE" "$G1_PROD_EXTENT_MAX_SIZE" "$G1_PROD_EXTENT_MIN_FREE_SPACE" "${G1_PROD_WARMUP:-on}" "$G1_PROD_L3_DIR" "$(git rev-parse HEAD)" > "$OUT/manifest.txt"
+export G1_LOGITS_CAPTURE=
+"$VENV/bin/python" -m sglang.launch_server "${ARGS[@]}" > "$OUT/server.log" 2>&1 & PID=$!
+MON=; GPU_MON=
+stop_tree() {
+  local root=${1:-} sig=${2:-TERM} child
+  [[ -n "$root" ]] || return 0
+  while read -r child; do stop_tree "$child" "$sig"; done < <(pgrep -P "$root" 2>/dev/null || true)
+  kill -s "$sig" "$root" 2>/dev/null || true
+}
+cleanup(){
+  local rc=$?
+  trap - EXIT TERM INT
+  set +e
+  [[ -z ${MON:-} ]] || { kill -TERM "$MON" 2>/dev/null; wait "$MON" 2>/dev/null; }
+  [[ -z ${GPU_MON:-} ]] || { kill -TERM "$GPU_MON" 2>/dev/null; wait "$GPU_MON" 2>/dev/null; }
+  if [[ -n ${PID:-} ]]; then
+    stop_tree "$PID" TERM
+    for _ in $(seq 1 60); do kill -0 "$PID" 2>/dev/null || break; sleep 1; done
+    stop_tree "$PID" KILL
+    wait "$PID" 2>/dev/null
+  fi
+  nvidia-smi --query-gpu=timestamp,utilization.gpu,memory.used --format=csv,noheader > "$OUT/gpu-after.csv" 2>&1
+  ss -ltnp|grep ":$PORT\\b" > "$OUT/port-after.txt" 2>&1 || true
+  exit "$rc"
+}
+trap cleanup EXIT
+trap 'exit 143' TERM
 trap 'exit 130' INT
-watchdog(){ sleep 4200; kill -TERM "$$" 2>/dev/null; }; watchdog & MON=$!; echo "$MON" > "$OUT/watchdog.pid"
-ready=0; for _ in $(seq 1 1200); do if curl -fsS "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; then ready=1;break;fi;kill -0 "$PID" 2>/dev/null || { tail -100 "$OUT/server.log"; exit 2; };sleep 1;done;[[ $ready == 1 ]];curl -fsS "http://127.0.0.1:$PORT/model_info" > "$OUT/model-info.json"; echo "$PID" > "$OUT/server.pid"; echo "$MON" > "$OUT/watchdog.pid"; nvidia-smi --query-gpu=timestamp,utilization.gpu,memory.used --format=csv --loop-ms=1000 > "$OUT/gpu-samples.csv" & GPU_MON=$!; echo "$GPU_MON" > "$OUT/gpu-monitor.pid"; wait "$PID"
+# The previous background watchdog inherited FD 9 and could outlive this launcher,
+# retaining the flock. Avoid a child watchdog: the parent wrapper owns its deadline.
+
+ready=0; for _ in $(seq 1 1200); do if curl -fsS "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; then ready=1;break;fi;kill -0 "$PID" 2>/dev/null || { tail -100 "$OUT/server.log"; exit 2; };sleep 1;done;[[ $ready == 1 ]];curl -fsS "http://127.0.0.1:$PORT/model_info" > "$OUT/model-info.json"; echo "$PID" > "$OUT/server.pid"; nvidia-smi --query-gpu=timestamp,utilization.gpu,memory.used --format=csv --loop-ms=1000 > "$OUT/gpu-samples.csv" & GPU_MON=$!; echo "$GPU_MON" > "$OUT/gpu-monitor.pid"; wait "$PID"

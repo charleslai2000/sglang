@@ -1165,7 +1165,15 @@ class HiCacheController:
                 ]
 
                 # Get one batch token, and update the completed_tokens if succeed
-                extra_info = HiCacheStorageExtraInfo(prefix_keys=prefix_keys)
+                extra_info = HiCacheStorageExtraInfo(
+                    prefix_keys=prefix_keys,
+                    extra_info={
+                        "rid": operation.request_id,
+                        "attempt_id": getattr(operation, "prefetch_attempt_id", None),
+                        "operation": "prefetch_restore",
+                        "pool": "kv",
+                    },
+                )
 
                 hit_pages = self._page_transfer_kv_batch(
                     operation,
@@ -1220,7 +1228,7 @@ class HiCacheController:
                 for transfer in kv_derived_transfers
             ]
             sidecar_results = self.storage_backend.batch_get_v2(
-                current_kv_derived_transfers
+                current_kv_derived_transfers, extra_info=extra_info
             )
             sidecar_hits = count_pool_hits(sidecar_results)
 
