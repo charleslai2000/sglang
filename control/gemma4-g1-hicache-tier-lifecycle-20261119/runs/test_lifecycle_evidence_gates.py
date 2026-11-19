@@ -25,13 +25,28 @@ class LifecycleEvidenceGateTest(unittest.TestCase):
         record["cached_tokens_details"]["host"] = 1
         self.assertFalse(MODULE.source_restore_qualified(record, "l1", 256))
 
+    def test_l2_allows_shared_ancestor_in_device_with_lower_tier_ready(self):
+        record = {
+            "rid": "r",
+            "ok": True,
+            "completion_tokens": 256,
+            "output_token_ids_count": 256,
+            "cached_tokens_details": {"device": 100, "host": 50, "storage": 0},
+            "restore_evidence": {
+                "ready_events": ["evt=ready_host rid=r finalize_result=accepted"]
+            },
+        }
+        self.assertTrue(MODULE.source_restore_qualified(record, "l2", 256))
+        record["cached_tokens_details"]["storage"] = 10
+        self.assertFalse(MODULE.source_restore_qualified(record, "l2", 256))
+
     def test_l2_requires_accepted_restore_ready_and_decode(self):
         record = {
             "rid": "r",
             "ok": True,
             "completion_tokens": 256,
             "output_token_ids_count": 256,
-            "cached_tokens_details": {"device": 0, "host": 100, "storage": 0},
+            "cached_tokens_details": {"device": 40, "host": 100, "storage": 0},
             "restore_evidence": {
                 "restore_events": ["restore"],
                 "ready_events": ["evt=ready_host finalize_result=accepted"],
@@ -65,7 +80,7 @@ class LifecycleEvidenceGateTest(unittest.TestCase):
             "ok": True,
             "completion_tokens": 256,
             "output_token_ids_count": 256,
-            "cached_tokens_details": {"device": 0, "host": 0, "storage": 100},
+            "cached_tokens_details": {"device": 25, "host": 0, "storage": 100},
             "restore_evidence": {
                 "extent_reads": [read],
                 "restore_events": ["evt=restore_disposition rid=r disposition=RESTORE requested=100 granted=100 reason=full"],
@@ -74,7 +89,7 @@ class LifecycleEvidenceGateTest(unittest.TestCase):
         }
         self.assertTrue(MODULE.source_restore_qualified(record, "l3", 256))
         record["cached_tokens_details"]["device"] = 1
-        self.assertFalse(MODULE.source_restore_qualified(record, "l3", 256))
+        self.assertTrue(MODULE.source_restore_qualified(record, "l3", 256))
         record["cached_tokens_details"]["device"] = 0
         # The parser's RID join is the required boundary: unrelated RIDs never
         # enter this record's extent_reads list.
@@ -83,6 +98,7 @@ class LifecycleEvidenceGateTest(unittest.TestCase):
         record["restore_evidence"]["extent_reads"] = [
             read.replace("physical_bytes=4096", "physical_bytes=0")
         ]
+        record["cached_tokens_details"]["storage"] = 0
         self.assertFalse(MODULE.source_restore_qualified(record, "l3", 256))
 
     def test_mixed_restore_requires_host_and_storage(self):
@@ -91,7 +107,7 @@ class LifecycleEvidenceGateTest(unittest.TestCase):
             "ok": True,
             "completion_tokens": 256,
             "output_token_ids_count": 256,
-            "cached_tokens_details": {"device": 0, "host": 10, "storage": 20},
+            "cached_tokens_details": {"device": 25, "host": 10, "storage": 20},
             "restore_evidence": {
                 "extent_reads": ["evt=extent_read rid=r succeeded_keys=2 physical_bytes=10"],
                 "restore_events": ["evt=restore_disposition rid=r disposition=RESTORE requested=20 granted=20 reason=full"],

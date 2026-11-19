@@ -211,7 +211,7 @@ CLIENT_ARGS=(
   --warm-output-tokens 1 --decode-output-tokens 256 --parallel 8
   --min-requests "$PRESSURE_MIN_REQUESTS"
   --capacity-json "$CAPACITY_JSON"
-  --require-capacity --require-radix-split --frontier-count "${G1_TIER_FRONTIER_COUNT:-0}" --stages "$STAGES"
+  --require-capacity --frontier-count "${G1_TIER_FRONTIER_COUNT:-0}" --stages "$STAGES"
 )
 if [[ -n "$BRANCH_SEQUENCE" ]]; then CLIENT_ARGS+=(--branch-sequence "$BRANCH_SEQUENCE"); fi
 if [[ -n "$REQUIRE_SOURCES" ]]; then CLIENT_ARGS+=(--require-sources "$REQUIRE_SOURCES"); fi
@@ -277,6 +277,21 @@ else:
     raise SystemExit("FULL_IDLE_TIMEOUT")
 PY
 if [[ "$CLIENT_RC" == 0 ]] && grep -q 'G1_P0_SANITY_CHECK_RESULT phase=production_on_idle status=PASS' "$OUT/scheduler-lifecycle.markers"; then
+  "$VENV/bin/python" - "$RUNS/run_radix_tree_lifecycle.py" "$OUT/tree-lifecycle-events.json" "$OUT/hicache_quiescent.json" <<'PY'
+import importlib.util, json, sys
+from pathlib import Path
+module_path, events_path, quiet_path = map(Path, sys.argv[1:])
+spec = importlib.util.spec_from_file_location("g1_lifecycle", module_path)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+module.validate_radix_events(json.loads(events_path.read_text()))
+quiet = json.loads(quiet_path.read_text())
+ops = quiet.get("tree_trace_operations", {})
+if not quiet.get("observed") or quiet.get("tree_trace_violation"):
+    raise SystemExit("RADIX_QUIESCENT_TRACE_INVALID")
+if ops.get("split_new_prefix", 0) < 1 or ops.get("split_old_child", 0) < 1:
+    raise SystemExit("RADIX_QUIESCENT_SPLIT_NOT_CONFIRMED")
+PY
   printf 'production_idle_sanity=PASS\n' >> "$OUT/run.identity.txt"
 else
   printf 'production_idle_sanity=UNKNOWN_OR_FAIL\n' >> "$OUT/run.identity.txt"
