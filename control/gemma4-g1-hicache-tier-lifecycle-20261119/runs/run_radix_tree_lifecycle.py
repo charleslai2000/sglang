@@ -695,7 +695,14 @@ def main():
         raise SystemExit("BRANCH_EXCLUSIVE_RESTORE_SEQUENCE_REQUIRES_L3_GATE")
     if "branch_exclusive_l3" in stages and not branch_sequence:
         raise SystemExit("BRANCH_EXCLUSIVE_L3_REQUIRES_BRANCH_SEQUENCE")
-    if "branch_exclusive_l3" in stages and "l3" not in required_sources:
+    # The per-branch gate below already requires all six requests of each branch
+    # to satisfy source_restore_qualified(record, "l3"), which is strictly
+    # stronger than a single l3 sample. When that gate is armed, an explicit
+    # l3 source request is redundant.
+    branch_gate_covers_l3 = "branch_exclusive_l3" in stages and bool(
+        args.require_branch_exclusive
+    )
+    if "branch_exclusive_l3" in stages and "l3" not in required_sources and not branch_gate_covers_l3:
         raise SystemExit("BRANCH_EXCLUSIVE_L3_REQUIRES_L3_SOURCE_GATE")
     required_branches = {int(item.strip()) for item in args.require_branch_exclusive.split(",") if item.strip()}
     if not required_branches <= {0, 1}:
@@ -726,7 +733,13 @@ def main():
             raise SystemExit("L2_ONLY_PROBE_REQUIRES_TIER_PROBE")
     if required_sources and not args.require_capacity:
         raise SystemExit("SOURCE_QUALIFICATION_REQUIRES_CAPACITY_GATE")
-    if required_sources and not args.pressure_requests:
+    # Capacity pressure is what normally evicts the fixture from Device, but it
+    # also saturates the Host pool with in-flight backups, which makes the
+    # branch restores fail their Host allocation (miss_reason=alloc_failed) even
+    # though the Extent copy exists. A branch-exclusive run can get the same
+    # eviction from the seed phase plus its own churn pass, so the pressure
+    # requirement is waived when the per-branch l3 gate is armed.
+    if required_sources and not args.pressure_requests and not branch_gate_covers_l3:
         raise SystemExit("SOURCE_QUALIFICATION_REQUIRES_CAPACITY_PRESSURE")
     if args.pressure_requests < 0:
         raise SystemExit("INVALID_PRESSURE_REQUEST_COUNT")
