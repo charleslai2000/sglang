@@ -69,6 +69,10 @@ class LifecycleEvidenceGateTest(unittest.TestCase):
             "evt=ready_host rid=r finalize_result=accepted"
         ]
         record["restore_evidence"]["restore_events"] = []
+        record["restore_evidence"]["ready_events"] = []
+        self.assertFalse(MODULE.source_restore_qualified(record, "l2", 256))
+        record["restore_evidence"]["ready_events"] = ["evt=ready_host rid=r finalize_result=accepted"]
+        record["restore_evidence"]["restore_events"] = ["evt=restore_disposition rid=r disposition=RESTORE requested=100 granted=100"]
         self.assertTrue(MODULE.source_restore_qualified(record, "l2", 256))
         record["completion_tokens"] = 255
         self.assertFalse(MODULE.source_restore_qualified(record, "l2", 256))
@@ -91,6 +95,9 @@ class LifecycleEvidenceGateTest(unittest.TestCase):
         record["cached_tokens_details"]["device"] = 1
         self.assertTrue(MODULE.source_restore_qualified(record, "l3", 256))
         record["cached_tokens_details"]["device"] = 0
+        record["restore_evidence"]["ready_events"] = ["evt=ready_host rid=r finalize_result=rejected"]
+        self.assertFalse(MODULE.source_restore_qualified(record, "l3", 256))
+        record["restore_evidence"]["ready_events"] = ["evt=ready_host rid=r finalize_result=accepted"]
         # The parser's RID join is the required boundary: unrelated RIDs never
         # enter this record's extent_reads list.
         record["restore_evidence"]["extent_reads"] = []

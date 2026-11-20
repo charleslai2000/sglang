@@ -76,6 +76,7 @@ mkdir -p "$OUT/service/l3-extent"
 export G1_PROD_OUT="$OUT/service" G1_PROD_PORT="$PORT" G1_GPU_LOCK_HELD=1
 export G1_PROD_KV=fp8_e5m2 G1_PROD_CONTEXT=131072 G1_PROD_MAX_RUNNING=32
 export G1_PROD_MAX_TOTAL_TOKENS=$MAX_TOTAL_TOKENS G1_PROD_MEM_FRACTION=${G1_TIER_MEM_FRACTION:-.90}
+export G1_PROD_HICACHE_PREFETCH_POLICY=${G1_TIER_PREFETCH_POLICY:-wait_complete}
 export G1_PROD_GRAPH_BS=32 G1_PROD_RADIX=on G1_PROD_HICACHE=on G1_PROD_HICACHE_SIZE=$HICACHE_SIZE_GB
 export G1_PROD_L3_DIR="$OUT/service/l3-extent" G1_PROD_WARMUP=off G1_PROD_EXPORT_REQUEST_METRICS=on
 export G1_PROD_EXTENT_SIZE=${G1_TIER_EXTENT_SIZE:-67108864}
@@ -147,9 +148,15 @@ for _ in $(seq 1 1200); do
 done
 [[ $READY == 1 ]] || { echo SERVICE_READINESS_TIMEOUT >&2; exit 3; }
 printf 'service_ready_epoch=%s\n' "$(date +%s)" >> "$OUT/run.identity.txt"
-if [[ -s "$OUT/service/server.pid" ]]; then SERVER_PID=$(<"$OUT/service/server.pid"); fi
+for _ in $(seq 1 30); do
+  if [[ -s "$OUT/service/server.pid" ]]; then SERVER_PID=$(<"$OUT/service/server.pid"); break; fi
+  server_pid=$(pgrep -f "python -m sglang.launch_server .*--port $PORT( |$)" | head -1 || true)
+  if [[ -n "$server_pid" ]]; then SERVER_PID=$server_pid; break; fi
+  process_live "$LAUNCHER" || { echo LAUNCHER_EXITED_BEFORE_SERVER_PID >&2; exit 4; }
+  sleep 1
+done
 printf 'launcher_pid=%s\n' "$LAUNCHER" >> "$OUT/run.identity.txt"
-[[ -n "$SERVER_PID" ]] || { echo SERVER_PID_MISSING >&2; exit 4; }
+[[ -n "$SERVER_PID" ]] || { echo SERVER_PID_MISSING_AFTER_HEALTH >&2; exit 4; }
 kill -0 "$SERVER_PID" 2>/dev/null || { echo SERVER_PID_NOT_ALIVE >&2; exit 4; }
 printf 'server_pid=%s\n' "$SERVER_PID" > "$OUT/owned-service.pid"
 if [[ "$PROBE_CAPACITY" == yes ]]; then
@@ -211,13 +218,17 @@ CLIENT_ARGS=(
   --warm-output-tokens 1 --decode-output-tokens 256 --parallel 8
   --min-requests "$PRESSURE_MIN_REQUESTS"
   --capacity-json "$CAPACITY_JSON"
-  --require-capacity --frontier-count "${G1_TIER_FRONTIER_COUNT:-0}" --stages "$STAGES"
+  --context "$G1_PROD_CONTEXT" --require-capacity --frontier-count "${G1_TIER_FRONTIER_COUNT:-0}" --stages "$STAGES"
 )
+if [[ -n "${G1_TIER_PRESSURE_FIXTURE:-}" ]]; then CLIENT_ARGS+=(--pressure-fixture "$G1_TIER_PRESSURE_FIXTURE" --pressure-requests "${G1_TIER_PRESSURE_REQUESTS:-2}"); fi
 if [[ -n "$BRANCH_SEQUENCE" ]]; then CLIENT_ARGS+=(--branch-sequence "$BRANCH_SEQUENCE"); fi
 if [[ -n "$REQUIRE_SOURCES" ]]; then CLIENT_ARGS+=(--require-sources "$REQUIRE_SOURCES"); fi
 if [[ -n "$REQUIRE_BRANCHES" ]]; then CLIENT_ARGS+=(--require-branch-exclusive "$REQUIRE_BRANCHES"); fi
 if [[ -n "${G1_TIER_REQUIRE_SOURCE:-}" ]]; then CLIENT_ARGS+=(--require-source "$G1_TIER_REQUIRE_SOURCE"); fi
 if [[ "${G1_TIER_REQUIRE_FRONTIER_RECOVERY:-}" == yes ]]; then CLIENT_ARGS+=(--require-frontier-recovery); fi
+if [[ -n "${G1_TIER_FRONTIER_COUNT:-}" && "${G1_TIER_FRONTIER_COUNT:-0}" != 0 ]]; then
+  CLIENT_ARGS+=(--require-radix-split)
+fi
 timeout --signal=TERM --kill-after=60 9000 \
   "$VENV/bin/python" "$RUNS/run_radix_tree_lifecycle.py" "${CLIENT_ARGS[@]}" \
   > "$OUT/client.stdout" 2> "$OUT/client.stderr" || CLIENT_RC=$?
@@ -277,6 +288,17 @@ else:
     raise SystemExit("FULL_IDLE_TIMEOUT")
 PY
 if [[ "$CLIENT_RC" == 0 ]] && grep -q 'G1_P0_SANITY_CHECK_RESULT phase=production_on_idle status=PASS' "$OUT/scheduler-lifecycle.markers"; then
+  if [[ -s "$OUT/client/lifecycle.json" ]]; then
+    "$VENV/bin/python" - "$OUT/client/lifecycle.json" <<'PY'
+import json, sys
+from pathlib import Path
+result=json.loads(Path(sys.argv[1]).read_text())
+for phase in ("tree_seed", "tier_probe", "cold_storage_restore"):
+    item=result.get(phase, {})
+    if item.get("count", 0) == 0 or item.get("success") != item.get("count"):
+        raise SystemExit(f"PHASE_DECODE_INCOMPLETE:{phase}:{item}")
+PY
+  fi
   "$VENV/bin/python" - "$RUNS/run_radix_tree_lifecycle.py" "$OUT/tree-lifecycle-events.json" "$OUT/hicache_quiescent.json" <<'PY'
 import importlib.util, json, sys
 from pathlib import Path

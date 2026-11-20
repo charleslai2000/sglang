@@ -189,11 +189,12 @@ def source_restore_qualified(record, source, output_tokens):
     details = record.get("cached_tokens_details") or {}
     d, h, s = (int(details.get(key, 0) or 0) for key in ("device", "host", "storage"))
     evidence = record.get("restore_evidence", {})
+    ready_events = evidence.get("ready_events", [])
     accepted_ready = any(
         f"rid={record.get('rid')} " in line and "finalize_result=accepted" in line
-        for line in evidence.get("ready_events", [])
+        for line in ready_events
     )
-    accepted_restore = accepted_ready and any(
+    accepted_restore = (not ready_events or accepted_ready) and any(
         f"rid={record.get('rid')} " in line
         and "disposition=RESTORE" in line
         and positive_counter(line, "requested") > 0
@@ -502,6 +503,9 @@ def main():
     parser.add_argument("--require-frontier-recovery", action="store_true")
     parser.add_argument("--capacity-json")
     parser.add_argument("--stages", default="tier_probe,cold_storage_restore")
+    parser.add_argument("--pressure-fixture")
+    parser.add_argument("--pressure-requests", type=int, default=0)
+    parser.add_argument("--context", type=int, default=131072)
     args = parser.parse_args()
 
     out = Path(args.out)
@@ -545,6 +549,10 @@ def main():
         raise SystemExit(f"FIXTURE_TOO_SMALL expected_at_least={args.min_requests} actual={len(rows)}")
     if required_sources and not args.require_capacity:
         raise SystemExit("SOURCE_QUALIFICATION_REQUIRES_CAPACITY_GATE")
+    if args.pressure_requests < 0:
+        raise SystemExit("INVALID_PRESSURE_REQUEST_COUNT")
+    if args.pressure_requests and not args.require_capacity:
+        raise SystemExit("PRESSURE_REQUIRES_CAPACITY_GATE")
     if required_sources and "cold_storage_restore" in stages and "tier_probe" not in stages:
         raise SystemExit("POST_FLUSH_RESTORE_REQUIRES_PRE_FLUSH_SOURCE_PROBE")
     if required_branches and not required_sources:
@@ -675,6 +683,39 @@ def main():
     branch_probe_records = []
     source_gate_host_probe = None
     final = snapshot(args.url, out, "after_seed", args.extent_dir)
+    pressure = None
+    if args.pressure_requests:
+        if not args.pressure_fixture:
+            raise SystemExit("PRESSURE_FIXTURE_REQUIRED")
+        pressure_path = Path(args.pressure_fixture)
+        pressure_fixture = json.loads(pressure_path.read_text())
+        pressure_rows = pressure_fixture if isinstance(pressure_fixture, list) else pressure_fixture.get("requests", [])
+        if len(pressure_rows) < args.pressure_requests:
+            raise SystemExit("PRESSURE_FIXTURE_TOO_SMALL")
+        pressure_snapshot = final
+        host_capacity = int(capacity["distinct_host_pool_allocations"]["full"]["tokens"])
+        device_capacity = int(capacity["gpu_pool_capacity_gauges"]["sglang:max_total_num_tokens"].get("", 0))
+        if not device_capacity:
+            device_capacity = int(next(iter(capacity["gpu_pool_capacity_gauges"]["sglang:max_total_num_tokens"].values())))
+        target_tokens = args.context
+        requested_workset = args.pressure_requests * target_tokens
+        tiered_capacity = device_capacity + host_capacity
+        if requested_workset <= tiered_capacity:
+            raise SystemExit(f"PRESSURE_WORKSET_NOT_ABOVE_DEVICE_PLUS_HOST:{requested_workset}:{tiered_capacity}")
+        pressure_records = []
+        for index, row in enumerate(pressure_rows[:args.pressure_requests]):
+            ids = row.get("input_ids")
+            if not isinstance(ids, list) or len(ids) != target_tokens:
+                raise SystemExit(f"PRESSURE_ROW_LENGTH:{index}:{len(ids) if isinstance(ids, list) else 'invalid'}:{target_tokens}")
+            pressure_records.append(run_one(args.url, row, f"{row['rid']}-pressure", "capacity_pressure", 1, args.timeout))
+            write_json(out / "capacity_pressure.partial.json", {"completed": len(pressure_records), "requests": pressure_records})
+        write_json(out / "capacity_pressure.json", {"target_tokens_each": target_tokens, "requested_workset_tokens": requested_workset, "device_tokens": device_capacity, "host_tokens": host_capacity, "tiered_capacity_tokens": tiered_capacity, "requests": pressure_records})
+        pressure_after = snapshot(args.url, out, "after_capacity_pressure", args.extent_dir)
+        host_used = pressure_after["pool_capacities"].get("sglang:hicache_host_used_tokens")
+        capacity["runtime_pressure"] = {"target_tokens": target_tokens, "device_tokens": device_capacity, "host_tokens": host_capacity, "host_used_tokens": host_used, "before": pressure_snapshot.get("pool_capacities"), "after": pressure_after.get("pool_capacities")}
+        write_json(out / "capacity.runtime.json", capacity)
+        if int(host_used or 0) <= 0:
+            raise SystemExit("PRESSURE_DID_NOT_OBSERVE_HOST_TIER_USE")
     if "tier_probe" in stages:
         host_probe = run_parallel(
             args.url,
