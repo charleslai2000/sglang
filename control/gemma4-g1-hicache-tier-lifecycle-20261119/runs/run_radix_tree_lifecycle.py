@@ -719,7 +719,11 @@ def main():
         raise SystemExit("INVALID_PRESSURE_REQUEST_COUNT")
     if args.pressure_requests and not args.require_capacity:
         raise SystemExit("PRESSURE_REQUIRES_CAPACITY_GATE")
-    if args.pressure_requests and "tier_probe" not in stages:
+    # Pressure normally exists to give tier_probe a Host/Extent-populated tree.
+    # A branch-exclusive run needs it for the opposite reason: the branch
+    # suffixes must be pushed OUT of Device so their restores come from the
+    # Extent instead of a Device hit, and pressure runs before every stage.
+    if args.pressure_requests and "tier_probe" not in stages and "branch_exclusive_l3" not in stages:
         raise SystemExit("CAPACITY_PRESSURE_REQUIRES_TIER_PROBE")
     if args.pressure_requests and args.pressure_prompt_tokens <= 0:
         raise SystemExit("INVALID_PRESSURE_PROMPT_LENGTH")
@@ -1256,17 +1260,32 @@ def main():
             stage_for_source = "tier_probe"
         if source == "l2" and l2_only:
             stage_for_source = "l2_only_probe"
+        # A branch-exclusive run may qualify l3 from its own records: each of
+        # them must independently show an Extent read, and the per-branch gate
+        # below requires all six. Keeping the cold stage in the request is not
+        # required when the branch stage is the qualified evidence source.
+        if (
+            source in ("l3", "mixed")
+            and "cold_storage_restore" not in stages
+            and "branch_exclusive_l3" in stages
+        ):
+            stage_for_source = "branch_exclusive_l3"
         if stage_for_source not in stages:
             raise SystemExit(f"SOURCE_STAGE_NOT_REQUESTED:{source}:{stage_for_source}")
         phase_records = (
             l1_probe if source == "l1" and l1_probe
             else l2_only if source == "l2" and l2_only
             else (source_gate_host_probe or host_probe) if source in ("l1", "l2")
+            else branch_probe_records if stage_for_source == "branch_exclusive_l3"
             else (cold_l3 if source in ("l3", "mixed") else host_probe)
         )
-        if source in ("l3", "mixed") and not any(
-            source_restore_qualified(record, source, args.decode_output_tokens)
-            for record in host_probe
+        if (
+            source in ("l3", "mixed")
+            and stage_for_source != "branch_exclusive_l3"
+            and not any(
+                source_restore_qualified(record, source, args.decode_output_tokens)
+                for record in host_probe
+            )
         ):
             phase_records = cold_l3
         if not phase_records:
