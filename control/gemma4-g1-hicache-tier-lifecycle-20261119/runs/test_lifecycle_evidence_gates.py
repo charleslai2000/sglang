@@ -31,7 +31,7 @@ class LifecycleEvidenceGateTest(unittest.TestCase):
             "ok": True,
             "completion_tokens": 256,
             "output_token_ids_count": 256,
-            "cached_tokens_details": {"device": 100, "host": 50, "storage": 0},
+            "cached_tokens_details": {"device": 0, "host": 50, "storage": 0},
             "restore_evidence": {
                 "restore_events": ["evt=restore_disposition rid=r disposition=RESTORE requested=50 granted=50"],
                 "ready_events": ["evt=ready_host rid=r finalize_result=accepted"]
@@ -47,7 +47,7 @@ class LifecycleEvidenceGateTest(unittest.TestCase):
             "ok": True,
             "completion_tokens": 256,
             "output_token_ids_count": 256,
-            "cached_tokens_details": {"device": 40, "host": 100, "storage": 0},
+            "cached_tokens_details": {"device": 0, "host": 100, "storage": 0},
             "restore_evidence": {
                 "restore_events": ["restore"],
                 "ready_events": ["evt=ready_host finalize_result=accepted"],
@@ -85,7 +85,7 @@ class LifecycleEvidenceGateTest(unittest.TestCase):
             "ok": True,
             "completion_tokens": 256,
             "output_token_ids_count": 256,
-            "cached_tokens_details": {"device": 25, "host": 0, "storage": 100},
+            "cached_tokens_details": {"device": 0, "host": 0, "storage": 100},
             "restore_evidence": {
                 "extent_reads": [read],
                 "restore_events": ["evt=restore_disposition rid=r disposition=RESTORE requested=100 granted=100 reason=full"],
@@ -115,7 +115,7 @@ class LifecycleEvidenceGateTest(unittest.TestCase):
             "ok": True,
             "completion_tokens": 256,
             "output_token_ids_count": 256,
-            "cached_tokens_details": {"device": 25, "host": 10, "storage": 20},
+            "cached_tokens_details": {"device": 0, "host": 10, "storage": 20},
             "restore_evidence": {
                 "extent_reads": ["evt=extent_read rid=r succeeded_keys=2 physical_bytes=10"],
                 "restore_events": ["evt=restore_disposition rid=r disposition=RESTORE requested=20 granted=20 reason=full"],
@@ -150,8 +150,10 @@ class LifecycleEvidenceGateTest(unittest.TestCase):
         self.assertFalse(MODULE.frontier_recovery_qualified(record, 256))
         record["restore_evidence"]["frontier_wake_events"][0]["line_index"] = 2
         record["restore_evidence"]["frontier_wake_ids"] = ["different"]
+        record["restore_evidence"]["frontier_wake_events"] = []
         self.assertFalse(MODULE.frontier_recovery_qualified(record, 256))
         record["restore_evidence"]["frontier_wake_ids"] = ["w"]
+        record["restore_evidence"]["frontier_wake_events"] = [{"line_index": 2, "line": "evt=frontier_wake rid=r node=1"}]
         record["restore_evidence"]["retry_events"] = []
         self.assertFalse(MODULE.frontier_recovery_qualified(record, 256))
         record["restore_evidence"]["retry_events"] = [{"line_index": 3, "line": "evt=restore_retry rid=r cause=frontier"}]

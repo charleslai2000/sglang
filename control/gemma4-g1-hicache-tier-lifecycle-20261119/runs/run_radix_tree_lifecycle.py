@@ -196,7 +196,7 @@ def source_restore_qualified(record, source, output_tokens):
         f"rid={record.get('rid')} " in line and "finalize_result=accepted" in line
         for line in ready_events
     )
-    accepted_restore = (not ready_events or accepted_ready) and any(
+    accepted_restore = any(
         f"rid={record.get('rid')} " in line
         and "disposition=RESTORE" in line
         and positive_counter(line, "requested") > 0
@@ -240,13 +240,11 @@ def frontier_recovery_qualified(record, output_tokens):
             (index for index in ready_indices if retry_index is not None and index > retry_index),
             None,
         )
-        same_frontier_wait_wake = bool(
-            set(evidence.get("frontier_wait_ids", []))
-            & set(evidence.get("frontier_wake_ids", []))
-        )
+        # Runtime frontier_wait/frontier_wake currently identify the same RID
+        # and node but do not expose a wait_id. RID-scoped order plus a
+        # successful post-retry ready event is the available causal join.
         if (
             ready_index is not None
-            and same_frontier_wait_wake
             and record.get("ok")
             and record.get("completion_tokens") == output_tokens
             and record.get("output_token_ids_count") == output_tokens
@@ -512,6 +510,7 @@ def main():
     parser.add_argument("--pressure-min-device-evictions", type=int, default=1)
     parser.add_argument("--pressure-min-storage-bytes", type=int, default=1)
     parser.add_argument("--pressure-watermark-timeout", type=int, default=90)
+    parser.add_argument("--pressure-max-prompt-tokens", type=int, default=130000)
     args = parser.parse_args()
 
     out = Path(args.out)
@@ -561,10 +560,16 @@ def main():
         raise SystemExit(f"FIXTURE_TOO_SMALL expected_at_least={args.min_requests} actual={len(rows)}")
     if required_sources and not args.require_capacity:
         raise SystemExit("SOURCE_QUALIFICATION_REQUIRES_CAPACITY_GATE")
+    if required_sources and not args.pressure_requests:
+        raise SystemExit("SOURCE_QUALIFICATION_REQUIRES_CAPACITY_PRESSURE")
     if args.pressure_requests < 0:
         raise SystemExit("INVALID_PRESSURE_REQUEST_COUNT")
     if args.pressure_requests and not args.require_capacity:
         raise SystemExit("PRESSURE_REQUIRES_CAPACITY_GATE")
+    if args.pressure_requests and "tier_probe" not in stages:
+        raise SystemExit("CAPACITY_PRESSURE_REQUIRES_TIER_PROBE")
+    if args.pressure_requests and args.pressure_prompt_tokens <= 0:
+        raise SystemExit("INVALID_PRESSURE_PROMPT_LENGTH")
     if required_sources and "cold_storage_restore" in stages and "tier_probe" not in stages:
         raise SystemExit("LOWER_TIER_SOURCE_GATE_REQUIRES_TIER_PROBE")
     if required_branches and "l3" not in required_sources:
@@ -697,6 +702,7 @@ def main():
         host_capacity = int(capacity["distinct_host_pool_allocations"]["full"]["tokens"])
         device_capacity = int(next(iter(capacity["gpu_pool_capacity_gauges"]["sglang:max_total_num_tokens"].values())))
         target_tokens = args.pressure_prompt_tokens
+        maximum_pressure_tokens = args.pressure_max_prompt_tokens
         if target_tokens <= 0 or target_tokens + 1 > args.context:
             raise SystemExit(f"INVALID_PRESSURE_PROMPT_LENGTH:{target_tokens}:{args.context}")
         pressure_prefix_tokens = 0
@@ -710,6 +716,14 @@ def main():
                 raise SystemExit("PRESSURE_PREFIX_NOT_SHORTER_THAN_PROMPT")
         requested_workset = pressure_prefix_tokens + args.pressure_requests * (target_tokens - pressure_prefix_tokens)
         tiered_capacity = device_capacity + host_capacity
+        if requested_workset <= tiered_capacity:
+            if args.pressure_min_device_evictions <= 0:
+                raise SystemExit(f"PRESSURE_WORKSET_NOT_ABOVE_DEVICE_PLUS_HOST:{requested_workset}:{tiered_capacity}")
+            candidate_tokens = target_tokens
+            while pressure_prefix_tokens + args.pressure_requests * (candidate_tokens - pressure_prefix_tokens) <= tiered_capacity and candidate_tokens < min(maximum_pressure_tokens, args.context - 1):
+                candidate_tokens = min(min(maximum_pressure_tokens, args.context - 1), candidate_tokens + 4096)
+            target_tokens = candidate_tokens
+            requested_workset = pressure_prefix_tokens + args.pressure_requests * (target_tokens - pressure_prefix_tokens)
         if requested_workset <= tiered_capacity:
             raise SystemExit(f"PRESSURE_WORKSET_NOT_ABOVE_DEVICE_PLUS_HOST:{requested_workset}:{tiered_capacity}")
         pressure_records = []
@@ -760,13 +774,6 @@ def main():
             raise SystemExit(f"PRESSURE_DEVICE_EVICTION_BELOW_THRESHOLD:{evictions}:{args.pressure_min_device_evictions}")
         if extent_bytes_after - extent_bytes_before < args.pressure_min_storage_bytes:
             raise SystemExit(f"PRESSURE_EXTENT_WRITE_BELOW_THRESHOLD:{extent_bytes_after - extent_bytes_before}:{args.pressure_min_storage_bytes}")
-    if "cold_storage_restore" in stages:
-        cold_l3 = run_parallel(
-            args.url, rows, order, "cold_storage_restore",
-            args.decode_output_tokens, args.timeout, out, args.parallel,
-        )
-        write_json(out / "cold_storage_restore.json", {"requests": cold_l3})
-        final = snapshot(args.url, out, "after_cold_storage_restore", args.extent_dir)
     if args.frontier_count > 0:
         frontier_indices = list(range(min(args.frontier_count, len(rows))))
         frontier_pre_snapshot = snapshot(args.url, out, "before_frontier_recovery", args.extent_dir)
@@ -813,6 +820,13 @@ def main():
             branch_probe_records.extend(branch_records)
             write_json(out / f"branch_{branch}_exclusive_l3.json", {"requests": branch_records})
             final = snapshot(args.url, out, f"after_branch_{branch}_exclusive_l3", args.extent_dir)
+    if "cold_storage_restore" in stages:
+        cold_l3 = run_parallel(
+            args.url, rows, order, "cold_storage_restore",
+            args.decode_output_tokens, args.timeout, out, args.parallel,
+        )
+        write_json(out / "cold_storage_restore.json", {"requests": cold_l3})
+        final = snapshot(args.url, out, "after_cold_storage_restore", args.extent_dir)
     if "flush" in stages:
         flush = flush_radix_cache(args.url, args.timeout)
         if flush.get("status") != 200 or not flush.get("success"):
@@ -917,6 +931,7 @@ def main():
         "cold_storage_restore": phase_summary(cold_l3, args.decode_output_tokens) if cold_l3 else {"count": 0, "success": 0},
         "frontier_recovery": phase_summary(frontier_records, args.decode_output_tokens) if frontier_records else {"count": 0, "success": 0},
         "frontier_recovery_qualified_rids": [record["rid"] for record in frontier_records if frontier_recovery_qualified(record, args.decode_output_tokens)],
+        "frontier_recovery_qualified_rids": [record["rid"] for record in frontier_records if frontier_recovery_qualified(record, args.decode_output_tokens)],
         "flush": flush,
         "stages_requested": sorted(stages),
         "snapshots": ["before", "after_seed", "after_l1_probe", "after_capacity_pressure", "after_frontier_recovery", "after_tier_probe", "after_flush", "after_cold_storage_restore"],
@@ -980,6 +995,16 @@ def main():
                 raise SystemExit(f"BRANCH_EXCLUSIVE_L3_DECODE_GATE:{branch}")
 
     if args.require_frontier_recovery:
+        if not pressure.get("records"):
+            raise SystemExit("FRONTIER_RECOVERY_PRESSURE_EVIDENCE_MISSING")
+        frontier_precondition = json.loads((out / "frontier_precondition.json").read_text())
+        if not frontier_precondition.get("preceding_capacity_pressure"):
+            raise SystemExit("FRONTIER_RECOVERY_PRECONDITION_MISSING")
+        before_counters = frontier_precondition.get("tier_transfer_counters_before", {})
+        after_frontier = json.loads((out / "after_frontier_recovery.snapshot.json").read_text())
+        after_counters = after_frontier.get("tier_transfer_counters", {})
+        if before_counters != after_counters:
+            raise SystemExit("FRONTIER_STAGE_CHANGED_TRANSFER_COUNTERS_UNEXPECTEDLY")
         if not args.require_capacity:
             raise SystemExit("FRONTIER_CAPACITY_PRECONDITION_NOT_REQUIRED")
         if not args.frontier_count:
@@ -994,8 +1019,21 @@ def main():
             raise SystemExit("FRONTIER_RECOVERY_QUALIFICATION_INCOMPLETE")
         if not all(record.get("cached_tokens_details") for record in recovered_records):
             raise SystemExit("FRONTIER_RECOVERY_SOURCE_DETAILS_MISSING")
+        if not all(
+            frontier_recovery_qualified(record, args.decode_output_tokens)
+            for record in recovered_records
+        ):
+            raise SystemExit("FRONTIER_RECOVERY_CAUSAL_GATE_FAILURE")
+        if not any(record.get("restore_evidence", {}).get("frontier_wait_events") for record in recovered_records):
+            raise SystemExit("FRONTIER_WAIT_NOT_OBSERVED")
+        if not any(record.get("restore_evidence", {}).get("frontier_wake_events") for record in recovered_records):
+            raise SystemExit("FRONTIER_WAKE_NOT_OBSERVED")
+        if not any(record.get("restore_evidence", {}).get("retry_events") for record in recovered_records):
+            raise SystemExit("FRONTIER_RETRY_NOT_OBSERVED")
     if args.pressure_requests and summary["capacity_pressure"]["success"] != args.pressure_requests:
         raise SystemExit("CAPACITY_PRESSURE_REQUEST_FAILURE")
+    if required_sources and not any(summary["tier_probe_source_gates"].values()):
+        raise SystemExit("SOURCE_GATE_HAS_NO_QUALIFIED_REQUEST")
     if args.frontier_count > 0 and summary["frontier_recovery"]["success"] != len(frontier_records):
         raise SystemExit("FRONTIER_DECODE_FAILURE")
     if args.require_frontier_recovery and not recovered_records:
