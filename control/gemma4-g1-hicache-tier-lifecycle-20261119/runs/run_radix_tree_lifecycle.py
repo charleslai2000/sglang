@@ -691,10 +691,6 @@ def main():
         required_sources.add(args.require_source)
     if not required_sources <= {"l1", "l2", "l3", "mixed"}:
         raise SystemExit(f"INVALID_REQUIRED_SOURCES:{sorted(required_sources)}")
-    if branch_sequence and "l3" not in required_sources:
-        raise SystemExit("BRANCH_EXCLUSIVE_RESTORE_SEQUENCE_REQUIRES_L3_GATE")
-    if "branch_exclusive_l3" in stages and not branch_sequence:
-        raise SystemExit("BRANCH_EXCLUSIVE_L3_REQUIRES_BRANCH_SEQUENCE")
     # The per-branch gate below already requires all six requests of each branch
     # to satisfy source_restore_qualified(record, "l3"), which is strictly
     # stronger than a single l3 sample. When that gate is armed, an explicit
@@ -702,6 +698,10 @@ def main():
     branch_gate_covers_l3 = "branch_exclusive_l3" in stages and bool(
         args.require_branch_exclusive
     )
+    if branch_sequence and "l3" not in required_sources and not branch_gate_covers_l3:
+        raise SystemExit("BRANCH_EXCLUSIVE_RESTORE_SEQUENCE_REQUIRES_L3_GATE")
+    if "branch_exclusive_l3" in stages and not branch_sequence:
+        raise SystemExit("BRANCH_EXCLUSIVE_L3_REQUIRES_BRANCH_SEQUENCE")
     if "branch_exclusive_l3" in stages and "l3" not in required_sources and not branch_gate_covers_l3:
         raise SystemExit("BRANCH_EXCLUSIVE_L3_REQUIRES_L3_SOURCE_GATE")
     required_branches = {int(item.strip()) for item in args.require_branch_exclusive.split(",") if item.strip()}
