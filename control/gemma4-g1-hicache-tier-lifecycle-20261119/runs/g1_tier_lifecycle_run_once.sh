@@ -244,7 +244,11 @@ if [[ "${G1_TIER_REQUIRE_FRONTIER_RECOVERY:-}" == yes ]]; then CLIENT_ARGS+=(--r
 # check; asking the client for them only produced a harness-ordering failure
 # (RADIX_TRACE_ARTIFACT_MISSING) after every phase had already succeeded.
 if [[ "${G1_TIER_L2_ONLY_PROBE:-}" == yes ]]; then
-  CLIENT_ARGS+=(--l2-only-storage-backend extent)
+  CLIENT_ARGS+=(
+    --l2-only-storage-backend extent
+    --l2-only-idle-timeout "${G1_TIER_L2_ONLY_IDLE_TIMEOUT:-600}"
+    --l2-only-churn-passes "${G1_TIER_L2_ONLY_CHURN_PASSES:-1}"
+  )
   if [[ -n "${G1_TIER_L2_ONLY_STORAGE_PREFETCH_POLICY:-}" ]]; then
     CLIENT_ARGS+=(--l2-only-storage-prefetch-policy "$G1_TIER_L2_ONLY_STORAGE_PREFETCH_POLICY")
   fi
