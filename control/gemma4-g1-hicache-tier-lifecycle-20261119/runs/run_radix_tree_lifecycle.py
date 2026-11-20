@@ -653,6 +653,11 @@ def main():
                 raise SystemExit(f"RUNTIME_DEVICE_CAPACITY_MISMATCH:{name}")
             if int(runtime_host or 0) <= int(runtime_gpu or 0):
                 raise SystemExit(f"RUNTIME_HOST_CAPACITY_NOT_ABOVE_DEVICE:{name}")
+        capacity["runtime_before"] = {
+            "gpu_pool_capacities": initial["pool_capacities"],
+            "host_pool_allocations": initial["host_pool_allocations"],
+        }
+        write_json(out / "capacity.runtime.json", capacity)
     write_json(out / "before.snapshot.json", initial)
 
     seed = [
@@ -699,6 +704,7 @@ def main():
         if len(pressure_rows) < args.pressure_requests:
             raise SystemExit("PRESSURE_FIXTURE_TOO_SMALL")
         pressure_snapshot = final
+        pressure["before"] = pressure_snapshot.get("pool_capacities")
         host_capacity = int(capacity["distinct_host_pool_allocations"]["full"]["tokens"])
         device_capacity = int(next(iter(capacity["gpu_pool_capacity_gauges"]["sglang:max_total_num_tokens"].values())))
         target_tokens = args.pressure_prompt_tokens
@@ -725,6 +731,19 @@ def main():
             target_tokens = candidate_tokens
             requested_workset = pressure_prefix_tokens + args.pressure_requests * (target_tokens - pressure_prefix_tokens)
         if requested_workset <= tiered_capacity:
+            candidate_tokens = target_tokens
+            while (
+                pressure_prefix_tokens + args.pressure_requests * (candidate_tokens - pressure_prefix_tokens)
+                <= tiered_capacity
+                and candidate_tokens < min(maximum_pressure_tokens, args.context - 1)
+            ):
+                candidate_tokens = min(
+                    min(maximum_pressure_tokens, args.context - 1),
+                    candidate_tokens + 4096,
+                )
+            target_tokens = candidate_tokens
+            requested_workset = pressure_prefix_tokens + args.pressure_requests * (target_tokens - pressure_prefix_tokens)
+        if requested_workset <= tiered_capacity:
             raise SystemExit(f"PRESSURE_WORKSET_NOT_ABOVE_DEVICE_PLUS_HOST:{requested_workset}:{tiered_capacity}")
         pressure_records = []
         for index, row in enumerate(pressure_rows[:args.pressure_requests]):
@@ -741,10 +760,15 @@ def main():
             write_json(out / "capacity_pressure.partial.json", {"completed": len(pressure_records), "requests": pressure_records})
             if not result.get("ok") or result.get("completion_tokens") != 1:
                 raise SystemExit(f"PRESSURE_REQUEST_FAILED:{index}:{result.get('rid')}:{result.get('error', 'incomplete_output')}")
-        write_json(out / "capacity_pressure.json", {"target_tokens_each": target_tokens, "requested_workset_tokens": requested_workset, "device_tokens": device_capacity, "host_tokens": host_capacity, "tiered_capacity_tokens": tiered_capacity, "requests": pressure_records})
+        write_json(out / "capacity_pressure.json", {"target_tokens_each": target_tokens, "requested_workset_tokens": requested_workset, "device_tokens": device_capacity, "host_tokens": host_capacity, "tiered_capacity_tokens": tiered_capacity, "shared_root_tokens": pressure_prefix_tokens, "requests": pressure_records})
         pressure_after = snapshot(args.url, out, "after_capacity_pressure", args.extent_dir)
         if pressure_after["pool_capacities"].get("sglang:hicache_host_used_tokens") is None:
             raise SystemExit("PRESSURE_HOST_USAGE_METRIC_MISSING")
+        pressure["watermark"] = {
+            "host_used_tokens": pressure_after["pool_capacities"].get("sglang:hicache_host_used_tokens"),
+            "backup_counters": pressure_after.get("tier_transfer_counters", {}),
+            "extent_bytes": sum(int(item.get("size_bytes", 0)) for item in pressure_after.get("extent_files", {}).values()),
+        }
         extent_before = pressure_snapshot.get("extent_files", {})
         extent_bytes_before = sum(int(item.get("size_bytes", 0)) for item in extent_before.values())
         backups_before = pressure_snapshot.get("tier_transfer_counters", {}).get("sglang:backuped_tokens_total", {})
@@ -931,10 +955,9 @@ def main():
         "cold_storage_restore": phase_summary(cold_l3, args.decode_output_tokens) if cold_l3 else {"count": 0, "success": 0},
         "frontier_recovery": phase_summary(frontier_records, args.decode_output_tokens) if frontier_records else {"count": 0, "success": 0},
         "frontier_recovery_qualified_rids": [record["rid"] for record in frontier_records if frontier_recovery_qualified(record, args.decode_output_tokens)],
-        "frontier_recovery_qualified_rids": [record["rid"] for record in frontier_records if frontier_recovery_qualified(record, args.decode_output_tokens)],
         "flush": flush,
         "stages_requested": sorted(stages),
-        "snapshots": ["before", "after_seed", "after_l1_probe", "after_capacity_pressure", "after_frontier_recovery", "after_tier_probe", "after_flush", "after_cold_storage_restore"],
+        "snapshots": ["before", "after_seed", "after_l1_probe", "after_capacity_pressure", "after_tier_probe", "before_frontier_recovery", "after_frontier_recovery", "after_branch_exclusive_l3", "after_cold_storage_restore", "after_flush"],
         "initial_extent_files": initial["extent_files"],
         "final_extent_files": final["extent_files"],
         "host_pool_allocations": initial.get("host_pool_allocations"),

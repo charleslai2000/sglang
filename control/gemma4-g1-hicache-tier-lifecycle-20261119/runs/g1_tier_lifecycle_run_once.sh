@@ -300,7 +300,7 @@ else:
 PY
 if [[ "$CLIENT_RC" == 0 ]] && grep -q 'G1_P0_SANITY_CHECK_RESULT phase=production_on_idle status=PASS' "$OUT/scheduler-lifecycle.markers"; then
   grep -E 'Decode batch, #new-seq:|Prefill batch, #new-seq:' "$OUT/service/server.log" > "$OUT/observed-gpu-batches.log" || true
-  "$VENV/bin/python" - "$OUT/observed-gpu-batches.log" "$OUT/gpu-batch-summary.json" <<'PY'
+  "$VENV/bin/python" - "$OUT/observed-gpu-batches.log" "$OUT/gpu-batch-summary.json" "$OUT/client/lifecycle.json" <<'PY'
 import json, re, sys
 from pathlib import Path
 lines=Path(sys.argv[1]).read_text(errors="replace").splitlines()
@@ -309,7 +309,14 @@ for line in lines:
     match=re.search(r"Decode batch, #new-seq: (\d+), #new-token: (\d+)", line)
     if match:
         decode.append({"new_sequences":int(match.group(1)),"new_tokens":int(match.group(2)),"line":line})
-Path(sys.argv[2]).write_text(json.dumps({"decode_batches":decode,"observed_sizes":sorted({x["new_sequences"] for x in decode}),"basis":"scheduler Decode batch log lines"},indent=2)+"\n")
+records={}
+summary=Path(sys.argv[3])
+if summary.exists():
+    result=json.loads(summary.read_text())
+    for phase in ("tier_probe", "cold_storage_restore", "frontier_recovery"):
+        for rid in result.get(phase, {}).get("request_ids", []):
+            records[rid]=phase
+Path(sys.argv[2]).write_text(json.dumps({"decode_batches":decode,"observed_sizes":sorted({x["new_sequences"] for x in decode}),"basis":"scheduler Decode batch log lines","rid_phase_map":records},indent=2)+"\n")
 if not decode:
     raise SystemExit("SCHEDULER_DECODE_BATCH_EVIDENCE_MISSING")
 PY
