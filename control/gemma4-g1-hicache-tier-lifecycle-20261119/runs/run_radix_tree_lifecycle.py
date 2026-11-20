@@ -1327,10 +1327,21 @@ def main():
             raise SystemExit("FRONTIER_RETRY_NOT_OBSERVED")
     if args.pressure_requests and summary["capacity_pressure"]["success"] != args.pressure_requests:
         raise SystemExit("CAPACITY_PRESSURE_REQUEST_FAILURE")
-    if required_sources and any(source in required_sources for source in ("l1", "l2")) and not any(
-        summary["tier_probe_source_gates"].get(source) for source in required_sources & {"l1", "l2"}
-    ):
-        raise SystemExit("TIER_SOURCE_GATE_HAS_NO_QUALIFIED_REQUEST")
+    if required_sources and (required_sources & {"l1", "l2"}):
+        # L1 evidence comes from tier_probe. L2 evidence may also come from the
+        # dedicated l2_only_probe stage, which exists precisely because a Host
+        # hit cannot show storage==0 while write-through storage is attached;
+        # requiring it from tier_probe alone makes that stage useless.
+        upper_tier_evidence = {
+            "l1": summary["tier_probe_source_gates"].get("l1") or [],
+            "l2": (
+                summary["l2_only_probe_source_gates"].get("l2")
+                or summary["tier_probe_source_gates"].get("l2")
+                or []
+            ),
+        }
+        if not any(upper_tier_evidence[source] for source in required_sources & {"l1", "l2"}):
+            raise SystemExit("TIER_SOURCE_GATE_HAS_NO_QUALIFIED_REQUEST")
     if required_sources and any(source in required_sources for source in ("l3", "mixed")) and not any(
         summary["tier_probe_source_gates"].get(source) or summary["cold_restore_source_gates"].get(source)
         for source in required_sources & {"l3", "mixed"}
