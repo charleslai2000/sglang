@@ -244,11 +244,13 @@ if [[ "${G1_TIER_REQUIRE_FRONTIER_RECOVERY:-}" == yes ]]; then CLIENT_ARGS+=(--r
 # check; asking the client for them only produced a harness-ordering failure
 # (RADIX_TRACE_ARTIFACT_MISSING) after every phase had already succeeded.
 if [[ "${G1_TIER_L2_ONLY_PROBE:-}" == yes ]]; then
-  CLIENT_ARGS+=(
-    --l2-only-storage-backend extent
-    --l2-only-storage-prefetch-policy "${G1_TIER_L2_ONLY_STORAGE_PREFETCH_POLICY:-timeout}"
-    --l2-only-storage-write-policy "${G1_TIER_L2_ONLY_STORAGE_WRITE_POLICY:-write_through}"
-  )
+  CLIENT_ARGS+=(--l2-only-storage-backend extent)
+  if [[ -n "${G1_TIER_L2_ONLY_STORAGE_PREFETCH_POLICY:-}" ]]; then
+    CLIENT_ARGS+=(--l2-only-storage-prefetch-policy "$G1_TIER_L2_ONLY_STORAGE_PREFETCH_POLICY")
+  fi
+  if [[ -n "${G1_TIER_L2_ONLY_STORAGE_WRITE_POLICY:-}" ]]; then
+    CLIENT_ARGS+=(--l2-only-storage-write-policy "$G1_TIER_L2_ONLY_STORAGE_WRITE_POLICY")
+  fi
   if [[ -n "${G1_TIER_L2_ONLY_STORAGE_EXTRA_CONFIG:-}" ]]; then
     CLIENT_ARGS+=(--l2-only-storage-extra-config "$G1_TIER_L2_ONLY_STORAGE_EXTRA_CONFIG")
   fi

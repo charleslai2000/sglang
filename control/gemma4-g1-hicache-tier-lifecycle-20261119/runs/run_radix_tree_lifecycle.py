@@ -620,8 +620,8 @@ def main():
     )
     parser.add_argument("--l2-only-storage-backend", default="")
     parser.add_argument("--l2-only-storage-extra-config", default="")
-    parser.add_argument("--l2-only-storage-prefetch-policy", default="timeout")
-    parser.add_argument("--l2-only-storage-write-policy", default="write_through")
+    parser.add_argument("--l2-only-storage-prefetch-policy", default="")
+    parser.add_argument("--l2-only-storage-write-policy", default="")
     parser.add_argument("--require-capacity", action="store_true")
     parser.add_argument("--require-frontier-recovery", action="store_true")
     parser.add_argument("--capacity-json")
@@ -1024,8 +1024,13 @@ def main():
             backend=args.l2_only_storage_backend
             or control_before.get("hicache_storage_backend"),
             extra_config=reattach_extra,
-            prefetch_policy=args.l2_only_storage_prefetch_policy,
-            write_policy=args.l2_only_storage_write_policy,
+            # Restore whatever the service was running with unless overridden;
+            # re-attaching with a different policy would silently change the
+            # configuration the earlier phases were measured under.
+            prefetch_policy=args.l2_only_storage_prefetch_policy
+            or control_before.get("hicache_storage_prefetch_policy"),
+            write_policy=args.l2_only_storage_write_policy
+            or control_before.get("hicache_storage_write_policy"),
         )
         control_after = (
             storage_backend_state(args.url, args.admin_api_key)
