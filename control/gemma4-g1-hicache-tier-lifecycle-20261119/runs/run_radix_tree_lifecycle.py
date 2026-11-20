@@ -636,6 +636,14 @@ def main():
     # parked in WAIT_CAPACITY and then falls back to recompute -- which hides the
     # Extent read the branch gate is looking for. Wait for quiescence first.
     parser.add_argument("--branch-idle-timeout", type=int, default=0)
+    # The rows touched last by the seed phase are still Device-resident when the
+    # branch phase starts, so their restores are Device hits and produce no
+    # Extent read (r18: 9/12 qualified, the misses were each branch's first
+    # request). A churn pass re-reads every row once at one output token in
+    # fixture order, which pushes them out of the Device pool again while
+    # leaving the two hottest rows -- which the measured pass reaches last --
+    # to be evicted by the restores that precede them.
+    parser.add_argument("--branch-churn-passes", type=int, default=0)
     parser.add_argument("--l2-only-churn-passes", type=int, default=1)
     parser.add_argument("--l2-only-storage-extra-config", default="")
     parser.add_argument("--l2-only-storage-prefetch-policy", default="")
@@ -1000,6 +1008,30 @@ def main():
                 out / "branch_idle.json",
                 {"observed": idle_ok, "best_effort": True, "state": idle_state},
             )
+        churn_records = []
+        for pass_index in range(args.branch_churn_passes):
+            churn_records.extend(
+                run_parallel(
+                    args.url,
+                    rows,
+                    list(range(len(rows))),
+                    f"branch_churn_{pass_index}",
+                    1,
+                    args.timeout,
+                    out,
+                    args.parallel,
+                )
+            )
+            write_json(
+                out / f"branch_churn_{pass_index}.json",
+                {"requests": churn_records[-(len(rows)):]},
+            )
+        if churn_records:
+            churn_evidence = parse_restore_log(
+                args.server_log, [record["rid"] for record in churn_records]
+            )
+            for record in churn_records:
+                record["restore_evidence"] = churn_evidence.get(record["rid"], {})
         for branch in branch_sequence:
             final = snapshot(args.url, out, f"before_branch_{branch}_exclusive_l3", args.extent_dir)
             indices = [index for index, row in enumerate(rows) if int(row["branch_id"]) == branch]
@@ -1215,6 +1247,7 @@ def main():
             })
             for source in ("l1", "l2", "l3", "mixed")
         },
+        "branch_churn": phase_summary(churn_records, 1) if churn_records else {"count": 0, "success": 0},
         "branch_exclusive_l3": {
             str(branch): {
                 "count": sum(record.get("branch_id") == branch for record in branch_probe_records),

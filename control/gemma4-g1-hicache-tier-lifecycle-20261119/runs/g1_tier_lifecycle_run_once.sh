@@ -234,6 +234,7 @@ if [[ -n "$PRESSURE_FIXTURE" ]]; then
 fi
 if [[ -n "$BRANCH_SEQUENCE" ]]; then CLIENT_ARGS+=(--branch-sequence "$BRANCH_SEQUENCE"); fi
 if [[ -n "${G1_TIER_BRANCH_IDLE_TIMEOUT:-}" ]]; then CLIENT_ARGS+=(--branch-idle-timeout "$G1_TIER_BRANCH_IDLE_TIMEOUT"); fi
+if [[ -n "${G1_TIER_BRANCH_CHURN_PASSES:-}" ]]; then CLIENT_ARGS+=(--branch-churn-passes "$G1_TIER_BRANCH_CHURN_PASSES"); fi
 if [[ -n "$REQUIRE_SOURCES" ]]; then CLIENT_ARGS+=(--require-sources "$REQUIRE_SOURCES"); fi
 if [[ -n "$REQUIRE_BRANCHES" ]]; then CLIENT_ARGS+=(--require-branch-exclusive "$REQUIRE_BRANCHES"); fi
 if [[ -n "${G1_TIER_REQUIRE_SOURCE:-}" ]]; then CLIENT_ARGS+=(--require-source "$G1_TIER_REQUIRE_SOURCE"); fi
