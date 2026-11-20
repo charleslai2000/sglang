@@ -757,12 +757,12 @@ def main():
         raise SystemExit("PRESSURE_MAX_PROMPT_TOKENS_BELOW_INITIAL")
     if required_sources and "cold_storage_restore" in stages and "tier_probe" not in stages:
         raise SystemExit("LOWER_TIER_SOURCE_GATE_REQUIRES_TIER_PROBE")
-    if required_branches and "l3" not in required_sources:
-        raise SystemExit("BRANCH_QUALIFICATION_REQUIRES_L3_SOURCE_GATE")
+    # required_branches is itself the l3 gate for a branch run: see
+    # branch_gate_covers_l3 above. Its per-record check is stronger than an
+    # aggregate l3 source sample, so this guard no longer needs an explicit
+    # l3 request.
     if required_branches and set(branch_sequence) != required_branches:
         raise SystemExit("BRANCH_SEQUENCE_AND_REQUIRED_BRANCHES_MISMATCH")
-    if required_branches and "l3" not in required_sources:
-        raise SystemExit("BRANCH_EXCLUSIVE_STAGE_REQUIRES_L3_SOURCE_GATE")
     if branch_sequence and set(branch_sequence) != {0, 1}:
         raise SystemExit("BRANCH_EXCLUSIVE_SEQUENCE_MUST_COVER_BOTH_BRANCHES")
     if args.require_capacity:
