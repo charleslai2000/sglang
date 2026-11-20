@@ -631,6 +631,7 @@ def main():
     )
     parser.add_argument("--l2-only-storage-backend", default="")
     parser.add_argument("--l2-only-idle-timeout", type=int, default=600)
+    parser.add_argument("--l2-only-churn-passes", type=int, default=1)
     parser.add_argument("--l2-only-storage-extra-config", default="")
     parser.add_argument("--l2-only-storage-prefetch-policy", default="")
     parser.add_argument("--l2-only-storage-write-policy", default="")
@@ -1017,6 +1018,27 @@ def main():
         )
         if isinstance(reattach_extra, (dict, list)):
             reattach_extra = json.dumps(reattach_extra, separators=(",", ":"))
+        # Churn the Device pool across the whole fixture first (1 token each,
+        # reverse order) so that by the time the measured pass runs, the tail
+        # prefixes are Device-evicted while their Host copies remain. Without
+        # this the probe can land entirely on Device, as happened in r8, and
+        # then no Host-only evidence exists regardless of the mechanism.
+        l2_churn = []
+        for churn_pass in range(args.l2_only_churn_passes):
+            l2_churn.extend(
+                run_parallel(
+                    args.url,
+                    rows,
+                    list(reversed(order)),
+                    f"l2_only_churn{churn_pass}",
+                    args.warm_output_tokens,
+                    args.timeout,
+                    out,
+                    1,
+                )
+            )
+        if l2_churn:
+            write_json(out / "l2_only_churn.json", {"requests": l2_churn})
         l2_only = run_parallel(
             args.url,
             rows,
