@@ -214,6 +214,21 @@ class LifecycleEvidenceGateTest(unittest.TestCase):
         self.assertIn("rid=r1 ", joined["r1"]["extent_reads"][0])
         self.assertIn("rid=r10 ", joined["r10"]["extent_reads"][0])
 
+    def test_restore_log_joins_scheduler_normalized_batch_rid_suffix(self):
+        rid = "g1-tree-00-cold_storage_restore-11"
+        lines = [
+            f"[P3] evt=extent_read rid={rid}_0 attempt_id=a succeeded_keys=1 physical_bytes=64",
+            f"[P2A] evt=restore_disposition rid={rid}_0 disposition=RESTORE requested=1 granted=1",
+            f"[P3] evt=ready_host rid={rid}_0 finalize_result=accepted",
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "server.log"
+            path.write_text("\n".join(lines) + "\n")
+            joined = MODULE.parse_restore_log(path, [rid])[rid]
+        self.assertEqual(len(joined["extent_reads"]), 1)
+        self.assertEqual(len(joined["restore_events"]), 1)
+        self.assertEqual(len(joined["ready_events"]), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -315,12 +315,23 @@ def parse_restore_log(server_log, request_ids):
                     except (ValueError, TypeError):
                         event = None
                     rid = str(event.get("rid")) if isinstance(event, dict) else None
-                    if rid in wanted:
-                        events[rid].append(("hae", event, line.rstrip()))
+                    base_rid = next((candidate for candidate in wanted if rid == candidate or (rid and re.fullmatch(re.escape(candidate) + r"_\d+", rid))), None)
+                    if base_rid is not None:
+                        events[base_rid].append(("hae", event, line.rstrip()))
                     continue
                 if "rid=" not in line:
                     continue
-                rid = next((candidate for candidate in wanted if f"rid={candidate} " in line), None)
+                # Scheduler normalizes batched generate IDs with a trailing
+                # _<index> (currently _0). Join that exact suffix while
+                # keeping r1 distinct from r10 and any other RID prefix.
+                rid = next(
+                    (
+                        candidate
+                        for candidate in wanted
+                        if re.search(rf"(?:^|\s)rid={re.escape(candidate)}(?:_\d+)?(?:\s|$)", line)
+                    ),
+                    None,
+                )
                 if rid is not None:
                     events[rid].append(("line", None, line.rstrip()))
     except OSError as exc:
