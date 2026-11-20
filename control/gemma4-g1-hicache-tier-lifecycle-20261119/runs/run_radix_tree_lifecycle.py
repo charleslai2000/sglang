@@ -171,6 +171,95 @@ def flush_radix_cache(url, timeout):
         }
 
 
+def admin_headers(admin_api_key):
+    return {"Authorization": f"Bearer {admin_api_key}"} if admin_api_key else {}
+
+
+def storage_backend_state(url, admin_api_key, timeout=30):
+    request = urllib.request.Request(
+        url + "/hicache/storage-backend",
+        headers=admin_headers(admin_api_key),
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read())
+
+
+def set_storage_backend(
+    url,
+    admin_api_key,
+    *,
+    detach,
+    backend=None,
+    extra_config=None,
+    prefetch_policy=None,
+    write_policy=None,
+    timeout=180,
+):
+    """Attach or detach the HiCache storage backend through the runtime control API."""
+    headers = {"Content-Type": "application/json", **admin_headers(admin_api_key)}
+    if detach:
+        request = urllib.request.Request(
+            url + "/hicache/storage-backend", headers=headers, method="DELETE"
+        )
+    else:
+        payload = {
+            "hicache_storage_backend": backend,
+            "hicache_storage_backend_extra_config_json": extra_config,
+        }
+        if prefetch_policy:
+            payload["hicache_storage_prefetch_policy"] = prefetch_policy
+        if write_policy:
+            payload["hicache_write_policy"] = write_policy
+        request = urllib.request.Request(
+            url + "/hicache/storage-backend",
+            data=json.dumps(payload, separators=(",", ":")).encode(),
+            headers=headers,
+            method="PUT",
+        )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return {
+                "status": response.status,
+                "body": response.read().decode(errors="replace"),
+            }
+    except urllib.error.HTTPError as exc:
+        return {
+            "status": exc.code,
+            "body": exc.read().decode(errors="replace"),
+        }
+
+
+def wait_for_scheduler_idle(url, timeout=180):
+    deadline = time.monotonic() + timeout
+    last = None
+    while time.monotonic() < deadline:
+        with urllib.request.urlopen(url + "/server_info", timeout=10) as response:
+            info = json.loads(response.read())
+        states = info.get("internal_states", [])
+        last = [state.get("g1_p0_hicache_pending", {}) for state in states]
+        if states and all(
+            state.get("g1_p0_is_fully_idle") is True
+            and all(
+                pending.get(key, 0) == 0
+                for key in (
+                    "running",
+                    "waiting",
+                    "result_queue",
+                    "write_through",
+                    "load_back",
+                    "prefetch",
+                    "backup",
+                    "ongoing_backup",
+                )
+            )
+            and pending.get("buffer_pipeline_idle") is True
+            for state, pending in zip(states, last)
+        ):
+            return True, last
+        time.sleep(1)
+    return False, last
+
+
 def positive_counter(line, name):
     match = re.search(rf"(?:^|\s){name}=(\d+)(?:\s|$)", line)
     return int(match.group(1)) if match else 0
@@ -208,6 +297,17 @@ def source_restore_qualified(record, source, output_tokens):
         and positive_counter(line, "granted") == positive_counter(line, "requested")
         for line in evidence.get("restore_events", [])
     )
+    # A pure Host hit (device-miss, storage-miss/absent) never enters the P2A
+    # storage-restore path, so it emits no `disposition=RESTORE`. It is
+    # materialized by promoting the Host-resident prefix into Device instead.
+    # Accept that mechanism only when the promotion is RID-correlated and
+    # covers exactly the Host-resident token count, which ties the Device
+    # placement to the Host copy rather than to a recompute.
+    promoted_host = h > 0 and any(
+        rid_matches_line(record.get("rid"), line)
+        and positive_counter(line, "n") == h
+        for line in evidence.get("promotion_reserves", [])
+    )
     extent_read = any(
         positive_counter(line, "physical_bytes") > 0
         and positive_counter(line, "succeeded_keys") > 0
@@ -219,7 +319,7 @@ def source_restore_qualified(record, source, output_tokens):
         # branch-exclusive suffix is restored from a lower tier. Aggregate
         # cached_tokens_details is therefore a presence/source test, not a
         # requirement that unrelated ancestor tokens be absent from Device.
-        "l2": h > 0 and s == 0 and accepted_ready and accepted_restore,
+        "l2": h > 0 and s == 0 and ((accepted_ready and accepted_restore) or promoted_host),
         "l3": s > 0 and extent_read and accepted_ready and accepted_restore,
         "mixed": h > 0 and s > 0 and extent_read and accepted_ready and accepted_restore,
     }[source]
@@ -402,6 +502,7 @@ def parse_restore_log(server_log, request_ids):
                 if "evt=restore_retry" in line and ("cause=frontier" in line or "cause=capacity" in line)
             ],
             "ready_events": [line for line in lines if "evt=ready_host" in line],
+            "promotion_reserves": [line for line in lines if "evt=promotion_reserve" in line],
             "ready_line_indices": [
                 index for index, line in indexed_lines
                 if "evt=ready_host" in line and "finalize_result=accepted" in line
@@ -514,6 +615,13 @@ def main():
     parser.add_argument("--branch-sequence", default="")
     parser.add_argument("--frontier-count", type=int, default=0)
     parser.add_argument("--require-radix-split", action="store_true")
+    parser.add_argument(
+        "--admin-api-key", default=os.environ.get("G1_PROD_ADMIN_API_KEY", "")
+    )
+    parser.add_argument("--l2-only-storage-backend", default="")
+    parser.add_argument("--l2-only-storage-extra-config", default="")
+    parser.add_argument("--l2-only-storage-prefetch-policy", default="timeout")
+    parser.add_argument("--l2-only-storage-write-policy", default="write_through")
     parser.add_argument("--require-capacity", action="store_true")
     parser.add_argument("--require-frontier-recovery", action="store_true")
     parser.add_argument("--capacity-json")
@@ -541,7 +649,13 @@ def main():
         raise SystemExit("DUPLICATE_BRANCH_SEQUENCE")
     if any(branch not in (0, 1) for branch in branch_sequence):
         raise SystemExit("INVALID_BRANCH_SEQUENCE")
-    allowed_stages = {"tier_probe", "flush", "cold_storage_restore", "branch_exclusive_l3"}
+    allowed_stages = {
+        "tier_probe",
+        "flush",
+        "cold_storage_restore",
+        "branch_exclusive_l3",
+        "l2_only_probe",
+    }
     if not stages or not stages <= allowed_stages:
         raise SystemExit(f"INVALID_STAGES:{sorted(stages)}")
     # Radix cache flush is terminal: it resets the tree and removes key
@@ -574,6 +688,16 @@ def main():
         raise SystemExit("FRONTIER_RECOVERY_REQUIRES_TIER_PROBE_AND_COLD_RESTORE_STAGES")
     if len(rows) < args.min_requests:
         raise SystemExit(f"FIXTURE_TOO_SMALL expected_at_least={args.min_requests} actual={len(rows)}")
+    if "l2_only_probe" in stages:
+        # The Host tier is isolated by detaching the durable backend at runtime,
+        # because write_through makes every Host-resident prefix also
+        # storage-resident once its backup is acknowledged.
+        if not args.admin_api_key:
+            raise SystemExit("L2_ONLY_PROBE_REQUIRES_ADMIN_API_KEY")
+        if not args.pressure_requests:
+            raise SystemExit("L2_ONLY_PROBE_REQUIRES_CAPACITY_PRESSURE")
+        if "tier_probe" not in stages:
+            raise SystemExit("L2_ONLY_PROBE_REQUIRES_TIER_PROBE")
     if required_sources and not args.require_capacity:
         raise SystemExit("SOURCE_QUALIFICATION_REQUIRES_CAPACITY_GATE")
     if required_sources and not args.pressure_requests:
@@ -860,6 +984,68 @@ def main():
         )
         write_json(out / "cold_storage_restore.json", {"requests": cold_l3})
         final = snapshot(args.url, out, "after_cold_storage_restore", args.extent_dir)
+    l2_only = []
+    storage_control = {}
+    if "l2_only_probe" in stages:
+        idle_ok, idle_state = wait_for_scheduler_idle(args.url, 180)
+        if not idle_ok:
+            raise SystemExit(f"L2_ONLY_PROBE_NOT_IDLE:{idle_state}")
+        control_before = storage_backend_state(args.url, args.admin_api_key)
+        detach = set_storage_backend(args.url, args.admin_api_key, detach=True)
+        if detach.get("status") != 200 or "detached" not in detach.get("body", "").lower():
+            raise SystemExit(f"L2_ONLY_PROBE_DETACH_FAILED:{detach}")
+        control_detached = storage_backend_state(args.url, args.admin_api_key)
+        if control_detached.get("hicache_storage_backend") not in (None, "", "none"):
+            raise SystemExit(f"L2_ONLY_PROBE_DETACH_NOT_EFFECTIVE:{control_detached}")
+        reattach_extra = (
+            args.l2_only_storage_extra_config
+            or control_before.get("hicache_storage_backend_extra_config")
+        )
+        if isinstance(reattach_extra, (dict, list)):
+            reattach_extra = json.dumps(reattach_extra, separators=(",", ":"))
+        l2_only = run_parallel(
+            args.url,
+            rows,
+            order,
+            "l2_only_probe",
+            args.decode_output_tokens,
+            args.timeout,
+            out,
+            1,
+        )
+        l2_evidence = parse_restore_log(args.server_log, [record["rid"] for record in l2_only])
+        for record in l2_only:
+            record["restore_evidence"] = l2_evidence.get(record["rid"], {})
+        write_json(out / "l2_only_probe.json", {"requests": l2_only})
+        attached = set_storage_backend(
+            args.url,
+            args.admin_api_key,
+            detach=False,
+            backend=args.l2_only_storage_backend
+            or control_before.get("hicache_storage_backend"),
+            extra_config=reattach_extra,
+            prefetch_policy=args.l2_only_storage_prefetch_policy,
+            write_policy=args.l2_only_storage_write_policy,
+        )
+        control_after = (
+            storage_backend_state(args.url, args.admin_api_key)
+            if attached.get("status") == 200
+            else {}
+        )
+        storage_control = {
+            "idle_confirmed": True,
+            "before": control_before,
+            "detach_response": detach,
+            "detached": control_detached,
+            "reattach_response": attached,
+            "after": control_after,
+        }
+        write_json(out / "l2_only_storage_control.json", storage_control)
+        if attached.get("status") != 200 or control_after.get(
+            "hicache_storage_backend"
+        ) != args.l2_only_storage_backend:
+            raise SystemExit(f"L2_ONLY_PROBE_REATTACH_FAILED:{attached}:{control_after}")
+        final = snapshot(args.url, out, "after_l2_only_probe", args.extent_dir)
     if "flush" in stages:
         flush = flush_radix_cache(args.url, args.timeout)
         if flush.get("status") != 200 or not flush.get("success"):
@@ -960,7 +1146,7 @@ def main():
         "all_stage_source_gates": {
             source: sorted({
                 record["rid"]
-                for record in [*host_probe, *cold_l3, *branch_probe_records]
+                for record in [*host_probe, *cold_l3, *branch_probe_records, *l2_only]
                 if source_restore_qualified(record, source, args.decode_output_tokens)
             })
             for source in ("l1", "l2", "l3", "mixed")
@@ -975,11 +1161,18 @@ def main():
             for branch in branch_sequence
         },
         "cold_storage_restore": phase_summary(cold_l3, args.decode_output_tokens) if cold_l3 else {"count": 0, "success": 0},
+        "l2_only_probe": phase_summary(l2_only, args.decode_output_tokens) if l2_only else {"count": 0, "success": 0},
+        "l2_only_probe_source_gates": {
+            "l2": [record["rid"] for record in l2_only if source_restore_qualified(record, "l2", args.decode_output_tokens)],
+            "l3": [record["rid"] for record in l2_only if source_restore_qualified(record, "l3", args.decode_output_tokens)],
+            "mixed": [record["rid"] for record in l2_only if source_restore_qualified(record, "mixed", args.decode_output_tokens)],
+        },
+        "l2_only_storage_control": storage_control,
         "frontier_recovery": phase_summary(frontier_records, args.decode_output_tokens) if frontier_records else {"count": 0, "success": 0},
         "frontier_recovery_qualified_rids": [record["rid"] for record in frontier_records if frontier_recovery_qualified(record, args.decode_output_tokens)],
         "flush": flush,
         "stages_requested": sorted(stages),
-        "snapshots": ["before", "after_seed", "after_l1_probe", "after_capacity_pressure", "after_tier_probe", "before_frontier_recovery", "after_frontier_recovery", "after_branch_exclusive_l3", "after_cold_storage_restore", "after_flush"],
+        "snapshots": ["before", "after_seed", "after_l1_probe", "after_capacity_pressure", "after_tier_probe", "before_frontier_recovery", "after_frontier_recovery", "after_branch_exclusive_l3", "after_cold_storage_restore", "after_l2_only_probe", "after_flush"],
         "initial_extent_files": initial["extent_files"],
         "final_extent_files": final["extent_files"],
         "completion_token_target_per_request": args.decode_output_tokens,
@@ -1020,10 +1213,13 @@ def main():
         stage_for_source = "cold_storage_restore" if source in ("l3", "mixed") else "tier_probe"
         if source == "l1" and l1_probe:
             stage_for_source = "tier_probe"
+        if source == "l2" and l2_only:
+            stage_for_source = "l2_only_probe"
         if stage_for_source not in stages:
             raise SystemExit(f"SOURCE_STAGE_NOT_REQUESTED:{source}:{stage_for_source}")
         phase_records = (
             l1_probe if source == "l1" and l1_probe
+            else l2_only if source == "l2" and l2_only
             else (source_gate_host_probe or host_probe) if source in ("l1", "l2")
             else (cold_l3 if source in ("l3", "mixed") else host_probe)
         )

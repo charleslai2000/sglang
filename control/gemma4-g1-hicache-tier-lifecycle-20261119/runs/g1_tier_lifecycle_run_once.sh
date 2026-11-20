@@ -223,11 +223,12 @@ CLIENT_ARGS=(
   --url "http://127.0.0.1:$PORT"
   --fixture "$FIXTURE" --out "$OUT/client" --extent-dir "$OUT/service/l3-extent"
   --server-log "$OUT/service/server.log" --timeout 1800
-  --warm-output-tokens 1 --decode-output-tokens 256 --parallel 8
+  --warm-output-tokens 1 --decode-output-tokens 256 --parallel "${G1_TIER_PARALLEL:-8}"
   --min-requests "$PRESSURE_MIN_REQUESTS"
   --capacity-json "$CAPACITY_JSON"
   --context "$G1_PROD_CONTEXT" --require-capacity --frontier-count "${G1_TIER_FRONTIER_COUNT:-0}" --stages "$STAGES"
 )
+if [[ -n "${G1_PROD_ADMIN_API_KEY:-}" ]]; then CLIENT_ARGS+=(--admin-api-key "$G1_PROD_ADMIN_API_KEY"); fi
 if [[ -n "$PRESSURE_FIXTURE" ]]; then
   CLIENT_ARGS+=(--pressure-fixture "$PRESSURE_FIXTURE" --pressure-requests "${G1_TIER_PRESSURE_REQUESTS:-4}" --pressure-prompt-tokens "${G1_TIER_PRESSURE_PROMPT_TOKENS:-130000}" --pressure-preserve-prefix --pressure-watermark-timeout "${G1_TIER_PRESSURE_WATERMARK_TIMEOUT:-180}" --pressure-max-prompt-tokens "${G1_TIER_PRESSURE_MAX_PROMPT_TOKENS:-130000}" --pressure-min-device-evictions "${G1_TIER_PRESSURE_MIN_DEVICE_EVICTIONS:-1}" --pressure-min-storage-bytes "${G1_TIER_PRESSURE_MIN_STORAGE_BYTES:-1}")
 fi
@@ -236,10 +237,22 @@ if [[ -n "$REQUIRE_SOURCES" ]]; then CLIENT_ARGS+=(--require-sources "$REQUIRE_S
 if [[ -n "$REQUIRE_BRANCHES" ]]; then CLIENT_ARGS+=(--require-branch-exclusive "$REQUIRE_BRANCHES"); fi
 if [[ -n "${G1_TIER_REQUIRE_SOURCE:-}" ]]; then CLIENT_ARGS+=(--require-source "$G1_TIER_REQUIRE_SOURCE"); fi
 if [[ "${G1_TIER_REQUIRE_FRONTIER_RECOVERY:-}" == yes ]]; then CLIENT_ARGS+=(--require-frontier-recovery); fi
-if [[ -n "${G1_TIER_FRONTIER_COUNT:-}" && "${G1_TIER_FRONTIER_COUNT:-0}" != 0 ]]; then
-  CLIENT_ARGS+=(--require-radix-split)
+# NOTE: the radix-split/quiescent artifacts (tree-lifecycle-events.json and
+# hicache_quiescent.json) are exported by THIS wrapper after the client returns,
+# so the client cannot require them on a fresh output directory. The same
+# validation runs below in the post-client gate, which is the authoritative
+# check; asking the client for them only produced a harness-ordering failure
+# (RADIX_TRACE_ARTIFACT_MISSING) after every phase had already succeeded.
+if [[ "${G1_TIER_L2_ONLY_PROBE:-}" == yes ]]; then
+  CLIENT_ARGS+=(
+    --l2-only-storage-backend extent
+    --l2-only-storage-prefetch-policy "${G1_TIER_L2_ONLY_STORAGE_PREFETCH_POLICY:-timeout}"
+    --l2-only-storage-write-policy "${G1_TIER_L2_ONLY_STORAGE_WRITE_POLICY:-write_through}"
+  )
+  if [[ -n "${G1_TIER_L2_ONLY_STORAGE_EXTRA_CONFIG:-}" ]]; then
+    CLIENT_ARGS+=(--l2-only-storage-extra-config "$G1_TIER_L2_ONLY_STORAGE_EXTRA_CONFIG")
+  fi
 fi
-if [[ -n "$PRESSURE_FIXTURE" ]]; then CLIENT_ARGS+=(--require-radix-split); fi
 timeout --signal=TERM --kill-after=60 9000 \
   "$VENV/bin/python" "$RUNS/run_radix_tree_lifecycle.py" "${CLIENT_ARGS[@]}" \
   > "$OUT/client.stdout" 2> "$OUT/client.stderr" || CLIENT_RC=$?

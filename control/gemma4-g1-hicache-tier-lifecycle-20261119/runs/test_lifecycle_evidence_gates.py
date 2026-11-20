@@ -245,6 +245,98 @@ class LifecycleEvidenceGateTest(unittest.TestCase):
         self.assertEqual(len(joined["restore_events"]), 1)
         self.assertEqual(len(joined["ready_events"]), 1)
 
+    def test_l2_only_probe_stage_is_allowed_and_admin_gated(self):
+        source = MODULE_PATH.read_text()
+        block = source.split("allowed_stages = {", 1)[1].split("}", 1)[0]
+        self.assertIn('"l2_only_probe"', block)
+        self.assertIn("L2_ONLY_PROBE_REQUIRES_ADMIN_API_KEY", source)
+        self.assertIn('"l2_only_probe" in stages', source)
+
+    def test_storage_backend_control_uses_expected_http_methods(self):
+        calls = []
+
+        class _Response:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return b'{"hicache_storage_backend": null}'
+
+        def fake_urlopen(request, timeout=None):
+            calls.append((request.get_method(), request.full_url, request.headers))
+            return _Response()
+
+        original = MODULE.urllib.request.urlopen
+        MODULE.urllib.request.urlopen = fake_urlopen
+        try:
+            detached = MODULE.set_storage_backend(
+                "http://127.0.0.1:1", "k", detach=True
+            )
+            attached = MODULE.set_storage_backend(
+                "http://127.0.0.1:1",
+                "k",
+                detach=False,
+                backend="extent",
+                extra_config='{"storage_dir":"/tmp/x"}',
+                prefetch_policy="timeout",
+                write_policy="write_through",
+            )
+        finally:
+            MODULE.urllib.request.urlopen = original
+        self.assertEqual(detached["status"], 200)
+        self.assertEqual(attached["status"], 200)
+        self.assertEqual([call[0] for call in calls], ["DELETE", "PUT"])
+        for _, url, _headers in calls:
+            self.assertTrue(url.endswith("/hicache/storage-backend"))
+
+    def test_l2_expressed_by_host_promotion_without_p2a_restore(self):
+        """A pure Host hit is materialized by promotion, not by P2A RESTORE."""
+        record = {
+            "rid": "g1-tree-00-l2_only_probe-00",
+            "ok": True,
+            "completion_tokens": 256,
+            "output_token_ids_count": 256,
+            "cached_tokens_details": {"device": 0, "host": 16384, "storage": 0},
+            "restore_evidence": {
+                "restore_events": [],
+                "ready_events": [],
+                "promotion_reserves": [
+                    "evt=promotion_reserve n=16384 rid=g1-tree-00-l2_only_probe-00_0 reserved=16384"
+                ],
+            },
+        }
+        self.assertTrue(MODULE.source_restore_qualified(record, "l2", 256))
+        # A promotion that does not match the Host-resident token count is not
+        # evidence that the Host copy was the source.
+        record["restore_evidence"]["promotion_reserves"] = [
+            "evt=promotion_reserve n=8192 rid=g1-tree-00-l2_only_probe-00_0 reserved=8192"
+        ]
+        self.assertFalse(MODULE.source_restore_qualified(record, "l2", 256))
+        # Another request's promotion must not qualify this one.
+        record["restore_evidence"]["promotion_reserves"] = [
+            "evt=promotion_reserve n=16384 rid=g1-tree-01-l2_only_probe-01_0 reserved=16384"
+        ]
+        self.assertFalse(MODULE.source_restore_qualified(record, "l2", 256))
+        # Storage presence disqualifies the record as Host-only evidence.
+        record["restore_evidence"]["promotion_reserves"] = [
+            "evt=promotion_reserve n=16384 rid=g1-tree-00-l2_only_probe-00_0 reserved=16384"
+        ]
+        record["cached_tokens_details"]["storage"] = 1
+        self.assertFalse(MODULE.source_restore_qualified(record, "l2", 256))
+
+    def test_wrapper_does_not_require_its_own_post_run_artifact(self):
+        """The client must not require an artifact this wrapper writes after it."""
+        wrapper = (MODULE_PATH.parent / "g1_tier_lifecycle_run_once.sh").read_text()
+        self.assertNotIn("--require-radix-split", wrapper)
+        # The authoritative validation must still exist in the wrapper.
+        self.assertIn("validate_radix_events", wrapper)
+        self.assertIn("RADIX_QUIESCENT_SPLIT_NOT_CONFIRMED", wrapper)
+
 
 if __name__ == "__main__":
     unittest.main()

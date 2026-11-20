@@ -52,6 +52,9 @@ ARGS=(--model-path "$MODEL" --trust-remote-code --host 127.0.0.1 --port "$PORT" 
 if [[ ${G1_PROD_EXPORT_REQUEST_METRICS:-off} == on ]]; then ARGS+=(--export-metrics-to-file --export-metrics-to-file-dir "$OUT/request-metrics"); fi
 [[ $G1_PROD_RADIX == on ]] || ARGS+=(--disable-radix-cache)
 if [[ ${G1_PROD_WARMUP:-on} == off ]]; then ARGS+=(--skip-server-warmup); fi
+# Optional control-plane key, needed only to exercise the runtime HiCache storage
+# attach/detach API (admin-gated). It does not change model or cache behaviour.
+if [[ -n "${G1_PROD_ADMIN_API_KEY:-}" ]]; then ARGS+=(--admin-api-key "$G1_PROD_ADMIN_API_KEY"); fi
 if [[ $G1_PROD_HICACHE == on ]]; then
   mkdir -p "$G1_PROD_L3_DIR"
   EXTENT_CONFIG=$(printf '{"storage_dir":"%s","extent_size":%s,"file_size":%s,"max_size":%s,"min_free_space":%s}' "$G1_PROD_L3_DIR" "$G1_PROD_EXTENT_SIZE" "$G1_PROD_EXTENT_FILE_SIZE" "$G1_PROD_EXTENT_MAX_SIZE" "$G1_PROD_EXTENT_MIN_FREE_SPACE")
