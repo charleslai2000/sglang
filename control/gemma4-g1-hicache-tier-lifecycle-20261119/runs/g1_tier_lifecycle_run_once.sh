@@ -323,16 +323,25 @@ else:
     raise SystemExit("FULL_IDLE_TIMEOUT")
 PY
 if [[ "$CLIENT_RC" == 0 ]] && grep -q 'G1_P0_SANITY_CHECK_RESULT phase=production_on_idle status=PASS' "$OUT/scheduler-lifecycle.markers"; then
-  grep -E 'Decode batch, #new-seq:|Prefill batch, #new-seq:' "$OUT/service/server.log" > "$OUT/observed-gpu-batches.log" || true
+  grep -E 'Decode batch|Prefill batch' "$OUT/service/server.log" > "$OUT/observed-gpu-batches.log" || true
   "$VENV/bin/python" - "$OUT/observed-gpu-batches.log" "$OUT/gpu-batch-summary.json" "$OUT/client/lifecycle.json" <<'PY'
 import json, re, sys
 from pathlib import Path
 lines=Path(sys.argv[1]).read_text(errors="replace").splitlines()
 decode=[]
+# This branch logs "Decode batch, #running-req: N, #full token: M"; some
+# revisions log "#new-seq/#new-token" instead. Accept either, and record which
+# field was used so the batch-size claim stays traceable.
 for line in lines:
     match=re.search(r"Decode batch, #new-seq: (\d+), #new-token: (\d+)", line)
     if match:
-        decode.append({"new_sequences":int(match.group(1)),"new_tokens":int(match.group(2)),"line":line})
+        decode.append({"new_sequences":int(match.group(1)),"new_tokens":int(match.group(2)),
+                       "field":"#new-seq","line":line})
+        continue
+    match=re.search(r"Decode batch, #running-req: (\d+), #full token: (\d+)", line)
+    if match:
+        decode.append({"new_sequences":int(match.group(1)),"new_tokens":int(match.group(2)),
+                       "field":"#running-req","line":line})
 records={}
 summary=Path(sys.argv[3])
 if summary.exists():
@@ -340,7 +349,7 @@ if summary.exists():
     for phase in ("tier_probe", "cold_storage_restore", "frontier_recovery"):
         for rid in result.get(phase, {}).get("request_ids", []):
             records[rid]=phase
-Path(sys.argv[2]).write_text(json.dumps({"decode_batches":decode,"observed_sizes":sorted({x["new_sequences"] for x in decode}),"basis":"scheduler Decode batch log lines","rid_phase_map":records},indent=2)+"\n")
+Path(sys.argv[2]).write_text(json.dumps({"decode_batches":decode,"observed_sizes":sorted({x["new_sequences"] for x in decode}),"batch_field":sorted({x["field"] for x in decode}),"basis":"scheduler Decode batch log lines","rid_phase_map":records},indent=2)+"\n")
 if not decode:
     raise SystemExit("SCHEDULER_DECODE_BATCH_EVIDENCE_MISSING")
 PY
@@ -349,7 +358,7 @@ PY
 import json, sys
 from pathlib import Path
 result=json.loads(Path(sys.argv[1]).read_text())
-for phase in ("tree_seed", "tier_probe", "cold_storage_restore"):
+for phase in ("seed", "tier_probe", "cold_storage_restore"):
     item=result.get(phase, {})
     if item.get("count", 0) == 0 or item.get("success") != item.get("count"):
         raise SystemExit(f"PHASE_DECODE_INCOMPLETE:{phase}:{item}")
@@ -362,13 +371,23 @@ module_path, events_path, quiet_path = map(Path, sys.argv[1:])
 spec = importlib.util.spec_from_file_location("g1_lifecycle", module_path)
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
-module.validate_radix_events(json.loads(events_path.read_text()))
+events = json.loads(events_path.read_text())
 quiet = json.loads(quiet_path.read_text())
 ops = quiet.get("tree_trace_operations", {})
 if not quiet.get("observed") or quiet.get("tree_trace_violation"):
     raise SystemExit("RADIX_QUIESCENT_TRACE_INVALID")
+# /server_info only attaches the raw event list when a violation was recorded
+# (`lifecycle_trace_events` is [] on a clean run), so the event dump cannot be
+# required here: a clean run is exactly the outcome we want. Validate the dump
+# when it exists, and in every case require the operation counters to show the
+# split actually happened.
+if events:
+    module.validate_radix_events(events)
+elif int(quiet.get("tree_trace_total_events", 0)) < 1:
+    raise SystemExit("RADIX_QUIESCENT_TRACE_EMPTY")
 if ops.get("split_new_prefix", 0) < 1 or ops.get("split_old_child", 0) < 1:
     raise SystemExit("RADIX_QUIESCENT_SPLIT_NOT_CONFIRMED")
+print("RADIX_GATE=PASS events=%d total=%s ops=%s" % (len(events), quiet.get("tree_trace_total_events"), {k: ops.get(k) for k in ("split_new_prefix", "split_old_child", "split_old_parent", "backup_commit")}))
 PY
   printf 'production_idle_sanity=PASS\n' >> "$OUT/run.identity.txt"
 else
