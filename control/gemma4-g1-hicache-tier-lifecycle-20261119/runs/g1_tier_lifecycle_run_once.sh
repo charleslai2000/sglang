@@ -89,7 +89,6 @@ if [[ -n "$PRESSURE_FIXTURE" ]]; then
   [[ -n "$PRESSURE_SHA256" && -f "$PRESSURE_FIXTURE" ]] || { echo PRESSURE_FIXTURE_OR_HASH_MISSING >&2; exit 84; }
   actual_pressure_sha=$(sha256sum "$PRESSURE_FIXTURE" | awk '{print $1}')
   [[ "$actual_pressure_sha" == "$PRESSURE_SHA256" ]] || { echo PRESSURE_FIXTURE_SHA256_MISMATCH >&2; exit 84; }
-  printf 'pressure_fixture=%s\npressure_fixture_sha256=%s\npressure_requests=%s\n' "$PRESSURE_FIXTURE" "$PRESSURE_SHA256" "${G1_TIER_PRESSURE_REQUESTS:-2}" >> "$OUT/run.identity.txt"
 fi
 export SGLANG_TREE_LIFECYCLE_TRACE=1 G1_P0_EXPORT_TREE_EVENTS=1
 export G1_P0_SANITY_RESULT_MARKER="$OUT/scheduler-lifecycle.markers"
@@ -104,6 +103,7 @@ printf 'fixture=%s\nfixture_sha256=%s\nport=%s\nextent_gib=%s\n' "$FIXTURE" "$fi
 printf 'target=max_total_tokens:%s,hicache_size_decimal_gb:%s,context:131072,output_tokens:256\n' "$MAX_TOTAL_TOKENS" "$HICACHE_SIZE_GB" >> "$OUT/run.identity.txt"
 printf 'timeout_s=10800\ncompletion=12_tree_seed_plus_12_reverse_restore_decode_plus_production_idle_sanity\n' >> "$OUT/run.identity.txt"
 printf 'probe_capacity_before_generation=%s\nstages=%s\n' "$PROBE_CAPACITY" "$STAGES" >> "$OUT/run.identity.txt"
+if [[ -n "$PRESSURE_FIXTURE" ]]; then printf 'pressure_fixture=%s\npressure_fixture_sha256=%s\npressure_requests=%s\npressure_prompt_tokens=%s\n' "$PRESSURE_FIXTURE" "$PRESSURE_SHA256" "${G1_TIER_PRESSURE_REQUESTS:-4}" "${G1_TIER_PRESSURE_PROMPT_TOKENS:-130000}" >> "$OUT/run.identity.txt"; fi
 "$PROD_RUNS/run_g1_prod_e5m2.sh" 9>&- > "$OUT/launcher.log" 2>&1 &
 LAUNCHER=$!
 SERVER_PID=''
@@ -229,7 +229,7 @@ CLIENT_ARGS=(
   --context "$G1_PROD_CONTEXT" --require-capacity --frontier-count "${G1_TIER_FRONTIER_COUNT:-0}" --stages "$STAGES"
 )
 if [[ -n "$PRESSURE_FIXTURE" ]]; then
-  CLIENT_ARGS+=(--pressure-fixture "$PRESSURE_FIXTURE" --pressure-requests "${G1_TIER_PRESSURE_REQUESTS:-4}" --pressure-prompt-tokens "${G1_TIER_PRESSURE_PROMPT_TOKENS:-130000}")
+  CLIENT_ARGS+=(--pressure-fixture "$PRESSURE_FIXTURE" --pressure-requests "${G1_TIER_PRESSURE_REQUESTS:-4}" --pressure-prompt-tokens "${G1_TIER_PRESSURE_PROMPT_TOKENS:-130000}" --pressure-preserve-prefix --pressure-watermark-timeout "${G1_TIER_PRESSURE_WATERMARK_TIMEOUT:-180}")
 fi
 if [[ -n "$BRANCH_SEQUENCE" ]]; then CLIENT_ARGS+=(--branch-sequence "$BRANCH_SEQUENCE"); fi
 if [[ -n "$REQUIRE_SOURCES" ]]; then CLIENT_ARGS+=(--require-sources "$REQUIRE_SOURCES"); fi
@@ -239,6 +239,7 @@ if [[ "${G1_TIER_REQUIRE_FRONTIER_RECOVERY:-}" == yes ]]; then CLIENT_ARGS+=(--r
 if [[ -n "${G1_TIER_FRONTIER_COUNT:-}" && "${G1_TIER_FRONTIER_COUNT:-0}" != 0 ]]; then
   CLIENT_ARGS+=(--require-radix-split)
 fi
+if [[ -n "$PRESSURE_FIXTURE" ]]; then CLIENT_ARGS+=(--require-radix-split); fi
 timeout --signal=TERM --kill-after=60 9000 \
   "$VENV/bin/python" "$RUNS/run_radix_tree_lifecycle.py" "${CLIENT_ARGS[@]}" \
   > "$OUT/client.stdout" 2> "$OUT/client.stderr" || CLIENT_RC=$?
@@ -305,10 +306,12 @@ from pathlib import Path
 lines=Path(sys.argv[1]).read_text(errors="replace").splitlines()
 decode=[]
 for line in lines:
-    match=re.search(r"Decode batch, #new-seq: (\\d+), #new-token: (\\d+)", line)
+    match=re.search(r"Decode batch, #new-seq: (\d+), #new-token: (\d+)", line)
     if match:
         decode.append({"new_sequences":int(match.group(1)),"new_tokens":int(match.group(2)),"line":line})
-Path(sys.argv[2]).write_text(json.dumps({"decode_batches":decode,"observed_sizes":sorted({x["new_sequences"] for x in decode}),"basis":"scheduler Decode batch log lines"},indent=2)+"\\n")
+Path(sys.argv[2]).write_text(json.dumps({"decode_batches":decode,"observed_sizes":sorted({x["new_sequences"] for x in decode}),"basis":"scheduler Decode batch log lines"},indent=2)+"\n")
+if not decode:
+    raise SystemExit("SCHEDULER_DECODE_BATCH_EVIDENCE_MISSING")
 PY
   if [[ -s "$OUT/client/lifecycle.json" ]]; then
     "$VENV/bin/python" - "$OUT/client/lifecycle.json" <<'PY'
