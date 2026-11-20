@@ -229,10 +229,21 @@ def set_storage_backend(
         }
 
 
-def wait_for_scheduler_idle(url, timeout=180):
+def wait_for_scheduler_idle(url, timeout=180, label="idle"):
+    """Wait for full scheduler + HiCache quiescence.
+
+    This is deliberately a poll rather than a fixed sleep: after a heavy restore
+    phase the write-through queue can hold a backlog whose drain time is not
+    bounded by request completion. `backup`/`ongoing_backup` are pending counts,
+    so a service that keeps emitting backups never reads idle.
+    """
     deadline = time.monotonic() + timeout
     last = None
+    next_report = time.monotonic() + 30
     while time.monotonic() < deadline:
+        if time.monotonic() >= next_report:
+            print(f"[{label}] still waiting: {last}", flush=True)
+            next_report = time.monotonic() + 30
         with urllib.request.urlopen(url + "/server_info", timeout=10) as response:
             info = json.loads(response.read())
         states = info.get("internal_states", [])
@@ -619,6 +630,7 @@ def main():
         "--admin-api-key", default=os.environ.get("G1_PROD_ADMIN_API_KEY", "")
     )
     parser.add_argument("--l2-only-storage-backend", default="")
+    parser.add_argument("--l2-only-idle-timeout", type=int, default=600)
     parser.add_argument("--l2-only-storage-extra-config", default="")
     parser.add_argument("--l2-only-storage-prefetch-policy", default="")
     parser.add_argument("--l2-only-storage-write-policy", default="")
@@ -987,7 +999,9 @@ def main():
     l2_only = []
     storage_control = {}
     if "l2_only_probe" in stages:
-        idle_ok, idle_state = wait_for_scheduler_idle(args.url, 180)
+        idle_ok, idle_state = wait_for_scheduler_idle(
+            args.url, args.l2_only_idle_timeout, "l2_only_probe"
+        )
         if not idle_ok:
             raise SystemExit(f"L2_ONLY_PROBE_NOT_IDLE:{idle_state}")
         control_before = storage_backend_state(args.url, args.admin_api_key)
