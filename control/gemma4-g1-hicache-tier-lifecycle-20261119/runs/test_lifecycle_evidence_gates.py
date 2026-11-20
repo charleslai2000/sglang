@@ -170,6 +170,37 @@ class LifecycleEvidenceGateTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             MODULE.validate_radix_events([{"operation": "split"}])
 
+    def test_capacity_pressure_prompt_length_escalation(self):
+        initial_tokens = 125000
+        max_tokens = 130000
+        prefix_tokens = 16384
+        requests = 4
+        tier_capacity = 460000
+        candidate = initial_tokens
+        while (
+            prefix_tokens + requests * (candidate - prefix_tokens) <= tier_capacity
+            and candidate < max_tokens
+        ):
+            candidate = min(max_tokens, candidate + 4096)
+        self.assertEqual(candidate, 129096)
+        self.assertGreater(prefix_tokens + requests * (candidate - prefix_tokens), tier_capacity)
+
+    def test_pressure_max_guard_rejects_unreachable_workset(self):
+        initial_tokens = 125000
+        max_tokens = 126000
+        prefix_tokens = 16384
+        requests = 4
+        tier_capacity = 480000
+        candidate = initial_tokens
+        while (
+            prefix_tokens + requests * (candidate - prefix_tokens) <= tier_capacity
+            and candidate < max_tokens
+        ):
+            candidate = min(max_tokens, candidate + 4096)
+        self.assertLessEqual(
+            prefix_tokens + requests * (candidate - prefix_tokens), tier_capacity
+        )
+
     def test_restore_log_joins_only_exact_rids(self):
         lines = [
             "[P3] evt=extent_read rid=r1 attempt_id=a1 succeeded_keys=1 physical_bytes=64 requested_bytes=64 preads=1",

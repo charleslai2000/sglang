@@ -14,7 +14,7 @@ FIXTURE_SHA256=${G1_TIER_FIXTURE_SHA256:-ac06790a415e772880dac9cb0415d09cc1bdc04
 CAPACITY_JSON=${G1_TIER_CAPACITY_JSON:-/data/sglang-hicache/gemma4/runs/20261120T-g1-capacity-139264-hicache8-extent32-20261119T204751Z/capacity.json}
 PROBE_CAPACITY=${G1_TIER_PROBE_CAPACITY:-yes}
 RUN_CLIENT=${G1_TIER_RUN_CLIENT:-yes}
-EXPECTED_GIT_HEAD=${G1_TIER_EXPECTED_GIT_HEAD:-2d5587ef367219ad136706bfe404da077f0b655e}
+EXPECTED_GIT_HEAD=${G1_TIER_EXPECTED_GIT_HEAD:?set G1_TIER_EXPECTED_GIT_HEAD to the reviewed immutable commit SHA}
 EXTENT_FILE_SIZE=${G1_TIER_EXTENT_FILE_SIZE:-34359738368}
 [[ "$EXTENT_FILE_SIZE" == 34359738368 ]] || { echo "EXTENT_SIZE_NOT_AUTHORIZED:$EXTENT_FILE_SIZE" >&2; exit 94; }
 STAGES=${G1_TIER_STAGES:-tier_probe,cold_storage_restore}
@@ -229,7 +229,7 @@ CLIENT_ARGS=(
   --context "$G1_PROD_CONTEXT" --require-capacity --frontier-count "${G1_TIER_FRONTIER_COUNT:-0}" --stages "$STAGES"
 )
 if [[ -n "$PRESSURE_FIXTURE" ]]; then
-  CLIENT_ARGS+=(--pressure-fixture "$PRESSURE_FIXTURE" --pressure-requests "${G1_TIER_PRESSURE_REQUESTS:-4}" --pressure-prompt-tokens "${G1_TIER_PRESSURE_PROMPT_TOKENS:-130000}" --pressure-preserve-prefix --pressure-watermark-timeout "${G1_TIER_PRESSURE_WATERMARK_TIMEOUT:-180}" --pressure-max-prompt-tokens "${G1_TIER_PRESSURE_MAX_PROMPT_TOKENS:-130000}")
+  CLIENT_ARGS+=(--pressure-fixture "$PRESSURE_FIXTURE" --pressure-requests "${G1_TIER_PRESSURE_REQUESTS:-4}" --pressure-prompt-tokens "${G1_TIER_PRESSURE_PROMPT_TOKENS:-130000}" --pressure-preserve-prefix --pressure-watermark-timeout "${G1_TIER_PRESSURE_WATERMARK_TIMEOUT:-180}" --pressure-max-prompt-tokens "${G1_TIER_PRESSURE_MAX_PROMPT_TOKENS:-130000}" --pressure-min-device-evictions "${G1_TIER_PRESSURE_MIN_DEVICE_EVICTIONS:-1}" --pressure-min-storage-bytes "${G1_TIER_PRESSURE_MIN_STORAGE_BYTES:-1}")
 fi
 if [[ -n "$BRANCH_SEQUENCE" ]]; then CLIENT_ARGS+=(--branch-sequence "$BRANCH_SEQUENCE"); fi
 if [[ -n "$REQUIRE_SOURCES" ]]; then CLIENT_ARGS+=(--require-sources "$REQUIRE_SOURCES"); fi
@@ -246,6 +246,11 @@ timeout --signal=TERM --kill-after=60 9000 \
 CLIENT_RC=${CLIENT_RC:-0}
 export G1_P0_SANITY_PHASE=production_on_idle
 printf 'client_complete_epoch=%s\nclient_exit=%s\n' "$(date +%s)" "$CLIENT_RC" >> "$OUT/run.identity.txt"
+if [[ "$CLIENT_RC" != 0 ]]; then
+  tail -100 "$OUT/client.stderr" >&2 || true
+  tail -80 "$OUT/client.stdout" >&2 || true
+  exit "$CLIENT_RC"
+fi
 # Confirm 5 seconds of full scheduler+HiCache idle; sanity_check remains active.
 "$VENV/bin/python" - "$PORT" "$OUT" <<'PY'
 import json, sys, time, urllib.request

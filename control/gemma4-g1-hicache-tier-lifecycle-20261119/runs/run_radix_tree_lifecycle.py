@@ -570,6 +570,8 @@ def main():
         raise SystemExit("CAPACITY_PRESSURE_REQUIRES_TIER_PROBE")
     if args.pressure_requests and args.pressure_prompt_tokens <= 0:
         raise SystemExit("INVALID_PRESSURE_PROMPT_LENGTH")
+    if args.pressure_requests and args.pressure_max_prompt_tokens < args.pressure_prompt_tokens:
+        raise SystemExit("PRESSURE_MAX_PROMPT_TOKENS_BELOW_INITIAL")
     if required_sources and "cold_storage_restore" in stages and "tier_probe" not in stages:
         raise SystemExit("LOWER_TIER_SOURCE_GATE_REQUIRES_TIER_PROBE")
     if required_branches and "l3" not in required_sources:
@@ -685,15 +687,6 @@ def main():
     branch_probe_records = []
     source_gate_host_probe = None
     final = snapshot(args.url, out, "after_seed", args.extent_dir)
-    if "tier_probe" in stages:
-        l1_probe = [
-            run_one(args.url, rows[0], f"{rows[0]['rid']}-l1_probe", "l1_probe", args.decode_output_tokens, args.timeout)
-        ]
-        l1_evidence = parse_restore_log(args.server_log, [record["rid"] for record in l1_probe])
-        for record in l1_probe:
-            record["restore_evidence"] = l1_evidence.get(record["rid"], {})
-        write_json(out / "l1_probe.json", {"requests": l1_probe})
-        final = snapshot(args.url, out, "after_l1_probe", args.extent_dir)
     pressure = {}
     if args.pressure_requests:
         if not args.pressure_fixture:
@@ -726,21 +719,13 @@ def main():
             if args.pressure_min_device_evictions <= 0:
                 raise SystemExit(f"PRESSURE_WORKSET_NOT_ABOVE_DEVICE_PLUS_HOST:{requested_workset}:{tiered_capacity}")
             candidate_tokens = target_tokens
-            while pressure_prefix_tokens + args.pressure_requests * (candidate_tokens - pressure_prefix_tokens) <= tiered_capacity and candidate_tokens < min(maximum_pressure_tokens, args.context - 1):
-                candidate_tokens = min(min(maximum_pressure_tokens, args.context - 1), candidate_tokens + 4096)
-            target_tokens = candidate_tokens
-            requested_workset = pressure_prefix_tokens + args.pressure_requests * (target_tokens - pressure_prefix_tokens)
-        if requested_workset <= tiered_capacity:
-            candidate_tokens = target_tokens
+            max_tokens = min(maximum_pressure_tokens, args.context - 1)
             while (
                 pressure_prefix_tokens + args.pressure_requests * (candidate_tokens - pressure_prefix_tokens)
                 <= tiered_capacity
-                and candidate_tokens < min(maximum_pressure_tokens, args.context - 1)
+                and candidate_tokens < max_tokens
             ):
-                candidate_tokens = min(
-                    min(maximum_pressure_tokens, args.context - 1),
-                    candidate_tokens + 4096,
-                )
+                candidate_tokens = min(max_tokens, candidate_tokens + 4096)
             target_tokens = candidate_tokens
             requested_workset = pressure_prefix_tokens + args.pressure_requests * (target_tokens - pressure_prefix_tokens)
         if requested_workset <= tiered_capacity:
@@ -817,6 +802,14 @@ def main():
         })
         snapshot(args.url, out, "after_frontier_recovery", args.extent_dir)
     if "tier_probe" in stages:
+        l1_probe = [
+            run_one(args.url, rows[0], f"{rows[0]['rid']}-l1_probe", "l1_probe", args.decode_output_tokens, args.timeout)
+        ]
+        l1_evidence = parse_restore_log(args.server_log, [record["rid"] for record in l1_probe])
+        for record in l1_probe:
+            record["restore_evidence"] = l1_evidence.get(record["rid"], {})
+        write_json(out / "l1_probe.json", {"requests": l1_probe})
+        final = snapshot(args.url, out, "after_l1_probe", args.extent_dir)
         host_probe = run_parallel(
             args.url,
             rows,
@@ -936,11 +929,24 @@ def main():
     summary = {
         "fixture": identity,
         "capacity_pressure": {"count": len(pressure.get("records", [])), "success": sum(bool(item.get("ok")) for item in pressure.get("records", [])), **{key: value for key, value in pressure.items() if key != "records"}},
+        "capacity_pressure_parameters": {"requested_count": args.pressure_requests, "initial_prompt_tokens": args.pressure_prompt_tokens, "maximum_prompt_tokens": args.pressure_max_prompt_tokens, "minimum_device_eviction_tokens": args.pressure_min_device_evictions, "minimum_extent_write_bytes": args.pressure_min_storage_bytes},
         "seed": phase_summary(seed, args.warm_output_tokens),
         "l1_probe": phase_summary(l1_probe, args.decode_output_tokens) if l1_probe else {"count": 0, "success": 0},
         "tier_probe": phase_summary(host_probe, args.decode_output_tokens) if host_probe else {"count": 0, "success": 0},
         "tier_probe_source_gates": {
             source: [record["rid"] for record in (l1_probe if source == "l1" and l1_probe else host_probe) if source_restore_qualified(record, source, args.decode_output_tokens)]
+            for source in ("l1", "l2", "l3", "mixed")
+        },
+        "cold_restore_source_gates": {
+            source: [record["rid"] for record in cold_l3 if source_restore_qualified(record, source, args.decode_output_tokens)]
+            for source in ("l3", "mixed")
+        },
+        "all_stage_source_gates": {
+            source: sorted({
+                record["rid"]
+                for record in [*host_probe, *cold_l3, *branch_probe_records]
+                if source_restore_qualified(record, source, args.decode_output_tokens)
+            })
             for source in ("l1", "l2", "l3", "mixed")
         },
         "branch_exclusive_l3": {
@@ -960,6 +966,10 @@ def main():
         "snapshots": ["before", "after_seed", "after_l1_probe", "after_capacity_pressure", "after_tier_probe", "before_frontier_recovery", "after_frontier_recovery", "after_branch_exclusive_l3", "after_cold_storage_restore", "after_flush"],
         "initial_extent_files": initial["extent_files"],
         "final_extent_files": final["extent_files"],
+        "completion_token_target_per_request": args.decode_output_tokens,
+        "frontier_requests_configured": args.frontier_count,
+        "capacity_pressure_required_device_eviction_tokens": args.pressure_min_device_evictions,
+        "capacity_pressure_required_extent_bytes": args.pressure_min_storage_bytes,
         "host_pool_allocations": initial.get("host_pool_allocations"),
         "finished_epoch_s": time.time(),
     }
@@ -996,7 +1006,16 @@ def main():
             stage_for_source = "tier_probe"
         if stage_for_source not in stages:
             raise SystemExit(f"SOURCE_STAGE_NOT_REQUESTED:{source}:{stage_for_source}")
-        phase_records = l1_probe if source == "l1" and l1_probe else ((source_gate_host_probe or host_probe) if source in ("l1", "l2") else cold_l3)
+        phase_records = (
+            l1_probe if source == "l1" and l1_probe
+            else (source_gate_host_probe or host_probe) if source in ("l1", "l2")
+            else (cold_l3 if source in ("l3", "mixed") else host_probe)
+        )
+        if source in ("l3", "mixed") and not any(
+            source_restore_qualified(record, source, args.decode_output_tokens)
+            for record in host_probe
+        ):
+            phase_records = cold_l3
         if not phase_records:
             raise SystemExit(f"SOURCE_GATE_NO_REQUESTS:{source}")
         qualified = [
@@ -1055,8 +1074,15 @@ def main():
             raise SystemExit("FRONTIER_RETRY_NOT_OBSERVED")
     if args.pressure_requests and summary["capacity_pressure"]["success"] != args.pressure_requests:
         raise SystemExit("CAPACITY_PRESSURE_REQUEST_FAILURE")
-    if required_sources and not any(summary["tier_probe_source_gates"].values()):
-        raise SystemExit("SOURCE_GATE_HAS_NO_QUALIFIED_REQUEST")
+    if required_sources and any(source in required_sources for source in ("l1", "l2")) and not any(
+        summary["tier_probe_source_gates"].get(source) for source in required_sources & {"l1", "l2"}
+    ):
+        raise SystemExit("TIER_SOURCE_GATE_HAS_NO_QUALIFIED_REQUEST")
+    if required_sources and any(source in required_sources for source in ("l3", "mixed")) and not any(
+        summary["tier_probe_source_gates"].get(source) or summary["cold_restore_source_gates"].get(source)
+        for source in required_sources & {"l3", "mixed"}
+    ):
+        raise SystemExit("STORAGE_SOURCE_GATE_HAS_NO_QUALIFIED_REQUEST")
     if args.frontier_count > 0 and summary["frontier_recovery"]["success"] != len(frontier_records):
         raise SystemExit("FRONTIER_DECODE_FAILURE")
     if args.require_frontier_recovery and not recovered_records:
