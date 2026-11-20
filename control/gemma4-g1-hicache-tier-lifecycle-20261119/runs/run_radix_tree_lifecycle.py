@@ -987,12 +987,19 @@ def main():
         final = snapshot(args.url, out, "after_tier_probe", args.extent_dir)
     if "branch_exclusive_l3" in stages:
         if args.branch_idle_timeout:
+            # Best effort, unlike the l2-only stage: the write-through backlog
+            # left by capacity pressure drains at roughly 1-1.5k tokens per
+            # ack, tens of seconds apart, so a full drain can take hours. A few
+            # minutes is enough for the first wave of acks to release the Host
+            # pages the restores need, and the per-request evidence decides
+            # whether the phase actually qualified.
             idle_ok, idle_state = wait_for_scheduler_idle(
                 args.url, args.branch_idle_timeout, "branch_exclusive_l3"
             )
-            write_json(out / "branch_idle.json", {"observed": idle_ok, "state": idle_state})
-            if not idle_ok:
-                raise SystemExit(f"BRANCH_L3_NOT_IDLE:{idle_state}")
+            write_json(
+                out / "branch_idle.json",
+                {"observed": idle_ok, "best_effort": True, "state": idle_state},
+            )
         for branch in branch_sequence:
             final = snapshot(args.url, out, f"before_branch_{branch}_exclusive_l3", args.extent_dir)
             indices = [index for index, row in enumerate(rows) if int(row["branch_id"]) == branch]
