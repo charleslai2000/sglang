@@ -214,6 +214,22 @@ class LifecycleEvidenceGateTest(unittest.TestCase):
         self.assertIn("rid=r1 ", joined["r1"]["extent_reads"][0])
         self.assertIn("rid=r10 ", joined["r10"]["extent_reads"][0])
 
+    def test_source_gate_accepts_exact_scheduler_normalized_batch_rid(self):
+        rid = "g1-tree-00-cold_storage_restore-11"
+        record = {
+            "rid": rid,
+            "ok": True,
+            "completion_tokens": 256,
+            "output_token_ids_count": 256,
+            "cached_tokens_details": {"device": 32768, "host": 0, "storage": 32767},
+            "restore_evidence": {
+                "extent_reads": [f"evt=extent_read rid={rid}_0 physical_bytes=64 succeeded_keys=1"],
+                "restore_events": [f"evt=restore_disposition rid={rid}_0 disposition=RESTORE requested=1 granted=1"],
+                "ready_events": [f"evt=ready_host rid={rid}_0 finalize_result=accepted"],
+            },
+        }
+        self.assertTrue(MODULE.source_restore_qualified(record, "l3", 256))
+
     def test_restore_log_joins_scheduler_normalized_batch_rid_suffix(self):
         rid = "g1-tree-00-cold_storage_restore-11"
         lines = [

@@ -181,6 +181,11 @@ def field_value(line, name):
     return match.group(1) if match else None
 
 
+def rid_matches_line(rid, line):
+    """Match a client RID with the scheduler's optional batched-ID suffix."""
+    return bool(re.search(rf"(?:^|\s)rid={re.escape(str(rid))}(?:_\d+)?(?:\s|$)", line))
+
+
 def source_restore_qualified(record, source, output_tokens):
     if (
         not record.get("ok")
@@ -193,11 +198,11 @@ def source_restore_qualified(record, source, output_tokens):
     evidence = record.get("restore_evidence", {})
     ready_events = evidence.get("ready_events", [])
     accepted_ready = any(
-        f"rid={record.get('rid')} " in line and "finalize_result=accepted" in line
+        rid_matches_line(record.get("rid"), line) and "finalize_result=accepted" in line
         for line in ready_events
     )
     accepted_restore = any(
-        f"rid={record.get('rid')} " in line
+        rid_matches_line(record.get("rid"), line)
         and "disposition=RESTORE" in line
         and positive_counter(line, "requested") > 0
         and positive_counter(line, "granted") == positive_counter(line, "requested")
@@ -265,7 +270,7 @@ def frontier_recovery_qualified(record, output_tokens):
             for wait in evidence.get("wait_events", [])
         )
         matched_ready = any(
-            f"rid={record.get('rid')} " in ready
+            rid_matches_line(record.get("rid"), ready)
             and f"wait_id={wake.get('wait_id')} " in ready
             and f"wake_event_id={wake.get('event_id')} " in ready
             and "finalize_result=accepted" in ready
@@ -275,7 +280,7 @@ def frontier_recovery_qualified(record, output_tokens):
             matched_wait
             and matched_ready
             and any(
-                f"rid={record.get('rid')} " in retry
+                rid_matches_line(record.get("rid"), retry)
                 and "cause=frontier" in retry
                 and field_value(retry, "attempt_id") == wake.get("attempt_id")
                 for retry in evidence.get("retry_events", [])
