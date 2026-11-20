@@ -33,6 +33,7 @@ class LifecycleEvidenceGateTest(unittest.TestCase):
             "output_token_ids_count": 256,
             "cached_tokens_details": {"device": 100, "host": 50, "storage": 0},
             "restore_evidence": {
+                "restore_events": ["evt=restore_disposition rid=r disposition=RESTORE requested=50 granted=50"],
                 "ready_events": ["evt=ready_host rid=r finalize_result=accepted"]
             },
         }
@@ -153,6 +154,9 @@ class LifecycleEvidenceGateTest(unittest.TestCase):
         record["restore_evidence"]["frontier_wake_ids"] = ["w"]
         record["restore_evidence"]["retry_events"] = []
         self.assertFalse(MODULE.frontier_recovery_qualified(record, 256))
+        record["restore_evidence"]["retry_events"] = [{"line_index": 3, "line": "evt=restore_retry rid=r cause=frontier"}]
+        record["cached_tokens_details"]["device"] = 1
+        self.assertTrue(MODULE.frontier_recovery_qualified(record, 256))
 
     def test_real_tree_trace_schema_operations(self):
         events = [

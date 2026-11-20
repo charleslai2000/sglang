@@ -83,6 +83,14 @@ export G1_PROD_EXTENT_SIZE=${G1_TIER_EXTENT_SIZE:-67108864}
 export G1_PROD_EXTENT_FILE_SIZE=$EXTENT_FILE_SIZE
 export G1_PROD_EXTENT_MAX_SIZE=$EXTENT_FILE_SIZE
 export G1_PROD_EXTENT_MIN_FREE_SPACE=${G1_TIER_EXTENT_MIN_FREE_SPACE:-1073741824}
+PRESSURE_FIXTURE=${G1_TIER_PRESSURE_FIXTURE:-}
+if [[ -n "$PRESSURE_FIXTURE" ]]; then
+  PRESSURE_SHA256=${G1_TIER_PRESSURE_FIXTURE_SHA256:-}
+  [[ -n "$PRESSURE_SHA256" && -f "$PRESSURE_FIXTURE" ]] || { echo PRESSURE_FIXTURE_OR_HASH_MISSING >&2; exit 84; }
+  actual_pressure_sha=$(sha256sum "$PRESSURE_FIXTURE" | awk '{print $1}')
+  [[ "$actual_pressure_sha" == "$PRESSURE_SHA256" ]] || { echo PRESSURE_FIXTURE_SHA256_MISMATCH >&2; exit 84; }
+  printf 'pressure_fixture=%s\npressure_fixture_sha256=%s\npressure_requests=%s\n' "$PRESSURE_FIXTURE" "$PRESSURE_SHA256" "${G1_TIER_PRESSURE_REQUESTS:-2}" >> "$OUT/run.identity.txt"
+fi
 export SGLANG_TREE_LIFECYCLE_TRACE=1 G1_P0_EXPORT_TREE_EVENTS=1
 export G1_P0_SANITY_RESULT_MARKER="$OUT/scheduler-lifecycle.markers"
 export G1_P0_SANITY_PHASE=startup
@@ -220,7 +228,9 @@ CLIENT_ARGS=(
   --capacity-json "$CAPACITY_JSON"
   --context "$G1_PROD_CONTEXT" --require-capacity --frontier-count "${G1_TIER_FRONTIER_COUNT:-0}" --stages "$STAGES"
 )
-if [[ -n "${G1_TIER_PRESSURE_FIXTURE:-}" ]]; then CLIENT_ARGS+=(--pressure-fixture "$G1_TIER_PRESSURE_FIXTURE" --pressure-requests "${G1_TIER_PRESSURE_REQUESTS:-2}"); fi
+if [[ -n "$PRESSURE_FIXTURE" ]]; then
+  CLIENT_ARGS+=(--pressure-fixture "$PRESSURE_FIXTURE" --pressure-requests "${G1_TIER_PRESSURE_REQUESTS:-4}" --pressure-prompt-tokens "${G1_TIER_PRESSURE_PROMPT_TOKENS:-130000}")
+fi
 if [[ -n "$BRANCH_SEQUENCE" ]]; then CLIENT_ARGS+=(--branch-sequence "$BRANCH_SEQUENCE"); fi
 if [[ -n "$REQUIRE_SOURCES" ]]; then CLIENT_ARGS+=(--require-sources "$REQUIRE_SOURCES"); fi
 if [[ -n "$REQUIRE_BRANCHES" ]]; then CLIENT_ARGS+=(--require-branch-exclusive "$REQUIRE_BRANCHES"); fi
@@ -288,6 +298,18 @@ else:
     raise SystemExit("FULL_IDLE_TIMEOUT")
 PY
 if [[ "$CLIENT_RC" == 0 ]] && grep -q 'G1_P0_SANITY_CHECK_RESULT phase=production_on_idle status=PASS' "$OUT/scheduler-lifecycle.markers"; then
+  grep -E 'Decode batch, #new-seq:|Prefill batch, #new-seq:' "$OUT/service/server.log" > "$OUT/observed-gpu-batches.log" || true
+  "$VENV/bin/python" - "$OUT/observed-gpu-batches.log" "$OUT/gpu-batch-summary.json" <<'PY'
+import json, re, sys
+from pathlib import Path
+lines=Path(sys.argv[1]).read_text(errors="replace").splitlines()
+decode=[]
+for line in lines:
+    match=re.search(r"Decode batch, #new-seq: (\\d+), #new-token: (\\d+)", line)
+    if match:
+        decode.append({"new_sequences":int(match.group(1)),"new_tokens":int(match.group(2)),"line":line})
+Path(sys.argv[2]).write_text(json.dumps({"decode_batches":decode,"observed_sizes":sorted({x["new_sequences"] for x in decode}),"basis":"scheduler Decode batch log lines"},indent=2)+"\\n")
+PY
   if [[ -s "$OUT/client/lifecycle.json" ]]; then
     "$VENV/bin/python" - "$OUT/client/lifecycle.json" <<'PY'
 import json, sys

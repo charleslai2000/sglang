@@ -212,7 +212,7 @@ def source_restore_qualified(record, source, output_tokens):
         # branch-exclusive suffix is restored from a lower tier. Aggregate
         # cached_tokens_details is therefore a presence/source test, not a
         # requirement that unrelated ancestor tokens be absent from Device.
-        "l2": h > 0 and s == 0 and accepted_ready,
+        "l2": h > 0 and s == 0 and accepted_restore,
         "l3": s > 0 and extent_read and accepted_restore,
         "mixed": h > 0 and s > 0 and extent_read and accepted_restore,
     }[source]
@@ -505,7 +505,10 @@ def main():
     parser.add_argument("--stages", default="tier_probe,cold_storage_restore")
     parser.add_argument("--pressure-fixture")
     parser.add_argument("--pressure-requests", type=int, default=0)
+    parser.add_argument("--pressure-prompt-tokens", type=int, default=130000)
     parser.add_argument("--context", type=int, default=131072)
+    parser.add_argument("--pressure-min-device-evictions", type=int, default=1)
+    parser.add_argument("--pressure-min-storage-bytes", type=int, default=1)
     args = parser.parse_args()
 
     out = Path(args.out)
@@ -559,8 +562,8 @@ def main():
         raise SystemExit("BRANCH_QUALIFICATION_REQUIRES_SOURCE_GATE")
     if required_branches and set(branch_sequence) != required_branches:
         raise SystemExit("BRANCH_SEQUENCE_AND_REQUIRED_BRANCHES_MISMATCH")
-    if required_branches and set(required_sources) != {"l3"}:
-        raise SystemExit("BRANCH_EXCLUSIVE_STAGE_MUST_GATE_ONLY_L3")
+    if required_branches and "l3" not in required_sources:
+        raise SystemExit("BRANCH_EXCLUSIVE_STAGE_REQUIRES_L3_SOURCE_GATE")
     if branch_sequence and set(branch_sequence) != {0, 1}:
         raise SystemExit("BRANCH_EXCLUSIVE_SEQUENCE_MUST_COVER_BOTH_BRANCHES")
     if args.require_capacity:
@@ -655,27 +658,6 @@ def main():
     # tree may produce L1, L2, or L3 sources; preserve each RID independently.
     order = list(reversed(range(len(rows))))
     frontier_records = []
-    if args.frontier_count > 0:
-        frontier_records = [
-            run_one(
-                args.url,
-                rows[index],
-                f"{rows[index]['rid']}-frontier-recovery-{index:02d}",
-                "frontier_recovery",
-                args.decode_output_tokens,
-                args.timeout,
-            )
-            for index in range(min(args.frontier_count, len(rows)))
-        ]
-        frontier_log = parse_restore_log(args.server_log, [record["rid"] for record in frontier_records])
-        for record in frontier_records:
-            record["restore_evidence"] = frontier_log.get(record["rid"], {})
-        write_json(out / "frontier_recovery.json", {"requests": frontier_records})
-        write_json(out / "frontier_precondition.json", {
-            "cache_usage_before_restore": initial["pool_capacities"],
-            "source_fixture_rids": [rows[i]["rid"] for i in range(min(args.frontier_count, len(rows)))],
-        })
-        snapshot(args.url, out, "after_frontier_recovery", args.extent_dir)
 
     host_probe = []
     cold_l3 = []
@@ -697,7 +679,9 @@ def main():
         device_capacity = int(capacity["gpu_pool_capacity_gauges"]["sglang:max_total_num_tokens"].get("", 0))
         if not device_capacity:
             device_capacity = int(next(iter(capacity["gpu_pool_capacity_gauges"]["sglang:max_total_num_tokens"].values())))
-        target_tokens = args.context
+        target_tokens = args.pressure_prompt_tokens
+        if target_tokens <= 0 or target_tokens + 1 > args.context:
+            raise SystemExit(f"INVALID_PRESSURE_PROMPT_LENGTH:{target_tokens}:{args.context}")
         requested_workset = args.pressure_requests * target_tokens
         tiered_capacity = device_capacity + host_capacity
         if requested_workset <= tiered_capacity:
@@ -705,17 +689,50 @@ def main():
         pressure_records = []
         for index, row in enumerate(pressure_rows[:args.pressure_requests]):
             ids = row.get("input_ids")
-            if not isinstance(ids, list) or len(ids) != target_tokens:
-                raise SystemExit(f"PRESSURE_ROW_LENGTH:{index}:{len(ids) if isinstance(ids, list) else 'invalid'}:{target_tokens}")
-            pressure_records.append(run_one(args.url, row, f"{row['rid']}-pressure", "capacity_pressure", 1, args.timeout))
+            if not isinstance(ids, list) or len(ids) < target_tokens:
+                raise SystemExit(f"PRESSURE_ROW_TOO_SHORT:{index}:{len(ids) if isinstance(ids, list) else 'invalid'}:{target_tokens}")
+            pressure_row = dict(row)
+            pressure_row["input_ids"] = ids[:target_tokens]
+            pressure_row["sha256"] = hashlib.sha256(json.dumps(pressure_row["input_ids"], separators=(",", ":")).encode()).hexdigest()
+            result = run_one(args.url, pressure_row, f"{row['rid']}-pressure", "capacity_pressure", 1, args.timeout)
+            pressure_records.append(result)
             write_json(out / "capacity_pressure.partial.json", {"completed": len(pressure_records), "requests": pressure_records})
+            if not result.get("ok") or result.get("completion_tokens") != 1:
+                raise SystemExit(f"PRESSURE_REQUEST_FAILED:{index}:{result.get('rid')}:{result.get('error', 'incomplete_output')}")
         write_json(out / "capacity_pressure.json", {"target_tokens_each": target_tokens, "requested_workset_tokens": requested_workset, "device_tokens": device_capacity, "host_tokens": host_capacity, "tiered_capacity_tokens": tiered_capacity, "requests": pressure_records})
         pressure_after = snapshot(args.url, out, "after_capacity_pressure", args.extent_dir)
         host_used = pressure_after["pool_capacities"].get("sglang:hicache_host_used_tokens")
-        capacity["runtime_pressure"] = {"target_tokens": target_tokens, "device_tokens": device_capacity, "host_tokens": host_capacity, "host_used_tokens": host_used, "before": pressure_snapshot.get("pool_capacities"), "after": pressure_after.get("pool_capacities")}
+        extent_before = pressure_snapshot.get("extent_files", {})
+        extent_after = pressure_after.get("extent_files", {})
+        extent_bytes_before = sum(int(item.get("size_bytes", 0)) for item in extent_before.values())
+        extent_bytes_after = sum(int(item.get("size_bytes", 0)) for item in extent_after.values())
+        backups_before = pressure_snapshot.get("tier_transfer_counters", {}).get("sglang:backuped_tokens_total", {})
+        backups_after = pressure_after.get("tier_transfer_counters", {}).get("sglang:backuped_tokens_total", {})
+        evictions = sum(max(0, int(float(backups_after.get(key, 0)) - float(backups_before.get(key, 0)))) for key in set(backups_before) | set(backups_after))
+        capacity["runtime_pressure"] = {"target_tokens_each": target_tokens, "device_tokens": device_capacity, "host_tokens": host_capacity, "host_used_tokens": host_used, "device_evicted_tokens_delta": evictions, "extent_bytes_before": extent_bytes_before, "extent_bytes_after": extent_bytes_after, "extent_bytes_written_delta": extent_bytes_after - extent_bytes_before, "before": pressure_snapshot.get("pool_capacities"), "after": pressure_after.get("pool_capacities")}
         write_json(out / "capacity.runtime.json", capacity)
         if int(host_used or 0) <= 0:
             raise SystemExit("PRESSURE_DID_NOT_OBSERVE_HOST_TIER_USE")
+        if evictions < args.pressure_min_device_evictions:
+            raise SystemExit(f"PRESSURE_DEVICE_EVICTION_BELOW_THRESHOLD:{evictions}:{args.pressure_min_device_evictions}")
+        if extent_bytes_after - extent_bytes_before < args.pressure_min_storage_bytes:
+            raise SystemExit(f"PRESSURE_EXTENT_WRITE_BELOW_THRESHOLD:{extent_bytes_after - extent_bytes_before}:{args.pressure_min_storage_bytes}")
+    if args.frontier_count > 0:
+        frontier_indices = list(range(min(args.frontier_count, len(rows))))
+        frontier_records = run_parallel(
+            args.url, rows, frontier_indices, "frontier_recovery",
+            args.decode_output_tokens, args.timeout, out, args.parallel,
+        )
+        frontier_log = parse_restore_log(args.server_log, [record["rid"] for record in frontier_records])
+        for record in frontier_records:
+            record["restore_evidence"] = frontier_log.get(record["rid"], {})
+        write_json(out / "frontier_recovery.json", {"requests": frontier_records})
+        write_json(out / "frontier_precondition.json", {
+            "cache_usage_before_restore": pressure.get("after") if pressure else initial["pool_capacities"],
+            "source_fixture_rids": [rows[i]["rid"] for i in frontier_indices],
+            "preceding_capacity_pressure": bool(pressure),
+        })
+        snapshot(args.url, out, "after_frontier_recovery", args.extent_dir)
     if "tier_probe" in stages:
         host_probe = run_parallel(
             args.url,
