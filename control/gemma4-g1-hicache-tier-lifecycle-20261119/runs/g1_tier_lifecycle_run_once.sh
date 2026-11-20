@@ -233,6 +233,7 @@ if [[ -n "$PRESSURE_FIXTURE" ]]; then
   CLIENT_ARGS+=(--pressure-fixture "$PRESSURE_FIXTURE" --pressure-requests "${G1_TIER_PRESSURE_REQUESTS:-4}" --pressure-prompt-tokens "${G1_TIER_PRESSURE_PROMPT_TOKENS:-130000}" --pressure-preserve-prefix --pressure-watermark-timeout "${G1_TIER_PRESSURE_WATERMARK_TIMEOUT:-180}" --pressure-max-prompt-tokens "${G1_TIER_PRESSURE_MAX_PROMPT_TOKENS:-130000}" --pressure-min-device-evictions "${G1_TIER_PRESSURE_MIN_DEVICE_EVICTIONS:-1}" --pressure-min-storage-bytes "${G1_TIER_PRESSURE_MIN_STORAGE_BYTES:-1}")
 fi
 if [[ -n "$BRANCH_SEQUENCE" ]]; then CLIENT_ARGS+=(--branch-sequence "$BRANCH_SEQUENCE"); fi
+if [[ -n "${G1_TIER_BRANCH_IDLE_TIMEOUT:-}" ]]; then CLIENT_ARGS+=(--branch-idle-timeout "$G1_TIER_BRANCH_IDLE_TIMEOUT"); fi
 if [[ -n "$REQUIRE_SOURCES" ]]; then CLIENT_ARGS+=(--require-sources "$REQUIRE_SOURCES"); fi
 if [[ -n "$REQUIRE_BRANCHES" ]]; then CLIENT_ARGS+=(--require-branch-exclusive "$REQUIRE_BRANCHES"); fi
 if [[ -n "${G1_TIER_REQUIRE_SOURCE:-}" ]]; then CLIENT_ARGS+=(--require-source "$G1_TIER_REQUIRE_SOURCE"); fi

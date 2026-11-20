@@ -631,6 +631,11 @@ def main():
     )
     parser.add_argument("--l2-only-storage-backend", default="")
     parser.add_argument("--l2-only-idle-timeout", type=int, default=600)
+    # A branch-exclusive restore that arrives while the write-through backlog is
+    # still draining cannot get a Host allocation (miss_reason=alloc_failed), is
+    # parked in WAIT_CAPACITY and then falls back to recompute -- which hides the
+    # Extent read the branch gate is looking for. Wait for quiescence first.
+    parser.add_argument("--branch-idle-timeout", type=int, default=0)
     parser.add_argument("--l2-only-churn-passes", type=int, default=1)
     parser.add_argument("--l2-only-storage-extra-config", default="")
     parser.add_argument("--l2-only-storage-prefetch-policy", default="")
@@ -981,6 +986,13 @@ def main():
         source_gate_host_probe = list(host_probe)
         final = snapshot(args.url, out, "after_tier_probe", args.extent_dir)
     if "branch_exclusive_l3" in stages:
+        if args.branch_idle_timeout:
+            idle_ok, idle_state = wait_for_scheduler_idle(
+                args.url, args.branch_idle_timeout, "branch_exclusive_l3"
+            )
+            write_json(out / "branch_idle.json", {"observed": idle_ok, "state": idle_state})
+            if not idle_ok:
+                raise SystemExit(f"BRANCH_L3_NOT_IDLE:{idle_state}")
         for branch in branch_sequence:
             final = snapshot(args.url, out, f"before_branch_{branch}_exclusive_l3", args.extent_dir)
             indices = [index for index, row in enumerate(rows) if int(row["branch_id"]) == branch]
