@@ -873,6 +873,7 @@ def main():
     cold_l3 = []
     flush = {"status": None, "body": "not_run"}
     branch_probe_records = []
+    churn_records = []
     source_gate_host_probe = None
     final = snapshot(args.url, out, "after_seed", args.extent_dir)
     pressure = {}
@@ -1044,7 +1045,6 @@ def main():
                 {"observed": all(item["observed"] for item in idle_reports.values()),
                  "best_effort": True, "per_branch": idle_reports},
             )
-        churn_records = []
         for pass_index in range(args.branch_churn_passes):
             churn_records.extend(
                 run_parallel(
