@@ -59,7 +59,16 @@ if [[ $G1_PROD_HICACHE == on ]]; then
   mkdir -p "$G1_PROD_L3_DIR"
   EXTENT_CONFIG=$(printf '{"storage_dir":"%s","extent_size":%s,"file_size":%s,"max_size":%s,"min_free_space":%s}' "$G1_PROD_L3_DIR" "$G1_PROD_EXTENT_SIZE" "$G1_PROD_EXTENT_FILE_SIZE" "$G1_PROD_EXTENT_MAX_SIZE" "$G1_PROD_EXTENT_MIN_FREE_SPACE")
   HICACHE_PREFETCH_POLICY=${G1_PROD_HICACHE_PREFETCH_POLICY:-wait_complete}
-  ARGS+=(--enable-hierarchical-cache --hicache-size "$G1_PROD_HICACHE_SIZE" --hicache-storage-backend extent --hicache-storage-backend-extra-config "$EXTENT_CONFIG" --hicache-write-policy write_through --hicache-io-backend kernel --hicache-mem-layout page_first --hicache-host-memory-mode cache --hicache-storage-prefetch-policy "$HICACHE_PREFETCH_POLICY")
+  # A fractional Host budget (the +0.5 GB capacity differential) cannot be
+  # expressed with the integer --hicache-size, so allow the equivalent
+  # --hicache-ratio instead: host tokens = ratio * device tokens, which is the
+  # same sizing path a fixed size takes after its GB -> token conversion.
+  if [[ -n "${G1_PROD_HICACHE_RATIO:-}" ]]; then
+    HOST_SIZE_ARGS=(--hicache-ratio "$G1_PROD_HICACHE_RATIO")
+  else
+    HOST_SIZE_ARGS=(--hicache-size "$G1_PROD_HICACHE_SIZE")
+  fi
+  ARGS+=(--enable-hierarchical-cache "${HOST_SIZE_ARGS[@]}" --hicache-storage-backend extent --hicache-storage-backend-extra-config "$EXTENT_CONFIG" --hicache-write-policy write_through --hicache-io-backend kernel --hicache-mem-layout page_first --hicache-host-memory-mode cache --hicache-storage-prefetch-policy "$HICACHE_PREFETCH_POLICY")
 fi
 # Optional, explicit extra server arguments for a single run (space separated).
 # Used to raise the bounded WAIT_CAPACITY timeout for restore experiments; the
@@ -68,7 +77,7 @@ if [[ -n "${G1_PROD_EXTRA_SERVER_ARGS:-}" ]]; then
   read -r -a EXTRA_ARGS <<<"$G1_PROD_EXTRA_SERVER_ARGS"
   ARGS+=("${EXTRA_ARGS[@]}")
 fi
-printf '%q ' "${ARGS[@]}" > "$OUT/launch-argv.txt"; printf '\nkv=%s\ncontext=%s\nmax_running=%s\nmax_total_tokens=%s\nmem_fraction=%s\ngraph_bs=%s\nradix=%s\nhicache=%s\nhicache_size_gb=%s\nrequest_metrics_export=%s\nextent_size_bytes=%s\nextent_file_size_bytes=%s\nextent_max_size_bytes=%s\nextent_min_free_bytes=%s\nwarmup=%s\nl3_dir=%s\nsource_head=%s\n' "$G1_PROD_KV" "$G1_PROD_CONTEXT" "$G1_PROD_MAX_RUNNING" "$G1_PROD_MAX_TOTAL_TOKENS" "$G1_PROD_MEM_FRACTION" "$G1_PROD_GRAPH_BS" "$G1_PROD_RADIX" "$G1_PROD_HICACHE" "$G1_PROD_HICACHE_SIZE" "${G1_PROD_EXPORT_REQUEST_METRICS:-off}" "$G1_PROD_EXTENT_SIZE" "$G1_PROD_EXTENT_FILE_SIZE" "$G1_PROD_EXTENT_MAX_SIZE" "$G1_PROD_EXTENT_MIN_FREE_SPACE" "${G1_PROD_WARMUP:-on}" "$G1_PROD_L3_DIR" "$(git rev-parse HEAD)" > "$OUT/manifest.txt"
+printf '%q ' "${ARGS[@]}" > "$OUT/launch-argv.txt"; printf '\nkv=%s\ncontext=%s\nmax_running=%s\nmax_total_tokens=%s\nmem_fraction=%s\ngraph_bs=%s\nradix=%s\nhicache=%s\nhicache_size_gb=%s\nhicache_ratio=%s\nrequest_metrics_export=%s\nextent_size_bytes=%s\nextent_file_size_bytes=%s\nextent_max_size_bytes=%s\nextent_min_free_bytes=%s\nwarmup=%s\nl3_dir=%s\nsource_head=%s\n' "$G1_PROD_KV" "$G1_PROD_CONTEXT" "$G1_PROD_MAX_RUNNING" "$G1_PROD_MAX_TOTAL_TOKENS" "$G1_PROD_MEM_FRACTION" "$G1_PROD_GRAPH_BS" "$G1_PROD_RADIX" "$G1_PROD_HICACHE" "$G1_PROD_HICACHE_SIZE" "${G1_PROD_HICACHE_RATIO:-none}" "${G1_PROD_EXPORT_REQUEST_METRICS:-off}" "$G1_PROD_EXTENT_SIZE" "$G1_PROD_EXTENT_FILE_SIZE" "$G1_PROD_EXTENT_MAX_SIZE" "$G1_PROD_EXTENT_MIN_FREE_SPACE" "${G1_PROD_WARMUP:-on}" "$G1_PROD_L3_DIR" "$(git rev-parse HEAD)" > "$OUT/manifest.txt"
 export G1_LOGITS_CAPTURE=
 "$VENV/bin/python" -m sglang.launch_server "${ARGS[@]}" > "$OUT/server.log" 2>&1 & PID=$!
 MON=; GPU_MON=
