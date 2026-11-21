@@ -1014,12 +1014,16 @@ def main():
             # minutes is enough for the first wave of acks to release the Host
             # pages the restores need, and the per-request evidence decides
             # whether the phase actually qualified.
-            idle_ok, idle_state = wait_for_scheduler_idle(
-                args.url, args.branch_idle_timeout, "branch_exclusive_l3"
-            )
+            idle_reports = {}
+            for branch in branch_sequence:
+                idle_ok, idle_state = wait_for_scheduler_idle(
+                    args.url, args.branch_idle_timeout, f"branch_{branch}_exclusive_l3"
+                )
+                idle_reports[str(branch)] = {"observed": idle_ok, "state": idle_state}
             write_json(
                 out / "branch_idle.json",
-                {"observed": idle_ok, "best_effort": True, "state": idle_state},
+                {"observed": all(item["observed"] for item in idle_reports.values()),
+                 "best_effort": True, "per_branch": idle_reports},
             )
         churn_records = []
         for pass_index in range(args.branch_churn_passes):
