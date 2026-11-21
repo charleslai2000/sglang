@@ -1,11 +1,13 @@
 import argparse
 import asyncio
+import hashlib
 import json
 import queue
 import random
 import threading
 import time
 from datetime import datetime
+from pathlib import Path
 
 import numpy as np
 import requests
@@ -156,6 +158,22 @@ def parse_args():
         type=str,
         default="",
         help="String of LoRA path. Currently we only support benchmarking on a single LoRA adaptor.",
+    )
+    parser.add_argument(
+        "--fixed-history-tokens",
+        action="store_true",
+        help=(
+            "Append deterministic history tokens instead of the generated output_ids, "
+            "so every cache mode sees byte-identical later-round prompts. Required for "
+            "a strict A/B: with real output_ids, a numeric difference between modes "
+            "changes the next round's input."
+        ),
+    )
+    parser.add_argument(
+        "--request-hash-log",
+        type=str,
+        default="",
+        help="Write one JSONL line per sent request with its input_ids length and hash.",
     )
     parser.add_argument(
         "--api-format",
@@ -380,6 +398,13 @@ class WorkloadGenerator:
                     "generated_len": [],
                 }
         self.num_clients = args.num_clients
+        self.fixed_history_tokens = bool(args.fixed_history_tokens)
+        self.history_rngs = {
+            i: random.Random(args.seed * 100003 + i) for i in range(args.num_clients)
+        }
+        self.request_hash_log = args.request_hash_log
+        if self.request_hash_log:
+            Path(self.request_hash_log).write_text("")
 
         self.num_rounds = self.max_rounds
         self.max_parallel = args.max_parallel
@@ -387,6 +412,17 @@ class WorkloadGenerator:
 
     async def handle_request(self, item):
         client_id, payload = item
+        if self.request_hash_log:
+            ids = payload.get("input_ids") or []
+            record = {
+                "client": client_id,
+                "len": len(ids),
+                "sha": hashlib.sha256(
+                    ",".join(str(token) for token in ids).encode()
+                ).hexdigest()[:16],
+            }
+            with open(self.request_hash_log, "a") as stream:
+                stream.write(json.dumps(record) + "\n")
         try:
             response = await self.request_func(payload, self.url, self.pbar)
             if self.pbar.n == self.pbar.total:
@@ -451,6 +487,14 @@ class WorkloadGenerator:
                         self.client_records[client_id]["history"].append(
                             {"role": "assistant", "content": response.generated_text}
                         )
+                elif self.fixed_history_tokens:
+                    # Same length as the generated ids (ignore_eos=true makes the
+                    # length deterministic), same tokens in every mode.
+                    generator = self.history_rngs[client_id]
+                    self.client_records[client_id]["history"].extend(
+                        generator.randrange(1000, 200000)
+                        for _ in range(len(response.output_ids))
+                    )
                 else:
                     self.client_records[client_id]["history"].extend(
                         response.output_ids
