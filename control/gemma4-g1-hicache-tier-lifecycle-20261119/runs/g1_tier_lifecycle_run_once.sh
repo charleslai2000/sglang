@@ -368,7 +368,17 @@ PY
 import json, sys
 from pathlib import Path
 result=json.loads(Path(sys.argv[1]).read_text())
-for phase in ("seed", "tier_probe", "cold_storage_restore"):
+# Only require the phases this invocation actually asked for: a branch-only run
+# (stages=branch_exclusive_l3) never executes tier_probe, and demanding it turned
+# a fully qualified branch result into PHASE_DECODE_INCOMPLETE:tier_probe.
+import os
+requested = {item for item in os.environ.get("G1_TIER_STAGES", "").split(",") if item}
+required_phases = ["seed"]
+if not requested or "tier_probe" in requested:
+    required_phases.append("tier_probe")
+if "cold_storage_restore" in requested:
+    required_phases.append("cold_storage_restore")
+for phase in required_phases:
     item=result.get(phase, {})
     if item.get("count", 0) == 0 or item.get("success") != item.get("count"):
         raise SystemExit(f"PHASE_DECODE_INCOMPLETE:{phase}:{item}")
