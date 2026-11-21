@@ -644,6 +644,11 @@ def main():
     # leaving the two hottest rows -- which the measured pass reaches last --
     # to be evicted by the restores that precede them.
     parser.add_argument("--branch-churn-passes", type=int, default=0)
+    # A frontier wait only happens when the request's anchor chain is still
+    # mid-backup. Fixture rows are long durable by the time the frontier phase
+    # runs (r4, r6 and r28 all produced zero frontier_wait events), so allow the
+    # phase to re-issue the prompts that capacity pressure has just written.
+    parser.add_argument("--frontier-from-pressure", action="store_true")
     parser.add_argument("--l2-only-churn-passes", type=int, default=1)
     parser.add_argument("--l2-only-storage-extra-config", default="")
     parser.add_argument("--l2-only-storage-prefetch-policy", default="")
@@ -914,6 +919,7 @@ def main():
         if requested_workset <= tiered_capacity:
             raise SystemExit(f"PRESSURE_WORKSET_NOT_ABOVE_DEVICE_PLUS_HOST:{requested_workset}:{tiered_capacity}")
         pressure_records = []
+        pressure_rows_used = []
         for index, row in enumerate(pressure_rows[:args.pressure_requests]):
             ids = row.get("input_ids")
             if not isinstance(ids, list) or len(ids) < target_tokens:
@@ -923,6 +929,7 @@ def main():
             pressure_row = dict(row)
             pressure_row["input_ids"] = ids[:target_tokens]
             pressure_row["sha256"] = hashlib.sha256(json.dumps(pressure_row["input_ids"], separators=(",", ":")).encode()).hexdigest()
+            pressure_rows_used.append(pressure_row)
             result = run_one(args.url, pressure_row, f"{row['rid']}-pressure", "capacity_pressure", 1, args.timeout)
             pressure_records.append(result)
             write_json(out / "capacity_pressure.partial.json", {"completed": len(pressure_records), "requests": pressure_records})
@@ -967,10 +974,21 @@ def main():
         if extent_bytes_after - extent_bytes_before < args.pressure_min_storage_bytes:
             raise SystemExit(f"PRESSURE_EXTENT_WRITE_BELOW_THRESHOLD:{extent_bytes_after - extent_bytes_before}:{args.pressure_min_storage_bytes}")
     if args.frontier_count > 0:
-        frontier_indices = list(range(min(args.frontier_count, len(rows))))
+        if args.frontier_from_pressure:
+            if not args.pressure_requests:
+                raise SystemExit("FRONTIER_FROM_PRESSURE_REQUIRES_CAPACITY_PRESSURE")
+            # Re-issue the prompts capacity pressure just wrote: their chains are
+            # still mid-backup, which is the state the frontier wait exists for.
+            frontier_rows = [
+                dict(row, branch_id=row.get("branch_id", -1))
+                for row in pressure_rows_used
+            ]
+        else:
+            frontier_rows = rows
+        frontier_indices = list(range(min(args.frontier_count, len(frontier_rows))))
         frontier_pre_snapshot = snapshot(args.url, out, "before_frontier_recovery", args.extent_dir)
         frontier_records = run_parallel(
-            args.url, rows, frontier_indices, "frontier_recovery",
+            args.url, frontier_rows, frontier_indices, "frontier_recovery",
             args.decode_output_tokens, args.timeout, out, args.parallel,
         )
         frontier_log = parse_restore_log(args.server_log, [record["rid"] for record in frontier_records])
@@ -980,7 +998,8 @@ def main():
         write_json(out / "frontier_precondition.json", {
             "cache_usage_before_restore": frontier_pre_snapshot["pool_capacities"],
             "tier_transfer_counters_before": frontier_pre_snapshot["tier_transfer_counters"],
-            "source_fixture_rids": [rows[i]["rid"] for i in frontier_indices],
+            "source_fixture_rids": [frontier_rows[i]["rid"] for i in frontier_indices],
+            "frontier_rows_from": "capacity_pressure" if args.frontier_from_pressure else "lifecycle_fixture",
             "preceding_capacity_pressure": bool(pressure),
         })
         snapshot(args.url, out, "after_frontier_recovery", args.extent_dir)
@@ -1386,8 +1405,38 @@ def main():
         before_counters = frontier_precondition.get("tier_transfer_counters_before", {})
         after_frontier = json.loads((out / "after_frontier_recovery.snapshot.json").read_text())
         after_counters = after_frontier.get("tier_transfer_counters", {})
-        if before_counters != after_counters:
-            raise SystemExit("FRONTIER_STAGE_CHANGED_TRANSFER_COUNTERS_UNEXPECTEDLY")
+        # A frontier wake IS a durability advance: the wait ends when the chain's
+        # write is acknowledged, which necessarily increments the backup
+        # completion counters (r28: +121,298 backuped tokens, +1.9 GB). Requiring
+        # the counters to be unchanged could therefore only ever hold for a phase
+        # in which no frontier wake happened at all -- which is exactly the
+        # degenerate case that then fails FRONTIER_RECOVERY_GATE_MISSING.
+        # Require monotonicity instead, and when the counters did grow require the
+        # growth to be attributable: a wake node must appear in a restore_backup
+        # acknowledgement line.
+        def counter_values(counters):
+            values = {}
+            for key, labelled in counters.items():
+                if isinstance(labelled, dict):
+                    values[key] = sum(float(value) for value in labelled.values())
+                else:
+                    values[key] = float(labelled)
+            return values
+
+        before_values = counter_values(before_counters)
+        after_values = counter_values(after_counters)
+        regressions = {
+            key: (before_values.get(key), after_values.get(key))
+            for key in before_values
+            if after_values.get(key, before_values[key]) < before_values[key]
+        }
+        if regressions:
+            raise SystemExit(f"FRONTIER_STAGE_REGRESSED_TRANSFER_COUNTERS:{regressions}")
+        growth = {
+            key: after_values[key] - before_values.get(key, 0.0)
+            for key in after_values
+            if after_values[key] > before_values.get(key, 0.0)
+        }
         if not args.require_capacity:
             raise SystemExit("FRONTIER_CAPACITY_PRECONDITION_NOT_REQUIRED")
         if not args.frontier_count:
@@ -1407,6 +1456,30 @@ def main():
             for record in recovered_records
         ):
             raise SystemExit("FRONTIER_RECOVERY_CAUSAL_GATE_FAILURE")
+        if growth:
+            acknowledged_nodes = {
+                match.group(1)
+                for match in re.finditer(r"evt=restore_backup\b[^\n]*?node=(\d+)", Path(args.server_log).read_text(errors="replace"))
+            }
+            wake_nodes = {
+                match.group(1)
+                for record in recovered_records
+                for line in record["restore_evidence"].get("frontier_wake_events", [])
+                for match in [re.search(r"node=(\d+)", line)]
+                if match
+            }
+            attributable = wake_nodes & acknowledged_nodes
+            write_json(
+                out / "frontier_counter_growth.json",
+                {
+                    "growth": growth,
+                    "acknowledged_nodes_sample": sorted(acknowledged_nodes)[:64],
+                    "wake_nodes": sorted(wake_nodes),
+                    "attributable_nodes": sorted(attributable),
+                },
+            )
+            if not attributable:
+                raise SystemExit("FRONTIER_COUNTER_GROWTH_NOT_ATTRIBUTABLE_TO_WAKE")
         if not any(record.get("restore_evidence", {}).get("frontier_wait_events") for record in recovered_records):
             raise SystemExit("FRONTIER_WAIT_NOT_OBSERVED")
         if not any(record.get("restore_evidence", {}).get("frontier_wake_events") for record in recovered_records):

@@ -239,6 +239,7 @@ if [[ -n "$REQUIRE_SOURCES" ]]; then CLIENT_ARGS+=(--require-sources "$REQUIRE_S
 if [[ -n "$REQUIRE_BRANCHES" ]]; then CLIENT_ARGS+=(--require-branch-exclusive "$REQUIRE_BRANCHES"); fi
 if [[ -n "${G1_TIER_REQUIRE_SOURCE:-}" ]]; then CLIENT_ARGS+=(--require-source "$G1_TIER_REQUIRE_SOURCE"); fi
 if [[ "${G1_TIER_REQUIRE_FRONTIER_RECOVERY:-}" == yes ]]; then CLIENT_ARGS+=(--require-frontier-recovery); fi
+if [[ "${G1_TIER_FRONTIER_FROM_PRESSURE:-}" == yes ]]; then CLIENT_ARGS+=(--frontier-from-pressure); fi
 # NOTE: the radix-split/quiescent artifacts (tree-lifecycle-events.json and
 # hicache_quiescent.json) are exported by THIS wrapper after the client returns,
 # so the client cannot require them on a fresh output directory. The same
