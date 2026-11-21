@@ -278,6 +278,16 @@ class WorkloadGenerator:
                 random.randint(min_rounds, max_rounds) for _ in range(args.num_clients)
             ]
 
+        # Deterministic sub-question ownership. The pool is consumed by pop()
+        # in response-arrival order by default, which makes the appended turn
+        # depend on completion order and therefore on cache mode. When history
+        # is deterministic, slice the same pool by (client, round) instead.
+        self.sub_question_offsets = []
+        _running = 0
+        for _total in self.client_total_rounds:
+            self.sub_question_offsets.append(_running)
+            _running += max(_total - 1, 0)
+
         # clients_per_round[r] = number of clients participating in round r
         self.clients_per_round = [
             sum(1 for t in self.client_total_rounds if t > r) for r in range(max_rounds)
@@ -527,7 +537,13 @@ class WorkloadGenerator:
 
                 client_total = self.client_records[client_id]["total_rounds"]
                 if self.client_records[client_id]["round"] < client_total:
-                    sub_q = self.sub_question_inputs.pop()
+                    if self.fixed_history_tokens:
+                        index = self.sub_question_offsets[client_id] + current_round
+                        sub_q = self.sub_question_inputs[
+                            min(index, len(self.sub_question_inputs) - 1)
+                        ]
+                    else:
+                        sub_q = self.sub_question_inputs.pop()
                     if self.api_format == "openai":
                         # Append sub-question as a new user message
                         sub_q_text = self.tokenizer.decode(list(sub_q.prompt))
