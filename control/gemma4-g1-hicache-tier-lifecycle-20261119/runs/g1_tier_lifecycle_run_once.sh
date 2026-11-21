@@ -24,7 +24,11 @@ REQUIRE_BRANCHES=${G1_TIER_REQUIRE_BRANCH_EXCLUSIVE:-}
 LOCK=/tmp/f1-r16b-gpu-exclusive.lock
 FIXTURE=${G1_TIER_FIXTURE:?set G1_TIER_FIXTURE}
 [[ ! -e "$OUT" ]] || { echo "OUTPUT_DIRECTORY_ALREADY_EXISTS:$OUT" >&2; exit 79; }
-[[ "$MAX_TOTAL_TOKENS" == 139264 && "$HICACHE_SIZE_GB" == 8 ]] || { echo "PRESSURE_CONFIG_NOT_AUTHORIZED" >&2; exit 94; }
+# 8 GB is the authorized acceptance configuration; 8.5 GB is authorized only for
+# the targeted branch-exclusive capacity differential (does a +0.5 GB Host pool
+# clear the restore_host_alloc_wait wall). Anything else is not authorized.
+[[ "$MAX_TOTAL_TOKENS" == 139264 ]] || { echo "PRESSURE_CONFIG_NOT_AUTHORIZED" >&2; exit 94; }
+case "$HICACHE_SIZE_GB" in 8|8.5) ;; *) echo "PRESSURE_CONFIG_NOT_AUTHORIZED" >&2; exit 94 ;; esac
 [[ "$G1_PROD_CONTEXT" == 131072 ]] || { echo "CONTEXT_CONFIG_NOT_AUTHORIZED" >&2; exit 94; }
 [[ -f "$FIXTURE" ]] || { echo "FIXTURE_MISSING:$FIXTURE" >&2; exit 80; }
 [[ -f "$CAPACITY_JSON" ]] || { echo "CAPACITY_JSON_MISSING:$CAPACITY_JSON" >&2; exit 85; }
