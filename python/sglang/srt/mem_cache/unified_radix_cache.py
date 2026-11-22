@@ -5882,7 +5882,7 @@ class UnifiedRadixCache(BasePrefixCache):
         if req_id not in self.ongoing_prefetch:
             return True
 
-        _, _, _, operation, _, _ = self.ongoing_prefetch[req_id]
+        _, _, _, operation, _, _, _ = self.ongoing_prefetch[req_id]
 
         # Determine whether or not we should terminate this prefetch request.  Make all
         # ranks agree on the decision.  When running with PP, PPn will follow PP0's decision.
@@ -6847,6 +6847,7 @@ class UnifiedRadixCache(BasePrefixCache):
             operation,
             anchor_lock_params,
             comp_xfers,
+            anchor_reclaim_pinned,
         ) = info
         if operation.is_terminated():
             revoke_reason = "terminated"
