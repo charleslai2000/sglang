@@ -84,6 +84,7 @@ def _make_cache(tree):
     cache.record_storage_prefetch_terminal = types.MethodType(
         UnifiedRadixCache.record_storage_prefetch_terminal, cache
     )
+    cache.buffer_pipeline = None
     return cache
 
 
@@ -156,6 +157,11 @@ class TestPrefetchAnchorIdentity(unittest.TestCase):
         self.tree._node_arena[anchor.id] = stranger
 
         self.assertFalse(self.cache._prefetch_anchor_is_valid(anchor.id, seen_hash))
+
+    def test_root_is_the_only_valid_unhashed_anchor(self):
+        self.assertTrue(
+            self.cache._prefetch_anchor_is_valid(self.tree.root_node.id, None)
+        )
 
     def test_unhashed_anchor_is_unverifiable(self):
         anchor = _add(self.tree, self.tree.root_node, [1], [1], hashes=[])

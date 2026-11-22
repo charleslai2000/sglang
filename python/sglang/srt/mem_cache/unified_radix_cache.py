@@ -6048,8 +6048,9 @@ class UnifiedRadixCache(BasePrefixCache):
 
         # All PP/TP ranks will get the same `min_completed_tokens`, because `completed_tokens`
         # and `pool_hits` in their operations are same.  No need to sync cross-rank here.
-        anchor_still_valid = self._prefetch_anchor_is_valid(
-            last_host_node_id, anchor_last_hash
+        anchor_still_valid = (
+            self.buffer_pipeline is not None
+            or self._prefetch_anchor_is_valid(last_host_node_id, anchor_last_hash)
         )
         if not anchor_still_valid or not self._check_hybrid_prefetch_result(
             req_id,
@@ -6541,7 +6542,7 @@ class UnifiedRadixCache(BasePrefixCache):
         completed_tokens = operation.completed_tokens
         # If its anchor vanished, no hybrid host insertion can be committed;
         # defer to the caller's stale-anchor cleanup, which owns all staging.
-        if not self._prefetch_anchor_is_valid(
+        if self.buffer_pipeline is None and not self._prefetch_anchor_is_valid(
             last_host_node_id, self.ongoing_prefetch[req_id].anchor_last_hash
         ):
             return True
@@ -8661,13 +8662,7 @@ class UnifiedRadixCache(BasePrefixCache):
             f"{self.inflight_promotion_reserved} != sum(live entries)="
             f"{reserved_sum}"
         )
-        ongoing_prefetch = [
-            (rid, info.anchor_node_id)
-            for rid, info in self.ongoing_prefetch.items()
-        ]
-        self.tree_core.sanity_check(
-            ongoing_write_through, ongoing_load_back, ongoing_prefetch
-        )
+        self.tree_core.sanity_check(ongoing_write_through, ongoing_load_back)
 
     def pretty_print(self) -> None:
         self.tree_core.pretty_print()
