@@ -256,6 +256,29 @@ def _storage_hit_crop_is_safe(operation, alloc_len: int) -> bool:
     )
 
 
+def _staging_crop_length(
+    operation, alloc_len: int, free_now: int, page_size: int
+) -> int:
+    """Largest page-aligned prefix of a validated storage hit that fits now.
+
+    Returns 0 for "do not crop": nothing usable is free, the crop would be too
+    small to pay for its own transfer, or the hit is a TRAILING_PAGES frontier
+    that the storage validation must not shorten.
+    """
+    page = max(1, int(page_size))
+    alloc_len = int(alloc_len)
+    crop_len = (max(0, int(free_now)) // page) * page
+    if crop_len >= alloc_len:
+        crop_len = alloc_len
+    if crop_len <= 0:
+        return 0
+    if crop_len < max(page, alloc_len // 8):
+        return 0
+    if not _storage_hit_crop_is_safe(operation, crop_len):
+        return 0
+    return crop_len
+
+
 def _t38c_residency_identity(context, node_id, final_kv_hash):
     if not isinstance(context, dict):
         return None
@@ -4130,6 +4153,24 @@ class UnifiedRadixCache(BasePrefixCache):
         finally:
             self._note_host_alloc_reclaim_exit(component_type)
 
+    def _drain_acks_and_reclaim_host(self, num_tokens: int) -> int:
+        """Drain finished storage acks, then retry host eviction once.
+
+        Mirrors the F1 recovery already used by ``_execute_kv_backup``: a
+        completed L3 write keeps ``host_lock_ref`` on its node until the ack is
+        consumed, so staging can be refused while reclaimable slots are still
+        pinned behind the ack backlog.  Bounded to one drain and one eviction
+        pass so the staging path cannot loop.
+        """
+        if num_tokens <= 0:
+            return 0
+        try:
+            self.drain_storage_control_queues_local()
+        except Exception:  # pragma: no cover - best-effort recovery
+            logger.warning("host staging: ack drain failed", exc_info=True)
+            return 0
+        return int(self.evict_host(num_tokens) or 0)
+
     # ---- Decode retraction ----
 
     def supports_retraction_backup(self) -> bool:
@@ -7044,6 +7085,7 @@ class UnifiedRadixCache(BasePrefixCache):
             alloc1_succeeded = host_indices is not None
             reclaimed_units = 0
             alloc2_succeeded = False
+            granted_len = alloc_len
             if host_indices is None:
                 # P3 M2: speculative staging eats free/soft-reserved host
                 # headroom only -- an alloc failure declines it silently,
@@ -7055,12 +7097,43 @@ class UnifiedRadixCache(BasePrefixCache):
                     reclaimed_units = int(self.evict_host(alloc_len) or 0)
                     host_indices = cc.mem_pool_host.alloc(alloc_len)
                     alloc2_succeeded = host_indices is not None
+                if host_indices is None:
+                    # F1 symmetry with _execute_kv_backup: a finished L3 write
+                    # keeps its host slots pinned (host_lock_ref) until its ack
+                    # is consumed, so one drain + retry can still free capacity
+                    # before the staging request is given up.
+                    reclaimed_units += self._drain_acks_and_reclaim_host(
+                        alloc_len - reclaimed_units
+                    )
+                    host_indices = cc.mem_pool_host.alloc(alloc_len)
+                    alloc2_succeeded = host_indices is not None
+                if host_indices is None:
+                    # Capacity crop: stage the prefix that fits instead of
+                    # revoking the whole validated hit (r60 C-8: 525 demand
+                    # staging failures requested 3.8-13.8 K tokens against a
+                    # pool whose only free units were 0.2-0.9 K, so every one
+                    # of them was revoked and recomputed).
+                    # _storage_hit_crop_is_safe keeps a TRAILING_PAGES
+                    # frontier un-cropped, which is why the predicate exists.
+                    free_now = int(cc.mem_pool_host.available_size())
+                    crop_len = _staging_crop_length(
+                        operation, alloc_len, free_now, self.page_size
+                    )
+                    if crop_len:
+                        host_indices = cc.mem_pool_host.alloc(crop_len)
+                        if host_indices is not None:
+                            granted_len = crop_len
+                            _log_restore_disposition(
+                                req_id, "PARTIAL", alloc_len, crop_len,
+                                "cropped_to_staging",
+                            )
             operation._host_alloc_retry_details = {
                 "snapshot": telemetry_snapshot,
                 "required": alloc_len,
                 "alloc1": alloc1_succeeded,
                 "reclaimed": reclaimed_units,
                 "alloc2": alloc2_succeeded,
+                "crop_granted": granted_len if granted_len != alloc_len else 0,
             }
             if host_indices is None:
                 if buffer_mode:
@@ -7068,12 +7141,12 @@ class UnifiedRadixCache(BasePrefixCache):
                 self.revoke_pending_prefetch(req_id, alloc_failed=True)
                 return True
 
-            operation.storage_hit_count = alloc_len
-            operation.hash_value = operation.hash_value[: alloc_len // self.page_size]
+            operation.storage_hit_count = granted_len
+            operation.hash_value = operation.hash_value[: granted_len // self.page_size]
             operation.host_indices = host_indices
             self.ongoing_prefetch[req_id] = info._replace(host_indices=host_indices)
             if buffer_mode:
-                cc.prefetch_tokens_occupied += alloc_len
+                cc.prefetch_tokens_occupied += granted_len
                 # IO commit: pin the anchor until consumption. Do not read
                 # attributes off `operation` here — alternative cache
                 # controllers may expose a narrower surface.

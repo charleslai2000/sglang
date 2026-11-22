@@ -43,6 +43,37 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Write-through retention can fill the Host pool to its last page.  When it
+# does, the only host leaves the eviction rule may release are childless ones,
+# and every live chain's last host-only node has a device-resident child, so no
+# staging headroom ever appears on its own (r60 C-8: 185.7 K/186.0 K occupied,
+# 0 evictable, 525 demand restores revoked after their Extent read).  Keep this
+# much staging headroom free of the write-back channel unless the operator asks
+# for an explicit margin.
+_DEFAULT_STAGING_FLOOR_TOKENS = 16384
+
+
+def _default_staging_floor_applies(server_args) -> bool:
+    """Whether to impose the implicit write-back staging floor.
+
+    Only write-through policies are covered: ``write_back`` already carries an
+    adjudicated reserve/margin model, and an explicit operator margin always
+    wins (the caller passes 0 only when none was configured).
+    """
+    policy = getattr(server_args, "hicache_write_policy", None)
+    return policy in ("write_through", "write_through_selective")
+
+
+def _default_staging_floor_bytes(pool) -> int:
+    """The implicit staging floor for one host pool, in bytes.
+
+    ``_DEFAULT_STAGING_FLOOR_TOKENS`` capped at 1/8 of the pool, converted with
+    the pool's own per-token size so mixed-pool groups each get their share.
+    """
+    tokens = min(_DEFAULT_STAGING_FLOOR_TOKENS, int(pool.size) // 8)
+    return int(tokens * pool.size_per_token)
+
+
 
 def _get_allocator_type() -> str:
     return get_allocator_type()
@@ -1770,18 +1801,32 @@ def attach_hybrid_pool_to_unified_cache(
             else int(server_args.ready_horizon_safety_margin_gb * 1e9)
         )
         for entry in cache.host_pool_group.entries:
-            if margin_bytes == 0:
-                continue
             pool = entry.host_pool
+            entry_margin_bytes = margin_bytes
+            if entry_margin_bytes == 0 and _default_staging_floor_applies(server_args):
+                # r60 C-8 (write_through, 8 GB Host, 40 clients): the pool sat
+                # at 185.7 K/186.0 K tokens with evictable=0, so 525 demand
+                # restores found no staging (3.8-13.8 K requested) and were
+                # revoked *after* their Extent read.  The eviction rule can
+                # only release childless host leaves, and a live chain's
+                # last host-only node always has a device-resident child, so
+                # no floor ever appears on its own.  Keep a bounded floor free
+                # of the write-back channel instead: backups cap at
+                # pool - margin, restores stage into the margin.  Costs cache
+                # retention (margin tokens), buys restore admission.
+                entry_margin_bytes = _default_staging_floor_bytes(pool)
+            if entry_margin_bytes == 0:
+                continue
             setter = getattr(pool, "set_writeback_reserve_margin_bytes", None)
             if setter is not None:
-                setter(margin_bytes)
+                setter(entry_margin_bytes)
             logger.info(
                 "P3 write-back reserve/margin as %% of %s host pool: "
-                "reserve=%.1f%% margin=%.1f%%",
+                "reserve=%.1f%% margin=%.1f%% (default_staging_floor=%s)",
                 entry.name.value,
                 100.0 * pool.writeback_reserve() / pool.size,
-                100.0 * int(margin_bytes // pool.size_per_token) / pool.size,
+                100.0 * int(entry_margin_bytes // pool.size_per_token) / pool.size,
+                entry_margin_bytes != margin_bytes,
             )
     except Exception:
         logger.exception("attach_hybrid_pool_to_unified_cache failed")
