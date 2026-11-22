@@ -587,9 +587,6 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         # Full KV on both tiers -> redundant host copy, reclaimed first by
         # write_back; insertion-ordered dict keeps victims TP-deterministic.
         self.full_host_duplicates: dict[NodeId, UnifiedTreeNode] = {}
-        # Async L3 operations carry node ids across scheduler turns.  These
-        # pins protect device-only anchors too (host_lock_ref does not).
-        self._host_reclaim_pins: dict[NodeId, int] = {}
         # Rolling digest of reclaim victim ids, cross-checked across TP ranks.
         self.write_back_duplicate_reclaim_digest: int = 0
 
@@ -855,7 +852,6 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
     def _unregister_node(self, node: UnifiedTreeNode) -> None:
         """Drop a tree node from the arena."""
         self._node_arena.pop(node.id, None)
-        self._host_reclaim_pins.pop(node.id, None)
 
     def inc_lock_ref(
         self, node_id: NodeId, skip_lock_components: Sequence[ComponentType] = ()
@@ -934,6 +930,10 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
     def dec_host_lock_ref(
         self, node_id: NodeId, params: Optional[DecLockRefParams] = None
     ) -> DecLockRefResult:
+        # Async storage operations may finish after their node was evicted and
+        # deleted; the lock died with the node, so there is nothing to release.
+        if not self.node_exists(node_id):
+            return DecLockRefResult()
         node = self.node_by_id(node_id)
         for component in self.components:
             component.release_component_lock(node=node, params=params, lock_host=True)
@@ -2007,8 +2007,6 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         cd = node.component_data[BASE_COMPONENT_TYPE]
         if node is self.root_node or cd.value is None or cd.host_value is None:
             return False
-        if self._host_reclaim_pins.get(node.id, 0) > 0:
-            return False
         if (
             node.write_through_pending_id is not None
             or node.load_back_pending_id is not None
@@ -2288,8 +2286,6 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         """Delete childless tombstone ancestors until a live or locked node is reached."""
         ct = BASE_COMPONENT_TYPE
         while cur != self.root_node and len(cur.children) == 0:
-            if self._host_reclaim_pins.get(cur.id, 0) > 0:
-                break
             if any(
                 cd.lock_ref > 0 or cd.host_lock_ref > 0 for cd in cur.component_data
             ):
@@ -2344,8 +2340,6 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         (Mamba, SWA) are not mandatory for D-leaf membership."""
         ct = BASE_COMPONENT_TYPE
         if node is self.root_node or node.evicted:
-            return False
-        if self._host_reclaim_pins.get(node.id, 0) > 0:
             return False
         if any(cd.lock_ref > 0 for cd in node.component_data):
             return False
@@ -2518,19 +2512,6 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
             node = node.parent
         gap.reverse()
         return gap
-
-    def pin_host_reclaim(self, node_id: NodeId) -> bool:
-        if not self.node_exists(node_id):
-            return False
-        self._host_reclaim_pins[node_id] = self._host_reclaim_pins.get(node_id, 0) + 1
-        return True
-
-    def unpin_host_reclaim(self, node_id: NodeId) -> None:
-        count = self._host_reclaim_pins.get(node_id, 0)
-        if count <= 1:
-            self._host_reclaim_pins.pop(node_id, None)
-        else:
-            self._host_reclaim_pins[node_id] = count - 1
 
     def mark_storage_written(self, node_id: NodeId) -> None:
         """Record that node_id's KV was submitted to L3 (dedupe guard)."""
@@ -3056,7 +3037,6 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         self,
         ongoing_write_through: list[tuple[int, NodeId]],
         ongoing_load_back: list[tuple[int, NodeId]],
-        ongoing_prefetch: list[tuple[str, NodeId]] = (),
     ) -> None:
         """Verify tree-structure, leaf-set, LRU, size, and ongoing-op invariants; raise
         AssertionError on any violation. ongoing_* args are (id, node_id) pairs.
@@ -3191,19 +3171,6 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         if self.enable_session_radix_cache:
             for component in self.components:
                 component.validate_session_state(all_node_set, E)
-
-        # Async storage pins are operation-owned NodeIds; every pin must still
-        # resolve to a reachable node at an idle sanity boundary.
-        pin_ids = set(self._host_reclaim_pins)
-        tree_ids = {node.id for node in all_nodes}
-        if pin_ids - tree_ids:
-            E(f"stale host reclaim pins: {sorted(pin_ids - tree_ids)[:5]}")
-        live_prefetch_anchors = {node_id for _rid, node_id in ongoing_prefetch}
-        if pin_ids != live_prefetch_anchors:
-            E(
-                "host reclaim pins do not match ongoing prefetch anchors: "
-                f"pins={sorted(pin_ids)[:8]} anchors={sorted(live_prefetch_anchors)[:8]}"
-            )
 
         # Stale nodes: leaf sets must only contain tree-reachable nodes
         stale = self.evictable_device_leaves - all_node_set

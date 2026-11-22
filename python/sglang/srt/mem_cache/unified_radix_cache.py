@@ -1624,7 +1624,9 @@ class _OngoingPrefetch(NamedTuple):
     operation: PrefetchOperation
     anchor_lock_params: DecLockRefParams
     comp_xfers: dict[ComponentType, list[PoolTransfer]]
-    anchor_reclaim_pinned: bool = False
+    # Last page hash of the anchor at issue. Hashes chain every ancestor, so
+    # an equal value at completion proves the same live node holds this prefix.
+    anchor_last_hash: Optional[str] = None
 
 
 class PrefetchKind(Enum):
@@ -5626,17 +5628,19 @@ class UnifiedRadixCache(BasePrefixCache):
             return "skipped_dup"
 
         # Buffer mode holds no tree state during the fetch: buffers are
-        # operation-owned, so the anchor needs no pin.
+        # operation-owned, so the anchor needs no identity record.
         anchor_lock_params = (
             None
             if buffer_mode
             else self.inc_host_lock_ref(last_host_node_id).to_dec_params()
         )
-        # Host locks pin only an extant Host slot.  A device-only anchor has
-        # no host_lock_ref in write_through mode, yet this async operation
-        # carries its NodeId until the storage query/result is consumed.
-        # Pin it against the Full-host duplicate reclaim/deletion path.
-        anchor_reclaim_pinned = self.tree_core.pin_host_reclaim(last_host_node_id)
+        # The anchor may be evicted while the storage query is in flight (a
+        # host lock only pins an extant host slot). Record its last page hash:
+        # hashes chain every ancestor, so equality at completion proves both
+        # that the node survived and that it still holds this exact prefix.
+        anchor_last_hash = (
+            None if buffer_mode else self.tree_core.get_last_hash_value(last_host_node_id)
+        )
         comp_xfers: dict[ComponentType, list[PoolTransfer]] = {}
         alloc_failed = False
         for ct in self.tree_components:
@@ -5686,8 +5690,6 @@ class UnifiedRadixCache(BasePrefixCache):
             )
             if anchor_lock_params is not None:
                 self.dec_host_lock_ref(last_host_node_id, anchor_lock_params)
-            if anchor_reclaim_pinned:
-                self.tree_core.unpin_host_reclaim(last_host_node_id)
             snapshot = self.host_allocability_snapshot(
                 [PoolName.KV.value, *required_aux_units]
             )
@@ -5831,7 +5833,7 @@ class UnifiedRadixCache(BasePrefixCache):
             operation,
             anchor_lock_params,
             comp_xfers,
-            anchor_reclaim_pinned,
+            anchor_last_hash,
         )
         if demand_restore:
             # The T15 wake re-issue is issued: grant its DEMAND_RESTORE
@@ -5908,6 +5910,111 @@ class UnifiedRadixCache(BasePrefixCache):
             self._handle_prefetch_result(operation)
         return True
 
+    def _prefetch_anchor_is_valid(
+        self, anchor_node_id: NodeId, anchor_last_hash: Optional[str]
+    ) -> bool:
+        """Whether an async prefetch may still graft under this anchor.
+
+        The anchor's last page hash chains every ancestor hash, so equality
+        proves that the id still resolves to a node holding the same prefix.
+        A deleted id that was reused by an unrelated node fails here, as does
+        an anchor whose hash chain was never recorded (unverifiable).
+        """
+        if not self.tree_core.node_exists(anchor_node_id):
+            return False
+        if not self.tree_core.is_root(anchor_node_id) and anchor_last_hash is None:
+            return False
+        is_root = self.tree_core.is_root(anchor_node_id)
+        if anchor_last_hash is None:
+            # The root is the sole valid unhashed anchor; a non-root node with
+            # no hash chain cannot establish prefix identity and is rejected.
+            return is_root
+        if is_root:
+            return False
+        return self.tree_core.get_last_hash_value(anchor_node_id) == anchor_last_hash
+
+    def _discard_prefetch_stale_anchor(
+        self,
+        *,
+        operation: PrefetchOperation,
+        req_id: str,
+        completed_tokens: int,
+        prefetch_key: RadixKey,
+        host_indices: Optional[torch.Tensor],
+        comp_xfers: dict[ComponentType, list[PoolTransfer]],
+        anchor_node_id: NodeId,
+        anchor_lock_params: Optional[DecLockRefParams],
+        sidecar_counts: dict,
+    ) -> None:
+        """Drop a completed prefetch whose anchor no longer holds its prefix.
+
+        The KV just read from L3 has nowhere valid to live, so this is a
+        terminal miss: release the operation's own staging (never the anchor's
+        slots), release the anchor host lock only if the node still exists,
+        clear the prefetch state, and let the request re-match and schedule.
+        """
+        pool_transfers = [x for xfers in comp_xfers.values() for x in xfers]
+        entry = self.ongoing_prefetch.get(req_id)
+        if entry is None:
+            # A terminal path already released this operation (double ACK /
+            # abort race): releasing again would double-free the staging.
+            return
+        if operation.host_indices is not None:
+            # The controller's prefetch IO thread released the untransferred
+            # tail; the completed head is still this operation's to free.
+            self.cache_controller.append_host_mem_release(
+                host_indices=host_indices[:completed_tokens],
+                extra_pools=(
+                    pool_transfers
+                    if getattr(operation, "pool_transfers_done", False)
+                    else None
+                ),
+            )
+        if not getattr(operation, "pool_transfers_done", False):
+            # Aux staging was pre-allocated but never consumed by a transfer.
+            self._release_aux_transfers_before_host_alloc_snapshot(
+                comp_xfers,
+                causal_rid=req_id,
+                trace_context=getattr(operation, "trace_context", None),
+            )
+        if anchor_lock_params is not None and self.tree_core.node_exists(
+            anchor_node_id
+        ):
+            self.dec_host_lock_ref(anchor_node_id, anchor_lock_params)
+        self.release_prefetch(req_id, "anchor_invalidated")
+        self.ongoing_prefetch.pop(req_id, None)
+        self._demand_restore_rids.discard(req_id)
+        self.cache_controller.prefetch_tokens_occupied = max(
+            0,
+            self.cache_controller.prefetch_tokens_occupied
+            - self._prefetch_occupied_span(entry.prefetch_key, entry.host_indices),
+        )
+        self.prefetch_loaded_tokens_by_reqid[req_id] = 0
+        self.record_storage_prefetch_terminal(
+            req_id, "finalized", getattr(operation, "prefetch_attempt_id", None)
+        )
+        self.record_storage_prefetch_completion(
+            req_id,
+            self._host_alloc_hybrid_completion(
+                operation, completed_tokens, "discarded", sidecar_counts
+            ),
+            getattr(operation, "prefetch_attempt_id", None),
+        )
+        _log_restore_disposition(
+            req_id,
+            "RECOMPUTE",
+            operation.stats_requested_tokens or 0,
+            completed_tokens,
+            "anchor_invalidated",
+        )
+        logger.warning(
+            "HiCache prefetch discarded: anchor %s no longer holds the "
+            "requested prefix (req=%s completed=%d)",
+            anchor_node_id,
+            req_id,
+            completed_tokens,
+        )
+
     def _handle_prefetch_result(self, operation: PrefetchOperation) -> None:
         # This function **owns**:
         # - host_indices[0 : completed_tokens]
@@ -5936,12 +6043,15 @@ class UnifiedRadixCache(BasePrefixCache):
             _,
             anchor_lock_params,
             comp_xfers,
-            anchor_reclaim_pinned,
+            anchor_last_hash,
         ) = self.ongoing_prefetch[req_id]
 
         # All PP/TP ranks will get the same `min_completed_tokens`, because `completed_tokens`
         # and `pool_hits` in their operations are same.  No need to sync cross-rank here.
-        if not self._check_hybrid_prefetch_result(
+        anchor_still_valid = self._prefetch_anchor_is_valid(
+            last_host_node_id, anchor_last_hash
+        )
+        if not anchor_still_valid or not self._check_hybrid_prefetch_result(
             req_id,
             operation,
             completed_tokens,
@@ -5951,6 +6061,18 @@ class UnifiedRadixCache(BasePrefixCache):
             anchor_lock_params,
             prefetch_key,
         ):
+            if not anchor_still_valid:
+                return self._discard_prefetch_stale_anchor(
+                    operation=operation,
+                    req_id=req_id,
+                    completed_tokens=completed_tokens,
+                    prefetch_key=prefetch_key,
+                    host_indices=host_indices,
+                    comp_xfers=comp_xfers,
+                    anchor_node_id=last_host_node_id,
+                    anchor_lock_params=anchor_lock_params,
+                    sidecar_counts=sidecar_counts,
+                )
             _log_host_alloc_telemetry(
                 "restore_hybrid_finalize",
                 rid=req_id,
@@ -6036,6 +6158,24 @@ class UnifiedRadixCache(BasePrefixCache):
                 req_id, completed_tokens, hash_value
             )
 
+        # Commit boundary: this runs on the scheduler thread inside the ACK
+        # drain, so no tree mutation can interleave between the identity
+        # check and the graft. An anchor that was evicted (or whose id was
+        # reused) discards this outcome instead of grafting under a foreign
+        # prefix; the request then re-matches and schedules normally.
+        if not self._prefetch_anchor_is_valid(last_host_node_id, anchor_last_hash):
+            return self._discard_prefetch_stale_anchor(
+                operation=operation,
+                req_id=req_id,
+                completed_tokens=completed_tokens,
+                prefetch_key=prefetch_key,
+                host_indices=host_indices,
+                comp_xfers=comp_xfers,
+                anchor_node_id=last_host_node_id,
+                anchor_lock_params=anchor_lock_params,
+                sidecar_counts=sidecar_counts,
+            )
+
         fetched_key = prefetch_key[:completed_tokens]
         insert_result = self.tree_core.insert_host(
             last_host_node_id,
@@ -6092,8 +6232,6 @@ class UnifiedRadixCache(BasePrefixCache):
             loaded_from_storage = completed_tokens - insert_result.prefix_len
 
         self.dec_host_lock_ref(last_host_node_id, anchor_lock_params)
-        if anchor_reclaim_pinned:
-            self.tree_core.unpin_host_reclaim(last_host_node_id)
         self.release_prefetch(req_id, "finalize")
         del self.ongoing_prefetch[req_id]
         self._demand_restore_rids.discard(req_id)
@@ -6401,6 +6539,12 @@ class UnifiedRadixCache(BasePrefixCache):
         except (AttributeError, TypeError):
             pool_hit_pages = [0 for _ in pool_transfers]
         completed_tokens = operation.completed_tokens
+        # If its anchor vanished, no hybrid host insertion can be committed;
+        # defer to the caller's stale-anchor cleanup, which owns all staging.
+        if not self._prefetch_anchor_is_valid(
+            last_host_node_id, self.ongoing_prefetch[req_id].anchor_last_hash
+        ):
+            return True
         # Hybrid cache state is all-or-nothing: every extra pool (SWA / Mamba / ...)
         # must cover the same fetched prefix. If any pool falls short the whole
         # prefetch result is unusable, so discard it and release everything.
@@ -6439,8 +6583,6 @@ class UnifiedRadixCache(BasePrefixCache):
             )
             if anchor_lock_params is not None:
                 self.dec_host_lock_ref(last_host_node_id, anchor_lock_params)
-            if anchor_reclaim_pinned:
-                self.tree_core.unpin_host_reclaim(last_host_node_id)
             if self.buffer_pipeline is not None:
                 self.buffer_pipeline.pop_prefix_ctx(req_id)
                 self.buffer_pipeline.release_anchor_lock(req_id)
@@ -6709,7 +6851,7 @@ class UnifiedRadixCache(BasePrefixCache):
             operation,
             anchor_lock_params,
             comp_xfers,
-            anchor_reclaim_pinned,
+            _anchor_last_hash,
         ) = self.ongoing_prefetch[rid]
         logger.info("[P2A] ts_ms=%d evt=prefetch_abort_cleanup rid=%s pre_alloc=%s", int(time.time() * 1000), rid, operation.host_indices is None)
         if operation.host_indices is None:
@@ -6720,8 +6862,6 @@ class UnifiedRadixCache(BasePrefixCache):
         completed_tokens, _ = self.cache_controller.terminate_prefetch(operation)
         if anchor_lock_params is not None:
             self.dec_host_lock_ref(last_host_node_id, anchor_lock_params)
-        if anchor_reclaim_pinned:
-            self.tree_core.unpin_host_reclaim(last_host_node_id)
         del self.ongoing_prefetch[rid]
         self._demand_restore_rids.discard(rid)
         if self.buffer_pipeline is not None:
@@ -6847,7 +6987,7 @@ class UnifiedRadixCache(BasePrefixCache):
             operation,
             anchor_lock_params,
             comp_xfers,
-            anchor_reclaim_pinned,
+            _anchor_last_hash,
         ) = info
         if operation.is_terminated():
             revoke_reason = "terminated"
@@ -6949,8 +7089,6 @@ class UnifiedRadixCache(BasePrefixCache):
             )
         if anchor_lock_params is not None:
             self.dec_host_lock_ref(last_host_node_id, anchor_lock_params)
-        if anchor_reclaim_pinned:
-            self.tree_core.unpin_host_reclaim(last_host_node_id)
         if revoke_reason == "alloc_failed":
             required_aux_units = dict(required_aux_units_before_cleanup)
             blocked_domains = {PoolName.KV.value}
@@ -8526,7 +8664,6 @@ class UnifiedRadixCache(BasePrefixCache):
         ongoing_prefetch = [
             (rid, info.anchor_node_id)
             for rid, info in self.ongoing_prefetch.items()
-            if info.anchor_reclaim_pinned
         ]
         self.tree_core.sanity_check(
             ongoing_write_through, ongoing_load_back, ongoing_prefetch
