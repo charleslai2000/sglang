@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import atexit
 import logging
+import time
 import os
 import sys
 import threading
@@ -99,14 +100,24 @@ logger = logging.getLogger(__name__)
 # overflows int64 with plain (non-wrapping) arithmetic in the Rust port, and
 # the TP consistency check can still all_reduce [digest, -digest] in int64.
 _RECLAIM_DIGEST_MASK = (1 << 42) - 1
-# Upper bound on bottom-up passes for write_through host-duplicate reclaim: each
-# pass frees the current host-subtree leaves, so the next pass can free their
-# parents.  A saturated pool only needs a few passes to fund one allocation.
-_HOST_DUPLICATE_RECLAIM_PASSES = 4
+# Upper bound on bottom-up passes for write_through host-duplicate reclaim. Each
+# pass frees the host layer of the current host-subtree leaves, which makes their
+# parents eligible for the next pass -- one tree level per pass, and only the
+# locked/DMA-pending branches stall.  A staging request of 8-10 K tokens at
+# 1,024-token segments needs ~10 levels, so the walk is demand-driven up to this
+# cap (measured: with a fixed 4 passes it released 0.5-6.6 K tokens against a
+# 4.9-10 K demand).
+_HOST_DUPLICATE_RECLAIM_MAX_PASSES = 64
 
 # Optional process-local diagnostic, disabled unless explicitly armed by the
 # caller. It records node identity/shape and FULL-host presence only.
 _TREE_LIFECYCLE_TRACE_ENABLED = os.environ.get("SGLANG_TREE_LIFECYCLE_TRACE") == "1"
+# Optional process-local diagnostic for host-duplicate reclaim eligibility
+# (SGLANG_HOST_RECLAIM_DEBUG=1): one aggregated line per reclaim call, at most
+# once per second, with the rejection breakdown that decides `reclaimed`.
+_HOST_RECLAIM_DEBUG = os.environ.get("SGLANG_HOST_RECLAIM_DEBUG") == "1"
+_HOST_RECLAIM_DEBUG_INTERVAL_NS = 1_000_000_000
+_host_reclaim_debug_last_ns = 0
 _TREE_LIFECYCLE_TRACE_CAPACITY = 4096
 _TREE_LIFECYCLE_TRACE_LOCK = threading.Lock()
 _TREE_LIFECYCLE_TRACE = deque(maxlen=_TREE_LIFECYCLE_TRACE_CAPACITY)
@@ -1892,10 +1903,24 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         the walk lets an ancestor become a leaf in the next pass, which keeps the
         release O(passes x nodes) without sorting the whole duplicate set.
         """
-        passes = _HOST_DUPLICATE_RECLAIM_PASSES if require_host_subtree_leaf else 1
-        for _ in range(passes):
+        passes = _HOST_DUPLICATE_RECLAIM_MAX_PASSES if require_host_subtree_leaf else 1
+        debug = None
+        if _HOST_RECLAIM_DEBUG:
+            debug = {
+                "passes": passes,
+                "tracked": len(self.full_host_duplicates),
+                "scanned": 0,
+                "spared": 0,
+                "stale": 0,
+                "locked": 0,
+                "pending_dma": 0,
+                "subtree_blocked": 0,
+                "released": 0,
+                "want": int(num_tokens),
+            }
+        for _pass in range(passes):
             if tracker[BASE_COMPONENT_TYPE] >= num_tokens:
-                return
+                break
             swept_ids: list[NodeId] = []
             released = False
             for spare_imminent_demotes in (True, False):
@@ -1905,14 +1930,32 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
                     if tracker[BASE_COMPONENT_TYPE] >= num_tokens:
                         break
                     cd = node.component_data[BASE_COMPONENT_TYPE]
+                    if debug is not None:
+                        debug["scanned"] += 1
                     if cd.value is None or cd.host_value is None:
                         swept_ids.append(node.id)  # stale entry
+                        if debug is not None:
+                            debug["stale"] += 1
                         continue
                     if spare_imminent_demotes and node in self.evictable_device_leaves:
+                        if debug is not None:
+                            debug["spared"] += 1
                         continue
                     if not self._can_reclaim_full_host_duplicate(
                         node, require_host_subtree_leaf
                     ):
+                        if debug is not None:
+                            if cd.host_lock_ref != 0:
+                                debug["locked"] += 1
+                            elif (
+                                node.write_through_pending_id is not None
+                                or node.load_back_pending_id is not None
+                            ):
+                                debug["pending_dma"] += 1
+                            elif require_host_subtree_leaf and any(
+                                child.backuped for child in node.children.values()
+                            ):
+                                debug["subtree_blocked"] += 1
                         continue
                     self._release_full_host_duplicate(
                         node,
@@ -1923,11 +1966,29 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
                     )
                     swept_ids.append(node.id)  # released -> no longer a duplicate
                     released = True
+                    if debug is not None:
+                        debug["released"] += 1
             # Sweep after the walk: the dict must not be mutated mid-iteration.
             for nid in swept_ids:
                 self.full_host_duplicates.pop(nid, None)
             if not released:
-                return
+                break
+        if debug is not None:
+            self._log_host_reclaim_debug(debug, tracker)
+
+    def _log_host_reclaim_debug(self, debug: dict, tracker: dict) -> None:
+        """Aggregated, rate-limited eligibility report (SGLANG_HOST_RECLAIM_DEBUG)."""
+        global _host_reclaim_debug_last_ns
+        now = time.monotonic_ns()
+        if now - _host_reclaim_debug_last_ns < _HOST_RECLAIM_DEBUG_INTERVAL_NS:
+            return
+        _host_reclaim_debug_last_ns = now
+        debug = dict(debug)
+        debug["freed"] = int(tracker.get(BASE_COMPONENT_TYPE, 0))
+        logger.warning(
+            "HOST_RECLAIM_DEBUG %s",
+            " ".join(f"{k}={v}" for k, v in debug.items()),
+        )
 
     def _can_reclaim_full_host_duplicate(
         self, node: UnifiedTreeNode, require_host_subtree_leaf: bool = False

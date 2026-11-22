@@ -139,6 +139,31 @@ class TestWriteThroughHostDuplicateReclaim(unittest.TestCase):
         self.assertEqual(len(nodes[2].children), 0)
         self.assertEqual(list(nodes[1].children.values()), [nodes[2]])
 
+    def test_a_deep_chain_is_reclaimed_to_the_demand_in_one_call(self):
+        """A 12-level chain must yield 12 K tokens, not one level per call.
+
+        Measured on the r61 probe: a fixed 4-pass walk released 0.5-6.6 K tokens
+        against a 4.9-10 K staging demand, so the restore still failed; the walk
+        is now demand-driven (one tree level per pass, capped).
+        """
+        root, nodes = _chain(12)
+        core = _core(root, nodes, is_write_back=False)
+
+        freed, released = _run(core, 12, require_host_subtree_leaf=True)
+
+        self.assertEqual(freed, 12)
+        self.assertEqual(released, list(reversed(nodes)))
+        _assert_prefix_closed(self, root)
+
+    def test_the_walk_stops_at_the_demand(self):
+        root, nodes = _chain(12)
+        core = _core(root, nodes, is_write_back=False)
+
+        freed, released = _run(core, 5, require_host_subtree_leaf=True)
+
+        self.assertEqual(freed, 5)
+        self.assertEqual(released, list(reversed(nodes))[:5])
+
     def test_root_host_copy_is_never_released(self):
         root, nodes = _chain(2)
         root.component_data[BASE].host_value = torch.tensor([1], dtype=torch.int64)
