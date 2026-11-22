@@ -1624,6 +1624,7 @@ class _OngoingPrefetch(NamedTuple):
     operation: PrefetchOperation
     anchor_lock_params: DecLockRefParams
     comp_xfers: dict[ComponentType, list[PoolTransfer]]
+    anchor_reclaim_pinned: bool = False
 
 
 class PrefetchKind(Enum):
@@ -5631,6 +5632,11 @@ class UnifiedRadixCache(BasePrefixCache):
             if buffer_mode
             else self.inc_host_lock_ref(last_host_node_id).to_dec_params()
         )
+        # Host locks pin only an extant Host slot.  A device-only anchor has
+        # no host_lock_ref in write_through mode, yet this async operation
+        # carries its NodeId until the storage query/result is consumed.
+        # Pin it against the Full-host duplicate reclaim/deletion path.
+        anchor_reclaim_pinned = self.tree_core.pin_host_reclaim(last_host_node_id)
         comp_xfers: dict[ComponentType, list[PoolTransfer]] = {}
         alloc_failed = False
         for ct in self.tree_components:
@@ -5680,6 +5686,8 @@ class UnifiedRadixCache(BasePrefixCache):
             )
             if anchor_lock_params is not None:
                 self.dec_host_lock_ref(last_host_node_id, anchor_lock_params)
+            if anchor_reclaim_pinned:
+                self.tree_core.unpin_host_reclaim(last_host_node_id)
             snapshot = self.host_allocability_snapshot(
                 [PoolName.KV.value, *required_aux_units]
             )
@@ -5823,6 +5831,7 @@ class UnifiedRadixCache(BasePrefixCache):
             operation,
             anchor_lock_params,
             comp_xfers,
+            anchor_reclaim_pinned,
         )
         if demand_restore:
             # The T15 wake re-issue is issued: grant its DEMAND_RESTORE
@@ -5927,6 +5936,7 @@ class UnifiedRadixCache(BasePrefixCache):
             _,
             anchor_lock_params,
             comp_xfers,
+            anchor_reclaim_pinned,
         ) = self.ongoing_prefetch[req_id]
 
         # All PP/TP ranks will get the same `min_completed_tokens`, because `completed_tokens`
@@ -6082,6 +6092,8 @@ class UnifiedRadixCache(BasePrefixCache):
             loaded_from_storage = completed_tokens - insert_result.prefix_len
 
         self.dec_host_lock_ref(last_host_node_id, anchor_lock_params)
+        if anchor_reclaim_pinned:
+            self.tree_core.unpin_host_reclaim(last_host_node_id)
         self.release_prefetch(req_id, "finalize")
         del self.ongoing_prefetch[req_id]
         self._demand_restore_rids.discard(req_id)
@@ -6427,6 +6439,8 @@ class UnifiedRadixCache(BasePrefixCache):
             )
             if anchor_lock_params is not None:
                 self.dec_host_lock_ref(last_host_node_id, anchor_lock_params)
+            if anchor_reclaim_pinned:
+                self.tree_core.unpin_host_reclaim(last_host_node_id)
             if self.buffer_pipeline is not None:
                 self.buffer_pipeline.pop_prefix_ctx(req_id)
                 self.buffer_pipeline.release_anchor_lock(req_id)
@@ -6695,6 +6709,7 @@ class UnifiedRadixCache(BasePrefixCache):
             operation,
             anchor_lock_params,
             comp_xfers,
+            anchor_reclaim_pinned,
         ) = self.ongoing_prefetch[rid]
         logger.info("[P2A] ts_ms=%d evt=prefetch_abort_cleanup rid=%s pre_alloc=%s", int(time.time() * 1000), rid, operation.host_indices is None)
         if operation.host_indices is None:
@@ -6705,6 +6720,8 @@ class UnifiedRadixCache(BasePrefixCache):
         completed_tokens, _ = self.cache_controller.terminate_prefetch(operation)
         if anchor_lock_params is not None:
             self.dec_host_lock_ref(last_host_node_id, anchor_lock_params)
+        if anchor_reclaim_pinned:
+            self.tree_core.unpin_host_reclaim(last_host_node_id)
         del self.ongoing_prefetch[rid]
         self._demand_restore_rids.discard(rid)
         if self.buffer_pipeline is not None:
@@ -6931,6 +6948,8 @@ class UnifiedRadixCache(BasePrefixCache):
             )
         if anchor_lock_params is not None:
             self.dec_host_lock_ref(last_host_node_id, anchor_lock_params)
+        if anchor_reclaim_pinned:
+            self.tree_core.unpin_host_reclaim(last_host_node_id)
         if revoke_reason == "alloc_failed":
             required_aux_units = dict(required_aux_units_before_cleanup)
             blocked_domains = {PoolName.KV.value}
@@ -8503,7 +8522,14 @@ class UnifiedRadixCache(BasePrefixCache):
             f"{self.inflight_promotion_reserved} != sum(live entries)="
             f"{reserved_sum}"
         )
-        self.tree_core.sanity_check(ongoing_write_through, ongoing_load_back)
+        ongoing_prefetch = [
+            (rid, info.anchor_node_id)
+            for rid, info in self.ongoing_prefetch.items()
+            if info.anchor_reclaim_pinned
+        ]
+        self.tree_core.sanity_check(
+            ongoing_write_through, ongoing_load_back, ongoing_prefetch
+        )
 
     def pretty_print(self) -> None:
         self.tree_core.pretty_print()

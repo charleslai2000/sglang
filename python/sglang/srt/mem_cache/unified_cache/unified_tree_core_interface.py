@@ -429,6 +429,14 @@ class UnifiedTreeCoreInterface(ABC):
         ...
 
     @abstractmethod
+    def pin_host_reclaim(self, node_id: NodeId) -> bool:
+        """Pin an anchor against host reclaim/node deletion for an async L3 op."""
+        ...
+
+    def unpin_host_reclaim(self, node_id: NodeId) -> None:
+        """Release an async L3 operation's anchor pin."""
+        ...
+
     def mark_storage_written(self, node_id: NodeId) -> None:
         """Record that node_id's KV was submitted to L3 (dedupe guard)."""
         ...

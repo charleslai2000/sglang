@@ -51,6 +51,7 @@ def _core(root, nodes, *, is_write_back: bool):
     core.is_write_back = is_write_back
     core.root_node = root
     core.full_host_duplicates = {n.id: n for n in nodes}
+    core._host_reclaim_pins = {}
     core.evictable_device_leaves = set()
     core.kv_events = mock.Mock()
     core.write_back_duplicate_reclaim_digest = 0
