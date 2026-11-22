@@ -161,3 +161,37 @@ class TestDefaultStagingFloor(unittest.TestCase):
 
         # C-8 staging demand: p50 3,839, p90 13,823 tokens per restore.
         self.assertGreaterEqual(_DEFAULT_STAGING_FLOOR_TOKENS, 13823)
+
+
+class TestBackupShortfall(unittest.TestCase):
+    """The margin-aware pre-check that keeps write-through feeding L3.
+
+    r61 floor arm: with the staging floor set, the pre-check used raw
+    ``available_size`` (which already includes the floor), saw room, skipped
+    eviction, and the backup was dropped by ``alloc_writeback`` -- host backing
+    up stopped after exactly one pool fill (169,630 of 6,670,455 tokens) and no
+    L3 hit was ever served.
+    """
+
+    def test_room_accounts_for_the_floor(self):
+        from sglang.srt.mem_cache.unified_radix_cache import _backup_shortfall
+
+        # 16,384 free of which 16,384 is the floor -> no room for 1,024.
+        self.assertEqual(_backup_shortfall(16384, 16384, 1024), 1024)
+
+    def test_no_shortfall_when_the_floor_is_respected(self):
+        from sglang.srt.mem_cache.unified_radix_cache import _backup_shortfall
+
+        # 20,480 free, floor 16,384 -> 4,096 usable for a 1,024-token backup.
+        self.assertEqual(_backup_shortfall(20480, 16384, 1024), 0)
+
+    def test_zero_floor_matches_the_legacy_check(self):
+        from sglang.srt.mem_cache.unified_radix_cache import _backup_shortfall
+
+        self.assertEqual(_backup_shortfall(512, 0, 1024), 512)
+        self.assertEqual(_backup_shortfall(4096, 0, 1024), 0)
+
+    def test_floor_larger_than_the_pool_still_requests_the_whole_backup(self):
+        from sglang.srt.mem_cache.unified_radix_cache import _backup_shortfall
+
+        self.assertEqual(_backup_shortfall(100, 5000, 1024), 1024)

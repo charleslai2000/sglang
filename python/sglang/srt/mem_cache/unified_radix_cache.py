@@ -256,6 +256,19 @@ def _storage_hit_crop_is_safe(operation, alloc_len: int) -> bool:
     )
 
 
+def _backup_shortfall(host_avail: int, floor: int, kv_tokens: int) -> int:
+    """Tokens the host must reclaim before a backup of *kv_tokens* can land.
+
+    ``alloc_writeback`` caps the D->H channel at ``pool - floor``, so the
+    pre-check in ``_execute_kv_backup`` must measure the shortfall against the
+    same floor.  Using raw ``available_size`` makes the check pass while the
+    allocation is still refused, and the backup is then dropped silently
+    (observed in the r61 floor arm).
+    """
+    room = int(host_avail) - max(0, int(floor))
+    return max(0, int(kv_tokens) - max(0, room))
+
+
 def _staging_crop_length(
     operation, alloc_len: int, free_now: int, page_size: int
 ) -> int:
@@ -4448,12 +4461,32 @@ class UnifiedRadixCache(BasePrefixCache):
             CacheTransferPhase.BACKUP_HOST, kv_xfer, comp_xfers
         )
 
+    def _host_writeback_floor(self) -> int:
+        """Tokens the write-back channel must leave free (its own margin).
+
+        ``HostKVCache.alloc_writeback`` refuses any allocation that would dip
+        below the configured margin, so a shortfall computed from the raw
+        ``available_size`` overstates the room: the backup would be dropped
+        *without* ever attempting eviction.  r61 floor arm did exactly that --
+        host backing up stopped after one pool fill (169,630 of 6,670,455
+        tokens), the Extent received 6.07 GB instead of 34.34 GB, and no L3 hit
+        was ever served.
+        """
+        group = self.cache_controller.mem_pool_host
+        getter = getattr(group, "writeback_margin", None)
+        if getter is None:
+            return 0
+        try:
+            return int(getter() or 0)
+        except (TypeError, ValueError):  # pragma: no cover - defensive
+            return 0
+
     def _execute_kv_backup(self, node_id, device_value, comp_xfers, sidecar_xfers):
         """Execute Backup action."""
         kv_tokens = len(device_value)
         host_avail = self.cache_controller.mem_pool_host.available_size()
-        if host_avail < kv_tokens:
-            needed = kv_tokens - host_avail
+        needed = _backup_shortfall(host_avail, self._host_writeback_floor(), kv_tokens)
+        if needed > 0:
             if self.evict_host(needed) < needed:
                 # F1: ACK backlog holds host_lock_ref on finished L3 writes;
                 # drain the ready ACKs once, then retry eviction exactly once.
