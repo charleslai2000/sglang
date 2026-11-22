@@ -1589,7 +1589,12 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
             # Deferred reference to a node a cascade delete already removed.
             return result
         node = self.node_by_id(node_id)
-        assert self._is_device_leaf(node), f"node {node.id} is not a D-leaf"
+        if not self._is_device_leaf(node):
+            # Deferred eviction references may become stale before the outer
+            # walk consumes them; another component can cascade-delete this
+            # node after the heap was constructed.  A still-registered but no
+            # longer eligible node is equally stale for this walk.
+            return result
         if not node.backuped:
             if is_write_back:
                 result.backup_kv = self._build_backup_kv_action(node, write_back=True)

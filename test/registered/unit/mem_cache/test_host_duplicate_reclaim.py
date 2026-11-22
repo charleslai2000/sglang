@@ -328,6 +328,32 @@ class TestSnapshotWalkersTolerateDeletedNodes(unittest.TestCase):
         self.assertIsNone(result.backup_kv)
         core.node_by_id.assert_not_called()
 
+    def test_registered_node_that_is_no_longer_a_device_leaf_is_a_noop(self):
+        node = UnifiedTreeNode((BASE,))
+        core = mock.Mock()
+        core.node_exists.return_value = True
+        core.node_by_id.return_value = node
+        core._is_device_leaf.return_value = False
+
+        result = UnifiedTreeCore.evict_device_leaf(core, node.id, False)
+
+        self.assertEqual(result.tracker, {})
+        self.assertIsNone(result.backup_kv)
+        core._delete_unbacked_device_leaf.assert_not_called()
+
+    def test_registered_node_that_is_no_longer_a_device_leaf_is_a_noop(self):
+        node = UnifiedTreeNode((BASE,))
+        core = mock.Mock()
+        core.node_exists.return_value = True
+        core.node_by_id.return_value = node
+        core._is_device_leaf.return_value = False
+
+        result = UnifiedTreeCore.evict_device_leaf(core, node.id, False)
+
+        self.assertEqual(result.tracker, {})
+        self.assertIsNone(result.backup_kv)
+        core._delete_unbacked_device_leaf.assert_not_called()
+
     def test_demote_of_a_deleted_node_is_a_noop(self):
         core = mock.Mock()
         core.node_exists.return_value = False
