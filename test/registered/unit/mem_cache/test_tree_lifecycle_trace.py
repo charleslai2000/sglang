@@ -92,6 +92,47 @@ class TreeLifecycleTraceTests(unittest.TestCase):
             core._trace_full_host_transition("duplicate_host_clear", child, True)
             self.assertEqual(error.call_count, before)
 
+    def test_completed_boundary_records_before_and_after_parent_chains(self):
+        core, parent, child = self._core()
+        core.root_node.children = {parent.key.child_key(1): parent}
+        core.root_node.key = RadixKey([])
+        parent.key = RadixKey([1])
+        parent.children = {child.key.child_key(1): child}
+        parent.component_data[ComponentType.FULL].host_value = object()
+        core._node_arena = {parent.id: parent, child.id: child}
+        before = core._trace_full_host_parent_chain(child)
+        child.component_data[ComponentType.FULL].host_value = object()
+        core.trace_host_transition_boundary(
+            "backup_commit_boundary", child.id, before_chain=before
+        )
+        event = tree_mod._TREE_LIFECYCLE_TRACE[-1]
+        self.assertEqual(event["parent_chain_before"][0]["full_host"], False)
+        self.assertEqual(event["parent_chain_after"][0]["full_host"], True)
+        self.assertEqual(event["parent_chain_after"][1]["full_host"], True)
+        self.assertNotIn("first_violation", event)
+
+    def test_boundary_detects_completed_child_parent_violation(self):
+        core, parent, child = self._core()
+        core.root_node.children = {parent.key.child_key(1): parent}
+        core.root_node.key = RadixKey([])
+        parent.key = RadixKey([1])
+        parent.children = {child.key.child_key(1): child}
+        core._node_arena = {parent.id: parent, child.id: child}
+        child.component_data[ComponentType.FULL].host_value = object()
+        core.trace_host_transition_boundary("completed_mutation", child.id)
+        event = tree_mod._TREE_LIFECYCLE_TRACE[-1]
+        self.assertTrue(event["first_violation"])
+        self.assertEqual(event["violating_child_id"], child.id)
+        self.assertEqual(event["violating_parent_id"], parent.id)
+
+    def test_completed_boundary_skips_work_when_trace_is_disabled(self):
+        core, _, child = self._core()
+        tree_mod._TREE_LIFECYCLE_TRACE_ENABLED = False
+        with mock.patch.object(
+            core, "_trace_full_host_parent_chain", side_effect=AssertionError("unexpected scan")
+        ):
+            core.trace_host_transition_boundary("disabled", child.id)
+
     def test_buffer_is_finite_and_does_not_capture_token_payload(self):
         core, parent, child = self._core()
         original_capacity = tree_mod._TREE_LIFECYCLE_TRACE_CAPACITY

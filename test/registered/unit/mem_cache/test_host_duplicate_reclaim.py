@@ -221,3 +221,93 @@ class TestHostDuplicateReclaimIsWiredIntoWriteThroughEviction(unittest.TestCase)
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSnapshotWalkersTolerateDeletedNodes(unittest.TestCase):
+    """A snapshot heap must not hand a dead node id to the walk.
+
+    r61 candidate-reclaim crashed with ``KeyError: 334`` in
+    ``TreeCore.evict_device_leaf``: reclaiming a device-resident duplicate's
+    host layer makes that leaf *unbacked*, so device eviction deletes it (and
+    cascade-deletes tombstone ancestors) mid-walk, while the heap built at
+    ``evict_device_start`` still holds the object and the leaf set still holds
+    a stale entry.
+    """
+
+    def _component(self, *, is_host: bool):
+        from sglang.srt.mem_cache.unified_cache.components.full_component import (
+            FullComponent,
+        )
+
+        comp = FullComponent.__new__(FullComponent)
+        return comp, is_host
+
+    def test_device_walk_drops_a_stale_leaf_entry(self):
+        from sglang.srt.mem_cache.unified_cache.components.full_component import (
+            FullComponent,
+        )
+
+        node = UnifiedTreeNode((BASE,))
+        node.component_data[BASE].value = torch.tensor([1], dtype=torch.int64)
+        core = mock.Mock()
+        core.evictable_device_leaves = {node}
+        core.evictable_host_leaves = set()
+        core.node_exists.return_value = False
+
+        comp = FullComponent.__new__(FullComponent)
+        comp.component_type = BASE
+        comp.tree_core = core
+        comp._evict_device_heap = [(0, node)]
+        comp._evict_device_last_node = None
+        comp._evict_device_request_cnt = 1
+        comp._ensure_eviction_strategy = lambda: None
+
+        result = comp._evict_device_next_node({BASE: 0}, {BASE: []}, {BASE: []})
+
+        self.assertIsNone(result)
+        # The stale entry is swept so the next walk does not re-pop it.
+        self.assertEqual(core.evictable_device_leaves, set())
+
+    def test_host_walk_drops_a_stale_leaf_entry(self):
+        from sglang.srt.mem_cache.unified_cache.components.full_component import (
+            FullComponent,
+        )
+
+        node = UnifiedTreeNode((BASE,))
+        node.component_data[BASE].host_value = torch.tensor([1], dtype=torch.int64)
+        core = mock.Mock()
+        core.evictable_device_leaves = set()
+        core.evictable_host_leaves = {node}
+        core.node_exists.return_value = False
+
+        comp = FullComponent.__new__(FullComponent)
+        comp.component_type = BASE
+        comp.tree_core = core
+        comp._ensure_eviction_strategy = lambda: None
+        comp.session_ref_eviction_strategy = lambda n: 0
+
+        tracker = {BASE: 0}
+        comp.drive_host_eviction(64, tracker, {BASE: []}, {BASE: []})
+
+        self.assertEqual(tracker[BASE], 0)
+        core._evict_host_leaf.assert_not_called()
+        self.assertEqual(core.evictable_host_leaves, set())
+
+    def test_evict_device_leaf_of_a_deleted_node_is_a_noop(self):
+        core = mock.Mock()
+        core.node_exists.return_value = False
+
+        result = UnifiedTreeCore.evict_device_leaf(core, 334, False)
+
+        self.assertEqual(result.tracker, {})
+        self.assertIsNone(result.backup_kv)
+        core.node_by_id.assert_not_called()
+
+    def test_demote_of_a_deleted_node_is_a_noop(self):
+        core = mock.Mock()
+        core.node_exists.return_value = False
+
+        result = UnifiedTreeCore.demote(core, 334)
+
+        self.assertEqual(result.tracker, {})
+        core.node_by_id.assert_not_called()

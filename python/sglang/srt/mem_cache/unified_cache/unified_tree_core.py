@@ -1574,6 +1574,9 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         for an unbacked write-back node, the result carries the BackupKV for
         the cache to execute and then demote."""
         result = EvictDeviceLeafResult()
+        if not self.node_exists(node_id):
+            # Deferred reference to a node a cascade delete already removed.
+            return result
         node = self.node_by_id(node_id)
         assert self._is_device_leaf(node), f"node {node.id} is not a D-leaf"
         if not node.backuped:
@@ -2013,6 +2016,8 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         """Release a node's device KV once its host copy exists; the node stays in the
         tree, now host-only."""
         result = DemoteResult()
+        if not self.node_exists(node_id):
+            return result
         self._demote(
             self.node_by_id(node_id),
             result.tracker,

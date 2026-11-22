@@ -235,6 +235,13 @@ class FullComponent(TreeComponent):
             _, x = heapq.heappop(self._evict_device_heap)
             if x not in self.tree_core.evictable_device_leaves:
                 continue
+            if not self.tree_core.node_exists(x.id):
+                # The heap is a snapshot: a mid-walk cascade delete (an unbacked
+                # leaf plus its tombstone ancestors) can unregister a node that
+                # is still in the leaf set.  Drop the stale entry instead of
+                # handing a dead id to the walk.
+                self.tree_core.evictable_device_leaves.discard(x)
+                continue
             self._evict_device_last_node = x
             return x.id
         return None
@@ -261,6 +268,9 @@ class FullComponent(TreeComponent):
         while tracker[ct] < num_tokens and heap:
             _, x = heapq.heappop(heap)
             if x not in self.tree_core.evictable_host_leaves:
+                continue
+            if not self.tree_core.node_exists(x.id):
+                self.tree_core.evictable_host_leaves.discard(x)
                 continue
             self.tree_core._evict_host_leaf(x, tracker, device_frees, host_frees)
             if (
