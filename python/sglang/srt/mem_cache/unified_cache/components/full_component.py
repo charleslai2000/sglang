@@ -147,36 +147,21 @@ class FullComponent(TreeComponent):
         if child_cd.value is not None:
             new_parent.component_data[ct].value = child_cd.value[:split_len].clone()
             child_cd.value = child_cd.value[split_len:].clone()
+        before_parent_host = new_parent.backuped
+        before_child_host = child.backuped
         if child_cd.host_value is not None:
             new_parent.component_data[ct].host_value = child_cd.host_value[
                 :split_len
             ].clone()
             child_cd.host_value = child_cd.host_value[split_len:].clone()
-        from sglang.srt.mem_cache.unified_cache.unified_tree_core import (
-            _tree_lifecycle_trace,
+        # State changes are recorded by TreeCore after it installs the new edge;
+        # checking here would observe an intentionally transient split state.
+        self.tree_core._trace_pending_split_host_state(
+            new_parent,
+            child,
+            before_parent_host=before_parent_host,
+            before_child_host=before_child_host,
         )
-
-        _tree_lifecycle_trace(
-            {
-                "operation": "full_component_split_parent",
-                "node_id": new_parent.id,
-                "parent_id": new_parent.parent.id if new_parent.parent else None,
-                "key_length": len(new_parent.key),
-                "before_full_host": False,
-                "after_full_host": new_parent.backuped,
-            }
-        )
-        _tree_lifecycle_trace(
-            {
-                "operation": "full_component_split_child",
-                "node_id": child.id,
-                "parent_id": child.parent.id if child.parent else None,
-                "key_length": len(child.key),
-                "before_full_host": child_cd.host_value is not None,
-                "after_full_host": child.backuped,
-            }
-        )
-        self.tree_core._trace_check_full_host_invariant("full_component_split")
 
     def evict_component(
         self,
@@ -434,12 +419,22 @@ class FullComponent(TreeComponent):
         if phase == CacheTransferPhase.BACKUP_HOST:
             if transfers and transfers[0].host_indices is not None:
                 before_host = node.backuped
+                before_chain = (
+                    self.tree_core._trace_full_host_parent_chain(node)
+                    if self.tree_core._trace_lifecycle_enabled()
+                    else None
+                )
                 node.component_data[ct].host_value = transfers[0].host_indices.clone()
                 self.tree_core._trace_full_host_transition(
                     "full_component_backup_commit", node, before_host
                 )
                 self.tree_core._trace_check_full_host_invariant(
                     "full_component_backup_commit"
+                )
+                self.tree_core.trace_host_transition_boundary(
+                    "full_component_backup_commit_boundary",
+                    node.id,
+                    before_chain=before_chain,
                 )
 
         elif phase == CacheTransferPhase.LOAD_BACK:

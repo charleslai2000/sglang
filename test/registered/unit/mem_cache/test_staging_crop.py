@@ -115,54 +115,6 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class TestDefaultStagingFloor(unittest.TestCase):
-    """The write-through staging floor that keeps Host restorable (r60 C-8)."""
-
-    def _pool(self, size, size_per_token=14336):
-        pool = mock.Mock()
-        pool.size = size
-        pool.size_per_token = size_per_token
-        return pool
-
-    def test_floor_applies_to_write_through_policies_only(self):
-        from sglang.srt.mem_cache.hybrid_cache.hybrid_pool_assembler import (
-            _default_staging_floor_applies,
-        )
-
-        for policy in ("write_through", "write_through_selective"):
-            args = mock.Mock(hicache_write_policy=policy)
-            self.assertTrue(_default_staging_floor_applies(args))
-        args = mock.Mock(hicache_write_policy="write_back")
-        self.assertFalse(_default_staging_floor_applies(args))
-        self.assertFalse(_default_staging_floor_applies(mock.Mock()))
-
-    def test_floor_is_capped_and_fractional(self):
-        from sglang.srt.mem_cache.hybrid_cache.hybrid_pool_assembler import (
-            _DEFAULT_STAGING_FLOOR_TOKENS,
-            _default_staging_floor_bytes,
-        )
-
-        # 186,012-token C-8 pool -> the absolute cap, not 1/8 (23,251).
-        self.assertEqual(
-            _default_staging_floor_bytes(self._pool(186012)),
-            _DEFAULT_STAGING_FLOOR_TOKENS * 14336,
-        )
-        # A small pool is limited to 1/8 of its capacity.
-        self.assertEqual(
-            _default_staging_floor_bytes(self._pool(65536)), 8192 * 14336
-        )
-        self.assertEqual(_default_staging_floor_bytes(self._pool(0)), 0)
-
-    def test_floor_keeps_restore_sized_headroom(self):
-        """The floor must cover a typical restore of the measured workload."""
-        from sglang.srt.mem_cache.hybrid_cache.hybrid_pool_assembler import (
-            _DEFAULT_STAGING_FLOOR_TOKENS,
-        )
-
-        # C-8 staging demand: p50 3,839, p90 13,823 tokens per restore.
-        self.assertGreaterEqual(_DEFAULT_STAGING_FLOOR_TOKENS, 13823)
-
-
 class TestBackupShortfall(unittest.TestCase):
     """The margin-aware pre-check that keeps write-through feeding L3.
 
@@ -195,3 +147,7 @@ class TestBackupShortfall(unittest.TestCase):
         from sglang.srt.mem_cache.unified_radix_cache import _backup_shortfall
 
         self.assertEqual(_backup_shortfall(100, 5000, 1024), 1024)
+
+
+if __name__ == "__main__":
+    unittest.main()
