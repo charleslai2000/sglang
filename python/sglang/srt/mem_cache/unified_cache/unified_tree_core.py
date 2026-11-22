@@ -2345,6 +2345,8 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         ct = BASE_COMPONENT_TYPE
         if node is self.root_node or node.evicted:
             return False
+        if self._host_reclaim_pins.get(node.id, 0) > 0:
+            return False
         if any(cd.lock_ref > 0 for cd in node.component_data):
             return False
         if any(
