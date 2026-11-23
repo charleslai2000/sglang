@@ -211,21 +211,24 @@ class TestWriteThroughHostDuplicateReclaim(unittest.TestCase):
         self.assertEqual(released, [nodes[0]])
 
     def test_debug_report_initializes_every_rejection_counter(self):
-        root, nodes = _chain(1)
-        core = _core(root, nodes, is_write_back=False)
-        # Force the branch where a protected node increments the detailed
-        # counters; every logged count must have been initialized.
-        nodes[0].component_data[BASE].host_lock_ref = 1
+        for pending_field in ("write_through_pending_id", "load_back_pending_id"):
+            with self.subTest(pending_field=pending_field):
+                root, nodes = _chain(1)
+                core = _core(root, nodes, is_write_back=False)
+                core._host_reclaim_context = {"allocation": "test"}
+                setattr(nodes[0], pending_field, 123)
 
-        with mock.patch(
-            "sglang.srt.mem_cache.unified_cache.unified_tree_core._HOST_RECLAIM_DEBUG",
-            True,
-        ):
-            freed, _released = _run(core, 1, require_host_subtree_leaf=True)
+                with mock.patch(
+                    "sglang.srt.mem_cache.unified_cache.unified_tree_core._HOST_RECLAIM_DEBUG",
+                    True,
+                ):
+                    freed, _released = _run(
+                        core, 1, require_host_subtree_leaf=True
+                    )
 
-        self.assertEqual(freed, 0)
-        # The real diagnostic formatter ran; missing rejection counters used
-        # to raise KeyError on this locked-node path.
+                self.assertEqual(freed, 0)
+                # The real diagnostic formatter ran; a missing per-reason
+                # counter used to raise KeyError for either pending state.
 
     def test_write_back_keeps_releasing_without_the_subtree_rule(self):
         root, nodes = _chain(2)
