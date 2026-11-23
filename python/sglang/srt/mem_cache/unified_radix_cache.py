@@ -7168,6 +7168,11 @@ class UnifiedRadixCache(BasePrefixCache):
                 "alloc1": bool(attempt_details.get("alloc1", False)),
                 "reclaimed": int(attempt_details.get("reclaimed", 0)),
                 "alloc2": bool(attempt_details.get("alloc2", False)),
+                "alloc1_ns": int(attempt_details.get("alloc1_ns", 0)),
+                "reclaim_ns": int(attempt_details.get("reclaim_ns", 0)),
+                "drain_ns": int(attempt_details.get("drain_ns", 0)),
+                "alloc2_ns": int(attempt_details.get("alloc2_ns", 0)),
+                "crop_ns": int(attempt_details.get("crop_ns", 0)),
                 "free_after": int(
                     snapshot.free_units_by_pool.get(PoolName.KV.value, 0)
                 ),
@@ -7211,6 +7216,15 @@ class UnifiedRadixCache(BasePrefixCache):
                 full_frontier_tokens=int(operation.storage_hit_count),
                 crop_attempted=False,
                 lower_checkpoint_queried=False,
+                allocation="prefetch_staging",
+                attempt_details={
+                    key: attempt_details.get(key)
+                    for key in (
+                        "required", "alloc1", "reclaimed", "alloc2",
+                        "crop_granted", "alloc1_ns", "reclaim_ns",
+                        "drain_ns", "alloc2_ns", "crop_ns",
+                    )
+                },
                 per_pool=per_pool,
                 required_aux_units=dict(required_aux_units),
                 failed_domains=sorted(map(str, blocked_domains)),
@@ -7308,9 +7322,15 @@ class UnifiedRadixCache(BasePrefixCache):
                     if transfer.indices_from_pool is None
                 )
                 telemetry_snapshot = snapshot_fn(pool_names)
+            alloc1_started_ns = time.monotonic_ns()
             host_indices = cc.mem_pool_host.alloc(alloc_len)
+            alloc1_ns = time.monotonic_ns() - alloc1_started_ns
             alloc1_succeeded = host_indices is not None
             reclaimed_units = 0
+            reclaim_ns = 0
+            alloc2_ns = 0
+            drain_ns = 0
+            crop_ns = 0
             alloc2_succeeded = False
             granted_len = alloc_len
             if host_indices is None:
@@ -7321,18 +7341,38 @@ class UnifiedRadixCache(BasePrefixCache):
                 # Ready-Horizon-off baseline (no reservation), still evict.
                 reservation = self._prefetch_reservations.get(req_id)
                 if reservation is None or reservation.kind is PrefetchKind.DEMAND:
-                    reclaimed_units = int(self.evict_host(alloc_len) or 0)
+                    reclaim_context = {
+                        "rid": req_id,
+                        "attempt_id": getattr(operation, "host_alloc_attempt_id", None),
+                        "allocation": "prefetch_staging",
+                        "pool": PoolName.KV.value,
+                        "requested": int(alloc_len),
+                    }
+                    previous_context = getattr(self.tree_core, "_host_reclaim_context", None)
+                    self.tree_core._host_reclaim_context = reclaim_context
+                    reclaim_started_ns = time.monotonic_ns()
+                    try:
+                        reclaimed_units = int(self.evict_host(alloc_len) or 0)
+                    finally:
+                        reclaim_ns += time.monotonic_ns() - reclaim_started_ns
+                        self.tree_core._host_reclaim_context = previous_context
+                    alloc2_started_ns = time.monotonic_ns()
                     host_indices = cc.mem_pool_host.alloc(alloc_len)
+                    alloc2_ns += time.monotonic_ns() - alloc2_started_ns
                     alloc2_succeeded = host_indices is not None
                 if host_indices is None:
                     # F1 symmetry with _execute_kv_backup: a finished L3 write
                     # keeps its host slots pinned (host_lock_ref) until its ack
                     # is consumed, so one drain + retry can still free capacity
                     # before the staging request is given up.
+                    drain_started_ns = time.monotonic_ns()
                     reclaimed_units += self._drain_acks_and_reclaim_host(
                         alloc_len - reclaimed_units
                     )
+                    drain_ns += time.monotonic_ns() - drain_started_ns
+                    alloc2_started_ns = time.monotonic_ns()
                     host_indices = cc.mem_pool_host.alloc(alloc_len)
+                    alloc2_ns += time.monotonic_ns() - alloc2_started_ns
                     alloc2_succeeded = host_indices is not None
                 if host_indices is None:
                     # Capacity crop: stage the prefix that fits instead of
@@ -7347,7 +7387,9 @@ class UnifiedRadixCache(BasePrefixCache):
                         operation, alloc_len, free_now, self.page_size
                     )
                     if crop_len:
+                        crop_started_ns = time.monotonic_ns()
                         host_indices = cc.mem_pool_host.alloc(crop_len)
+                        crop_ns += time.monotonic_ns() - crop_started_ns
                         if host_indices is not None:
                             granted_len = crop_len
                             _log_restore_disposition(
@@ -7361,6 +7403,11 @@ class UnifiedRadixCache(BasePrefixCache):
                 "reclaimed": reclaimed_units,
                 "alloc2": alloc2_succeeded,
                 "crop_granted": granted_len if granted_len != alloc_len else 0,
+                "alloc1_ns": int(alloc1_ns),
+                "reclaim_ns": int(reclaim_ns),
+                "drain_ns": int(drain_ns),
+                "alloc2_ns": int(alloc2_ns),
+                "crop_ns": int(crop_ns),
             }
             if host_indices is None:
                 if buffer_mode:

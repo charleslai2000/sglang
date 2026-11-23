@@ -1967,6 +1967,8 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
                 "subtree_blocked": 0,
                 "released": 0,
                 "want": int(num_tokens),
+                "reclaim_context": getattr(self, "_host_reclaim_context", None),
+                "_started_ns": time.monotonic_ns(),
             }
         for _pass in range(passes):
             if tracker[BASE_COMPONENT_TYPE] >= num_tokens:
@@ -1995,17 +1997,18 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
                         node, require_host_subtree_leaf
                     ):
                         if debug is not None:
-                            if cd.host_lock_ref != 0:
+                            if node.write_through_pending_id is not None:
+                                debug["write_through_pending"] += 1
+                            elif node.load_back_pending_id is not None:
+                                debug["load_back_pending"] += 1
+                            elif cd.host_lock_ref != 0:
                                 debug["locked"] += 1
-                            elif (
-                                node.write_through_pending_id is not None
-                                or node.load_back_pending_id is not None
-                            ):
-                                debug["pending_dma"] += 1
                             elif require_host_subtree_leaf and any(
                                 child.backuped for child in node.children.values()
                             ):
                                 debug["subtree_blocked"] += 1
+                            else:
+                                debug["other_ineligible"] += 1
                         continue
                     self._release_full_host_duplicate(
                         node,
@@ -2027,14 +2030,18 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
             self._log_host_reclaim_debug(debug, tracker)
 
     def _log_host_reclaim_debug(self, debug: dict, tracker: dict) -> None:
-        """Aggregated, rate-limited eligibility report (SGLANG_HOST_RECLAIM_DEBUG)."""
+        """Aggregated eligibility report, with per-allocation context retained."""
         global _host_reclaim_debug_last_ns
         now = time.monotonic_ns()
-        if now - _host_reclaim_debug_last_ns < _HOST_RECLAIM_DEBUG_INTERVAL_NS:
+        if (
+            debug.get("reclaim_context") is None
+            and now - _host_reclaim_debug_last_ns < _HOST_RECLAIM_DEBUG_INTERVAL_NS
+        ):
             return
         _host_reclaim_debug_last_ns = now
         debug = dict(debug)
         debug["freed"] = int(tracker.get(BASE_COMPONENT_TYPE, 0))
+        debug["elapsed_ns"] = max(0, now - debug.pop("_started_ns", 0))
         logger.warning(
             "HOST_RECLAIM_DEBUG %s",
             " ".join(f"{k}={v}" for k, v in debug.items()),
