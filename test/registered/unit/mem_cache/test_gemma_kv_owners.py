@@ -92,6 +92,28 @@ def test_owner_pool_host_uses_compact_layer_storage():
     assert host.get_size_per_token() == 2 * 8 * 2 * 2 * 2
 
 
+def test_owner_device_pointer_resolution_avoids_uint64_advanced_indexing():
+    class DevicePool:
+        device = torch.device("cpu")
+        k_data_ptrs = torch.tensor([101, 202], dtype=torch.uint64)
+        v_data_ptrs = torch.tensor([303, 404], dtype=torch.uint64)
+        k_buffer = ["k0", "k1"]
+        v_buffer = ["v0", "v1"]
+        logical_owner_layer_ids = [5, 11]
+        _hicache_logical_to_physical = {5: 0, 11: 1}
+
+    host = object.__new__(MHATokenToKVPoolHost)
+    host.mtp_draft_device_pools = ()
+    k_ptrs, v_ptrs, k_buffers, v_buffers = host._resolve_device_transfer_buffers(
+        DevicePool()
+    )
+
+    assert k_ptrs is DevicePool.k_data_ptrs
+    assert v_ptrs is DevicePool.v_data_ptrs
+    assert k_buffers == ["k0", "k1"]
+    assert v_buffers == ["v0", "v1"]
+
+
 def test_non_gemma_model_has_no_owner_override():
     config = SimpleNamespace(
         hf_config=SimpleNamespace(architectures=["LlamaForCausalLM"]),
