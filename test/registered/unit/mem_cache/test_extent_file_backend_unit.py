@@ -79,6 +79,48 @@ def _write(alloc: ExtentAllocator, key: str, length: int) -> ExtentRef:
 
 
 class TestExtentAllocator(CustomTestCase):
+    def test_reclaim_refusal_when_wrapped_batch_exhausts_all_tail_space(self):
+        """A whole-file batch may leave no legal relocation destination.
+
+        This is a deliberately constructed fail-closed geometry; r3's
+        operation-time allocator state has not been reconstructed. The test
+        uses 512 slots,
+        64-MiB extents, a 770-page/14,336-byte batch wrapping through slot 0,
+        and four small live refs in slot 0 after its cursor was previously
+        advanced to the tail. Cursors in all non-victim slots are full, so the
+        770-page plan is valid but the live refs cannot be relocated.
+        """
+        extent_size = 64 * 1024 * 1024
+        alloc = ExtentAllocator(extent_size=extent_size, num_slots=512)
+        alloc._next_slot = 511
+        alloc._cursors = [extent_size] * alloc.num_slots
+        # The slot cursor remains at the tail although only four live 25-KiB
+        # entries survive later overwrites in that slot.
+        live_refs = [
+            ExtentRef(0, extent_size - 100 * 1024 + i * 25 * 1024, 25 * 1024, 0)
+            for i in range(4)
+        ]
+        for i, ref in enumerate(live_refs):
+            key = f"victim-{i}"
+            alloc._index[key] = ref
+            alloc._slot_keys[0].add(key)
+            alloc._slot_bytes[0] += ref.length
+            alloc._recency[key] = None
+        keys = [(f"batch-{i}", 14_336) for i in range(770)]
+        refs, passed, drop_events = alloc.plan_split(keys)
+        self.assertTrue(all(ref is not None for ref in refs))
+        self.assertEqual(passed, [0])
+        excluded = {slot for slot, _ in drop_events}
+        excluded.update(ref.extent_id for ref in refs if ref is not None)
+        relocated = alloc.plan_relocation(
+            [0],
+            [(f"victim-{i}", ref.length) for i, ref in enumerate(live_refs)],
+            excluded_slots=sorted(excluded),
+            start_slot=max(ref.extent_id for ref in refs if ref is not None),
+        )
+        self.assertIsNone(relocated)
+        self.assertEqual(alloc.lookup("victim-0"), live_refs[0])
+
     def _alloc(self, num_slots=4, extent_size=_EXTENT) -> ExtentAllocator:
         return ExtentAllocator(extent_size=extent_size, num_slots=num_slots)
 
@@ -870,26 +912,42 @@ class TestExtentV1(ExtentBackendTestBase):
         finally:
             backend.close()
 
-    def test_circular_wrap_relocates_live_refs_or_fails_closed(self):
-        """F1 reclaim contract: no live ref is destroyed in place.
+    def test_circular_wrap_relocates_live_refs_or_evicts_cache_safely(self):
+        """F1 reclaim preserves data when it fits and evicts only on pressure.
 
-        Circular slot reclaim used to bump the victim's generation and drop
-        every live ref pointing into it (the write-once chain head was lost
-        and ``batch_exists`` then reported the whole chain missing).  Reclaim
-        now relocates the victim's live refs first, or -- when no destination
-        capacity can be secured -- fails closed and leaves the victim intact.
+        When relocation capacity exists the live head is moved. When all
+        remaining tail space is exhausted, this cache backend may invalidate
+        the LRU victim with a durable DROP_SLOT and accept the new write.
         """
-        # (a) No destination capacity: the 4x16 KiB file is already filled by
-        # 60 KiB of pages, so the 20-page wrap batch cannot relocate slot 0's
-        # live 16 KiB.  It must be refused with the victim untouched.
+        # (a) The 4x16 KiB file is full. Relocation has no destination, so
+        # circular reuse durably evicts the victim slot and accepts new pages.
         for start in range(0, 60, 20):
             self._write_keys_into(self.backend, 20, start)
+        retained_keys = [f"k{i:04d}" for i in (0, 19, 20, 39, 40, 59)]
+        retained_values = [self._page_bytes(i) for i in (0, 19, 20, 39, 40, 59)]
+        wal_offset_before = self.backend._wal_offset
         wrap_keys = self._make_keys(20, start=60)
         wrap_values = [self._page_bytes(i) for i in range(60, 80)]
-        self.assertFalse(self.backend.batch_set(wrap_keys, wrap_values))
-        self.assertTrue(self.backend.exists("k0000"))
-        self.assertFalse(self.backend.exists("k0060"))
-        self.assertEqual(self.backend._allocator.used_bytes, 60 * 1000)
+        self.assertTrue(self.backend.batch_set(wrap_keys, wrap_values))
+        self.assertFalse(self.backend.exists("k0000"))
+        self.assertTrue(self.backend.exists("k0060"))
+        evicted_hashes = self.backend.drain_evicted_storage_keys()
+        self.assertIn("k0000", evicted_hashes)
+        self.assertNotIn("k0060", evicted_hashes)
+        self.assertLess(self.backend._wal_offset, wal_offset_before + 4096)
+        retained_targets = [bytearray(1000) for _ in retained_keys]
+        retained = self.backend.batch_get(retained_keys, retained_targets)
+        self.assertEqual(retained[0], None)
+        self._assert_pages_equal(retained[1:], retained_values[1:])
+        # Confirm the eviction is durable across a restart.
+        self.backend.close()
+        self.backend = ExtentFileBackend(self._wal_config(0))
+        self.assertFalse(self.backend.exists("k0000"))
+        self.assertTrue(self.backend.exists("k0060"))
+        new_targets = [bytearray(1000) for _ in wrap_keys]
+        self._assert_pages_equal(
+            self.backend.batch_get(wrap_keys, new_targets), wrap_values
+        )
         # (b) Destination capacity present: slot 0 is full but holds only a
         # small live head (a large recorded filler was overwritten out of it)
         # and the middle slots keep tail room, so the same circular reclaim
@@ -933,6 +991,7 @@ class TestExtentV1(ExtentBackendTestBase):
                 )
             )
             self.assertEqual(relocate.batch_exists(["h0", "h1", "h2"], None), 3)
+            self.assertEqual(relocate.drain_evicted_storage_keys(), [])
             for key, value in head.items():
                 got = relocate.get(key, bytearray(len(value)))
                 self.assertEqual(bytes(got), bytes(value))
@@ -941,6 +1000,174 @@ class TestExtentV1(ExtentBackendTestBase):
                 self.assertNotEqual(ref.extent_id, 0)
         finally:
             relocate.close()
+
+    def test_eviction_during_inflight_read_returns_miss_not_reused_bytes(self):
+        for start in range(0, 60, 20):
+            self._write_keys_into(self.backend, 20, start)
+        read_started = threading.Event()
+        allow_read = threading.Event()
+        original_pread = self.backend._pread_full
+
+        def delayed_pread(buf, offset):
+            read_started.set()
+            if not allow_read.wait(timeout=5):
+                raise TimeoutError("test did not release the in-flight read")
+            return original_pread(buf, offset)
+
+        result = {}
+        with mock.patch.object(self.backend, "_pread_full", side_effect=delayed_pread):
+            thread = threading.Thread(
+                target=lambda: result.setdefault(
+                    "pages", self.backend.batch_get(["k0000"], [bytearray(1000)])
+                )
+            )
+            thread.start()
+            self.assertTrue(read_started.wait(timeout=5))
+            wrap_keys = self._make_keys(20, start=60)
+            wrap_values = [self._page_bytes(i) for i in range(60, 80)]
+            self.assertTrue(self.backend.batch_set(wrap_keys, wrap_values))
+            allow_read.set()
+            thread.join(timeout=5)
+            self.assertFalse(thread.is_alive())
+        self.assertEqual(result["pages"], [None])
+        self.assertTrue(self.backend.exists("k0060"))
+        self.assertFalse(self.backend.exists("k0000"))
+
+    def test_lru_reclaim_survives_multiple_full_file_cycles_and_restart(self):
+        backend = ExtentFileBackend(
+            _make_config(
+                model_name="multi-cycle-cache-reclaim",
+                extra_config={
+                    "storage_dir": self.tmpdir,
+                    "extent_size": "16Ki",
+                    "file_size": "64Ki",
+                },
+            )
+        )
+        try:
+            live = {}
+            evicted = set()
+            for cycle in range(5):
+                for batch in range(8):
+                    base = cycle * 80 + batch * 10
+                    keys = [f"cycle-{base+i}" for i in range(10)]
+                    values = [self._page_bytes(base+i, 1000) for i in range(10)]
+                    before = set(live)
+                    self.assertTrue(backend.batch_set(keys, values))
+                    live.update(zip(keys, values))
+                    for key in before:
+                        if not backend.exists(key):
+                            evicted.add(key)
+                            live.pop(key, None)
+                    targets = [bytearray(1000) for _ in keys]
+                    self._assert_pages_equal(backend.batch_get(keys, targets), values)
+                self.assertGreater(backend._allocator._next_slot, -1)
+                self.assertEqual(
+                    backend._allocator.used_bytes,
+                    sum(ref.length for ref in backend._allocator._index.values()),
+                )
+                self.assertEqual(
+                    set(backend._allocator._index),
+                    {key + backend.config_suffix for key in live},
+                )
+            self.assertTrue(evicted, "cyclic workload did not exercise LRU eviction")
+            expected = dict(live)
+            backend.close()
+            backend = ExtentFileBackend(
+                _make_config(
+                    model_name="multi-cycle-cache-reclaim",
+                    extra_config={
+                        "storage_dir": self.tmpdir,
+                        "extent_size": "16Ki",
+                        "file_size": "64Ki",
+                    },
+                )
+            )
+            for key in evicted:
+                self.assertFalse(backend.exists(key))
+            readback = backend.batch_get(
+                list(expected), [bytearray(1000) for _ in expected]
+            )
+            self._assert_pages_equal(readback, list(expected.values()))
+        finally:
+            backend.close()
+
+    @unittest.skip("exploratory: group reservation relocation model not established")
+    def test_group_reclaim_can_relocate_into_own_reserved_slot_tail(self):
+        """A group may use its own staged extent's still-free tail for relocation.
+
+        Other groups' staged reservations remain excluded. This models the
+        write-through L3 case where one atomic group accumulates multiple
+        storage writes before the final group commit.
+        """
+        backend = ExtentFileBackend(
+            _make_config(
+                model_name="group-relocate-own-tail",
+                extra_config={
+                    "storage_dir": self.tmpdir,
+                    "extent_size": "16Ki",
+                    "file_size": "64Ki",
+                },
+            )
+        )
+        try:
+            # Slot 0: live refs to relocate; slot 1: staged by this group;
+            # slot 2: staged by another group and must stay unavailable.
+            kv = _PagePool(1000)
+            mamba = _PagePool(1000)
+            backend.register_mem_host_pool_v2(kv, PoolName.KV)
+            backend.register_mem_host_pool_v2(mamba, PoolName.MAMBA)
+            for idx, value in enumerate((1, 2, 3, 4, 5, 6, 7)):
+                kv._pages[idx][:] = self._page_bytes(value, 1000)
+            group = backend.open_group()
+            other = backend.open_group()
+            self.assertTrue(
+                backend.batch_set_v2(
+                    [PoolTransfer(PoolName.KV, host_indices=[0], keys=["own-reservation"])],
+                    group_id=group,
+                )[PoolName.KV][0]
+            )
+            self.assertTrue(
+                backend.batch_set_v2(
+                    [PoolTransfer(PoolName.KV, host_indices=[1], keys=["other-reservation"])],
+                    group_id=other,
+                )[PoolName.KV][0]
+            )
+            # Advance to slot 3, then wrap to victim slot 0. The new payload
+            # occupies slot 0 after its old refs have been safely relocated.
+            self.assertTrue(
+                backend._write_pages(
+                    ["advance2"], [self._page_bytes(5, 16000)], group_id=group
+                )
+            )
+            self.assertTrue(
+                backend._write_pages(
+                    ["advance3"], [self._page_bytes(6, 16000)], group_id=group
+                )
+            )
+            self.assertTrue(
+                backend._write_pages(
+                    ["wrap"], [self._page_bytes(7, 8000)], group_id=group
+                )
+            )
+            self.assertTrue(backend.commit_group(group))
+            self.assertTrue(backend.abort_group(other))
+            self.assertEqual(backend.batch_exists(["live0", "live1"], None), 2)
+            self._assert_pages_equal(
+                backend.batch_get(
+                    ["live0", "live1"], [bytearray(6000), bytearray(6000)]
+                ),
+                [self._page_bytes(1, 6000), self._page_bytes(2, 6000)],
+            )
+            self._assert_pages_equal(
+                backend.batch_get(
+                    ["own-reservation"], [bytearray(1000)]
+                ),
+                [self._page_bytes(3, 1000)],
+            )
+            self.assertEqual(backend.batch_exists(["other-reservation"], None), 0)
+        finally:
+            backend.close()
 
     def test_watermark_gc_keeps_used_bytes_under_cap(self):
         backend = ExtentFileBackend(

@@ -620,6 +620,9 @@ class ExtentFileBackend(HiCacheStorage):
         self._file_uuid = self._new_file_uuid()
         self._namespace_epoch = self._new_nonzero_epoch()
         self._components = {}
+        # Cache entries invalidated by durable DROP_SLOT commits are consumed
+        # by the scheduler to clear the corresponding Radix L3 beliefs.
+        self._evicted_storage_keys = []
         self._constructor_complete = False
         self._closed = False
         self._lifecycle_state = "OPENING"
@@ -1617,12 +1620,14 @@ class ExtentFileBackend(HiCacheStorage):
             # must have a durable replacement before its generation is bumped.
             if not self._relocate_reclaim_victims_locked(passed, drop_events, refs):
                 return [False] * len(keys)
+            evicted_keys = self._keys_for_drop_events(drop_events)
             try:
                 self._append_drops(drop_events)
                 self._allocator.apply_drops(
                     drop_events,
                     trace_context=getattr(self, "_t38c_durable_context", None),
                 )
+                self._evicted_storage_keys.extend(evicted_keys)
                 for slot, _generation in drop_events:
                     for key in list(self._components):
                         ref = self._allocator._index.get(key)
@@ -2170,6 +2175,32 @@ class ExtentFileBackend(HiCacheStorage):
 
     # ---- reclaim-time live-ref relocation ----
 
+    def drain_evicted_storage_keys(self):
+        """Return keys invalidated by committed slot drops since last drain."""
+        with self._lock:
+            keys = self._evicted_storage_keys
+            self._evicted_storage_keys = []
+            # A successful live-ref relocation publishes replacement refs
+            # before the victim DROP_SLOT. Such keys remain readable and must
+            # not invalidate their Radix durability claims.
+            return [
+                key[: -len(self.config_suffix)]
+                for key in keys
+                if key not in self._allocator._index
+                and key.endswith(self.config_suffix)
+            ]
+
+    def _keys_for_drop_events(self, drop_events):
+        slots = {slot for slot, _generation in drop_events}
+        return [
+            key
+            for slot in sorted(slots)
+            for key in sorted(self._allocator._slot_keys[slot])
+            if (ref := self._allocator._index.get(key)) is not None
+            and ref.extent_id == slot
+            and ref.generation == self._allocator._generations[slot]
+        ]
+
     def _reclaim_victims(self, passed, drop_events):
         """Enumerate the live refs held by circular-reclaim victim slots.
 
@@ -2231,13 +2262,19 @@ class ExtentFileBackend(HiCacheStorage):
             start_slot=start_slot,
         )
         if destination_refs is None:
-            logger.warning(
-                "ExtentFileBackend: reclaim relocation of %d live refs "
-                "refused: no destination capacity outside victims %s",
+            # Extent is a finite cache, not a permanent store. When safe
+            # relocation cannot fit, drop this LRU victim atomically with the
+            # incoming write. DROP_SLOT invalidates its generation before any
+            # bytes are reused; concurrent readers verify their snapshot and
+            # turn a raced read into a miss. The scheduler consumes the dropped
+            # keys and clears every dependent Radix durability claim.
+            logger.info(
+                "ExtentFileBackend: evicting %d LRU live refs from slots %s "
+                "to satisfy circular allocation (no relocation tail space)",
                 len(victims),
                 sorted({ref.extent_id for _key, ref in victims}),
             )
-            return False
+            return True
         # Exact bytes, read from the victim and written to the replacement.
         for (key, ref), destination in zip(victims, destination_refs):
             buffer = bytearray(ref.length)
@@ -2366,9 +2403,11 @@ class ExtentFileBackend(HiCacheStorage):
             # must have a durable replacement before its generation is bumped.
             if not self._relocate_reclaim_victims_locked(passed, drop_events, refs):
                 return False
+            evicted_keys = self._keys_for_drop_events(drop_events)
             try:
                 self._append_drops(drop_events)
                 self._allocator.apply_drops(drop_events, trace_context=trace_context)
+                self._evicted_storage_keys.extend(evicted_keys)
             except Exception as exc:
                 logger.error("ExtentFileBackend: WAL invalidation failed: %s", exc)
                 return False

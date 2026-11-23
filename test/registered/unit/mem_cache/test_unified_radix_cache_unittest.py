@@ -292,6 +292,77 @@ class TestUnifiedTreeNodeGetPrefixHashValues(CustomTestCase):
         self.assertEqual(n4.get_prefix_hash_values(n3), ["h1", "h2", "h3"])
 
 
+class TestUnifiedTreeCoreExtentEvictionInvalidation(CustomTestCase):
+    def test_evicted_hash_clears_durable_chain_beliefs(self):
+        from sglang.srt.mem_cache.unified_cache.unified_tree_core import UnifiedTreeCore
+
+        params = CacheInitParams(
+            req_to_token_pool=ReqToTokenPool(
+                size=2, max_context_len=8, device="cpu", enable_memory_saver=False
+            ),
+            token_to_kv_pool_allocator=None,
+            page_size=1,
+            disable=True,
+            tree_components=(ComponentType.FULL,),
+        )
+        tree = UnifiedTreeCore(
+            params, {ComponentType.FULL: mock.Mock(component_type=ComponentType.FULL)}
+        )
+        a = UnifiedTreeCore._add_new_node(
+            tree, tree.root_node, RadixKey([1]), torch.tensor([1])
+        )
+        b = UnifiedTreeCore._add_new_node(
+            tree, a, RadixKey([2]), torch.tensor([2])
+        )
+        c = UnifiedTreeCore._add_new_node(
+            tree, b, RadixKey([3]), torch.tensor([3])
+        )
+        a.hash_value, b.hash_value, c.hash_value = ["ha"], ["hb"], ["hc"]
+        for node in (a, b, c):
+            node.storage_written = True
+            node.storage_acked = True
+            node.storage_persisted = True
+            node.storage_restored = True
+        self.assertEqual(tree.invalidate_storage_keys(["ha"]), 3)
+        for node in (a, b, c):
+            self.assertFalse(node.storage_written)
+            self.assertFalse(node.storage_acked)
+            self.assertFalse(node.storage_persisted)
+            self.assertFalse(node.storage_restored)
+            self.assertGreater(node.storage_version, 0)
+
+    def test_evicted_hash_does_not_clear_pending_acked_dependency(self):
+        from sglang.srt.mem_cache.unified_cache.unified_tree_core import UnifiedTreeCore
+
+        params = CacheInitParams(
+            req_to_token_pool=ReqToTokenPool(
+                size=2, max_context_len=8, device="cpu", enable_memory_saver=False
+            ),
+            token_to_kv_pool_allocator=None,
+            page_size=1,
+            disable=True,
+            tree_components=(ComponentType.FULL,),
+        )
+        tree = UnifiedTreeCore(
+            params, {ComponentType.FULL: mock.Mock(component_type=ComponentType.FULL)}
+        )
+        parent = UnifiedTreeCore._add_new_node(
+            tree, tree.root_node, RadixKey([1]), torch.tensor([1])
+        )
+        child = UnifiedTreeCore._add_new_node(
+            tree, parent, RadixKey([2]), torch.tensor([2])
+        )
+        parent.hash_value, child.hash_value = ["hp"], ["hc"]
+        parent.storage_persisted = True
+        parent.storage_restored = True
+        child.storage_acked = True
+        child.storage_persisted = False
+        self.assertEqual(tree.invalidate_storage_keys(["hp"]), 0)
+        self.assertTrue(parent.storage_persisted)
+        self.assertTrue(parent.storage_restored)
+        self.assertTrue(child.storage_acked)
+
+
 class TestUnifiedTreeCoreLoadBackPending(CustomTestCase):
     def _build_core(self, *, is_write_back: bool):
         component_types = (ComponentType.FULL,)

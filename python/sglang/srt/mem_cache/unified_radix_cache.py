@@ -6900,6 +6900,24 @@ class UnifiedRadixCache(BasePrefixCache):
             prefetch_key, host_indices
         )
 
+    def _drain_extent_evictions(self) -> int:
+        """Apply backend LRU invalidations to the authoritative Radix state."""
+        controller = self.cache_controller
+        backend = getattr(controller, "storage_backend", None) if controller else None
+        drain = getattr(backend, "drain_evicted_storage_keys", None)
+        if drain is None:
+            return 0
+        keys = drain()
+        if not keys:
+            return 0
+        invalidated = self.tree_core.invalidate_storage_keys(keys)
+        logger.info(
+            "[P3] extent_eviction_radix_invalidate keys=%d nodes=%d",
+            len(keys),
+            invalidated,
+        )
+        return invalidated
+
     def _invalidate_absent_from_hit_query(self, operation) -> None:
         """Drop KV beliefs beyond the folded usable cut (rank-synced): the
         next insert then re-writes the node (all pools), healing stale
@@ -7977,6 +7995,8 @@ class UnifiedRadixCache(BasePrefixCache):
         _drain_backup()
         _drain_release()
         _drain_extra_release()
+        if self.cache_controller is not None:
+            self._drain_extent_evictions()
         # The owning drain transaction is the authoritative queue-empty
         # trigger. Polling remains an optional watchdog, never liveness.
         _t38c_residency_release_queues_drained(self)
@@ -8408,6 +8428,16 @@ class UnifiedRadixCache(BasePrefixCache):
         cc = self.cache_controller
         if cc is not None and cc.storage_failure_reason is not None:
             self._handle_storage_failure(cc.storage_failure_reason)
+        if cc is not None and cc.storage_backend is not None:
+            try:
+                self._drain_extent_evictions()
+            except Exception:
+                logger.exception("Failed to reconcile Extent LRU evictions with Radix durability")
+                cc._storage_thread_fatal(
+                    "extent_eviction_reconcile",
+                    RuntimeError("could not reconcile Extent eviction with Radix L3 state"),
+                )
+                self._handle_storage_failure(cc.storage_failure_reason)
         try:
             import time as _t38c_time
             _now = _t38c_time.time()

@@ -814,6 +814,47 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         """The hash values owned by this node, excluding its ancestors."""
         return self.node_by_id(node_id).hash_value or []
 
+    def invalidate_storage_keys(self, storage_keys: Sequence[str]) -> int:
+        """Clear durable beliefs whose owned pages intersect evicted L3 keys.
+
+        Radix durability represents complete node spans. Losing any page from
+        a node invalidates that node and every descendant whose contiguous
+        prefix depends on it. We clear flags only after the backend's DROP_SLOT
+        WAL commit has made those keys absent; pending/unacked writes remain
+        protected by the separate storage_written/deferred-ACK path.
+        """
+        lost = set(storage_keys)
+        if not lost:
+            return 0
+        affected_roots = []
+        for node in self._node_arena.values():
+            if lost.intersection(node.hash_value or ()):
+                # A page may have been written but not yet promoted across a
+                # contiguous parent chain. Its submission/ACK dedupe must be
+                # reset too or it will never be repersisted after eviction.
+                node.storage_written = False
+                affected_roots.append(node)
+        cleared = set()
+        stack = list(affected_roots)
+        while stack:
+            node = stack.pop()
+            if node.id in cleared:
+                continue
+            cleared.add(node.id)
+            stack.extend(node.children.values())
+        count = 0
+        for node_id in cleared:
+            node = self._node_arena.get(node_id)
+            if node is None:
+                continue
+            node.storage_written = False
+            node.storage_acked = False
+            node.storage_persisted = False
+            node.storage_restored = False
+            node.storage_version += 1
+            count += 1
+        return count
+
     def backfill_missing_hash_values(self) -> int:
         """Hash every node that was built while storage was disabled.
 

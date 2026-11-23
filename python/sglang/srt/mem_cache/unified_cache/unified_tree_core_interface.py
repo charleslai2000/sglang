@@ -181,6 +181,14 @@ class UnifiedTreeCoreInterface(ABC):
         """The hash values owned by this node, excluding its ancestors."""
         ...
 
+    def invalidate_storage_keys(self, storage_keys: Sequence[str]) -> int:
+        """Clear L3 durability claims for backend-evicted KV pages.
+
+        Backends that do not track per-page L3 claims may keep the default
+        no-op implementation.
+        """
+        return 0
+
     @abstractmethod
     def backfill_missing_hash_values(self) -> int:
         """Hash every node built while storage was disabled; return how many.
