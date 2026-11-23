@@ -225,8 +225,8 @@ def build_hybrid_swa_group(
     page_size: int,
     full_kv_pool: Any,
     swa_kv_pool: Any,
-    full_layer_mapping: dict[int, int],
-    swa_layer_mapping: dict[int, int],
+    full_layer_mapping: dict[int, Any],
+    swa_layer_mapping: dict[int, Any],
     use_mla: bool,
     kv_host_size: Optional[float] = None,
     swa_host_size: Optional[float] = None,
@@ -236,7 +236,7 @@ def build_hybrid_swa_group(
     mtp_swa_device_pools: tuple[Any, ...] = (),
 ) -> HostPoolGroup:
     """Anchor (full) + SWA host pool group for a hybrid-SWA device pool."""
-    transfer_layer_num = len(full_layer_mapping | swa_layer_mapping)
+    transfer_layer_num = len(full_layer_mapping) + len(swa_layer_mapping)
     kv_host_pool = build_kv_host_pool(
         kv_pool=full_kv_pool,
         page_size=page_size,

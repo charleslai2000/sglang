@@ -281,6 +281,24 @@ class TestHiCacheStagedWriteBackDispatch(CustomTestCase):
             [0, 1],
         )
 
+    def test_l2_transfer_maps_compact_host_and_device_layers(self):
+        host_pool = mock.Mock()
+        transfer = L2Transfer(
+            host_pool=host_pool,
+            device_pool=mock.sentinel.device_pool,
+            host_indices=_indices(0, 2),
+            device_indices=_indices(2, 4),
+            layer_mapper={0: (0, 1), 1: (1, 0)}.get,
+        )
+        with mock.patch.object(transfer_module, "device_module", _FakeDeviceModule):
+            L2TransferEngine("kernel").submit_host_to_device([transfer], layer_num=2)
+
+        calls = host_pool.load_to_device_per_layer.call_args_list
+        self.assertEqual([call.args[3] for call in calls], [0, 1])
+        self.assertEqual(
+            [call.kwargs["device_layer_id"] for call in calls], [1, 0]
+        )
+
     def test_packed_draft_load_is_flattened_into_l2_transfers(self):
         host_pool = mock.Mock()
         controller = HybridCacheController.__new__(HybridCacheController)

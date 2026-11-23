@@ -464,10 +464,14 @@ class HybridSWAPoolConfigurator(MemoryPoolConfigurator):
                 _, full_owners, swa_owners = self._gemma_owner_layout
                 self._full_layers_num = len(full_owners)
                 self._swa_layers_num = len(swa_owners)
-                window = int(model_config.sliding_window_size or 0)
                 page_size = int(kvc.page_size)
-                eviction_interval = max(1, envs.SGLANG_SWA_EVICTION_INTERVAL.get())
-                chunk_size = max(0, int(get_schedule().chunked_prefill_size or 0))
+                window = int(model_config.sliding_window_size or 0)
+                eviction_interval = max(
+                    1, envs.SGLANG_SWA_EVICTION_INTERVAL.get()
+                )
+                chunk_size = max(
+                    0, int(get_schedule().chunked_prefill_size or 0)
+                )
                 running = int(get_schedule().max_running_requests or 1)
                 self._gemma_swa_cap = (
                     running * (window + eviction_interval + page_size)

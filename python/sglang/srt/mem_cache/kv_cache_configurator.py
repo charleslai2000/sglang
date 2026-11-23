@@ -1470,7 +1470,11 @@ class KVCacheConfigurator:
         swa_attention_layer_ids = self.model_config.swa_attention_layer_ids
         full_attention_layer_ids = self.model_config.full_attention_layer_ids
         gemma_owner_layout = None
-        if not self.is_hybrid_swa_mtp_draft:
+        if (
+            not self.is_hybrid_swa_mtp_draft
+            and get_parallel().tp_size == 1
+            and get_parallel().pp_size == 1
+        ):
             from sglang.srt.mem_cache.gemma_kv_owners import gemma4_kv_owner_layout
 
             gemma_owner_layout = gemma4_kv_owner_layout(self.model_config)
@@ -1524,6 +1528,8 @@ class KVCacheConfigurator:
                 get_parallel().attn_tp_size, get_parallel().attn_dcp_size
             ),
             head_dim=self.model_config.head_dim,
+            start_layer=self.layer_info.start_layer,
+            end_layer=self.layer_info.end_layer,
             swa_attention_layer_ids=swa_attention_layer_ids,
             full_attention_layer_ids=full_attention_layer_ids,
             device=self.device,

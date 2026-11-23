@@ -73,12 +73,13 @@ class SWAKVPool(BaseSWAKVPool):
             layer_id: index
             for index, layer_id in enumerate(self.swa_owner_layer_ids)
         }
+        self._owner_only_layout = logical_layers_mapping is not None
         self.layer_num = (
             max(logical_layers_mapping) + 1
             if logical_layers_mapping
             else self.full_layer_nums + self.swa_layer_nums
         )
-        self.start_layer = 0
+        self.start_layer = kwargs.get("start_layer", 0)
         self.page_size = page_size
         self.layer_transfer_counter = None
 
@@ -114,6 +115,14 @@ class SWAKVPool(BaseSWAKVPool):
                 **kwargs,
             }
 
+        full_kv_pool_kwargs.setdefault("start_layer", self.start_layer)
+        full_kv_pool_kwargs.setdefault(
+            "end_layer", kwargs.get("end_layer", self.start_layer + self.layer_num)
+        )
+        swa_kv_pool_kwargs.setdefault("start_layer", self.start_layer)
+        swa_kv_pool_kwargs.setdefault(
+            "end_layer", kwargs.get("end_layer", self.start_layer + self.layer_num)
+        )
         self.full_kv_pool = full_kv_pool_class(
             size=size,
             dtype=dtype,
@@ -126,6 +135,15 @@ class SWAKVPool(BaseSWAKVPool):
             layer_num=len(self.swa_owner_layer_ids),
             **swa_kv_pool_kwargs,
         )
+        if self._owner_only_layout:
+            self.full_kv_pool.logical_owner_layer_ids = list(self.full_owner_layer_ids)
+            self.swa_kv_pool.logical_owner_layer_ids = list(self.swa_owner_layer_ids)
+            self.full_kv_pool._hicache_logical_to_physical = dict(
+                self._compact_full_index
+            )
+            self.swa_kv_pool._hicache_logical_to_physical = dict(
+                self._compact_swa_index
+            )
         self.dsa_kv_cache_store_fp8 = False
         self.kv_cache_dim = None
         self.index_head_dim = None
@@ -159,7 +177,8 @@ class SWAKVPool(BaseSWAKVPool):
                 self._logical_owner_ids[logical_id] = owner_logical_id
                 self._logical_owner_ids[owner_logical_id] = owner_logical_id
                 self._transfer_owner_ids[logical_id] = owner_transfer_id[owner_logical_id]
-                self._transfer_owner_ids[owner_logical_id] = owner_transfer_id[owner_logical_id]
+                if self._owner_only_layout:
+                    self._transfer_owner_ids[owner_logical_id] = owner_transfer_id[owner_logical_id]
         self.full_to_swa_index_mapping: Optional[torch.Tensor] = None
 
         k_size, v_size = self.get_kv_size_bytes()

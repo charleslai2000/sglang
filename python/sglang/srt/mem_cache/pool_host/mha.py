@@ -93,13 +93,13 @@ class MHATokenToKVPoolHost(HostKVCache):
             physical: logical
             for physical, logical in enumerate(self.logical_owner_layer_ids)
         }
-        self.logical_to_device_physical_layer = getattr(
-            device_pool, "_hicache_logical_to_physical", self.logical_to_physical_layer
-        )
         self.logical_to_physical_layer = {
             logical: physical
             for physical, logical in self.physical_to_logical_layer.items()
         }
+        self.logical_to_device_physical_layer = getattr(
+            device_pool, "_hicache_logical_to_physical", self.logical_to_physical_layer
+        )
         super().__init__(
             device_pool,
             host_to_device_ratio,

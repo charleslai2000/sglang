@@ -96,6 +96,12 @@ class L2TransferEngine:
                         local_layer_id, device_layer_id = mapped_layer
                     else:
                         local_layer_id, device_layer_id = mapped_layer, layer_id
+                    if (
+                        transfer.layer_mapper is None
+                        and transfer is primary
+                        and device_layer_id >= transfer.device_pool.layer_num
+                    ):
+                        continue
                     if local_layer_id is None or device_layer_id is None or (
                         transfer is not primary
                         and transfer.layer_mapper is None
