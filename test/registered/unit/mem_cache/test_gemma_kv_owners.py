@@ -114,6 +114,31 @@ def test_owner_device_pointer_resolution_avoids_uint64_advanced_indexing():
     assert v_buffers == ["v0", "v1"]
 
 
+def test_owner_only_pointer_mapping_keeps_full_and_swa_order_stable():
+    class DevicePool:
+        device = torch.device("cpu")
+        layer_num = 3
+        head_num = 2
+        head_dim = 4
+        store_dtype = torch.float32
+        logical_owner_layer_ids = [2, 5, 8]
+        _hicache_logical_to_physical = {2: 0, 5: 1, 8: 2}
+        k_data_ptrs = torch.tensor([10, 20, 30], dtype=torch.uint64)
+        v_data_ptrs = torch.tensor([40, 50, 60], dtype=torch.uint64)
+        k_buffer = ["k2", "k5", "k8"]
+        v_buffer = ["v2", "v5", "v8"]
+
+    host = object.__new__(MHATokenToKVPoolHost)
+    host.mtp_draft_device_pools = ()
+    k_ptrs, v_ptrs, k_buffers, v_buffers = host._resolve_device_transfer_buffers(
+        DevicePool()
+    )
+    assert [int(ptr) for ptr in k_ptrs] == [10, 20, 30]
+    assert [int(ptr) for ptr in v_ptrs] == [40, 50, 60]
+    assert k_buffers == ["k2", "k5", "k8"]
+    assert v_buffers == ["v2", "v5", "v8"]
+
+
 def test_non_gemma_model_has_no_owner_override():
     config = SimpleNamespace(
         hf_config=SimpleNamespace(architectures=["LlamaForCausalLM"]),

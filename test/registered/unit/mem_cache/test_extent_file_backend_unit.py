@@ -647,6 +647,42 @@ class TestExtentV1(ExtentBackendTestBase):
             bytes(later_value),
         )
 
+    def test_owner_only_namespace_isolated_from_legacy_cache_data(self):
+        legacy = self.backend
+        legacy_key = "gemma4-page-0001"
+        legacy_value = self._page_bytes(41)
+        self.assertTrue(legacy.set(legacy_key, legacy_value))
+
+        owner = ExtentFileBackend(
+            _make_config(
+                model_name="testmodel-kv-owner-v1",
+                extra_config={
+                    "storage_dir": self.tmpdir,
+                    "extent_size": "16Ki",
+                    "file_size": "64Ki",
+                },
+            )
+        )
+        try:
+            self.assertNotEqual(legacy.config_suffix, owner.config_suffix)
+            self.assertTrue(legacy.exists(legacy_key))
+            self.assertFalse(owner.exists(legacy_key))
+            owner_key = "gemma4-page-0001"
+            owner_value = self._page_bytes(73)
+            self.assertTrue(owner.set(owner_key, owner_value))
+            self.assertTrue(owner.exists(owner_key))
+            self.assertTrue(legacy.exists(legacy_key))
+            self.assertEqual(
+                bytes(legacy.get(legacy_key, bytearray(len(legacy_value)))),
+                bytes(legacy_value),
+            )
+            self.assertEqual(
+                bytes(owner.get(owner_key, bytearray(len(owner_value)))),
+                bytes(owner_value),
+            )
+        finally:
+            owner.close()
+
     def test_separate_config_suffix_can_open_while_namespace_is_held(self):
         other = ExtentFileBackend(
             _make_config(
