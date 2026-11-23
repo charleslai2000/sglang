@@ -412,9 +412,22 @@ class MHATokenToKVPoolHost(HostKVCache):
                 dtype=torch.long,
                 device=device_pool.device,
             )
+            # PyTorch does not implement CUDA indexing for UInt64 pointer
+            # tensors. Owners are already stored in physical order, so use
+            # the pointer vector directly and select only the Python buffers.
+            if indices.numel() == device_pool.k_data_ptrs.numel() and torch.equal(
+                indices, torch.arange(indices.numel(), device=indices.device)
+            ):
+                k_ptrs = device_pool.k_data_ptrs
+                v_ptrs = device_pool.v_data_ptrs
+            else:
+                raise RuntimeError(
+                    "Gemma owner Host transfer requires owner buffers in the "
+                    "same physical order as device pointer arrays"
+                )
             return (
-                device_pool.k_data_ptrs[indices],
-                device_pool.v_data_ptrs[indices],
+                k_ptrs,
+                v_ptrs,
                 [device_pool.k_buffer[i] for i in indices.tolist()],
                 [device_pool.v_buffer[i] for i in indices.tolist()],
             )
