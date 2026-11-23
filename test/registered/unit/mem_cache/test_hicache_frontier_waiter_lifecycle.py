@@ -12,6 +12,28 @@ from sglang.srt.mem_cache.radix_cache import RadixKey
 
 
 class FrontierWaiterLifecycleTests(TestCase):
+    def test_nested_pending_storage_flush_is_drained_by_outer_call(self):
+        cache = object.__new__(UnifiedRadixCache)
+        cache._pending_storage_writes = [1]
+        cache._reconcile_deferred_acked = Mock()
+        cache._skip_stale_storage_persist = Mock()
+        cache.tree_core = Mock()
+        cache.tree_core.node_exists.return_value = True
+        calls = []
+
+        def write_backup_storage(node_id):
+            calls.append(node_id)
+            if len(calls) == 1:
+                cache._pending_storage_writes.append(2)
+                cache._flush_pending_storage_writes()
+
+        cache.write_backup_storage = Mock(side_effect=write_backup_storage)
+        cache._flush_pending_storage_writes()
+
+        self.assertEqual(calls, [1, 2])
+        self.assertEqual(cache._pending_storage_writes, [])
+        cache._reconcile_deferred_acked.assert_called_once()
+
     def _cache(self):
         cache = object.__new__(UnifiedRadixCache)
         cache._storage_frontier_waiters = {}

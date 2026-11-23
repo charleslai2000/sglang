@@ -8119,6 +8119,7 @@ class TestUnifiedRadixPrefetchCorruption(CustomTestCase):
         anchor_lock_params = cache.inc_host_lock_ref(parent_id).to_dec_params()
         req_id = "drop-all-resources"
         operation.request_id = req_id
+        operation.pool_transfers = []
         cache.ongoing_prefetch[req_id] = _OngoingPrefetch(
             parent_id,
             prefetch_key,
@@ -8126,6 +8127,7 @@ class TestUnifiedRadixPrefetchCorruption(CustomTestCase):
             operation,
             anchor_lock_params,
             comp_xfers,
+            cache.tree_core.get_last_hash_value(parent_id),
         )
         cache.cache_controller.prefetch_tokens_occupied = completed_tokens
         hashes = [f"h{i}" for i in range(completed_tokens // self.ps)]

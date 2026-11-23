@@ -2765,8 +2765,10 @@ class UnifiedRadixCache(BasePrefixCache):
         # any tier). They have nothing to persist and are skipped as the
         # explicit invalid / un-backupable state. Observability counter.
         self._storage_gap_skipped_nokv_count = 0
-        # Re-entry guard for _drain_write_through_acks (see its entry check).
+        # Re-entry guards for the ACK and deferred-persist drains (see their
+        # entry checks); the scheduler thread owns both queues.
         self._drain_write_through_depth = 0
+        self._pending_storage_flush_active = False
         # P3 (phase2-p3-fix): deferred-ACK reconciliation re-entrancy guard
         # (see _reconcile_deferred_acked) -- write_backup_storage re-enters
         # _flush_pending_storage_writes, so the scan must run at most once
@@ -4960,6 +4962,21 @@ class UnifiedRadixCache(BasePrefixCache):
         return transfers
 
     def _flush_pending_storage_writes(self) -> None:
+        """Drain deferred storage writes without recursive re-entry.
+
+        write_backup_storage may itself finish D->H acknowledgements, which
+        queue more nodes and call this method. The outer drain owns the queue;
+        nested drains must return so the outer loop can consume those entries.
+        """
+        if getattr(self, "_pending_storage_flush_active", False):
+            return
+        self._pending_storage_flush_active = True
+        try:
+            self._flush_pending_storage_writes_inner()
+        finally:
+            self._pending_storage_flush_active = False
+
+    def _flush_pending_storage_writes_inner(self) -> None:
         """Persist every node whose D->H write acked while its chain was not
         yet written to L3. The ack path only defers (see
         _finish_write_through_ack), so this runs outside any drain. Nodes
