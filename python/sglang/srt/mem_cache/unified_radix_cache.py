@@ -2768,6 +2768,7 @@ class UnifiedRadixCache(BasePrefixCache):
         # Re-entry guards for the ACK and deferred-persist drains (see their
         # entry checks); the scheduler thread owns both queues.
         self._drain_write_through_depth = 0
+        self._drain_write_through_retry_pending = False
         self._pending_storage_flush_active = False
         # P3 (phase2-p3-fix): deferred-ACK reconciliation re-entrancy guard
         # (see _reconcile_deferred_acked) -- write_backup_storage re-enters
@@ -4490,14 +4491,27 @@ class UnifiedRadixCache(BasePrefixCache):
         """Execute Backup action."""
         kv_tokens = len(device_value)
         host_avail = self.cache_controller.mem_pool_host.available_size()
-        needed = _backup_shortfall(host_avail, self._host_writeback_floor(), kv_tokens)
+        floor = self._host_writeback_floor()
+        needed = _backup_shortfall(host_avail, floor, kv_tokens)
         if needed > 0:
-            if self.evict_host(needed) < needed:
+            self.evict_host(needed)
+            # Recompute from the allocator after reclaim: an eviction may have
+            # freed more than requested, and the ACK drain can release further
+            # slots. Reusing the original shortfall both over-reclaims and can
+            # incorrectly reject a backup that now fits.
+            host_avail = self.cache_controller.mem_pool_host.available_size()
+            needed = _backup_shortfall(host_avail, floor, kv_tokens)
+            if needed > 0:
                 # F1: ACK backlog holds host_lock_ref on finished L3 writes;
-                # drain the ready ACKs once, then retry eviction exactly once.
+                # drain ready ACKs once, then make one demand-sized reclaim.
                 self.drain_storage_control_queues_local()
-                if self.evict_host(needed) < needed:
-                    return None
+                host_avail = self.cache_controller.mem_pool_host.available_size()
+                needed = _backup_shortfall(host_avail, floor, kv_tokens)
+                if needed > 0:
+                    self.evict_host(needed)
+                    host_avail = self.cache_controller.mem_pool_host.available_size()
+                    if _backup_shortfall(host_avail, floor, kv_tokens) > 0:
+                        return None
         aux_xfers = [x for xfers in comp_xfers.values() for x in xfers]
         aux_xfers.extend(sidecar_xfers)
         return self.cache_controller.write(
@@ -8230,30 +8244,33 @@ class UnifiedRadixCache(BasePrefixCache):
         included)."""
         cc = self.cache_controller
         if self._drain_write_through_depth:
-            # Re-entered from an ack callback: the enclosing drain owns this
-            # round; acking again would double-claim the same generation.
-            logger.warning(
-                "skipping re-entered _drain_write_through_acks; the "
-                "enclosing drain owns this round"
-            )
+            # Re-entered from an ACK callback: the enclosing drain owns this
+            # round. Defer one more nonblocking pass so newly enqueued ACKs are
+            # consumed only after the current generation is fully processed.
+            self._drain_write_through_retry_pending = True
             return
         self._drain_write_through_depth += 1
         try:
-            # Claim the whole generation up front so every ack is popped
-            # exactly once before its callback runs; acks enqueued by the
-            # callbacks wait for the next round instead of being drained
-            # again here.
-            batch = list(cc.ack_write_queue)
-            cc.ack_write_queue.clear()
-            for ack in batch:
-                ack.finish_event.synchronize()
-                acked = False
-                for ack_id in ack.node_ids:
-                    if ack_id in self.ongoing_write_through:
-                        self._finish_write_through_ack(ack_id)
-                        acked = True
-                if acked:
-                    self._log_write_ack_metrics(ack)
+            while True:
+                if not cc.ack_write_queue:
+                    break
+                # Claim the whole generation up front so every ack is popped
+                # exactly once before its callback runs; callbacks may request
+                # another pass, but cannot consume this generation again.
+                self._drain_write_through_retry_pending = False
+                batch = list(cc.ack_write_queue)
+                cc.ack_write_queue.clear()
+                for ack in batch:
+                    ack.finish_event.synchronize()
+                    acked = False
+                    for ack_id in ack.node_ids:
+                        if ack_id in self.ongoing_write_through:
+                            self._finish_write_through_ack(ack_id)
+                            acked = True
+                    if acked:
+                        self._log_write_ack_metrics(ack)
+                if not self._drain_write_through_retry_pending:
+                    break
         finally:
             self._drain_write_through_depth -= 1
 

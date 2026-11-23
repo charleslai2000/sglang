@@ -248,6 +248,9 @@ class WorkloadGenerator:
 
         self.sent_requests = 0
         self.completed_requests = 0
+        self.failed_requests = 0
+        self.request_failed = threading.Event()
+        self.client_failures = set()
 
         # Resolve per-client round counts
         min_rounds = args.min_rounds
@@ -448,6 +451,11 @@ class WorkloadGenerator:
     def request_sender(self):
         async def request_loop():
             while True:
+                if self.request_failed.is_set():
+                    if self.completed_requests >= self.sent_requests:
+                        break
+                    await asyncio.sleep(0.05)
+                    continue
                 if self.sent_requests - self.completed_requests < self.max_parallel:
                     new_request = self.ready_queue.pop()
                     if new_request:
@@ -489,7 +497,14 @@ class WorkloadGenerator:
                 )  # Block until response is available
                 if not response.success:
                     print(f"Request failed for client {client_id}: {response.error}")
+                    self.failed_requests += 1
+                    self.client_failures.add(client_id)
+                    self.request_failed.set()
                     self.completed_requests += 1
+                    if self.completed_requests >= self.sent_requests:
+                        if self.finished_time is None:
+                            self.finished_time = time.perf_counter()
+                        break
                     continue
                 # Extend history with response
                 if self.api_format == "openai":
@@ -536,7 +551,10 @@ class WorkloadGenerator:
                 self.completed_requests += 1
 
                 client_total = self.client_records[client_id]["total_rounds"]
-                if self.client_records[client_id]["round"] < client_total:
+                if (
+                    client_id not in self.client_failures
+                    and self.client_records[client_id]["round"] < client_total
+                ):
                     if self.fixed_history_tokens:
                         index = self.sub_question_offsets[client_id] + current_round
                         sub_q = self.sub_question_inputs[
@@ -597,7 +615,19 @@ class WorkloadGenerator:
                         current_barrier_round += 1
                         barrier_round_completed = 0
             except queue.Empty:
-                if self.pbar.n == self.pbar.total:
+                if (
+                    self.request_failed.is_set()
+                    and self.completed_requests >= self.sent_requests
+                ):
+                    if self.finished_time is None:
+                        self.finished_time = time.perf_counter()
+                    break
+                if (
+                    self.pbar.n == self.pbar.total
+                    and self.completed_requests >= self.sent_requests
+                ):
+                    if self.finished_time is None:
+                        self.finished_time = time.perf_counter()
                     break
             except ValueError as e:
                 print(f"Error processing response for client {client_id}: {e}")
@@ -624,7 +654,9 @@ class WorkloadGenerator:
         response_thread.join()
         self.pbar.close()
 
-        duration = self.finished_time - self.start_time
+        if self.finished_time is None:
+            self.finished_time = time.perf_counter()
+        duration = max(self.finished_time - self.start_time, 1e-9)
         sorted_ttft = sorted(self.performance_metrics["ttft"])
         sorted_latency = sorted(self.performance_metrics["latency"])
         sorted_itl = sorted(self.performance_metrics["itl"])
@@ -662,8 +694,12 @@ class WorkloadGenerator:
                 "p99_prompt_len": percentile(sorted_prompt_len, 0.99),
                 "p90_output_len": percentile(sorted_output_len, 0.9),
                 "p99_output_len": percentile(sorted_output_len, 0.99),
-                "average_ttft": sum(self.performance_metrics["ttft"])
-                / len(self.performance_metrics["ttft"]),
+                "average_ttft": (
+                    sum(self.performance_metrics["ttft"])
+                    / len(self.performance_metrics["ttft"])
+                    if self.performance_metrics["ttft"]
+                    else 0.0
+                ),
                 "p90_ttft": percentile(sorted_ttft, 0.9),
                 "p99_ttft": percentile(sorted_ttft, 0.99),
                 "median_ttft": percentile(sorted_ttft, 0.5),
@@ -678,8 +714,12 @@ class WorkloadGenerator:
                 "p99_itl": percentile(sorted_itl, 0.99),
                 "median_itl": percentile(sorted_itl, 0.5),
                 "max_itl": max_or_zero(sorted_itl),
-                "average_latency": sum(self.performance_metrics["latency"])
-                / len(self.performance_metrics["latency"]),
+                "average_latency": (
+                    sum(self.performance_metrics["latency"])
+                    / len(self.performance_metrics["latency"])
+                    if self.performance_metrics["latency"]
+                    else 0.0
+                ),
                 "p90_latency": percentile(sorted_latency, 0.9),
                 "p99_latency": percentile(sorted_latency, 0.99),
                 "median_latency": percentile(sorted_latency, 0.5),
@@ -790,6 +830,9 @@ class WorkloadGenerator:
                     else:
                         print(f"  Round {round_num}: No requests completed")
 
+        performance_data["summary"]["failed_requests"] = self.failed_requests
+        performance_data["summary"]["completed_requests"] = self.completed_requests
+        performance_data["summary"]["duration_seconds"] = duration
         return performance_data
 
 

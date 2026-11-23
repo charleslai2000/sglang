@@ -110,6 +110,50 @@ class TestAckDrainReclaim(unittest.TestCase):
             self.assertEqual(shim.drain_and_reclaim(4095), 0)
         self.assertEqual(shim.evict_calls, [])
 
+    def test_ack_reentry_defers_new_generation_without_double_consumption(self):
+        from types import SimpleNamespace
+
+        class AckCache:
+            _drain_write_through_acks = UnifiedRadixCache._drain_write_through_acks
+
+            def __init__(self):
+                self.cache_controller = SimpleNamespace(ack_write_queue=[])
+                self._drain_write_through_depth = 0
+                self._drain_write_through_retry_pending = False
+                self.ongoing_write_through = {1: object(), 2: object()}
+                self.finished = []
+
+            def _finish_write_through_ack(self, ack_id):
+                self.finished.append(ack_id)
+                self.ongoing_write_through.pop(ack_id)
+                if ack_id == 1:
+                    # A nested request during callback must schedule a later
+                    # generation, not consume the active generation twice.
+                    self.cache_controller.ack_write_queue.append(
+                        SimpleNamespace(
+                            finish_event=SimpleNamespace(synchronize=lambda: None),
+                            node_ids=[2],
+                        )
+                    )
+                    self._drain_write_through_acks()
+
+            def _log_write_ack_metrics(self, ack):
+                pass
+
+        cache = AckCache()
+        cache.cache_controller.ack_write_queue = [
+            SimpleNamespace(
+                finish_event=SimpleNamespace(synchronize=lambda: None),
+                node_ids=[1],
+            )
+        ]
+        cache._drain_write_through_acks()
+
+        self.assertEqual(cache.finished, [1, 2])
+        self.assertEqual(cache.cache_controller.ack_write_queue, [])
+        self.assertEqual(cache.ongoing_write_through, {})
+        self.assertEqual(cache._drain_write_through_depth, 0)
+
 
 if __name__ == "__main__":
     unittest.main()
@@ -147,6 +191,48 @@ class TestBackupShortfall(unittest.TestCase):
         from sglang.srt.mem_cache.unified_radix_cache import _backup_shortfall
 
         self.assertEqual(_backup_shortfall(100, 5000, 1024), 1024)
+
+    def test_backup_reclaim_rechecks_actual_capacity_before_rejecting(self):
+        cache = mock.Mock()
+        cache._host_writeback_floor.return_value = 100
+        cache.cache_controller.mem_pool_host.available_size.side_effect = [
+            100,
+            900,
+        ]
+        cache._execute_kv_backup = UnifiedRadixCache._execute_kv_backup.__get__(
+            cache, UnifiedRadixCache
+        )
+        cache.evict_host.return_value = 800
+        cache.cache_controller.write.return_value = "written"
+
+        result = cache._execute_kv_backup(7, [0] * 500, {}, [])
+
+        self.assertEqual(result, "written")
+        cache.evict_host.assert_called_once_with(500)
+        cache.drain_storage_control_queues_local.assert_not_called()
+        cache.cache_controller.write.assert_called_once()
+
+    def test_backup_recomputes_shortfall_after_ack_drain(self):
+        cache = mock.Mock()
+        cache._host_writeback_floor.return_value = 100
+        cache.cache_controller.mem_pool_host.available_size.side_effect = [
+            100,
+            100,
+            300,
+            700,
+        ]
+        cache._execute_kv_backup = UnifiedRadixCache._execute_kv_backup.__get__(
+            cache, UnifiedRadixCache
+        )
+        cache.evict_host.side_effect = [0, 300]
+        cache.cache_controller.write.return_value = "written"
+
+        result = cache._execute_kv_backup(7, [0] * 500, {}, [])
+
+        self.assertEqual(result, "written")
+        cache.drain_storage_control_queues_local.assert_called_once()
+        cache.evict_host.assert_has_calls([mock.call(500), mock.call(300)])
+        cache.cache_controller.write.assert_called_once()
 
 
 if __name__ == "__main__":
