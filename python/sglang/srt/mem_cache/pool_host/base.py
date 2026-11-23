@@ -292,6 +292,7 @@ class HostKVCache(abc.ABC):
         io_backend,
         *,
         is_draft: bool = False,
+        device_layer_id: Optional[int] = None,
     ) -> None:
         """
         Load KV data from the host memory pool to the device memory pool for a specific layer.

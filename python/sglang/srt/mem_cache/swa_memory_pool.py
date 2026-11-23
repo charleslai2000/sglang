@@ -42,6 +42,9 @@ class SWAKVPool(BaseSWAKVPool):
         swa_kv_pool_class: Optional[type] = None,
         full_kv_pool_kwargs: Optional[dict] = None,
         swa_kv_pool_kwargs: Optional[dict] = None,
+        logical_layers_mapping: Optional[Dict[int, Tuple[int, bool]]] = None,
+        full_owner_layer_ids: Optional[List[int]] = None,
+        swa_owner_layer_ids: Optional[List[int]] = None,
         **kwargs,
     ):
         self.size = size
@@ -52,7 +55,29 @@ class SWAKVPool(BaseSWAKVPool):
         self.device = device
         self.swa_layer_nums = len(swa_attention_layer_ids)
         self.full_layer_nums = len(full_attention_layer_ids)
-        self.layer_num = self.full_layer_nums + self.swa_layer_nums
+        self.full_owner_layer_ids = list(
+            full_owner_layer_ids
+            if full_owner_layer_ids is not None
+            else full_attention_layer_ids
+        )
+        self.swa_owner_layer_ids = list(
+            swa_owner_layer_ids
+            if swa_owner_layer_ids is not None
+            else swa_attention_layer_ids
+        )
+        self._compact_full_index = {
+            layer_id: index
+            for index, layer_id in enumerate(self.full_owner_layer_ids)
+        }
+        self._compact_swa_index = {
+            layer_id: index
+            for index, layer_id in enumerate(self.swa_owner_layer_ids)
+        }
+        self.layer_num = (
+            max(logical_layers_mapping) + 1
+            if logical_layers_mapping
+            else self.full_layer_nums + self.swa_layer_nums
+        )
         self.start_layer = 0
         self.page_size = page_size
         self.layer_transfer_counter = None
@@ -92,13 +117,13 @@ class SWAKVPool(BaseSWAKVPool):
         self.full_kv_pool = full_kv_pool_class(
             size=size,
             dtype=dtype,
-            layer_num=self.full_layer_nums,
+            layer_num=len(self.full_owner_layer_ids),
             **full_kv_pool_kwargs,
         )
         self.swa_kv_pool = swa_kv_pool_class(
             size=size_swa,
             dtype=dtype,
-            layer_num=self.swa_layer_nums,
+            layer_num=len(self.swa_owner_layer_ids),
             **swa_kv_pool_kwargs,
         )
         self.dsa_kv_cache_store_fp8 = False
@@ -110,11 +135,31 @@ class SWAKVPool(BaseSWAKVPool):
         if isinstance(self.full_kv_pool, DSATokenToKVPool):
             self.index_head_dim = self.full_kv_pool.index_head_dim
         # {layer_id: (index, is_swa_layer)}
-        self.layers_mapping: Dict[int, Tuple[int, bool]] = {}
-        for full_attn_layer_id, global_layer_id in enumerate(full_attention_layer_ids):
-            self.layers_mapping[global_layer_id] = (full_attn_layer_id, False)
-        for swa_layer_id, global_layer_id in enumerate(swa_attention_layer_ids):
-            self.layers_mapping[global_layer_id] = (swa_layer_id, True)
+        # Map every logical attention layer to a compact physical owner index.
+        self.layers_mapping: Dict[int, Tuple[int, bool]] = (
+            dict(logical_layers_mapping) if logical_layers_mapping is not None else {}
+        )
+        if logical_layers_mapping is None:
+            for full_attn_layer_id, global_layer_id in enumerate(full_attention_layer_ids):
+                self.layers_mapping[global_layer_id] = (full_attn_layer_id, False)
+            for swa_layer_id, global_layer_id in enumerate(swa_attention_layer_ids):
+                self.layers_mapping[global_layer_id] = (swa_layer_id, True)
+        self._logical_owner_ids = {}
+        self._transfer_owner_ids = {}
+        owner_transfer_id = {
+            layer_id: index
+            for index, layer_id in enumerate(
+                [*self.full_owner_layer_ids, *self.swa_owner_layer_ids]
+            )
+        }
+        for logical_id, (physical_id, is_swa) in self.layers_mapping.items():
+            owner_ids = self.swa_owner_layer_ids if is_swa else self.full_owner_layer_ids
+            if 0 <= physical_id < len(owner_ids):
+                owner_logical_id = owner_ids[physical_id]
+                self._logical_owner_ids[logical_id] = owner_logical_id
+                self._logical_owner_ids[owner_logical_id] = owner_logical_id
+                self._transfer_owner_ids[logical_id] = owner_transfer_id[owner_logical_id]
+                self._transfer_owner_ids[owner_logical_id] = owner_transfer_id[owner_logical_id]
         self.full_to_swa_index_mapping: Optional[torch.Tensor] = None
 
         k_size, v_size = self.get_kv_size_bytes()
@@ -154,7 +199,11 @@ class SWAKVPool(BaseSWAKVPool):
 
     def _wait_for_layer(self, layer_id: int):
         if self.layer_transfer_counter is not None:
-            self.layer_transfer_counter.wait_until(layer_id - self.start_layer)
+            mapping = self.layers_mapping.get(layer_id)
+            if mapping is None:
+                raise KeyError(f"No physical KV owner mapped for logical layer {layer_id}")
+            owner_transfer_id = self._transfer_owner_ids[layer_id]
+            self.layer_transfer_counter.wait_until(owner_transfer_id)
 
     def get_kv_size_bytes(self):
         def split_size(pool):

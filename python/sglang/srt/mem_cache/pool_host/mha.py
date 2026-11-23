@@ -57,7 +57,6 @@ if _is_cuda or _is_hip:
         transfer_kv_per_layer_direct_pf_lf,
         transfer_kv_per_layer_mla,
         transfer_kv_per_layer_mla_pf_lf,
-        transfer_kv_per_layer_pf_lf,
         transfer_kv_per_layer_ph_lf,
     )
 if _is_npu:
@@ -86,6 +85,21 @@ class MHATokenToKVPoolHost(HostKVCache):
     ):
         self.mtp_draft_device_pools = tuple(mtp_draft_device_pools)
         self.target_layer_num = device_pool.layer_num
+        self.logical_owner_layer_ids = list(
+            getattr(device_pool, "logical_owner_layer_ids", range(device_pool.layer_num))
+        )
+        self.physical_layer_num = len(self.logical_owner_layer_ids)
+        self.physical_to_logical_layer = {
+            physical: logical
+            for physical, logical in enumerate(self.logical_owner_layer_ids)
+        }
+        self.logical_to_device_physical_layer = getattr(
+            device_pool, "_hicache_logical_to_physical", self.logical_to_physical_layer
+        )
+        self.logical_to_physical_layer = {
+            logical: physical
+            for physical, logical in self.physical_to_logical_layer.items()
+        }
         super().__init__(
             device_pool,
             host_to_device_ratio,
@@ -153,7 +167,7 @@ class MHATokenToKVPoolHost(HostKVCache):
     def get_size_per_token(self):
         self.head_num = self.device_pool.head_num
         self.head_dim = self.device_pool.head_dim
-        self.layer_num = self.target_layer_num + len(self.mtp_draft_device_pools)
+        self.layer_num = self.physical_layer_num + len(self.mtp_draft_device_pools)
         return self.head_dim * self.head_num * self.layer_num * self.dtype.itemsize * 2
 
     def get_ksize_per_token(self):
@@ -247,15 +261,28 @@ class MHATokenToKVPoolHost(HostKVCache):
         io_backend,
         *,
         is_draft: bool = False,
+        device_layer_id: Optional[int] = None,
     ):
         if self.device_pool is not None:
-            if not is_draft and not self._is_device_layer_owned(device_pool, layer_id):
+            physical_device_layer = (
+                device_layer_id
+                if device_layer_id is not None
+                else self.logical_to_device_physical_layer.get(layer_id, layer_id)
+            )
+            if not is_draft and not self._is_device_layer_owned(
+                device_pool, physical_device_layer
+            ):
                 return
             # MTP draft layers do not participate in CP layer sharding.
             host_layer_id = layer_id if is_draft else self._host_layer_index(layer_id)
-            device_layer_id = 0 if is_draft else layer_id
+            if device_layer_id is None:
+                device_layer_id = (
+                    0 if is_draft else self.logical_to_device_physical_layer.get(layer_id, layer_id)
+                )
         else:
-            host_layer_id = device_layer_id = layer_id
+            host_layer_id = layer_id
+            if device_layer_id is None:
+                device_layer_id = layer_id
 
         if io_backend == "kernel":
             if self.layout == "layer_first":
@@ -376,6 +403,20 @@ class MHATokenToKVPoolHost(HostKVCache):
                 self.packed_device_v_data_ptrs,
                 self.packed_device_k_buffers,
                 self.packed_device_v_buffers,
+            )
+        if hasattr(device_pool, "logical_owner_layer_ids"):
+            logical_to_physical = device_pool._hicache_logical_to_physical
+            logical_ids = device_pool.logical_owner_layer_ids
+            indices = torch.tensor(
+                [logical_to_physical[layer_id] for layer_id in logical_ids],
+                dtype=torch.long,
+                device=device_pool.device,
+            )
+            return (
+                device_pool.k_data_ptrs[indices],
+                device_pool.v_data_ptrs[indices],
+                [device_pool.k_buffer[i] for i in indices.tolist()],
+                [device_pool.v_buffer[i] for i in indices.tolist()],
             )
         return (
             device_pool.k_data_ptrs,

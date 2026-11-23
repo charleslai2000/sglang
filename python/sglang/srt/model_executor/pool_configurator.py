@@ -454,6 +454,27 @@ class HybridSWAPoolConfigurator(MemoryPoolConfigurator):
             self._swa_layers_num > 0
         ), "Hybrid SWA model must have at least one SWA layer"
 
+        self._gemma_owner_layout = None
+        architectures = getattr(model_config.hf_config, "architectures", ()) or ()
+        if any("Gemma4" in architecture for architecture in architectures):
+            from sglang.srt.mem_cache.gemma_kv_owners import gemma4_kv_owner_layout
+
+            self._gemma_owner_layout = gemma4_kv_owner_layout(model_config)
+            if self._gemma_owner_layout is not None:
+                _, full_owners, swa_owners = self._gemma_owner_layout
+                self._full_layers_num = len(full_owners)
+                self._swa_layers_num = len(swa_owners)
+                window = int(model_config.sliding_window_size or 0)
+                page_size = int(kvc.page_size)
+                eviction_interval = max(1, envs.SGLANG_SWA_EVICTION_INTERVAL.get())
+                chunk_size = max(0, int(get_schedule().chunked_prefill_size or 0))
+                running = int(get_schedule().max_running_requests or 1)
+                self._gemma_swa_cap = (
+                    running * (window + eviction_interval + page_size)
+                    + 2 * chunk_size
+                    + page_size
+                )
+
         self._swa_full_tokens_ratio = get_schedule().swa_full_tokens_ratio
         self._sliding_window_size = kvc.sliding_window_size
         self._page_size = kvc.page_size
@@ -622,12 +643,42 @@ class HybridSWAPoolConfigurator(MemoryPoolConfigurator):
     def calculate_pool_sizes(
         self, available_bytes: int, page_size: int
     ) -> MemoryPoolConfig:
+        if self._gemma_owner_layout is not None:
+            swa_tokens = ceil_align(self._gemma_swa_cap, page_size)
+            swa_bytes = swa_tokens * self._swa_per_token * self._swa_layers_num
+            full_cell_bytes = self._full_per_token * self._full_layers_num
+            full_tokens = max(0, (available_bytes - swa_bytes) // full_cell_bytes)
+            full_tokens = (full_tokens // page_size) * page_size
+            if full_tokens <= 0:
+                raise RuntimeError("Gemma4 SWA reservation leaves no Full KV capacity")
+            logger.info(
+                "Gemma4 owner KV sizing: physical_full_layers=%d "
+                "physical_swa_layers=%d swa_working_set_tokens=%d",
+                self._full_layers_num,
+                self._swa_layers_num,
+                swa_tokens,
+            )
+            return MemoryPoolConfig(
+                max_total_num_tokens=full_tokens,
+                full_max_total_num_tokens=full_tokens,
+                swa_max_total_num_tokens=swa_tokens,
+            )
         max_total_num_tokens = int(available_bytes // self._cell_size)
         return self._solve_pool_sizes(max_total_num_tokens, page_size)
 
     def calculate_pool_sizes_from_max_tokens(
         self, max_total_num_tokens: int, page_size: int
     ) -> MemoryPoolConfig:
+        if self._gemma_owner_layout is not None:
+            full_tokens = (max_total_num_tokens // page_size) * page_size
+            swa_tokens = min(
+                ceil_align(self._gemma_swa_cap, page_size), full_tokens
+            )
+            return MemoryPoolConfig(
+                max_total_num_tokens=full_tokens,
+                full_max_total_num_tokens=full_tokens,
+                swa_max_total_num_tokens=swa_tokens,
+            )
         return self._solve_pool_sizes(max_total_num_tokens, page_size)
 
 

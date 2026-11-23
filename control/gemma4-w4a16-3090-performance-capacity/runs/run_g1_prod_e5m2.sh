@@ -46,9 +46,10 @@ with open(sys.argv[2], "w") as stream:
     stream.write("\n")
 print(json.dumps(identity, sort_keys=True))
 PY
-: "${G1_PROD_KV:=fp8_e5m2}"; : "${G1_PROD_CONTEXT:=8192}"; : "${G1_PROD_MAX_RUNNING:=32}"; : "${G1_PROD_MAX_TOTAL_TOKENS:=262144}"; : "${G1_PROD_MEM_FRACTION:=.94}"; : "${G1_PROD_GRAPH_BS:=32}"; : "${G1_PROD_RADIX:=on}"; : "${G1_PROD_HICACHE:=off}"; : "${G1_PROD_HICACHE_SIZE:=1}"; : "${G1_PROD_L3_DIR:=$OUT/l3-extent}"
+: "${G1_PROD_KV:=fp8_e5m2}"; : "${G1_PROD_CONTEXT:=8192}"; : "${G1_PROD_MAX_RUNNING:=32}"; : "${G1_PROD_MAX_TOTAL_TOKENS:=}"; : "${G1_PROD_MEM_FRACTION:=.94}"; : "${G1_PROD_GRAPH_BS:=32}"; : "${G1_PROD_RADIX:=on}"; : "${G1_PROD_HICACHE:=off}"; : "${G1_PROD_HICACHE_SIZE:=1}"; : "${G1_PROD_L3_DIR:=$OUT/l3-extent}"
 : "${G1_PROD_EXTENT_SIZE:=67108864}"; : "${G1_PROD_EXTENT_FILE_SIZE:=4294967296}"; : "${G1_PROD_EXTENT_MAX_SIZE:=$G1_PROD_EXTENT_FILE_SIZE}"; : "${G1_PROD_EXTENT_MIN_FREE_SPACE:=10737418240}"
-ARGS=(--model-path "$MODEL" --trust-remote-code --host 127.0.0.1 --port "$PORT" --context-length "$G1_PROD_CONTEXT" --max-running-requests "$G1_PROD_MAX_RUNNING" --max-total-tokens "$G1_PROD_MAX_TOTAL_TOKENS" --mem-fraction-static "$G1_PROD_MEM_FRACTION" --kv-cache-dtype "$G1_PROD_KV" --attention-backend triton --cuda-graph-backend-decode full --cuda-graph-max-bs-decode "$G1_PROD_GRAPH_BS" --log-level info --enable-metrics)
+ARGS=(--model-path "$MODEL" --trust-remote-code --host 127.0.0.1 --port "$PORT" --context-length "$G1_PROD_CONTEXT" --max-running-requests "$G1_PROD_MAX_RUNNING" --mem-fraction-static "$G1_PROD_MEM_FRACTION" --kv-cache-dtype "$G1_PROD_KV" --attention-backend triton --cuda-graph-backend-decode full --cuda-graph-max-bs-decode "$G1_PROD_GRAPH_BS" --log-level info --enable-metrics)
+[[ -z "$G1_PROD_MAX_TOTAL_TOKENS" ]] || ARGS+=(--max-total-tokens "$G1_PROD_MAX_TOTAL_TOKENS")
 if [[ ${G1_PROD_EXPORT_REQUEST_METRICS:-off} == on ]]; then ARGS+=(--export-metrics-to-file --export-metrics-to-file-dir "$OUT/request-metrics"); fi
 [[ $G1_PROD_RADIX == on ]] || ARGS+=(--disable-radix-cache)
 if [[ ${G1_PROD_WARMUP:-on} == off ]]; then ARGS+=(--skip-server-warmup); fi

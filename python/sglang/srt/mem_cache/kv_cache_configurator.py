@@ -1469,6 +1469,11 @@ class KVCacheConfigurator:
         )
         swa_attention_layer_ids = self.model_config.swa_attention_layer_ids
         full_attention_layer_ids = self.model_config.full_attention_layer_ids
+        gemma_owner_layout = None
+        if not self.is_hybrid_swa_mtp_draft:
+            from sglang.srt.mem_cache.gemma_kv_owners import gemma4_kv_owner_layout
+
+            gemma_owner_layout = gemma4_kv_owner_layout(self.model_config)
         if self.is_hybrid_swa_mtp_draft:
             if self.draft_swa_full_capacity:
                 # Route local MTP depths through the SWA ring pool.
@@ -1483,6 +1488,32 @@ class KVCacheConfigurator:
             if self.draft_swa_full_capacity
             else swa_max_total_num_tokens
         )
+        pool_kwargs = {}
+        if gemma_owner_layout is not None:
+            logical_mapping, full_owner_ids, swa_owner_ids = gemma_owner_layout
+            local_start, local_end = self.layer_info.start_layer, self.layer_info.end_layer
+            full_owner_ids = [x for x in full_owner_ids if local_start <= x < local_end]
+            swa_owner_ids = [x for x in swa_owner_ids if local_start <= x < local_end]
+            full_owner_index = {x: i for i, x in enumerate(full_owner_ids)}
+            swa_owner_index = {x: i for i, x in enumerate(swa_owner_ids)}
+            full_global_owners = gemma_owner_layout[1]
+            swa_global_owners = gemma_owner_layout[2]
+            logical_mapping = {
+                layer_id: (
+                    full_owner_index[full_global_owners[physical_id]], False
+                ) if not is_swa else (
+                    swa_owner_index[swa_global_owners[physical_id]], True
+                )
+                for layer_id, (physical_id, is_swa) in logical_mapping.items()
+                if local_start <= layer_id < local_end
+            }
+            full_attention_layer_ids = full_owner_ids
+            swa_attention_layer_ids = swa_owner_ids
+            pool_kwargs = {
+                "logical_layers_mapping": logical_mapping,
+                "full_owner_layer_ids": full_owner_ids,
+                "swa_owner_layer_ids": swa_owner_ids,
+            }
         token_to_kv_pool = SWAKVPool(
             size=full_max_total_num_tokens,
             size_swa=size_swa,
@@ -1498,6 +1529,7 @@ class KVCacheConfigurator:
             device=self.device,
             enable_kv_cache_copy=(get_spec().speculative_algorithm is not None),
             token_to_kv_pool_class=swa_pool_class,
+            **pool_kwargs,
             **kwargs,
         )
         return token_to_kv_pool

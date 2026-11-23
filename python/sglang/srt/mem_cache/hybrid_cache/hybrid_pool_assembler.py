@@ -72,10 +72,10 @@ def _evict_mamba_for_device_alloc(cache: UnifiedRadixCache, required_size: int) 
 
 
 def _make_layer_mapper(
-    layer_mapping: dict[int, int],
+    layer_mapping: dict[int, Any],
     transfer_layer_num: int,
-) -> Callable[[int], Optional[int]]:
-    def mapper(layer_id: int) -> Optional[int]:
+) -> Callable[[int], Any]:
+    def mapper(layer_id: int) -> Any:
         if not 0 <= layer_id < transfer_layer_num:
             return None
         return layer_mapping.get(layer_id)
@@ -1321,11 +1321,30 @@ class _MambaStrategy(StackStrategy):
         )
 
 
-def _swa_layer_mappings(kvcache) -> tuple[dict[int, int], dict[int, int]]:
+def _swa_layer_mappings(kvcache) -> tuple[dict[int, Any], dict[int, Any]]:
+    if not hasattr(kvcache, "full_owner_layer_ids"):
+        full = {
+            gid: lid
+            for gid, (lid, is_swa) in kvcache.layers_mapping.items()
+            if not is_swa
+        }
+        swa = {
+            gid: lid
+            for gid, (lid, is_swa) in kvcache.layers_mapping.items()
+            if is_swa
+        }
+        return full, swa
+    # Completion IDs are flattened owner indices: Full, then SWA. Each
+    # component's Host and device layers use compact local indices.
+    full_owner_ids = list(kvcache.full_owner_layer_ids)
+    swa_owner_ids = list(kvcache.swa_owner_layer_ids)
     full = {
-        gid: lid for gid, (lid, is_swa) in kvcache.layers_mapping.items() if not is_swa
+        index: (index, index) for index in range(len(full_owner_ids))
     }
-    swa = {gid: lid for gid, (lid, is_swa) in kvcache.layers_mapping.items() if is_swa}
+    swa = {
+        len(full_owner_ids) + index: (index, index)
+        for index in range(len(swa_owner_ids))
+    }
     return full, swa
 
 
@@ -1357,6 +1376,23 @@ class _SwaStrategy(StackStrategy):
         enable_storage_metrics=False,
     ):
         full_layer_mapping, swa_layer_mapping = _swa_layer_mappings(kvcache)
+        if hasattr(kvcache, "full_owner_layer_ids"):
+            # Isolate owner-only pages from legacy logical-layer Extent data.
+            model_name = f"{model_name or 'gemma4'}-kv-owner-v1"
+            kvcache.full_kv_pool.logical_owner_layer_ids = list(
+                kvcache.full_owner_layer_ids
+            )
+            kvcache.swa_kv_pool.logical_owner_layer_ids = list(
+                kvcache.swa_owner_layer_ids
+            )
+            kvcache.full_kv_pool._hicache_logical_to_physical = {
+                layer_id: index
+                for index, layer_id in enumerate(kvcache.full_owner_layer_ids)
+            }
+            kvcache.swa_kv_pool._hicache_logical_to_physical = {
+                layer_id: index
+                for index, layer_id in enumerate(kvcache.swa_owner_layer_ids)
+            }
         host_pool_group, cache_controller = build_hybrid_swa_stack(
             params=params,
             server_args=server_args,
@@ -1381,8 +1417,8 @@ class _SwaStrategy(StackStrategy):
                 ComponentType.FULL: host_pool_group.get_pool(PoolName.KV),
                 ComponentType.SWA: host_pool_group.get_pool(PoolName.SWA),
             },
-            transfer_layer_num=len(full_layer_mapping | swa_layer_mapping),
-            pools_desc="Full + SWA",
+            transfer_layer_num=len(full_layer_mapping) + len(swa_layer_mapping),
+            pools_desc="Full + SWA (physical KV owners)",
         )
 
 

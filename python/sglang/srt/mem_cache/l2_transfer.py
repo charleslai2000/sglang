@@ -87,12 +87,16 @@ class L2TransferEngine:
             ack_start.record()
             for layer_id in range(layer_num):
                 for transfer in transfers:
-                    local_layer_id = (
+                    mapped_layer = (
                         transfer.layer_mapper(layer_id)
                         if transfer.layer_mapper is not None
                         else layer_id
                     )
-                    if local_layer_id is None or (
+                    if isinstance(mapped_layer, tuple):
+                        local_layer_id, device_layer_id = mapped_layer
+                    else:
+                        local_layer_id, device_layer_id = mapped_layer, layer_id
+                    if local_layer_id is None or device_layer_id is None or (
                         transfer is not primary
                         and transfer.layer_mapper is None
                         and layer_id >= transfer.host_pool.layer_num
@@ -105,6 +109,7 @@ class L2TransferEngine:
                         local_layer_id,
                         self.io_backend,
                         is_draft=transfer.is_draft,
+                        device_layer_id=device_layer_id,
                     )
                 if on_layer_done is not None:
                     on_layer_done(layer_id)
