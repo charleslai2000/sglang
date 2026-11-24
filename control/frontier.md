@@ -5,14 +5,17 @@
   - frontier: 用户确认接受约0.91pp GSM8K损失并关闭数值专项；既有E5M2/eager/Decode Graph证据保留，不再扩充数值对照。
   - task: control/gemma4-w4a16-3090-performance-capacity/tasks/T004-bos-e5m2-and-numerical-closure.md
 
-## gemma4-g1-hicache-tier-lifecycle-20261119
-- T001-deterministic-tier-lifecycle Gemma4 deterministic HiCache L1/L2/L3 lifecycle and Frontier recovery — ACTIVE
-  - frontier: Authorized pressure is max-total 139264 / HiCache 8 decimal GB / fresh Extent 32 GiB (startup-only Host Full/SWA 186012/148810 > GPU 139264/111411). Offline runner/wrapper edits now preserve one service, gate per-RID source/Extent/ready/Decode, require a real Radix trace, and order Frontier records; 7 CPU evidence tests, syntax, fixture and diff checks pass. No generation workload has run. Next finish offline phase/cleanup validation, then resource checks and bounded pressure qualification; keep production C32 separate.
-  - task: control/gemma4-g1-hicache-tier-lifecycle-20261119/tasks/T001-deterministic-tier-lifecycle.md
+## gemma4-g5-owner-only-capacity-performance
+- T006-g5-live-capacity-throughput Gemma4 Owner-only FP8 E5M2真实服务容量与吞吐优化 — ACTIVE
+  - frontier: 唯一当前主线。复用 r12/r15 已完成的真实服务结果与 r38 pool/Host 32-slot roundtrip（不重跑）；解除 139264-token 与 C-8 no-repeat 旧限制。直接启动当前 worktree 的真实 Gemma4 服务，实测并调优最大安全 Full/SWA KV 容量、32K C32 batch/GPU duty/TPS及真实负载 L1/L2/L3 恢复，最后运行原始 40×20/800。任何代码修复须针对服务中观察到的具体错误。完成后提交仅相关代码/控制变更并推送。
+  - task: control/gemma4-w4a16-3090-performance-capacity/tasks/T006-g5-live-capacity-throughput.md
 
-## gemma4-g1-prod-e5m2
-- T005-e5m2-production-readiness Gemma4 W4A16 + E5M2 KV修正生产就绪验收 — ACTIVE
-  - frontier: 2026-11-17 核验成功C32逐请求source：shared prefix 63,488 tokens均L1 device（host=0/storage=0）；789-event Trace见67 backup commits/131 TreeCore splits，但无host eviction，L3 `restore_backup`仅durability write，非GPU restore。idle sanity PASS并不满足分层恢复门。原失败source HEAD d7e092a，当前checkout db185be；成功runtime来自editable `/home/ubuntu/workspaces/3rdparty/sglang`，SOURCE_HEAD 4f41f5b且137 dirty paths、缓存核心有550行净改动；失败worktree已丢失，成功run source digest与当前文件不匹配。成功runtime包含后续生产变更7d4186945d/22eddb20f0，不能称差异只有diagnostics。P0-A仍历史NO-GO，P0-B未证实恢复。下一步若继续必须冻结runtime身份，真实触发Host压力/eviction、L2与L3 request-source restore→GPU→decode、Frontier waiter恢复，并保留C32 idle sanity；GO/NO-GO报告`runs/G1-P0-REAL-LIFECYCLE-20261117.md`。
+## Deferred Gemma4 qualifications
+- T001-deterministic-tier-lifecycle — DEFERRED
+  - frontier: 保留既有压力/生命周期结果；不再要求 139264-token 压力认证、独立逐层级/Frontier 认证或作为 T006 前置条件。仅当真实服务负载暴露与其直接相关的具体错误时恢复。
+  - task: control/gemma4-g1-hicache-tier-lifecycle-20261119/tasks/T001-deterministic-tier-lifecycle.md
+- T005-e5m2-production-readiness — DEFERRED
+  - frontier: 保留既有 E5M2 图形/并发/HiCache 历史证据；不再执行独立认证矩阵或将旧资格门作为 T006 前置条件。当前必要的真实负载 cache correctness 归入 T006。
   - task: control/gemma4-w4a16-3090-performance-capacity/tasks/T005-e5m2-production-readiness.md
 
 ## gemma4-w4a16-g1-baseline-restoration

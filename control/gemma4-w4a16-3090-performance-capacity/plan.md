@@ -1,5 +1,12 @@
 # Current plan
 
+## G5 Owner-only live capacity and throughput — sole active implementation
+
+User ruling (2026-11-24) supersedes older plan/report constraints. T006 is the only ACTIVE task: directly run the actual Gemma4 Owner-only FP8 E5M2 service; reuse r12/r15/r38 evidence; remove the prior 139,264-token artificial cap and C-8 no-repeat rule; size for measured safe capacity and SWA working set; optimize real 32K batch, GPU duty and throughput; verify tier correctness/restoration under that workload; then complete the original 40×20/800 test. No standalone bootstrap, fixture, byte audit or certification. Any code fix must be triggered by a concrete production-service error. Historical T001/T005 are DEFERRED and not prerequisites. Commit/push only related changes as they are verified.
+
+Current preflight at 2026-11-24T04:56Z: target process absent, RTX 3090 at 1 MiB/0%, port clear, project GPU lock free. Existing evidence to reuse: r12 32×32K returned 32/32 identical 16-token outputs under active CUDA Graph, with wall ~353s and 1.449 output tok/s (concurrency smoke, not throughput acceptance); r15 flush/L3 restore observed successful Extent read/1,519-token restore; r38 actual production pool/Host transfer class roundtrip passed 48 K/V owner records (32-slot fixture), not scheduler ACK or L3 proof. No independent reruns of these.
+
+
 ## G1 W4A16 + BF16-KV GSM8K restoration — in progress
 
 - Root cause of 67.93% baseline established: Gemma BOS=2 was omitted from every prompt because tokenizer config has `add_bos_token=false`. Custom adapter now explicitly prepends BOS; full same-checkpoint/backend/scorer BF16-KV run completed at **1,079/1,319 (81.804%)**, +183 answers / +13.874 pp. All prompts start BOS; 1,319 output IDs/text/stop/score joins independently verified; all stopped normally (1,297 Question, 22 EOS). Evidence `/data/sglang-hicache/gemma4/runs/20261115T-g1-bf16-gsm8k-explicit-bos/`; report `runs/G1-INITIAL-AUDIT-20261114.md`.
