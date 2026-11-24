@@ -5,10 +5,6 @@
   - frontier: 用户确认接受约0.91pp GSM8K损失并关闭数值专项；既有E5M2/eager/Decode Graph证据保留，不再扩充数值对照。
   - task: control/gemma4-w4a16-3090-performance-capacity/tasks/T004-bos-e5m2-and-numerical-closure.md
 
-## gemma4-g5-owner-only-capacity-performance
-- T006-g5-live-capacity-throughput Gemma4 Owner-only FP8 E5M2真实服务容量与吞吐优化 — ACTIVE
-  - frontier: 唯一当前主线。复用 r12/r15 已完成的真实服务结果与 r38 pool/Host 32-slot roundtrip（不重跑）；解除 139264-token 与 C-8 no-repeat 旧限制。直接启动当前 worktree 的真实 Gemma4 服务，实测并调优最大安全 Full/SWA KV 容量、32K C32 batch/GPU duty/TPS及真实负载 L1/L2/L3 恢复，最后运行原始 40×20/800。任何代码修复须针对服务中观察到的具体错误。完成后提交仅相关代码/控制变更并推送。
-  - task: control/gemma4-w4a16-3090-performance-capacity/tasks/T006-g5-live-capacity-throughput.md
 
 ## Deferred Gemma4 qualifications
 - T001-deterministic-tier-lifecycle — DEFERRED
