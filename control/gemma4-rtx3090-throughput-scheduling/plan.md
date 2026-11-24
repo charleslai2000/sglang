@@ -1,0 +1,19 @@
+# T007 current plan
+
+## Baseline and known facts
+
+T006 is DONE at commit `592c11061668e280d502239cfe156e6466d5bbba`; retain its accepted Owner-only W4A16 / FP8 E5M2 KV, fixed pool/resource budget, and cache features. The original C-8 run completed 800/800 requests in 1,703.385 s: 120.231 output tok/s, 6,191.906 logical input tok/s, and 0.46965 req/s. Observed pools: Full 1,443,024 slots, SWA 65,536 slots, ~1.37 GB post-allocation free; peaks Full/SWA 767,155/25,702, Host 876,808 tokens; GPU peak 23,931 MiB. These are measured outcomes, not safe-max guarantees. NVML mean/p95/max 18.47/97/100%. 211 logged decode batches used CUDA Graph, batch size 32 appeared 39 times, and logged prefill batch sequence counts 1/2/3 occurred 242/235/126 times (603 batches). Logged decode TPS is not end-to-end throughput. Detailed T006 record: `/data/sglang-hicache/gemma4/runs/20261124T-g5-live-capacity-65536/RESTORE-CLOSEOUT.md`.
+
+`SGLANG_ENABLE_METRICS_DEVICE_TIMER` defaults false in `python/sglang/srt/environ.py`; `MetricsReporter` binds DeviceTimer only when true, and the occupancy gauge remains NaN until timer intervals complete. C-8 start metrics contain NaN, while its preserved manifest/log has no record demonstrating the env was enabled. The C-8 evidence therefore does not tell whether this was an env activation issue or simply a first-window/measurement artifact. Verify actual child environment, imported source version, timer binding, logs and subsequent finite exported metrics before relying on this instrumentation.
+
+Historical Nsight/FPM patterns exist in `control/falcon-h1-3090-hicache-perf/runs/R17-20261012T0100Z/` and `control/queued-prefetch-host-ready/runs/T004-FALCON-20261016/`; adapt only the existing capture mechanics and ensure Gemma runtime/checkpoint/source identity. The named Gemma 8K profiler/convergence directories were searched but contain no reusable files in the current tree; do not infer evidence from directory names.
+
+## Decisive sequence
+
+1. Inspect C-8 raw request/perf, request metrics, server logs, launch args, model/runtime identity and current scheduler/PrefillAdder/HiCache source. Recompute accurate actual new Prefill tokens from per-batch `extend_lens`/request metrics (not logical prompt tokens); identify chunked-prefill, max-prefill, available Full/SWA charge and admission/denial evidence.
+2. Trace DeviceTimer activation through env import, scheduler construction/installation, forward contexts, reporter update cadence and Prometheus export. Reuse FPM/NVTX paths and a previously successful Nsight workflow; establish whether coverage perturbs workload. Capture a bounded representative window of the unchanged original C-8 fixture/load if prior records cannot answer phase attribution. No standalone benchmark framework.
+3. Join same-run time/token ledger: prefill GPU kernels, decode kernels, copy kernels, GPU busy union, inter-forward idle, host scheduler gaps, waits/denials, L1/L2/L3 hits/restores, and recomputed tokens. Keep union distinct from summed async kernel duration; identify exact measured intervals and uncertainty.
+4. Based on the demonstrated constraint, implement a narrow contract-compatible optimization or parameter change; if algorithm/ownership behavior must change, stop at the decision boundary and request that decision. Add targeted unit/regression tests.
+5. Run same load/configuration before/after with correctness and cache function intact. Report E2E/latency/batches/duty/union/cache sources; accept net gain only if workload and output checks pass. Record artifacts/trace identity and selectively commit/push changes.
+
+No change or workload rerun is authorized merely to produce an intermediate report; continue through analysis, implementation where justified, and final comparison. Do not repeat completed T006 KV correctness work.

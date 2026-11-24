@@ -1,5 +1,10 @@
 # Frontier
 
+## gemma4-rtx3090-throughput-scheduling
+- T007-gpu-throughput-scheduling Gemma4 RTX3090 GPU吞吐与调度性能优化 — ACTIVE
+  - frontier: 复用T006 C-8基线及已有DeviceTimer/FPM/NVTX/Nsight工具。先证明DeviceTimer在实际Gemma服务的env→import→scheduler绑定→GPU forward区间→metrics输出链路生效；再对未缓存Prefill、Decode、memcpy、GPU busy union/inter-forward gap、Scheduler/Radix/HiCache等待及admission拒绝做同一运行关联。基于证据优化后以相同800请求/资源/缓存功能对照验证。
+  - task: control/gemma4-rtx3090-throughput-scheduling/tasks/T007-gpu-throughput-scheduling.md
+
 ## gemma4-g1-e5m2-postbos-numerical-closure
 - T004-bos-e5m2-and-numerical-closure Gemma4 E5M2数值专项 — DONE
   - frontier: 用户确认接受约0.91pp GSM8K损失并关闭数值专项；既有E5M2/eager/Decode Graph证据保留，不再扩充数值对照。
