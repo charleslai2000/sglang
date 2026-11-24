@@ -444,6 +444,9 @@ class TestHiCacheStagedWriteBackDispatch(CustomTestCase):
             layer_num=layer_num,
             k_buffer=k_layers,
             v_buffer=v_layers,
+            device=torch.device("cpu"),
+            logical_owner_layer_ids=[2, 5],
+            _hicache_logical_to_physical={2: 0, 5: 1, 7: 0, 9: 1},
             k_data_ptrs=torch.tensor(
                 [layer.data_ptr() for layer in k_layers], dtype=torch.uint64
             ),
@@ -453,6 +456,9 @@ class TestHiCacheStagedWriteBackDispatch(CustomTestCase):
         )
 
         host = MHATokenToKVPoolHost.__new__(MHATokenToKVPoolHost)
+        host.device_pool = device_pool
+        host.logical_to_device_physical_layer = device_pool._hicache_logical_to_physical
+        host.physical_to_logical_layer = {0: 2, 1: 5}
         host.layout = "page_first"
         host.page_size = 1
         host.layer_num = layer_num
@@ -503,7 +509,7 @@ class TestHiCacheStagedWriteBackDispatch(CustomTestCase):
             )
             for layer in k_layers + v_layers:
                 layer.zero_()
-            for layer_id in range(layer_num):
+            for layer_id in (2, 5, 7, 9):
                 host.load_to_device_per_layer(
                     device_pool,
                     host_indices,
@@ -514,7 +520,7 @@ class TestHiCacheStagedWriteBackDispatch(CustomTestCase):
 
         self.assertEqual(staged.call_count, 1)
         self.assertEqual(fallback.call_count, 0)
-        self.assertEqual(load.call_count, layer_num)
+        self.assertEqual(load.call_count, 4)
         can_use_write_back_jit_kernel.assert_not_called()
         for layer_id in range(layer_num):
             self.assertTrue(

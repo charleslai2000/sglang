@@ -274,7 +274,15 @@ class MHATokenToKVPoolHost(HostKVCache):
             ):
                 return
             # MTP draft layers do not participate in CP layer sharding.
-            host_layer_id = layer_id if is_draft else self._host_layer_index(layer_id)
+            if is_draft:
+                host_layer_id = layer_id
+            elif hasattr(device_pool, "logical_owner_layer_ids"):
+                # Owner-only pools are physically compact: the logical layer
+                # (and its shared aliases) maps to the same physical index in
+                # both the device and host pool.
+                host_layer_id = physical_device_layer
+            else:
+                host_layer_id = self._host_layer_index(layer_id)
             if device_layer_id is None:
                 device_layer_id = (
                     0 if is_draft else self.logical_to_device_physical_layer.get(layer_id, layer_id)
