@@ -7663,6 +7663,22 @@ class TestResumableInsertWalkSWA(_InsertWalkSuite):
         components=(ComponentType.FULL, ComponentType.SWA), sliding_window_size=8
     )
 
+    def test_swa_host_backup_may_outlive_full_host_duplicate(self):
+        cache, allocator, req_to_token_pool = build_fixture(self.cfg)
+        self._insert(cache, allocator, req_to_token_pool, list(range(1, 17)))
+        node = cache.match_prefix(
+            MatchPrefixParams(key=RadixKey(array("q", list(range(1, 17))))),
+        ).last_device_node
+        self.assertIsNotNone(_device_value(cache, node, ComponentType.FULL))
+        self.assertIsNone(_host_value(cache, node, ComponentType.FULL))
+        cache.tree_core.set_component_host_value_raw(
+            node, ComponentType.SWA, torch.tensor([1], dtype=torch.int64)
+        )
+
+        # SWA has a separate host pool. Reclaiming the redundant Full-host copy
+        # must not make an otherwise live Full-device node fail sanity checking.
+        cache.sanity_check()
+
     def test_swa_recovery_keeps_recovered_node_below_window_nodes(self):
         """A tombstone recovered during the walk lands below the in-window path
         in the SWA LRU, so eviction takes the recovered span first."""

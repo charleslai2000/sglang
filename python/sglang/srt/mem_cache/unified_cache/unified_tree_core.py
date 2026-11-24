@@ -3141,11 +3141,16 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
                 if cd.value is not None and not full_dev:
                     E(f"node {nid} {ct} device present but Full.value=None")
                 if cd.host_value is not None and not full_hst:
-                    # write_back reclaim takes only the Full host layer; an
-                    # aux host slice may outlive it while the Full device is
-                    # live or the node's L3 chain is the durable copy.
-                    if not (self.is_write_back and (full_dev or persisted)):
-                        E(f"node {nid} {ct} host present but Full.host_value=None")
+                    # Auxiliary components use independent host pools and may
+                    # outlive a reclaimed Full host duplicate. This is safe when
+                    # Full remains on device or has an acknowledged L3 copy;
+                    # the write-through host-prefix rule applies only when Full
+                    # itself is host-resident.
+                    if not (full_dev or persisted):
+                        E(
+                            f"node {nid} {ct} host present but Full is absent "
+                            "from host/device/L3"
+                        )
 
             # Every node must keep Full data on at least one layer: device,
             # host, or the acked L3 chain (hollow leaves keep only L3).
