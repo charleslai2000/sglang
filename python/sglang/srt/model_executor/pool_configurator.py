@@ -478,6 +478,14 @@ class HybridSWAPoolConfigurator(MemoryPoolConfigurator):
                     + 2 * chunk_size
                     + page_size
                 )
+                # Optional floor lets operators reserve more physical SWA KV
+                # for shared-prefix workloads while keeping the GPU KV byte
+                # budget fixed: calculate_pool_sizes
+                # charges this pool first and deducts it from Full capacity.
+                self._gemma_swa_cap = max(
+                    self._gemma_swa_cap,
+                    int(envs.SGLANG_GEMMA4_SWA_POOL_TOKENS.get()),
+                )
 
         self._swa_full_tokens_ratio = get_schedule().swa_full_tokens_ratio
         self._sliding_window_size = kvc.sliding_window_size

@@ -398,6 +398,65 @@ class TestHybridSWAConfigurator(CustomTestCase):
         _, _, config = self._run(10_000_000)
         self.assertEqual(config.max_total_num_tokens, config.full_max_total_num_tokens)
 
+    def test_gemma4_swa_pool_floor_reduces_full_without_exceeding_budget(self):
+        from sglang.srt.environ import envs
+
+        mr = _make_model_runner(
+            self,
+            is_hybrid_swa=True,
+            full_attention_layer_ids=list(range(4)),
+            swa_attention_layer_ids=list(range(4, 24)),
+            num_kv_heads=2,
+            head_dim=256,
+            v_head_dim=256,
+            swa_num_kv_heads=2,
+            swa_head_dim=256,
+            swa_v_head_dim=256,
+            page_size=1,
+            chunked_prefill_size=2048,
+            max_running_requests=32,
+        )
+        mr.model_config.hf_config.architectures = ["Gemma4ForConditionalGeneration"]
+        mr.model_config.hf_config.num_hidden_layers = 42
+        mr.model_config.hf_config.num_kv_shared_layers = 18
+        mr.model_config.hf_config.layer_types = [
+            "full_attention" if i < 4 or (i >= 24 and i % 2 == 0)
+            else "sliding_attention"
+            for i in range(42)
+        ]
+        mr.model_config.hf_text_config = mr.model_config.hf_config
+        mr.model_config.sliding_window_size = 512
+        budget = 6_800_000_000
+
+        with mock_cpu_env(kv_size=1, swa_eviction_interval=128):
+            from sglang.srt.model_executor.pool_configurator import (
+                create_memory_pool_configurator,
+            )
+
+            with envs.SGLANG_GEMMA4_SWA_POOL_TOKENS.override(0):
+                default = create_memory_pool_configurator(mr).calculate_pool_sizes(
+                    budget, page_size=1
+                )
+            with envs.SGLANG_GEMMA4_SWA_POOL_TOKENS.override(65536):
+                cfg = create_memory_pool_configurator(mr)
+                raised = cfg.calculate_pool_sizes(budget, page_size=1)
+
+        self.assertEqual(default.swa_max_total_num_tokens, 24609)
+        self.assertEqual(raised.swa_max_total_num_tokens, 65536)
+        self.assertLess(raised.full_max_total_num_tokens, default.full_max_total_num_tokens)
+        default_bytes = (
+            default.full_max_total_num_tokens * cfg._full_per_token * 4
+            + default.swa_max_total_num_tokens * cfg._swa_per_token * 20
+        )
+        raised_bytes = (
+            raised.full_max_total_num_tokens * cfg._full_per_token * 4
+            + raised.swa_max_total_num_tokens * cfg._swa_per_token * 20
+        )
+        self.assertLessEqual(default_bytes, budget)
+        self.assertLessEqual(raised_bytes, budget)
+        self.assertLessEqual(raised_bytes, default_bytes)
+        self.assertLessEqual(raised.full_max_total_num_tokens, default.full_max_total_num_tokens)
+
     def test_constraint_respected(self):
         """full_tokens = constrained value after re-run"""
         mr, cfg, _ = self._run(10_000_000, page_size=1)

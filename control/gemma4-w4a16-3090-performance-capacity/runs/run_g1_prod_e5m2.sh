@@ -10,7 +10,7 @@ if [[ ${G1_GPU_LOCK_HELD:-0} != 1 ]]; then
   export G1_GPU_LOCK_HELD=1
 fi
 ss -ltn|grep -q ":$PORT\\b" && { echo PORT_BUSY >&2; exit 91; } || true
-mkdir -p "$OUT"; export PYTHONNOUSERSITE=1 PYTHONPATH="$ROOT/control/gemma4-w4a16-3090-performance-capacity/runs:$AOT:$ROOT/python:$VENV/lib/python3.12/site-packages:$ROOT/python/sglang/kernels/aot/python:$OVERLAY" LD_LIBRARY_PATH="$VENV/lib/python3.12/site-packages/torch/lib:/usr/local/cuda-12.9/lib64" SGLANG_CACHE_DIR="$DATA/cache" HF_HOME="$DATA/cache/hf-home" HF_DATASETS_CACHE="$DATA/cache/datasets"; cd "$ROOT"
+mkdir -p "$OUT"; export PYTHONNOUSERSITE=1 SGLANG_GEMMA4_SWA_POOL_TOKENS="$G1_PROD_GEMMA4_SWA_POOL_TOKENS" PYTHONPATH="$ROOT/control/gemma4-w4a16-3090-performance-capacity/runs:$AOT:$ROOT/python:$VENV/lib/python3.12/site-packages:$ROOT/python/sglang/kernels/aot/python:$OVERLAY" LD_LIBRARY_PATH="$VENV/lib/python3.12/site-packages/torch/lib:/usr/local/cuda-12.9/lib64" SGLANG_CACHE_DIR="$DATA/cache" HF_HOME="$DATA/cache/hf-home" HF_DATASETS_CACHE="$DATA/cache/datasets"; cd "$ROOT"
 # The venv has a different editable SGLang checkout. Keep it installed for other
 # projects, but fail closed unless this process resolves the service and HiCache
 # modules from this one authorized worktree. Record imported file hashes before
@@ -47,8 +47,9 @@ with open(sys.argv[2], "w") as stream:
 print(json.dumps(identity, sort_keys=True))
 PY
 : "${G1_PROD_KV:=fp8_e5m2}"; : "${G1_PROD_CONTEXT:=8192}"; : "${G1_PROD_MAX_RUNNING:=32}"; : "${G1_PROD_MAX_TOTAL_TOKENS:=}"; : "${G1_PROD_MEM_FRACTION:=.94}"; : "${G1_PROD_GRAPH_BS:=32}"; : "${G1_PROD_RADIX:=on}"; : "${G1_PROD_HICACHE:=off}"; : "${G1_PROD_HICACHE_SIZE:=1}"; : "${G1_PROD_L3_DIR:=$OUT/l3-extent}"
+: "${G1_PROD_GEMMA4_SWA_POOL_TOKENS:=0}"
 : "${G1_PROD_EXTENT_SIZE:=67108864}"; : "${G1_PROD_EXTENT_FILE_SIZE:=4294967296}"; : "${G1_PROD_EXTENT_MAX_SIZE:=$G1_PROD_EXTENT_FILE_SIZE}"; : "${G1_PROD_EXTENT_MIN_FREE_SPACE:=10737418240}"
-ARGS=(--model-path "$MODEL" --trust-remote-code --host 127.0.0.1 --port "$PORT" --context-length "$G1_PROD_CONTEXT" --max-running-requests "$G1_PROD_MAX_RUNNING" --mem-fraction-static "$G1_PROD_MEM_FRACTION" --kv-cache-dtype "$G1_PROD_KV" --attention-backend triton --cuda-graph-backend-decode full --cuda-graph-max-bs-decode "$G1_PROD_GRAPH_BS" --log-level info --enable-metrics)
+ARGS=(--model-path "$MODEL" --trust-remote-code --host 127.0.0.1 --port "$PORT" --context-length "$G1_PROD_CONTEXT" --max-running-requests "$G1_PROD_MAX_RUNNING" --mem-fraction-static "$G1_PROD_MEM_FRACTION" --kv-cache-dtype "$G1_PROD_KV" --attention-backend triton --cuda-graph-backend-decode full --cuda-graph-max-bs-decode "$G1_PROD_GRAPH_BS" --log-level info --enable-metrics --decode-log-interval "${G1_PROD_DECODE_LOG_INTERVAL:-40}")
 [[ -z "$G1_PROD_MAX_TOTAL_TOKENS" ]] || ARGS+=(--max-total-tokens "$G1_PROD_MAX_TOTAL_TOKENS")
 if [[ ${G1_PROD_EXPORT_REQUEST_METRICS:-off} == on ]]; then ARGS+=(--export-metrics-to-file --export-metrics-to-file-dir "$OUT/request-metrics"); fi
 [[ $G1_PROD_RADIX == on ]] || ARGS+=(--disable-radix-cache)
@@ -85,7 +86,7 @@ if [[ -n "${G1_PROD_EXTRA_SERVER_ARGS:-}" ]]; then
   read -r -a EXTRA_ARGS <<<"$G1_PROD_EXTRA_SERVER_ARGS"
   ARGS+=("${EXTRA_ARGS[@]}")
 fi
-printf '%q ' "${ARGS[@]}" > "$OUT/launch-argv.txt"; printf '\nkv=%s\ncontext=%s\nmax_running=%s\nmax_total_tokens=%s\nmem_fraction=%s\ngraph_bs=%s\nradix=%s\nhicache=%s\nhicache_size_gb=%s\nhicache_storage=%s\nhicache_ratio=%s\nrequest_metrics_export=%s\nextent_size_bytes=%s\nextent_file_size_bytes=%s\nextent_max_size_bytes=%s\nextent_min_free_bytes=%s\nwarmup=%s\nl3_dir=%s\nsource_head=%s\n' "$G1_PROD_KV" "$G1_PROD_CONTEXT" "$G1_PROD_MAX_RUNNING" "$G1_PROD_MAX_TOTAL_TOKENS" "$G1_PROD_MEM_FRACTION" "$G1_PROD_GRAPH_BS" "$G1_PROD_RADIX" "$G1_PROD_HICACHE" "$G1_PROD_HICACHE_SIZE" "${G1_PROD_HICACHE_STORAGE:-on}" "${G1_PROD_HICACHE_RATIO:-none}" "${G1_PROD_EXPORT_REQUEST_METRICS:-off}" "$G1_PROD_EXTENT_SIZE" "$G1_PROD_EXTENT_FILE_SIZE" "$G1_PROD_EXTENT_MAX_SIZE" "$G1_PROD_EXTENT_MIN_FREE_SPACE" "${G1_PROD_WARMUP:-on}" "$G1_PROD_L3_DIR" "$(git rev-parse HEAD)" > "$OUT/manifest.txt"
+printf '%q ' "${ARGS[@]}" > "$OUT/launch-argv.txt"; printf '\nkv=%s\ncontext=%s\nmax_running=%s\nmax_total_tokens=%s\nmem_fraction=%s\ngraph_bs=%s\nradix=%s\ndecode_log_interval=%s\ngemma4_swa_pool_tokens=%s\nhicache=%s\nhicache_size_gb=%s\nhicache_storage=%s\nhicache_ratio=%s\nrequest_metrics_export=%s\nextent_size_bytes=%s\nextent_file_size_bytes=%s\nextent_max_size_bytes=%s\nextent_min_free_bytes=%s\nwarmup=%s\nl3_dir=%s\nsource_head=%s\n' "$G1_PROD_KV" "$G1_PROD_CONTEXT" "$G1_PROD_MAX_RUNNING" "$G1_PROD_MAX_TOTAL_TOKENS" "$G1_PROD_MEM_FRACTION" "$G1_PROD_GRAPH_BS" "$G1_PROD_RADIX" "${G1_PROD_DECODE_LOG_INTERVAL:-40}" "$G1_PROD_GEMMA4_SWA_POOL_TOKENS" "$G1_PROD_HICACHE" "$G1_PROD_HICACHE_SIZE" "${G1_PROD_HICACHE_STORAGE:-on}" "${G1_PROD_HICACHE_RATIO:-none}" "${G1_PROD_EXPORT_REQUEST_METRICS:-off}" "$G1_PROD_EXTENT_SIZE" "$G1_PROD_EXTENT_FILE_SIZE" "$G1_PROD_EXTENT_MAX_SIZE" "$G1_PROD_EXTENT_MIN_FREE_SPACE" "${G1_PROD_WARMUP:-on}" "$G1_PROD_L3_DIR" "$(git rev-parse HEAD)" > "$OUT/manifest.txt"
 export G1_LOGITS_CAPTURE=
 "$VENV/bin/python" -m sglang.launch_server "${ARGS[@]}" > "$OUT/server.log" 2>&1 & PID=$!
 MON=; GPU_MON=

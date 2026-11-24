@@ -611,6 +611,9 @@ class Envs:
     SGLANG_OPT_UNIFIED_CACHE_FREE_OUT_OF_WINDOW_SLOTS = EnvBool(True)
     # Decode batches between SWA out-of-window evictions.
     SGLANG_SWA_EVICTION_INTERVAL = EnvInt(128)
+    # Optional Gemma4 physical SWA KV pool floor (tokens); 0 keeps the
+    # admission-derived default. The extra bytes are deducted from Full KV.
+    SGLANG_GEMMA4_SWA_POOL_TOKENS = EnvInt(0)
     # Deprecated: the unified radix tree is the default tree cache now, so the
     # registry no longer reads this. Kept because a few model/arch call sites
     # still assert on it; do not use in new code.
