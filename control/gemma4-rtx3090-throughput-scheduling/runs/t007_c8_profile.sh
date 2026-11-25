@@ -20,6 +20,9 @@ SESSION=${T007_SESSION:-t007c8-$(date -u +%H%M%S)-$$}
 WINDOW_DELAY=${T007_WINDOW_DELAY:-150}
 WINDOW_SECONDS=${T007_WINDOW_SECONDS:-120}
 CHUNK_OVERRIDE=${T007_CHUNK:-}
+HICACHE_MODE=${T007_HICACHE_MODE:-on}
+EXTENT_OUT=${T007_EXTENT_OUT:-$OUT/l3-extent}
+[[ $HICACHE_MODE == on || $HICACHE_MODE == l2 || $HICACHE_MODE == off ]] || { echo "invalid T007_HICACHE_MODE=$HICACHE_MODE" >&2; exit 2; }
 
 [[ -d "$OUT" && -z "$(ls -A "$OUT")" ]] || { echo "T007_OUT must be an empty directory: $OUT" >&2; exit 2; }
 mkdir -p "$OUT"
@@ -38,7 +41,6 @@ export PYTHONNOUSERSITE=1 SGLANG_GEMMA4_SWA_POOL_TOKENS=65536 \
   LD_LIBRARY_PATH="$VENV/lib/python3.12/site-packages/torch/lib:/usr/local/cuda-12.9/lib64" \
   SGLANG_CACHE_DIR="$DATA/cache" HF_HOME="$DATA/cache/hf-home" HF_DATASETS_CACHE="$DATA/cache/datasets" \
   SGLANG_ENABLE_METRICS_DEVICE_TIMER=1 SGLANG_ENABLE_NVTX_SCHEDULER=1
-
 # Bind the run to the actual imported service modules (not just git metadata).
 "$VENV/bin/python" - "$ROOT" "$OUT/source-identity.json" <<'PY'
 import hashlib, importlib, json, os, subprocess, sys
@@ -54,11 +56,23 @@ ident={"project_root":root,"git_head":subprocess.check_output(["git","-C",root,"
 json.dump(ident,open(sys.argv[2],"w"),indent=2); print(json.dumps({k:ident[k] for k in ("git_head","python")},sort_keys=True))
 PY
 
-# Reuse T006's exact recorded argv, overriding only the request-metrics directory.
+# Reuse T006's exact recorded argv, overriding only metrics/artifact paths and
+# (for the L1+L2 diagnostic) removing the L3 storage backend.
 eval "ARGS=($(cat "$T006/launch-argv.txt"))"
 NEW=(); skip=0
 for ((i=0;i<${#ARGS[@]};i++)); do
   if [[ $skip == 1 ]]; then skip=0; continue; fi
+  if [[ $HICACHE_MODE == off ]]; then
+    case ${ARGS[i]} in
+      --enable-hierarchical-cache) continue ;;
+      --hicache-size|--hicache-write-policy|--hicache-io-backend|--hicache-mem-layout|--hicache-host-memory-mode|--hicache-storage-backend|--hicache-storage-backend-extra-config|--hicache-storage-prefetch-policy) skip=1; continue ;;
+    esac
+  elif [[ $HICACHE_MODE == l2 ]]; then
+    case ${ARGS[i]} in
+      --hicache-storage-backend) skip=1; continue ;;
+      --hicache-storage-backend-extra-config|--hicache-storage-prefetch-policy) skip=1; continue ;;
+    esac
+  fi
   if [[ ${ARGS[i]} == --export-metrics-to-file-dir ]]; then NEW+=("${ARGS[i]}" "$OUT/request-metrics"); skip=1; continue; fi
   NEW+=("${ARGS[i]}")
 done
@@ -76,17 +90,25 @@ fi
 # Fresh L3 extent dir per run: never replay a previous run's WAL.
 NEW3=(); had=0
 for ((i=0;i<${#ARGS[@]};i++)); do
-  if [[ $had == 1 ]]; then
-    had=0
-    NEW3+=("$(python3 -c 'import json,sys; c=json.loads(sys.argv[1]); c["storage_dir"]=sys.argv[2]; print(json.dumps(c))' "${ARGS[i]}" "$OUT/l3-extent")")
+  if [[ $had == 1 ]]; then had=0; continue; fi
+  if [[ $HICACHE_MODE == l2 && ${ARGS[i]} == --hicache-storage-backend-extra-config ]]; then had=1; continue; fi
+  if [[ $HICACHE_MODE == l2 && ${ARGS[i]} == --hicache-storage-prefetch-policy ]]; then had=1; continue; fi
+  if [[ ${ARGS[i]} == --hicache-storage-backend-extra-config ]]; then
+    NEW3+=("${ARGS[i]}")
+    had=2
     continue
   fi
-  if [[ ${ARGS[i]} == --hicache-storage-backend-extra-config ]]; then NEW3+=("${ARGS[i]}"); had=1; continue; fi
+  if [[ $had == 2 ]]; then
+    had=0
+    NEW3+=("$(python3 -c 'import json,sys; c=json.loads(sys.argv[1]); c["storage_dir"]=sys.argv[2]; print(json.dumps(c))' "${ARGS[i]}" "$EXTENT_OUT")")
+    continue
+  fi
   NEW3+=("${ARGS[i]}")
 done
 ARGS=("${NEW3[@]}")
 mkdir -p "$OUT/request-metrics"
-printf '%q ' "${ARGS[@]}" > "$OUT/launch-argv.txt"; printf '\nchunked_prefill_size_override=%s\nwindow_delay_s=%s\nwindow_seconds=%s\n' "${CHUNK_OVERRIDE:-default}" "$WINDOW_DELAY" "$WINDOW_SECONDS" > "$OUT/manifest.txt"
+printf '%q ' "${ARGS[@]}" > "$OUT/launch-argv.txt"; printf '\nchunked_prefill_size_override=%s\nhicache_mode=%s\nwindow_delay_s=%s\nwindow_seconds=%s\n' "${CHUNK_OVERRIDE:-default}" "$HICACHE_MODE" "$WINDOW_DELAY" "$WINDOW_SECONDS" > "$OUT/manifest.txt"
+printf 'task_started=%s\nwrapper_pid=%s\nwrapper_command=%q\nextent_dir=%s\n' "$(date -u +%FT%TZ)" "$$" "$0" "$EXTENT_OUT" >> "$OUT/manifest.txt"
 printf 'SGLANG_ENABLE_METRICS_DEVICE_TIMER=1\nSGLANG_ENABLE_NVTX_SCHEDULER=1\n' >> "$OUT/manifest.txt"
 printf 'git_head=%s\n' "$(git -C "$ROOT" rev-parse HEAD)" >> "$OUT/manifest.txt"
 
@@ -161,7 +183,7 @@ sleep "$WINDOW_SECONDS"
 echo "window_end=$(date -Is) bench_elapsed_s=$(( $(date +%s) - BENCH_START ))" >> "$OUT/window.txt"
 fi
 
-wait "$BENCH_PID"; BENCH_RC=$?
+if wait "$BENCH_PID"; then BENCH_RC=0; else BENCH_RC=$?; fi
 BENCH_PID=
 printf 'bench_exit=%s finished=%s\n' "$BENCH_RC" "$(date -u +%FT%TZ)" > "$OUT/bench-exit.txt"
 curl -fsS --max-time 5 "http://127.0.0.1:$PORT/metrics" > "$OUT/metrics-at-end.prom" 2>"$OUT/metrics-at-end.err" || true

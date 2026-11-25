@@ -1,5 +1,10 @@
 # Frontier
 
+## gemma4-rtx3090-throughput-scheduling
+- T007/T008 Gemma4 RTX3090 Throughput and HiCache Restore Scheduling — ACTIVE
+  - frontier: 132.724 TPS不验收。L1-only未留下正式TPS；800请求server envelope=648.00 proxy。L1+L2正式800/800为601.36 online TPS，L2 hit计数为0，无paired cache delta/根因；完成Nsight/FPM归档`runs/T007-L1L2-20261125.md`。继续分析现有证据；/data仅411MiB空闲，禁止删历史归档。
+  - task: control/gemma4-rtx3090-throughput-scheduling/tasks/T008-hicache-restore-wait-scheduling.md
+
 
 ## gemma4-g1-e5m2-postbos-numerical-closure
 - T004-bos-e5m2-and-numerical-closure Gemma4 E5M2数值专项 — DONE
