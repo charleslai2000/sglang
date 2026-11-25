@@ -1,5 +1,7 @@
 """Operator trace-marker gating: memoized, still enable-able mid-run."""
 
+import pathlib
+import re
 import unittest
 from unittest import mock
 
@@ -43,6 +45,24 @@ class TraceMarkerMemoTests(unittest.TestCase):
             # Same one-second window: still at most one stat per marker path
             # (two paths total: the durable marker and the probe marker).
             self.assertLessEqual(exists.call_count, 2)
+
+    def test_marker_checks_go_through_the_memo(self):
+        """No module may stat a trace marker per call again: a per-call stat on
+        the release/revoke path was 6.2% of the scheduler thread and it came
+        back once already through a second copy of the helper."""
+        root = pathlib.Path(__file__).resolve().parents[4] / "python" / "sglang"
+        allowed = {
+            root / "srt" / "mem_cache" / "trace_context.py",  # the memo itself
+            # Evaluated once at import, not per call.
+            root / "srt" / "mem_cache" / "unified_cache" / "unified_tree_core.py",
+        }
+        pattern = re.compile(r'path\.exists\("/tmp/t38c')
+        offenders = sorted(
+            str(path.relative_to(root))
+            for path in root.rglob("*.py")
+            if path not in allowed and pattern.search(path.read_text())
+        )
+        self.assertEqual(offenders, [])
 
 
 if __name__ == "__main__":

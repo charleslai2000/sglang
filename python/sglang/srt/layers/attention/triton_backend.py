@@ -2132,6 +2132,19 @@ class TritonMultiStepDraftBackend:
             attn_backend.init_forward_metadata_in_graph(forward_batch)
 
 
+_WINDOW_SIZE_TENSORS: dict[tuple[str, int], torch.Tensor] = {}
+
+
+def _window_size_tensor(size: int, device) -> torch.Tensor:
+    """0-dim window size on the device: one allocation per (device, size)."""
+    key = (str(device), int(size))
+    tensor = _WINDOW_SIZE_TENSORS.get(key)
+    if tensor is None:
+        tensor = torch.tensor(int(size), dtype=torch.int64, device=device)
+        _WINDOW_SIZE_TENSORS[key] = tensor
+    return tensor
+
+
 def update_sliding_window_buffer(
     window_kv_indptr,
     req_to_token,
@@ -2160,13 +2173,17 @@ def update_sliding_window_buffer(
     """
     window_kv_lens = torch.minimum(
         seq_lens,
-        torch.tensor(sliding_window_size),
+        _window_size_tensor(sliding_window_size, seq_lens.device),
     )
     window_kv_indptr[1 : bs + 1] = torch.cumsum(window_kv_lens, dim=0)
     window_kv_indptr = window_kv_indptr[: bs + 1]
+    # Reading the token total off the prefix sums is a device->host sync. Read it
+    # once and reuse it for both the buffer size and the translate slice.
+    total_tokens = None
     if window_kv_indices is None:
+        total_tokens = int(window_kv_indptr[-1])
         window_kv_indices = torch.empty(
-            window_kv_indptr[-1], dtype=torch.int64, device=device
+            total_tokens, dtype=torch.int64, device=device
         )
     window_kv_start_idx = seq_lens - window_kv_lens
     create_flashinfer_kv_indices_triton[(bs,)](
@@ -2181,10 +2198,11 @@ def update_sliding_window_buffer(
     if not skip_full_to_swa_translation and hasattr(
         token_to_kv_pool, "translate_loc_from_full_to_swa"
     ):
-        kv_last_index = window_kv_indptr[-1]
-        window_kv_indices[:kv_last_index] = (
+        if total_tokens is None:
+            total_tokens = int(window_kv_indptr[-1])
+        window_kv_indices[:total_tokens] = (
             token_to_kv_pool.translate_loc_from_full_to_swa(
-                window_kv_indices[:kv_last_index]
+                window_kv_indices[:total_tokens]
             )
         )
     return window_kv_indptr, window_kv_indices, window_kv_lens, window_kv_start_idx
