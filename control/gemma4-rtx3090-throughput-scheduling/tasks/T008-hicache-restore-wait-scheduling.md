@@ -5,7 +5,7 @@ Work area: `control/gemma4-rtx3090-throughput-scheduling` with runtime changes i
 Objective: T007 remains ACTIVE; 132.724 tok/s is not acceptable. Without rerunning the completed L1-only workload, recover its formal TPS from existing artifacts and repair the profile wrapper. Then, on identical Owner-only FP8 E5M2 model, Full/SWA GPU pools, chunk4096 and 40×20 request payload/load, run an L1+L2 diagnostic to isolate host-tier maintenance from L3 increment, then establish full active-tier three-mode results and source-attributed bottleneck. Target near-L1-only throughput. Inspect Host eviction/write-through, scheduler reject/no-batch conditions and L3 prefetch/capacity waits; test existing policy choices first, fix only evidenced in-contract causes, and complete full-tier 800-request acceptance.
 Inputs: T007 report/artifacts; existing L1-only raw 800 request metrics, GPU samples and Nsight/FPM artifacts; `benchmark/hicache/bench_multiturn.py`; current `scheduler.py`, `hiradix_cache.py`, PrefillAdder, DeviceTimer/FPM/Nsight and Radix telemetry.
 Completion: Recovered formal L1-only output TPS without replay; valid L1+L2 and full-tier results under identical model/configuration/capacity/chunk/load; actual cache tier hit/restore and eviction/write-through accounting; source-attributed dominant throughput loss and scheduler decline reason; evidence-backed in-contract fix with meaningful throughput gain; full active-tier 800-request acceptance; tests, report, selective commit/push and remote SHA verification. Do not repeat cache correctness or historical benchmark certification.
-Result: In progress. Full-tier acceptance still unmet (best stable 505.36 TPS, latest 499.64 TPS vs >=540 gate); see "Convergence round".
+Result: >=540 TPS met after the convergence-round-2 fixes (median ~550 TPS over four runs, 77-78% duty), 800/800 with zero sanity failures and exact payload multiset; real L3 restore re-validated on the shipped build. Duty remains short of ~80% for model-path reasons outside this task. See "Convergence round 2".
 
 ## Evidence so far
 - L1-only diagnostic artifacts: `/data/sglang-hicache/gemma4/runs/20261125T-t008-c8-l1-only/`. No replay requested/performed. The 800 server request-metric records each report 256 completion tokens, `finish_reason=length`, zero retractions; matching T007 payload hashes. Wrapper failure omitted official aggregate/TPS. The often cited 641.16 tok/s is a request-received-to-request-finished envelope, not bench serving TPS. Server first-request-received to last-response-sent envelope is 648.00 TPS; still not official bench timing because its `perf_counter()` start and last client-response finish were not persisted. FPM/Nsight: 360s FPM window, decode 144.8s, extend 167.8s, summed forward duty 86.83%; L1 9,533,440, L2/L3 0, new prefill 1,013,760. Nsight 45.043s, kernel union 41.649s (92.46%), idle 3.388s, max gap 5.44ms, no >10ms gaps or HOST_ALLOC/FRONTIER wait overlap. DeviceTimer occupancy NaN. Request prefix authority unknown. No cache correctness conclusion.
@@ -63,6 +63,56 @@ Consequence for the default policy: `write_through` remains the correctness defa
 **5) Sampled CPU attribution, and one more evidenced fix.** A 60s `py-spy` sample of the scheduler thread during the full-tier `write_back` workload showed `os.path.exists` as a 6.2% self-time leaf, all of it inside `_get_new_batch_prefill_raw` (2.54s of 41.7s sampled CPU): the operator trace-marker gates (`/tmp/t38c-durable-trace`, `/tmp/t38c-on`) were stat'ed on every call from the per-page release/revoke and drain paths (dozens of call sites). `trace_context.marker_present()` now memoizes marker presence for 1s, so an operator can still enable a trace mid-run (≤1s) while a disabled trace costs one stat per interval; `test_trace_marker_gate.py` pins the semantics (3 passed). Full-tier no-profile acceptance after the fix: **800/800, 511.58 official TPS / 72.49% duty**, zero sanity failures, exact payload multiset — i.e. +1.2% over the 505.36 baseline and still below the >=540 gate. Artifacts `20261125T-t007-l3-wb-markerfix-c8/` (60s samples in `20261125T-t007-l3-wb-pyspy-c8/`).
 
 Remaining gap, now measured rather than inferred: the same profile puts ~6% of wall in the HiCache backup submission on the scheduler thread (`transfer_hicache_all_layer_staged_lf_pf` 2.47s + `_resolve_device_transfer_buffers` 0.65s + `alloc_writeback` 0.28s per 60s), which is the `write_back` staging launcher. **Correction to the first write-up:** this launcher is repo source (`python/sglang/kernels/ops/kvcache/hicache.py` plus the JIT C++ `python/sglang/kernels/jit/csrc/kvcacheio/staged_write_back.cuh`), not the prebuilt SM86 AOT `sgl_kernel` package, so it is in principle modifiable here; it already issues one relayout kernel plus batched `cudaMemcpyBatchAsync` (per-page fallback only on unsupported drivers). What is still missing is a split of the 2.47s between the Python wrapper and the C++ launch, which the aggregate sample cannot provide — until that exists, changing the launcher would be speculative. The rest of the non-GPU time is model-path work (`gptq_marlin_gemm`/`forward` launches, `update_sliding_window_buffer` SWA metadata, `free_swa`, detokenizer sends). No further in-scope Python change is evidenced; reaching >=540 requires either an AOT transfer-launcher change or a workload/config change, neither of which is authorized here.
+
+## Convergence round 2 (2026-11-25, gate met on TPS)
+
+Mandate: freeze `write_back` + `wait_complete` and the existing GPU capacity; evaluate upstream PR #44173 (SWA tail-only backup); split the backup submission's Python/C++ cost and quantify the aux-pool allocation that precedes an all-miss query; fix evidenced bottlenecks only; reach >=540 TPS and ~80% duty without reopening refuted directions.
+
+### PR #44173 applicability: cache mode is already tail-only
+The PR adds `SGLANG_ENABLE_HICACHE_SWA_TAIL_ONLY_BACKUP` to the **buffer-mode** `BufferModePipeline`: `_backup_pool_keys`/`_trim_swa_backup_transfer` keep only the last `full_window_pages` of SWA per node, set `PoolHitPolicy.TRAILING_PAGES`, and `finish_backup_ack` extends `prefix_keys` past the omitted pages so a pool-only suffix still addresses correctly. Our fork's buffer-mode pipeline predates that refactor (no `_backup_pool_keys`/`_launch_transfers`/`extend_storage_prefix`), and this workload does not use buffer mode at all (`--hicache-host-memory-mode cache`).
+
+In cache mode the equivalent invariant already holds at insert time, so the PR has no redundant SWA pages to remove here:
+- `SWAComponent.build_hicache_transfers(BACKUP_STORAGE)` stores `cd.host_value` under the node's trailing hashes with `TRAILING_PAGES` (`swa_component.py`, BACKUP_STORAGE branch).
+- `commit_insert_component_data` tombstones everything older than the window, and `_maybe_split_leaf_for_swa_lock` splits any in-window leaf longer than one page-aligned window, so a node's SWA host value is at most `full_window_pages` and is exactly the window ending at that node.
+- Consequently nothing is omitted, so the PR's `prefix_keys` extension has no counterpart here. No SWA backup policy was changed, and no restore-needed SWA state is dropped.
+
+Volume agrees: SWA backed up ~0.53x the pages of KV (529,924 vs 1,064,185) over ~1,267 newly prefilled tokens per request, i.e. about one window per node rather than whole nodes.
+
+### Python/C++ split of the backup submission
+Instrumented in isolation (`control/.../runs/verify_staged_write_back_copy.py`, real JIT kernel, 35 layers x 256 dim, fp8, page_size=1):
+- Before: 512 pages 2,442us CPU/call, 4096 pages 18,584us -> ~4.5us per page-copy. The Python wrapper is only ~0.1ms of that (an intercept measurement), so the cost was per-copy submission inside the C++ staged write-back, not Python.
+- The batched `cudaMemcpyBatchAsync` path and the per-page `cudaMemcpyAsync` fallback measured identically (2,485us / 18,822us), proving the API choice was not the lever: the copy *count* was.
+- After coalescing consecutive destination pages into one copy per run: 512 pages 119us, 4096 pages 231us (~80x less). Scattered destination pages keep the old cost (18,358us) and the per-page loop. Byte-exactness verified for 128/512/4096 pages, contiguous and scattered.
+
+### Aux-pool allocation before an all-miss query
+`prefetch_from_storage` allocates each component's staging buffer (`prepare_prefetch`) before issuing the storage query, so an all-miss attempt still allocates and releases an SWA window. Measured on the scheduler thread: `prepare_prefetch` **0.07s of 40.85s** sampled CPU (0.17%); the wider host-staging alloc path `alloc_writeback` is 0.37s but is shared with real backups. Not a bottleneck; no reordering change was made.
+
+### Fixes applied (all profile-verified)
+| Fix | Evidence |
+|---|---|
+| Coalesce consecutive destination pages in the staged write-back copy | 18.6ms -> 0.23ms CPU per 4096-page backup |
+| Route every `/tmp/t38c` marker check through `trace_context.marker_present` (the hot copy was in `hybrid_cache/hybrid_cache_controller.py`, not the one already memoized) | `os.path.exists` 1.22s -> 0.00s of 40.85s |
+| Cache the Gemma owner logical->physical transfer buffers per pool (it rebuilt a CUDA tensor, copied it, and ran a synchronizing `torch.equal` per backup) | `_resolve_device_transfer_buffers` 0.99s -> 0.00s |
+| SWA window buffer update reads the token total once (one device sync) and reuses a cached 0-dim window-size tensor | `update_sliding_window_buffer` 2.54s -> 2.05s |
+
+Together the last three remove ~2.7s of 40.5s sampled scheduler CPU.
+
+### Results (frozen configuration throughout)
+| Run | Source | Official result | Duty |
+|---|---|---|---:|
+| `20261125T-t007-l3-wb-markerfix-c8` | marker memo only | 800/800, 511.58 TPS | 72.49% |
+| `20261125T-t007-l3-wb-stagecopy-c8` | + coalesced copies | 800/800, 519.68 TPS | 75.15% |
+| `20261125T-t007-l3-wb-markerall2-c8` | + all markers + owner-buffer cache | 800/800, **550.58 TPS** | **77.84%** |
+| `20261125T-t007-l3-wb-final-c8` | same | 800/800, **550.03 TPS** | 77.19% |
+| `20261125T-t007-l3-wb-swasync-c8` | + SWA single sync | 800/800, 526.22 TPS | 75.61% |
+| `20261125T-t007-l3-wb-swasync2-c8` | same | 800/800, **550.33 TPS** | 76.79% |
+
+Every run: 0 failed requests, 0 Radix sanity failures, exact 800-payload multiset. The 526.22 sample carries the same profile signature as its 550.33 repeat and strictly less scheduler CPU, so run-to-run variance here is about +-2.5%, not a regression; the median of the four post-fix runs is ~550 TPS. Gate: >=540 TPS met; duty lands at 77-78% against "~80%", and the remaining host time is model-path (marlin GEMM launches, `forward`, SWA/rmsnorm/set_kv_buffer) that this task does not own.
+
+Disk incident worth remembering: `20261125T-t007-l3-wb-markerall-c8` measured 467.35 TPS because `/data` was full (594MB free) and Extent GC could not write. 180GiB of closed-run `l3-extent` payloads were removed (logs/manifests/WALs kept), then the run repeated at 550.58.
+
+### Real L3 restore on the shipped build
+`20261125T-t007-wb-l3-restore3` re-ran the accepted write_back cycle (cold target -> 16x20,016-token distinct pressure -> re-request) against commit `6ff1d81e21`: `restored_cached_tokens=1519`, `hicache_prompt_tokens_total{source=l3}=1519`, extent reads 1024+495 keys all succeeded (12,443,648 bytes), output text identical, cold-vs-restored logprob drift 1.4469e-4 (pre-existing), 0 sanity failures, client exit 0, service and lock released.
 
 ## Next
 1. The non-reconcile host work in `run_batch`/`process_batch_result`/`process_input_requests` and the per-pass prefix re-match in the prefill adder are the only remaining evidenced sources of the 26.9% GPU idle; any change there must keep match/admission accuracy and is not started.
