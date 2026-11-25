@@ -7464,6 +7464,7 @@ This section is the reviewed production change for the T007 convergence phase, a
 
 - Review baseline: `06f8999484` (the source the rest of this document lists).
 - Phase-final HEAD: `c24c421dafd14bcbe31d07ecea5cebc1c6f667ee` (`3090-24g-hicache`, pushed; `origin` equal at the time of writing).
+- Control-only follow-up: `d31ad7ea50` (this freeze record) and any later control commits change no production source, so the diff below is still exactly `git diff 06f8999484..HEAD -- python/` at HEAD; the embedded diff was byte-compared against that command at write time.
 - Command: `git diff 06f8999484..HEAD -- python/` (838 lines; 11 files, +329/-109 before this appendix).
 - The acceptance runs used exactly this production source: `20261125T-t007-l3-wb-swasync2-c8` ran at `14856c531a` with `source-status.txt` showing no modification under `python/` (only four unrelated control scripts), and `git diff 14856c531a..HEAD -- python/` is empty. Its seven recorded module digests in `source-identity.json` re-hash equal to the working tree at HEAD (checked at freeze time). The preceding acceptances (`20261125T-t007-l3-wb-markerall2-c8` 550.58 TPS, `20261125T-t007-l3-wb-final-c8` 550.03 TPS) differ only by the last two hunks in `triton_backend.py`, which the later 550.33 TPS run includes.
 
