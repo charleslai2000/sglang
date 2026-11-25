@@ -65,3 +65,5 @@
   - frontier: 复用历史合格点；仅当当前目标定义的对应cache正确性门通过后开展新比较。
   - task: control/falcon-h1-3090-r17-metrics/tasks/T003-representative-cache-performance-matrix.md
   - unblock/reopen: GPU phase/counter seam与L1/L2正确性通过；Disk仅在L3读回与恢复PASS后开启。
+
+**FROZEN 2026-11-25**: T007 performance acceptance passed (median ~550 TPS, 77-78% duty, 800/800, zero sanity failures, real L3 restore re-validated). Configuration and code frozen at `c24c421daf`; no further optimisation, no new experiments, no repeated correctness certification. Complete phase diff for architecture review in `runs/G5-L3-PERFORMANCE-CODE-REVIEW.md` §6.

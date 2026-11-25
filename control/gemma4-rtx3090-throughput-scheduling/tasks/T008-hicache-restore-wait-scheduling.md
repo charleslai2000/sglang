@@ -114,6 +114,15 @@ Disk incident worth remembering: `20261125T-t007-l3-wb-markerall-c8` measured 46
 ### Real L3 restore on the shipped build
 `20261125T-t007-wb-l3-restore3` re-ran the accepted write_back cycle (cold target -> 16x20,016-token distinct pressure -> re-request) against commit `6ff1d81e21`: `restored_cached_tokens=1519`, `hicache_prompt_tokens_total{source=l3}=1519`, extent reads 1024+495 keys all succeeded (12,443,648 bytes), output text identical, cold-vs-restored logprob drift 1.4469e-4 (pre-existing), 0 sanity failures, client exit 0, service and lock released.
 
+## Freeze (2026-11-25)
+
+T007 performance acceptance **passed** and the optimisation is frozen here: `write_back` + `wait_complete`, fixed Full/SWA device capacity, chunk4096 and the original 40x20 payload stay as they are; no further SWA-allocator work, no new experiments, no repeated correctness certification.
+
+- Source identity: phase-final HEAD `c24c421dafd14bcbe31d07ecea5cebc1c6f667ee` (production source identical to the acceptance build). The 550.33 TPS acceptance run `20261125T-t007-l3-wb-swasync2-c8` recorded `git_head=14856c531a` with `source-status.txt` listing no modification under `python/`, and `git diff 14856c531a..HEAD -- python/` is empty; its seven `source-identity.json` module digests re-hash equal to HEAD. The two 550 TPS runs before it differ only by the final `triton_backend.py` hunks.
+- Architecture review package: `runs/G5-L3-PERFORMANCE-CODE-REVIEW.md` section 6 now carries the complete phase production diff (`git diff 06f8999484..HEAD -- python/`, 11 files) with the measurement behind each file.
+- The three `test_unified_mamba_component_specs_use_persisted_final_hash` failures were **not** introduced here. Re-verified at freeze time: a pristine worktree at baseline `06f8999484` still fails all three (`AssertionError: 1 != 4`), while the current tree passes 4 / skips 15. The test inserted four *tokens* and asserted four Mamba *pages*, which only holds at `page_size == 1`; the parameterised ps4/ps64/ps128 fixtures fail on that assumption. The fix is test-only (derive the token list from `cfg.page_size`).
+- Unrelated dirty work owned by other tasks, deliberately not staged: `control/gemma4-g1-hicache-tier-lifecycle-20261119/runs/{g1_tier_lifecycle_run_once.sh,run_radix_tree_lifecycle.py,test_lifecycle_evidence_gates.py}` (service-health gate work) and `control/gemma4-w4a16-3090-performance-capacity/runs/run_g1_p0_c32_trace.sh` (c32 trace harness), plus untracked `control/falcon-*`, `control/gemma4-e4b-*`, `control/queued-prefetch-host-ready/runs/`, `experiments/`, `.pi/` and root `AGENTS.md`. None contain T007 code.
+
 ## Next
 1. The non-reconcile host work in `run_batch`/`process_batch_result`/`process_input_requests` and the per-pass prefix re-match in the prefill adder are the only remaining evidenced sources of the 26.9% GPU idle; any change there must keep match/admission accuracy and is not started.
 2. Gate unchanged: 800/800, >=540 official output TPS, ~80% Forward duty, unchanged configuration, zero sanity failures and no correctness regression.
