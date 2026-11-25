@@ -35,11 +35,9 @@ cleanup() {
   trap - EXIT INT TERM
   if [[ -n "$LAUNCHER_PID" ]] && kill -0 "$LAUNCHER_PID" 2>/dev/null; then
     kill -TERM "$LAUNCHER_PID" 2>/dev/null || true
-    wait "$LAUNCHER_PID" || true
-  fi
-  if [[ -f "$OUT/watchdog.pid" ]]; then
-    watchdog_pid=$(<"$OUT/watchdog.pid")
-    kill -TERM "$watchdog_pid" 2>/dev/null || true
+    for _ in $(seq 1 90); do kill -0 "$LAUNCHER_PID" 2>/dev/null || break; sleep 1; done
+    kill -KILL "$LAUNCHER_PID" 2>/dev/null || true
+    wait "$LAUNCHER_PID" 2>/dev/null || true
   fi
   printf 'launcher_cleanup_exit=%s\n' "$rc" >> "$OUT/lifecycle.status"
   nvidia-smi --query-gpu=timestamp,utilization.gpu,memory.used --format=csv,noheader > "$OUT/gpu-after.csv" 2>&1 || true
@@ -74,6 +72,18 @@ echo 'service_ready=1' >> "$OUT/lifecycle.status"
   --prefix-tokens 63488 --total-tokens 65536 --new-tokens "${G1_P0_TRACE_NEW_TOKENS:-32}" \
   > "$OUT/c32/driver.stdout" 2> "$OUT/c32/driver.stderr"
 echo 'client_requests_complete=32' >> "$OUT/lifecycle.status"
+
+# Optional production-driver sequence on the same live service. Supply a JSON
+# request list and nonzero output length to add sequential/restore requests.
+if [[ -n ${G1_P0_FOLLOWUP_FIXTURE:-} ]]; then
+  [[ -f "$G1_P0_FOLLOWUP_FIXTURE" ]] || { echo "missing follow-up fixture: $G1_P0_FOLLOWUP_FIXTURE" >&2; exit 4; }
+  "$VENV/bin/python" "$ROOT/control/gemma4-w4a16-3090-performance-capacity/runs/g1_shared_prefix_hicache.py" \
+    --action evict --fixture "$FIXTURE" --prompt-file "$G1_P0_FOLLOWUP_FIXTURE" \
+    --out "$OUT/followup" --count "${G1_P0_FOLLOWUP_PARALLEL:-1}" \
+    --max-parallel "${G1_P0_FOLLOWUP_PARALLEL:-1}" --new-tokens "${G1_P0_FOLLOWUP_NEW_TOKENS:-256}" \
+    > "$OUT/followup.stdout" 2> "$OUT/followup.stderr"
+  echo 'followup_requests_complete=1' >> "$OUT/lifecycle.status"
+fi
 
 export G1_P0_SANITY_PHASE=production_on_idle
 # Wait for scheduler-reported full idle and HiCache queue drain. Capture the
