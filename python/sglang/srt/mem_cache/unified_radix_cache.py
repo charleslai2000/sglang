@@ -58,6 +58,7 @@ from sglang.srt.mem_cache.radix_cache import RadixKey
 from sglang.srt.mem_cache.swa_memory_pool import SWAKVPool
 from sglang.srt.mem_cache.trace_context import (
     attach_trace_context,
+    marker_present,
     complete_trace_context,
     complete_slot_context,
     durable_trace_enabled,
@@ -351,8 +352,8 @@ def _t38c_log(rec):
     try:
         import json as _json
         import time as _time
-        import os as _os
-        if not _os.path.exists("/tmp/t38c-on"):
+
+        if not marker_present("/tmp/t38c-on"):
             return
         rec["ts"] = round(_time.time(), 3)
         with open("/tmp/t38c-probe.log", "a") as _f:
@@ -362,9 +363,8 @@ def _t38c_log(rec):
 
 
 def _t38c_durable_enabled() -> bool:
-    import os as _os
-
-    return _os.path.exists("/tmp/t38c-durable-trace")
+    # Memoized: this gate is consulted from the per-pass release/revoke path.
+    return marker_present("/tmp/t38c-durable-trace")
 
 
 def _t38c_slot_digest(pool, values) -> str | None:
@@ -403,7 +403,7 @@ def _t38c_durable_log(rec):
         import json as _json
         import os as _os
 
-        if not _os.path.exists("/tmp/t38c-durable-trace"):
+        if not marker_present("/tmp/t38c-durable-trace"):
             return
         thread_id = threading.get_ident()
         with _T38C_DURABLE_SEQ_LOCK:

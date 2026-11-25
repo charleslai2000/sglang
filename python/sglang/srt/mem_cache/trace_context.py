@@ -5,10 +5,30 @@ from __future__ import annotations
 import os
 import threading
 import hashlib
+import time
 from typing import Any, Optional
 
 TRACE_MARKER = "/tmp/t38c-durable-trace"
 TRACE_SCHEMA = "p0_durable.v3"
+
+# The marker files are operator-created files, but they are consulted from the
+# per-pass release/revoke path (dozens of call sites, one per released page
+# group or drain). A stat per call showed up as a measurable scheduler cost, so
+# presence is memoized for a short window: enabling a trace still takes effect
+# within a second, and a disabled trace still costs one stat per interval.
+_MARKER_TTL_S = 1.0
+_MARKER_CACHE: dict[str, tuple[float, bool]] = {}
+
+
+def marker_present(path: str) -> bool:
+    """Memoized ``os.path.exists`` for an operator trace marker."""
+    now = time.monotonic()
+    cached = _MARKER_CACHE.get(path)
+    if cached is not None and now - cached[0] < _MARKER_TTL_S:
+        return cached[1]
+    present = os.path.exists(path)
+    _MARKER_CACHE[path] = (now, present)
+    return present
 
 _SLOT_CONTEXTS: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
 _SLOT_CONTEXTS_LOCK = threading.Lock()
@@ -26,7 +46,7 @@ def is_inert_release_token(token: Optional[tuple[Any, ...]]) -> bool:
 
 
 def durable_trace_enabled() -> bool:
-    return os.path.exists(TRACE_MARKER)
+    return marker_present(TRACE_MARKER)
 
 
 def ordered_key_set_digest(keys) -> tuple[str, int]:
