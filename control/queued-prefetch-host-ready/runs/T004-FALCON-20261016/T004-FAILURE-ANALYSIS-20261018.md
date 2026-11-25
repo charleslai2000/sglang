@@ -1,0 +1,15 @@
+# T004 failure analysis — 2026-10-18
+
+## Finding: the retry loop is not an SSE/HTTP failure
+
+The captured `falcon-t004-live-20261018T142208Z-nsys` run fails before the measured queue workload, during the exact FULL+MAMBA L3 fixture gate. Driver `driver.py` starts with four seed sessions and waits for all their durable ACKs, then closes seeds and calls `/flush_cache`, before issuing `AB_verify_l3_*`. The driver asserts all four queries have KV hit >= 1786 and a MAMBA hit; failure there aborts the run. This is a real fixture failure, not a valid performance sample.
+
+Durable trace shows `storage_persisted` true for seed A/B/C/D (`operation_id` 3/5/8/9; one MAMBA page each). But their MAMBA per-key generations are invalidated by `allocator_apply_drops` during **the same seed writes**, before verification: A invalidates 6 keys in slot 0; B invalidates 259 in slot 0 and 1,784 in slot 1; C invalidates 2 keys in slot 2; D invalidates 259 in slot 2 and 1,784 in slot 3. For example seed B's `storage_invalidate` records carry session `t004-ab-seedB`, build RID `62e9e80ea4674c12a44907502f05fc2a`, and bump slot 1 generation 0→1. The failures are not inferred from probe data; they are allocator index removals and generation bumps.
+
+Runner requests `extent_size=150,994,944`, `file_size=max_size=34,359,738,368`, and `min_free_space=10,737,418,240`. Source inspection confirms `_select_gc_victims()` applies this configured max-size and free-space watermark to **each component write**, but measures only that component allocator's `used_bytes`; it selects a victim while live bytes exceed 90% of 32 GiB **or** the shared filesystem has less than 10 GiB free. The host has only 1,553,965,056 bytes free (`df -B1 /tmp`, filesystem at 100%), so the free-space condition is true before these fixture writes. Each MAMBA write consequently selects LRU slots in its independent MAMBA allocator and advances their generations; MAMBA keys are erased even though individual new page writes receive durable ACKs. This exactly explains the trace's repeated MAMBA slot invalidations and later miss. This is a config error in the runner, not a capacity shortage in the 32-GiB Extent file and not an SSE failure.
+
+Do not touch the shared filesystem, run global cache eviction, or delete artifacts. Correct the isolated experimental config to set `min_free_space=0` (the MAMBA allocator's free-space GC is not a valid proxy for the FULL allocator on this nearly-full shared filesystem; keeping a threshold would evict component-local keys whenever common free space is below it). Before another GPU run, confirm disk health and ensure the runner will not consume the shared remaining space, then exercise the four-target write/query fixture on CPU or with a controlled local Extent-only test. Keep any failed runs as failures. The GPU was idle at the observed check; no workload started during this analysis.
+
+## Evidence limits
+
+No measured B/C/D workload, valid L3 verification, same-run RID→kernel linkage, or performance result exists for this run. The run is failed evidence only. FPM/kernel joins, GPU L0 and numerical oracle remain outstanding.

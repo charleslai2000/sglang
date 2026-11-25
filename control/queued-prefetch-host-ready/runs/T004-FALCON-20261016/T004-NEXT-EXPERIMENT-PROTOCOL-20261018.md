@@ -1,0 +1,21 @@
+# T004 next bounded experiment protocol (pre-run, not evidence)
+
+Status: not run. Existing three ON/OFF mechanism pairs and the one full high-pressure ON/OFF pair satisfy their own completed stages; they are not repeated here. The high-pressure pair has real 2,048-token L3 FULL+MAMBA hits and 128-token outputs but only one A Decode occupant; its stage ledger is separate.
+
+## Low-concurrency control — proposed one-arm workload
+
+- `T004_MAX_RUNNING_REQUESTS=2`, `T004_MAX_TOTAL_TOKENS=8192`, queue cap `T004_MAX_QUEUED_REQUESTS=4`, Ready Horizon ON, Queue Prefetch ON. The driver starts two long-prompt 1,024-token greedy Decode occupants, then requires scheduler evidence of at least one active Decode request and one **distinct non-health RID** with `can_run=0` before dispatching one 2,112-token B request. It submits only B (not B/C/D). No arm has been run; completion will be a valid low-concurrency characterization only if the manifest's actual `experiment_config`, occupancy/RID timeline, exact L3 fixture, and request count confirm this config. The name “low concurrency” means 1–2 active Decode requests + one waiting target, not a fully saturated two-slot benchmark.
+- A matching OFF arm, if completed for comparison, must use same workload, fixture construction, prefix/output lengths, queue gate, and configuration except `SGLANG_DISABLE_HICACHE_QUEUE_PREFETCH`; repeat order/replication and performance claims must be predeclared, otherwise report mechanism only.
+- `driver.py` still has an additional legacy wait in `submit_when_queued_slot_frees` for `Decode batch ... #queue-req: 0`; do not assume the new one-pending gate is operational until a run proves it. If it times out, keep failed artifact; do not loosen actual occupancy retrospectively.
+
+## Numerical correctness inputs found
+
+- Existing exact T003 baseline for Falcon H1 is target hash `721e82b98783b54519c46e4be90f5363be52d20bcbba82a614d022a61eafe09c` and greedy output token `[10553]`, established in `control/falcon-h1-3090-hicache-perf/runs/T003-L2-20261014T1700Z/` and `T003-L3-20261015T0300Z/`. The 2026-10-14 L2 run proves same target's one-token Host-source output parity; `T003-L3R-20261015T0900Z/RESULTS.md` proves cold-process Extent restore, same output, synchronized H2D and separate block-device sector delta. This is a **short one-token smoke**, not the requested frozen long greedy/multi-round/logits/FULL+MAMBA contract.
+- The T004 workload target hashes/outputs are not this T003 target. The T004 manifests retain inputs and response token IDs for the benchmark request but no cross-tier matched logits baseline. Do not compare their generated strings or tokens against the `[10553]` sentinel.
+- No repo-local Falcon frozen long greedy/multi-round logits/state oracle or tolerance configuration was located in T004/T003 notes. Cross-family R-HBA1 is Qwen-based and is not a Falcon numerical oracle. Therefore full numerical correctness remains BLOCKED on absence of the frozen Falcon oracle/config; no new GPU request should be represented as that contract.
+
+## Source identity and profiler boundary
+
+- Historical high-pressure arm manifests/driver logs did not record source Git HEAD or executed binary SHA; `highpressure-stage-ledger-20261018.json` says `NOT_RECORDED`. Current checkout HEAD `592a9ef996d8efc4a06cf64ce9079e34b1003637` must not be projected backward onto those runs.
+- The attempted online NVTX control seam was fully removed before server launch due to unvalidated response routing and cross-thread range semantics. No new profiler/service was launched. Existing T002 CUPTI is CUDA-graph-bound and current Prefill is eager; it cannot fill per-RID Prefill/L0 metrics here. Keep first GPU step, L0, GPU I/O stall and physical-media distinction NOT_VERIFIED.
+- Before any new GPU run: hold `/tmp/f1-r16b-gpu-exclusive.lock`; use corrected full overlay `/tmp/t002-sm86-overlay-root` (not incomplete `/tmp/f1-r3-kernel-overlay`) in PYTHONPATH; record HEAD, dirty patch identity, scheduler/server PID, executable/model revision/config; use isolated run ID/Extent; assert trap cleanup; verify zero service processes and GPU memory released at end. This protocol does not authorize bypassing the missing correctness contract.
