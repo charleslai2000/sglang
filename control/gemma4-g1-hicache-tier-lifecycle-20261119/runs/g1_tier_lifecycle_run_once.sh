@@ -11,7 +11,7 @@ HICACHE_SIZE_GB=${G1_TIER_HICACHE_SIZE_GB:-8}
 G1_PROD_CONTEXT=${G1_TIER_CONTEXT:-131072}
 PRESSURE_MIN_REQUESTS=${G1_TIER_PRESSURE_MIN_REQUESTS:-12}
 FIXTURE_SHA256=${G1_TIER_FIXTURE_SHA256:-ac06790a415e772880dac9cb0415d09cc1bdc04142652733d1314f583f841a8b}
-CAPACITY_JSON=${G1_TIER_CAPACITY_JSON:-/data/sglang-hicache/gemma4/runs/20261120T-g1-capacity-139264-hicache8-extent32-20261119T204751Z/capacity.json}
+CAPACITY_JSON=${G1_TIER_CAPACITY_JSON:-/data/sglang-hicache/gemma4/fixtures/capacity-139264-hicache8.json}
 PROBE_CAPACITY=${G1_TIER_PROBE_CAPACITY:-yes}
 RUN_CLIENT=${G1_TIER_RUN_CLIENT:-yes}
 EXPECTED_GIT_HEAD=${G1_TIER_EXPECTED_GIT_HEAD:?set G1_TIER_EXPECTED_GIT_HEAD to the reviewed immutable commit SHA}
@@ -229,7 +229,7 @@ MONITOR_PID=$!
 CLIENT_ARGS=(
   --url "http://127.0.0.1:$PORT"
   --fixture "$FIXTURE" --out "$OUT/client" --extent-dir "$OUT/service/l3-extent"
-  --server-log "$OUT/service/server.log" --timeout 1800
+  --server-log "$OUT/service/server.log" --service-pid "$SERVER_PID" --timeout 1800
   --warm-output-tokens 1 --decode-output-tokens 256 --parallel "${G1_TIER_PARALLEL:-8}"
   --min-requests "$PRESSURE_MIN_REQUESTS"
   --capacity-json "$CAPACITY_JSON"

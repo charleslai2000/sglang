@@ -4,6 +4,7 @@
 import importlib.util
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 MODULE_PATH = Path(__file__).with_name("run_radix_tree_lifecycle.py")
@@ -14,6 +15,18 @@ SPEC.loader.exec_module(MODULE)
 
 
 class LifecycleEvidenceGateTest(unittest.TestCase):
+    def test_service_health_uses_owned_pid_and_accepts_transient_http_misses(self):
+        current_pid = str(__import__("os").getpid())
+        MODULE.wait_for_service_exit(int(current_pid))
+        with patch("pathlib.Path.read_text", side_effect=FileNotFoundError):
+            with self.assertRaisesRegex(RuntimeError, "service exited"):
+                MODULE.wait_for_service_exit(99999999)
+        with patch("pathlib.Path.read_text", return_value="999999 (python service) S 1 2 3"):
+            MODULE.wait_for_service_exit(999999)
+        with patch("pathlib.Path.read_text", return_value="999999 (python service) Z 1 2 3"):
+            with self.assertRaisesRegex(RuntimeError, "state=Z"):
+                MODULE.wait_for_service_exit(999999)
+
     def test_l1_source_is_device_only_with_decode(self):
         record = {
             "ok": True,

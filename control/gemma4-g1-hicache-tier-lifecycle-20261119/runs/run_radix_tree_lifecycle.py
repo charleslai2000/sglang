@@ -20,6 +20,22 @@ def http_json(url, path, timeout=30):
         return json.loads(response.read())
 
 
+def wait_for_service_exit(service_pid):
+    """Fail promptly if the owned service process has exited."""
+    if service_pid is None:
+        return
+    try:
+        stat = Path(f"/proc/{service_pid}/stat").read_text()
+    except FileNotFoundError:
+        raise RuntimeError(f"service exited while client workload was active (pid={service_pid})")
+    # comm is parenthesized but can itself contain spaces; state follows the
+    # closing parenthesis and is the first token after it.
+    fields_after_comm = stat.rsplit(")", 1)[1].split()
+    state = fields_after_comm[0] if fields_after_comm else ""
+    if state in {"Z", "X"}:
+        raise RuntimeError(f"service exited while client workload was active (pid={service_pid}, state={state})")
+
+
 def metrics(url):
     try:
         with urllib.request.urlopen(url + "/metrics", timeout=10) as response:
@@ -522,7 +538,7 @@ def parse_restore_log(server_log, request_ids):
     return result
 
 
-def run_one(url, row, rid, phase, new_tokens, timeout):
+def run_one(url, row, rid, phase, new_tokens, timeout, service_pid=None):
     payload = {
         "rid": rid,
         "input_ids": [row["input_ids"]],
@@ -539,6 +555,7 @@ def run_one(url, row, rid, phase, new_tokens, timeout):
     started = time.time()
     tick = time.perf_counter()
     try:
+        wait_for_service_exit(service_pid)
         result = post(url, "/generate", payload, timeout)
         if isinstance(result, list):
             result = result[0]
@@ -549,9 +566,10 @@ def run_one(url, row, rid, phase, new_tokens, timeout):
             "rid": rid,
             "phase": phase,
             "source_fixture_rid": row["rid"],
-            "branch_id": row["branch_id"],
+            "branch_id": row.get("branch_id", -1),
             "prompt_sha256": row["sha256"],
             "prompt_tokens": meta.get("prompt_tokens", len(row["input_ids"])),
+
             "started_epoch_s": started,
             "elapsed_s": time.perf_counter() - tick,
             "completion_tokens": completion,
@@ -569,7 +587,7 @@ def run_one(url, row, rid, phase, new_tokens, timeout):
             "rid": rid,
             "phase": phase,
             "source_fixture_rid": row["rid"],
-            "branch_id": row["branch_id"],
+            "branch_id": row.get("branch_id", -1),
             "prompt_sha256": row["sha256"],
             "started_epoch_s": started,
             "elapsed_s": time.perf_counter() - tick,
@@ -578,7 +596,7 @@ def run_one(url, row, rid, phase, new_tokens, timeout):
         }
 
 
-def run_parallel(url, rows, indices, phase, tokens, timeout, out, workers):
+def run_parallel(url, rows, indices, phase, tokens, timeout, out, workers, service_pid=None):
     records = []
     with ThreadPoolExecutor(max_workers=min(workers, len(indices))) as pool:
         futures = {
@@ -590,6 +608,7 @@ def run_parallel(url, rows, indices, phase, tokens, timeout, out, workers):
                 phase,
                 tokens,
                 timeout,
+                service_pid,
             ): sequence
             for sequence, index in enumerate(indices)
         }
@@ -614,6 +633,7 @@ def main():
     parser.add_argument("--out", required=True)
     parser.add_argument("--extent-dir", required=True)
     parser.add_argument("--server-log", required=True)
+    parser.add_argument("--service-pid", type=int, required=True)
     parser.add_argument("--timeout", type=int, default=1800)
     parser.add_argument("--parallel", type=int, default=8)
     parser.add_argument("--warm-output-tokens", type=int, default=1)
@@ -858,6 +878,7 @@ def main():
             "tree_seed",
             args.warm_output_tokens,
             args.timeout,
+            args.service_pid,
         )
         for row in rows
     ]
@@ -931,7 +952,7 @@ def main():
             pressure_row["input_ids"] = ids[:target_tokens]
             pressure_row["sha256"] = hashlib.sha256(json.dumps(pressure_row["input_ids"], separators=(",", ":")).encode()).hexdigest()
             pressure_rows_used.append(pressure_row)
-            result = run_one(args.url, pressure_row, f"{row['rid']}-pressure", "capacity_pressure", 1, args.timeout)
+            result = run_one(args.url, pressure_row, f"{row['rid']}-pressure", "capacity_pressure", 1, args.timeout, args.service_pid)
             pressure_records.append(result)
             write_json(out / "capacity_pressure.partial.json", {"completed": len(pressure_records), "requests": pressure_records})
             if not result.get("ok") or result.get("completion_tokens") != 1:
@@ -990,7 +1011,7 @@ def main():
         frontier_pre_snapshot = snapshot(args.url, out, "before_frontier_recovery", args.extent_dir)
         frontier_records = run_parallel(
             args.url, frontier_rows, frontier_indices, "frontier_recovery",
-            args.decode_output_tokens, args.timeout, out, args.parallel,
+            args.decode_output_tokens, args.timeout, out, args.parallel, args.service_pid,
         )
         frontier_log = parse_restore_log(args.server_log, [record["rid"] for record in frontier_records])
         for record in frontier_records:
@@ -1006,7 +1027,7 @@ def main():
         snapshot(args.url, out, "after_frontier_recovery", args.extent_dir)
     if "tier_probe" in stages:
         l1_probe = [
-            run_one(args.url, rows[0], f"{rows[0]['rid']}-l1_probe", "l1_probe", args.decode_output_tokens, args.timeout)
+            run_one(args.url, rows[0], f"{rows[0]['rid']}-l1_probe", "l1_probe", args.decode_output_tokens, args.timeout, args.service_pid)
         ]
         l1_evidence = parse_restore_log(args.server_log, [record["rid"] for record in l1_probe])
         for record in l1_probe:
@@ -1022,6 +1043,7 @@ def main():
             args.timeout,
             out,
             args.parallel,
+            args.service_pid,
         )
         write_json(out / "tier_probe.json", {"requests": host_probe})
         source_gate_host_probe = list(host_probe)
@@ -1056,6 +1078,7 @@ def main():
                     args.timeout,
                     out,
                     args.parallel,
+                    args.service_pid,
                 )
             )
             write_json(
@@ -1073,7 +1096,7 @@ def main():
             indices = [index for index, row in enumerate(rows) if int(row["branch_id"]) == branch]
             branch_records = run_parallel(
                 args.url, rows, indices, f"branch_{branch}_exclusive_l3",
-                args.decode_output_tokens, args.timeout, out, args.parallel,
+                args.decode_output_tokens, args.timeout, out, args.parallel, args.service_pid,
             )
             evidence = parse_restore_log(args.server_log, [record["rid"] for record in branch_records])
             for record in branch_records:
@@ -1084,7 +1107,7 @@ def main():
     if "cold_storage_restore" in stages:
         cold_l3 = run_parallel(
             args.url, rows, order, "cold_storage_restore",
-            args.decode_output_tokens, args.timeout, out, args.parallel,
+            args.decode_output_tokens, args.timeout, out, args.parallel, args.service_pid,
         )
         write_json(out / "cold_storage_restore.json", {"requests": cold_l3})
         final = snapshot(args.url, out, "after_cold_storage_restore", args.extent_dir)
@@ -1126,6 +1149,7 @@ def main():
                     args.timeout,
                     out,
                     1,
+                    args.service_pid,
                 )
             )
         if l2_churn:
@@ -1139,6 +1163,7 @@ def main():
             args.timeout,
             out,
             1,
+            args.service_pid,
         )
         l2_evidence = parse_restore_log(args.server_log, [record["rid"] for record in l2_only])
         for record in l2_only:
