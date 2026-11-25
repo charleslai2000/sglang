@@ -1259,6 +1259,77 @@ class TestExtentV1(ExtentBackendTestBase):
         finally:
             backend.close()
 
+    def test_gc_victim_selection_samples_statvfs_once_and_walks_lru(self):
+        backend = ExtentFileBackend(
+            _make_config(
+                model_name="gc-linear-lru",
+                extra_config={
+                    "storage_dir": self.tmpdir,
+                    "extent_size": "16Ki",
+                    "file_size": "1Mi",
+                    "min_free_space": "1Ti",
+                },
+            )
+        )
+        try:
+            self._write_keys_into(backend, 8)
+            recency = backend._allocator._recency
+            expected = []
+            selected = set()
+            used = backend._allocator.used_bytes
+            for key in recency:
+                ref = backend._allocator._index[key]
+                if ref.extent_id in selected:
+                    continue
+                selected.add(ref.extent_id)
+                expected.append(ref.extent_id)
+                used -= backend._allocator._slot_bytes[ref.extent_id]
+                if used <= int(backend._max_size_bytes * backend._eviction_ratio):
+                    break
+            with mock.patch(
+                "sglang.srt.mem_cache.storage.extent.extent_file_backend.os.statvfs",
+                return_value=type("Stat", (), {"f_bavail": 0, "f_frsize": 4096})(),
+            ) as statvfs:
+                self.assertEqual(backend._select_gc_victims(), expected)
+            statvfs.assert_called_once_with(backend._storage_dir)
+        finally:
+            backend.close()
+
+    def test_gc_evict_stops_once_free_space_recovers(self):
+        backend = ExtentFileBackend(
+            _make_config(
+                model_name="gc-no-overevict",
+                extra_config={
+                    "storage_dir": self.tmpdir,
+                    "extent_size": "16Ki",
+                    # Large size ceiling: only the free-space watermark may
+                    # drive this sweep.
+                    "file_size": "64Mi",
+                    "min_free_space": "1Ti",
+                },
+            )
+        )
+        try:
+            self._write_keys_into(backend, 6)
+            before = len(backend._allocator._index)
+            # Free space is sampled per reclaimed slot, so the sweep stops as
+            # soon as the filesystem reports enough room again instead of
+            # draining the whole LRU on one stale pressure reading.
+            falling = type("Stat", (), {"f_bavail": 0, "f_frsize": 4096})()
+            recovered = type("Stat", (), {"f_bavail": 1 << 40, "f_frsize": 4096})()
+            with mock.patch(
+                "sglang.srt.mem_cache.storage.extent.extent_file_backend.os.statvfs",
+                side_effect=[falling, recovered],
+            ) as statvfs:
+                backend._gc_evict()
+            # Two samples: the pressure check, then the post-eviction re-check
+            # that ends the sweep. A single stale reading would have kept
+            # evicting every remaining slot.
+            self.assertEqual(statvfs.call_count, 2)
+            self.assertLess(len(backend._allocator._index), before)
+        finally:
+            backend.close()
+
     def test_batch_set_refused_when_page_exceeds_extent(self):
         big = bytearray(20 * 1024)  # > 16 KiB extent
         self.assertFalse(self.backend.set("big", big))

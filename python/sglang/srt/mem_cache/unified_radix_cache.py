@@ -1805,6 +1805,12 @@ class UnifiedRadixCache(BasePrefixCache):
         # compare equal to the new cache state.
         self._host_allocability_instance_id = 0
         self._host_allocability_generations: dict[str, int] = {}
+        # Per-pool evictable signature memo keyed by the pool generation that
+        # produced it. A bump invalidates the entry, so a signature is scanned
+        # once per (pool, generation) instead of once per waiting request.
+        self._host_allocability_signature_memo: dict[
+            str, tuple[int, tuple[int, frozenset[int]]]
+        ] = {}
         self._host_allocability_telemetry_seq = 0
         self._host_allocability_telemetry_mutations = {}
         self._host_allocability_telemetry_emitted = {}
@@ -2699,6 +2705,7 @@ class UnifiedRadixCache(BasePrefixCache):
         """Full reset: destroy entire tree and all state."""
         self._host_allocability_instance_id += 1
         self._host_allocability_generations = {PoolName.KV.value: 0}
+        getattr(self, "_host_allocability_signature_memo", {}).clear()
         self._host_allocability_telemetry_seq = 0
         self._host_allocability_telemetry_mutations = {}
         self._host_allocability_telemetry_emitted = {}
@@ -3895,6 +3902,40 @@ class UnifiedRadixCache(BasePrefixCache):
             eligible,
         )
 
+    def _host_evictable_signature_cached(
+        self, pool: str
+    ) -> tuple[int, frozenset[int]]:
+        """Return the evictable signature, reusing the scan for one generation.
+
+        The signature is a pure function of tree/host-LRU state, and every
+        mutation that changes it advances that pool's allocability generation
+        (``_bump_host_allocability`` / ``_bump_changed_host_allocability``).
+        Keying the memo by that generation therefore returns what a fresh scan
+        would produce, while a burst of waiters in one scheduler pass no
+        longer repeats the walk over ``evictable_host_leaves`` or the whole
+        host LRU per request. A generation bump invalidates the entry;
+        ``reset_host_allocability_signature_memo`` additionally drops the memo
+        at a scheduler pass boundary so a mutation that did not report itself
+        cannot outlive the pass that observed it.
+        """
+        pool = str(getattr(pool, "value", pool))
+        memo = getattr(self, "_host_allocability_signature_memo", None)
+        if memo is None:
+            memo = self._host_allocability_signature_memo = {}
+        generation = getattr(self, "_host_allocability_generations", {}).get(pool, 0)
+        cached = memo.get(pool)
+        if cached is not None and cached[0] == generation:
+            return cached[1]
+        signature = self._host_evictable_signature(pool)
+        memo[pool] = (generation, signature)
+        return signature
+
+    def reset_host_allocability_signature_memo(self) -> None:
+        """Drop memoized evictable signatures at a state-change boundary."""
+        memo = getattr(self, "_host_allocability_signature_memo", None)
+        if memo:
+            memo.clear()
+
     def _host_allocability_signatures(self) -> dict[str, tuple[int, frozenset[int]]]:
         pools = [PoolName.KV.value]
         pools.extend(
@@ -3938,7 +3979,7 @@ class UnifiedRadixCache(BasePrefixCache):
         before = generations.get(pool, 0)
         generations[pool] = before + 1
         if evictable_after is None:
-            evictable_after = self._host_evictable_signature(pool)[0]
+            evictable_after = self._host_evictable_signature_cached(pool)[0]
         if evictable_before is None:
             evictable_before = evictable_after
         self._host_allocability_telemetry_seq += 1
@@ -4044,7 +4085,7 @@ class UnifiedRadixCache(BasePrefixCache):
         free_units = {}
         evictable_units = {}
         for pool in pools:
-            evictable_units[pool] = self._host_evictable_signature(pool)[0]
+            evictable_units[pool] = self._host_evictable_signature_cached(pool)[0]
             controller = self.cache_controller
             host_group = getattr(controller, "mem_pool_host", None)
             try:

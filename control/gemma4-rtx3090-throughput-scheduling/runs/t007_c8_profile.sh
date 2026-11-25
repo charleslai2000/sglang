@@ -21,8 +21,12 @@ WINDOW_DELAY=${T007_WINDOW_DELAY:-150}
 WINDOW_SECONDS=${T007_WINDOW_SECONDS:-120}
 CHUNK_OVERRIDE=${T007_CHUNK:-}
 HICACHE_MODE=${T007_HICACHE_MODE:-on}
+WRITE_POLICY=${T007_WRITE_POLICY:-}
+PREFETCH_POLICY=${T007_PREFETCH_POLICY:-}
 EXTENT_OUT=${T007_EXTENT_OUT:-$OUT/l3-extent}
 [[ $HICACHE_MODE == on || $HICACHE_MODE == l2 || $HICACHE_MODE == off ]] || { echo "invalid T007_HICACHE_MODE=$HICACHE_MODE" >&2; exit 2; }
+[[ -z $WRITE_POLICY || $WRITE_POLICY == write_through || $WRITE_POLICY == write_back || $WRITE_POLICY == write_through_selective ]] || { echo "invalid T007_WRITE_POLICY=$WRITE_POLICY" >&2; exit 2; }
+[[ -z $PREFETCH_POLICY || $PREFETCH_POLICY == wait_complete || $PREFETCH_POLICY == best_effort || $PREFETCH_POLICY == timeout ]] || { echo "invalid T007_PREFETCH_POLICY=$PREFETCH_POLICY" >&2; exit 2; }
 
 [[ -d "$OUT" && -z "$(ls -A "$OUT")" ]] || { echo "T007_OUT must be an empty directory: $OUT" >&2; exit 2; }
 mkdir -p "$OUT"
@@ -74,6 +78,12 @@ for ((i=0;i<${#ARGS[@]};i++)); do
     esac
   fi
   if [[ ${ARGS[i]} == --export-metrics-to-file-dir ]]; then NEW+=("${ARGS[i]}" "$OUT/request-metrics"); skip=1; continue; fi
+  if [[ -n $WRITE_POLICY && ${ARGS[i]} == --hicache-write-policy ]]; then
+    NEW+=("${ARGS[i]}" "$WRITE_POLICY"); skip=1; continue
+  fi
+  if [[ -n $PREFETCH_POLICY && ${ARGS[i]} == --hicache-storage-prefetch-policy ]]; then
+    NEW+=("${ARGS[i]}" "$PREFETCH_POLICY"); skip=1; continue
+  fi
   NEW+=("${ARGS[i]}")
 done
 ARGS=("${NEW[@]}")
@@ -107,7 +117,7 @@ for ((i=0;i<${#ARGS[@]};i++)); do
 done
 ARGS=("${NEW3[@]}")
 mkdir -p "$OUT/request-metrics"
-printf '%q ' "${ARGS[@]}" > "$OUT/launch-argv.txt"; printf '\nchunked_prefill_size_override=%s\nhicache_mode=%s\nwindow_delay_s=%s\nwindow_seconds=%s\n' "${CHUNK_OVERRIDE:-default}" "$HICACHE_MODE" "$WINDOW_DELAY" "$WINDOW_SECONDS" > "$OUT/manifest.txt"
+printf '%q ' "${ARGS[@]}" > "$OUT/launch-argv.txt"; printf '\nchunked_prefill_size_override=%s\nhicache_mode=%s\nwrite_policy_override=%s\nprefetch_policy_override=%s\nwindow_delay_s=%s\nwindow_seconds=%s\n' "${CHUNK_OVERRIDE:-default}" "$HICACHE_MODE" "${WRITE_POLICY:-from-baseline}" "${PREFETCH_POLICY:-from-baseline}" "$WINDOW_DELAY" "$WINDOW_SECONDS" > "$OUT/manifest.txt"
 printf 'task_started=%s\nwrapper_pid=%s\nwrapper_command=%q\nextent_dir=%s\n' "$(date -u +%FT%TZ)" "$$" "$0" "$EXTENT_OUT" >> "$OUT/manifest.txt"
 printf 'SGLANG_ENABLE_METRICS_DEVICE_TIMER=1\nSGLANG_ENABLE_NVTX_SCHEDULER=1\n' >> "$OUT/manifest.txt"
 printf 'git_head=%s\n' "$(git -C "$ROOT" rev-parse HEAD)" >> "$OUT/manifest.txt"

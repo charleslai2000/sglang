@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import sglang.srt.managers.scheduler as scheduler_mod
 from sglang.srt.managers.scheduler import Scheduler
 from sglang.srt.managers.scheduler_components.hicache_restore import (
+    RestoreEvent,
     RestoreState,
     RestoreWaitReason,
     promotion_budget_fits,
@@ -133,6 +134,50 @@ class PrefetchBudgetWakeTests(unittest.TestCase):
         request = self._request(RestoreWaitReason.DEVICE_QUOTA)
 
         self.assertFalse(scheduler._restore_wait_capacity_fits(request))
+
+    def test_l3_only_wait_is_released_for_current_prefix_admission(self):
+        scheduler = self._scheduler()
+        request = self._request(RestoreWaitReason.FRONTIER)
+        request.last_host_node = 7
+        discarded = []
+        recomputed = []
+        scheduler.tree_cache.discard_frontier_waiter = discarded.append
+        scheduler.tree_cache.discard_backup_wait = lambda _rid: None
+        scheduler._log_restore_recompute = lambda req, cause: recomputed.append(
+            (req.rid, cause)
+        )
+        self.assertTrue(scheduler._release_l3_only_restore_wait(request))
+        self.assertIs(request.hicache_restore_state, RestoreState.NONE)
+        self.assertEqual(discarded, [request.rid])
+        self.assertEqual(recomputed, [(request.rid, "l3_wait_fast_forward")])
+        self.assertFalse(scheduler._release_l3_only_restore_wait(request))
+
+    def test_backup_pending_l3_wait_is_also_released(self):
+        scheduler = self._scheduler()
+        request = self._request(RestoreWaitReason.BACKUP_PENDING)
+        request.last_host_node = 9
+        discarded = []
+        scheduler.tree_cache.discard_frontier_waiter = discarded.append
+        scheduler.tree_cache.discard_backup_wait = lambda _rid: None
+        scheduler._log_restore_recompute = lambda *_args: None
+        self.assertTrue(scheduler._release_l3_only_restore_wait(request))
+        self.assertEqual(discarded, [request.rid])
+        self.assertIs(request.hicache_restore_state, RestoreState.NONE)
+
+    def test_other_capacity_waits_are_not_fast_forwarded(self):
+        scheduler = self._scheduler()
+        scheduler.tree_cache.discard_frontier_waiter = lambda _rid: None
+        scheduler.tree_cache.discard_backup_wait = lambda _rid: None
+        scheduler._log_restore_recompute = lambda *_args: None
+        for reason in (
+            RestoreWaitReason.DEVICE_QUOTA,
+            RestoreWaitReason.HOST_ALLOC,
+            RestoreWaitReason.PREFETCH_BUDGET,
+        ):
+            with self.subTest(reason=reason):
+                request = self._request(reason)
+                self.assertFalse(scheduler._release_l3_only_restore_wait(request))
+                self.assertIs(request.hicache_restore_state, RestoreState.WAIT_CAPACITY)
 
 
 if __name__ == "__main__":

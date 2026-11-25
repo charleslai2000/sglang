@@ -3538,7 +3538,47 @@ class Scheduler(
         snapshot_fn = getattr(self.tree_cache, "host_allocability_snapshot", None)
         if snapshot_fn is None:
             return cursor.snapshot if cursor is not None else None
-        return snapshot_fn(sorted(pools))
+        key = tuple(sorted(pools))
+        pass_snapshots = getattr(self, "_host_alloc_pass_snapshots", None)
+        if pass_snapshots is not None:
+            cached = pass_snapshots.get(key)
+            if cached is not None:
+                return cached
+        snapshot = snapshot_fn(list(key))
+        if pass_snapshots is not None:
+            pass_snapshots[key] = snapshot
+        return snapshot
+
+    def _begin_host_alloc_pass(self) -> None:
+        """Open one reconciliation pass's snapshot-reuse scope.
+
+        The scheduler is the only mutator inside one pass, and every mutation
+        it performs advances the affected host-allocability generation, so a
+        snapshot taken here stays authoritative until the pass ends. The cache
+        side additionally drops its memoized evictable signatures at this
+        boundary, so an unreported mutation cannot leak across passes.
+        """
+        self._host_alloc_pass_snapshots = {}
+        self._host_alloc_pass_global_vector = None
+        self._host_alloc_pass_global_vector_ready = False
+        reset_fn = getattr(
+            self.tree_cache, "reset_host_allocability_signature_memo", None
+        )
+        if reset_fn is not None:
+            reset_fn()
+
+    def _end_host_alloc_pass(self, previous) -> None:
+        self._host_alloc_pass_snapshots = previous
+        self._host_alloc_pass_global_vector_ready = False
+        self._host_alloc_pass_global_vector = None
+
+    def _invalidate_host_alloc_pass_snapshots(self) -> None:
+        """Forget this pass's snapshots after a resource-changing action."""
+        pass_snapshots = getattr(self, "_host_alloc_pass_snapshots", None)
+        if pass_snapshots:
+            pass_snapshots.clear()
+        self._host_alloc_pass_global_vector_ready = False
+        self._host_alloc_pass_global_vector = None
 
     def _host_alloc_telemetry_identity(self):
         parallel_state = getattr(self, "ps", None)
@@ -3779,10 +3819,16 @@ class Scheduler(
         )
 
     def _host_alloc_global_generation_vector(self):
+        if getattr(self, "_host_alloc_pass_global_vector_ready", False):
+            return self._host_alloc_pass_global_vector
         snapshot_fn = getattr(self.tree_cache, "host_allocability_snapshot", None)
         if snapshot_fn is None:
             return None
-        return snapshot_fn().generation_vector()
+        vector = snapshot_fn().generation_vector()
+        if getattr(self, "_host_alloc_pass_snapshots", None) is not None:
+            self._host_alloc_pass_global_vector = vector
+            self._host_alloc_pass_global_vector_ready = True
+        return vector
 
     def _host_alloc_global_snapshot(self):
         snapshot_fn = getattr(self.tree_cache, "host_allocability_snapshot", None)
@@ -3996,6 +4042,58 @@ class Scheduler(
             return "hold_no_generation"
         return "hold_global_grant_used"
 
+    def _emit_host_alloc_hold(self, req, decision_name) -> None:
+        """Emit one non-granted HOST_ALLOC waiter record.
+
+        Repeat records are coalesced downstream by ``_log_host_alloc_telemetry``
+        (identical decision/wait/generation signature), so this path only pays
+        for the state it reports when a record can actually change.
+        """
+        worker, rank = self._host_alloc_telemetry_identity()
+        cursor = getattr(req, "hicache_host_alloc_wait_cursor", None)
+        current = self._host_alloc_snapshot_for_req(req)
+        _log_host_alloc_telemetry(
+            "restore_host_alloc_wake_decision",
+            worker=worker,
+            rank=rank,
+            rid=req.rid,
+            attempt_id=getattr(req, "hicache_host_alloc_attempt_id", None),
+            cache_instance_id=(
+                current.cache_instance_id if current is not None else None
+            ),
+            trace_context=self._host_alloc_trace_context(req),
+            decision=decision_name,
+            captured_generations=(
+                dict(cursor.snapshot.generation_by_pool) if cursor else {}
+            ),
+            current_generations=(
+                dict(current.generation_by_pool) if current is not None else {}
+            ),
+            blocked_domains=sorted(map(str, cursor.blocked_domains)) if cursor else [],
+            required_aux_units=(dict(cursor.required_aux_units) if cursor else {}),
+            requested_primary_tokens=(
+                int(cursor.requested_primary_tokens) if cursor else 0
+            ),
+            fifo_sequence=cursor.fifo_sequence if cursor else None,
+            generation_vector_id=self._host_alloc_generation_vector_id(
+                current.generation_vector() if current is not None else None
+            ),
+            global_grant_used=decision_name == "hold_global_grant_used",
+            budget_available=decision_name != "hold_budget",
+            free_units=(dict(current.free_units_by_pool) if current is not None else {}),
+            evictable_units=(
+                dict(current.evictable_units_by_pool) if current is not None else {}
+            ),
+            retry_grant=False,
+            retry_skip=decision_name != "grant",
+            retry_outcome=decision_name,
+            lifecycle_key=self._host_alloc_lifecycle_key(req),
+            wait_id=getattr(req, "hicache_host_alloc_wait_id", None),
+            wake_event_id=None,
+            attempt_number=0,
+            attempt_origin="HOST_ALLOC_WAKE_HOLD",
+        )
+
     def _emit_host_alloc_wake_grant(self, req) -> Optional[str]:
         """Emit the authoritative grant record for one woken waiter.
 
@@ -4102,6 +4200,7 @@ class Scheduler(
         )
         return event_id
 
+    @scheduler_nvtx_method("scheduler.reconcile_restore_states")
     def _reconcile_restore_states(self):
         """Per-pass restore-state reconciliation (P2-1 M1b/M2; evolved from
         _retry_missed_storage_prefetches). Feeds terminal prefetch outcomes
@@ -4117,6 +4216,15 @@ class Scheduler(
                 )
             return
 
+        previous_scope = getattr(self, "_host_alloc_pass_snapshots", None)
+        self._begin_host_alloc_pass()
+        try:
+            self._reconcile_restore_states_in_pass()
+        finally:
+            self._end_host_alloc_pass(previous_scope)
+
+    def _reconcile_restore_states_in_pass(self):
+        """Body of ``_reconcile_restore_states`` inside one snapshot scope."""
         # 1) Terminal outcomes recorded by the drain this pass (same thread).
         for req in self.waiting_queue:
             self._feed_restore_terminal(req)
@@ -4145,6 +4253,9 @@ class Scheduler(
                     req.storage_prefetch_retry_attempts,
                 )
                 self._prefetch_kvcache(req, origin=HiCachePrefetchOrigin.DEMAND_RETRY)
+                # The retry may have claimed or freed host slots, so a later
+                # admission decision in this pass must re-read allocability.
+                self._invalidate_host_alloc_pass_snapshots()
 
         # 3) M2: frontier-ACK wakes (T12). The ack drain moved the waiter
         # into the ready set earlier in this same event pass.
@@ -4178,6 +4289,7 @@ class Scheduler(
                     origin=HiCachePrefetchOrigin.DEMAND_RETRY,
                     demand_restore=self.enable_ready_horizon or was_backup_pending,
                 )
+                self._invalidate_host_alloc_pass_snapshots()
                 if req.hicache_restore_state is RestoreState.NONE:
                     # The wake re-issue was declined too-short: terminal
                     # (T4 on the re-issue leg), released to recompute now
@@ -4205,68 +4317,9 @@ class Scheduler(
                 # leaves only via the paced retry or the T13 timeout.
                 continue
             if req.hicache_restore_wait_reason is RestoreWaitReason.HOST_ALLOC:
-                worker, rank = self._host_alloc_telemetry_identity()
-                cursor = getattr(req, "hicache_host_alloc_wait_cursor", None)
-                current = self._host_alloc_snapshot_for_req(req)
-                current_generations = (
-                    dict(current.generation_by_pool) if current is not None else {}
-                )
-                captured_generations = (
-                    dict(cursor.snapshot.generation_by_pool) if cursor else {}
-                )
-                vector = (
-                    current.generation_vector() if current is not None else None
-                )
                 if req.rid != host_alloc_grant:
-                    decision_name = self._host_alloc_skip_decision(req)
-                    _log_host_alloc_telemetry(
-                        "restore_host_alloc_wake_decision",
-                        worker=worker,
-                        rank=rank,
-                        rid=req.rid,
-                        attempt_id=getattr(
-                            req, "hicache_host_alloc_attempt_id", None
-                        ),
-                        cache_instance_id=(
-                            current.cache_instance_id if current is not None else None
-                        ),
-                        trace_context=self._host_alloc_trace_context(req),
-                        decision=decision_name,
-                        captured_generations=captured_generations,
-                        current_generations=current_generations,
-                        blocked_domains=sorted(
-                            map(str, cursor.blocked_domains)
-                        )
-                        if cursor
-                        else [],
-                        required_aux_units=(
-                            dict(cursor.required_aux_units) if cursor else {}
-                        ),
-                        requested_primary_tokens=(
-                            int(cursor.requested_primary_tokens) if cursor else 0
-                        ),
-                        fifo_sequence=cursor.fifo_sequence if cursor else None,
-                        generation_vector_id=self._host_alloc_generation_vector_id(
-                            vector
-                        ),
-                        global_grant_used=decision_name == "hold_global_grant_used",
-                        budget_available=decision_name != "hold_budget",
-                        free_units=(
-                            dict(current.free_units_by_pool) if current is not None else {}
-                        ),
-                        evictable_units=(
-                            dict(current.evictable_units_by_pool)
-                            if current is not None
-                            else {}
-                        ),
-                        retry_grant=False,
-                        retry_skip=decision_name != "grant",
-                        retry_outcome=decision_name,
-                        lifecycle_key=self._host_alloc_lifecycle_key(req),
-                        wait_id=getattr(req, "hicache_host_alloc_wait_id", None),
-                        wake_event_id=None,
-                        attempt_number=0,
-                        attempt_origin="HOST_ALLOC_WAKE_HOLD",
+                    self._emit_host_alloc_hold(
+                        req, self._host_alloc_skip_decision(req)
                     )
                     continue
                 self._emit_host_alloc_wake_grant(req)
@@ -4315,6 +4368,7 @@ class Scheduler(
                     origin=HiCachePrefetchOrigin.DEMAND_RETRY,
                     demand_restore=self.enable_ready_horizon or was_backup_pending,
                 )
+                self._invalidate_host_alloc_pass_snapshots()
                 if req.hicache_restore_state is RestoreState.NONE:
                     # Same terminal rule as the T12 wake leg: a capacity
                     # wake whose re-issued prefetch is declined too-short
@@ -6681,6 +6735,31 @@ class Scheduler(
 
         return NextBatchPlan(batch_to_run=ret, running_batch=running_batch)
 
+    def _release_l3_only_restore_wait(self, req) -> bool:
+        """Release a stale L3-only wait so current prefix admission can run.
+
+        FRONTIER and BACKUP_PENDING describe the durability frontier, not the
+        validity of the request's current L1/L2 match. Clear only that wait;
+        PrefillAdder remains authoritative for real device/aux capacity and
+        owns any rollback/cleanup for an admission that still cannot fit.
+        """
+        if req.hicache_restore_wait_reason not in (
+            RestoreWaitReason.FRONTIER,
+            RestoreWaitReason.BACKUP_PENDING,
+        ):
+            return False
+        self.tree_cache.discard_frontier_waiter(req.rid)
+        discard_backup_wait = getattr(
+            self.tree_cache, "discard_backup_wait", None
+        )
+        if discard_backup_wait is not None:
+            discard_backup_wait(req.rid)
+        decision = self._apply_restore_event(req, RestoreEvent.TIMEOUT)
+        if decision is RestoreDecision.ADMIT_RECOMPUTE:
+            self._log_restore_recompute(req, "l3_wait_fast_forward")
+            return True
+        return False
+
     def _get_new_batch_prefill_raw(
         self,
         prefill_delayer_single_pass: Optional[PrefillDelayerSinglePassExecutor],
@@ -6866,10 +6945,16 @@ class Scheduler(
                 # revoke) before the WAIT skip below.
                 self._feed_restore_terminal(req)
                 if req.hicache_restore_state is RestoreState.WAIT_CAPACITY:
-                    # Restore intent denied for capacity: keep waiting for a
-                    # wake (T11/T12) instead of admitting into a full
-                    # recompute; bounded by the WAIT timeout (T13).
-                    continue
+                    # FRONTIER/BACKUP_PENDING are L3-only waits. They can
+                    # describe persistence that is stale relative to the
+                    # current L1/L2 prefix. Drop that restore intent and let
+                    # PrefillAdder make the authoritative device-capacity
+                    # decision below; L3 remains asynchronously persistent
+                    # and eligible for later requests. Other capacity waits
+                    # (DEVICE_QUOTA/HOST_ALLOC/PREFETCH_BUDGET) retain their
+                    # existing wake/timeout path.
+                    if not self._release_l3_only_restore_wait(req):
+                        continue
                 # Pop the number of tokens loaded from storage (L3 hits)
                 loaded_tokens = self.tree_cache.pop_prefetch_loaded_tokens(req.rid)
                 if loaded_tokens > 0:

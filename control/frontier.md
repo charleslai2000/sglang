@@ -2,7 +2,7 @@
 
 ## gemma4-rtx3090-throughput-scheduling
 - T007/T008 Gemma4 RTX3090 Throughput and HiCache Restore Scheduling — ACTIVE
-  - frontier: 132.724 TPS不验收。L1-only未留下正式TPS；800请求server envelope=648.00 proxy。L1+L2正式800/800为601.36 online TPS，L2 hit计数为0，无paired cache delta/根因；完成Nsight/FPM归档`runs/T007-L1L2-20261125.md`。继续分析现有证据；/data仅411MiB空闲，禁止删历史归档。
+  - frontier: `write_back`+`wait_complete` full-tier acceptance is 800/800 with zero sanity failures but 499.64-521.97 TPS / 71.4-72.7% duty, below >=540. Per-pass reconcile measured at 0.55% of the window, so duplicate host-snapshot/log work was not the bottleneck; L3 restore is structurally 100% miss with 1.05x KV write amplification, so no L3 policy change. Remaining evidenced loss is ~20s/120s of admission/result-path host work (run_batch, process_batch_result, get_next_batch_to_run, process_input_requests) against 26.9% device idle.
   - task: control/gemma4-rtx3090-throughput-scheduling/tasks/T008-hicache-restore-wait-scheduling.md
 
 

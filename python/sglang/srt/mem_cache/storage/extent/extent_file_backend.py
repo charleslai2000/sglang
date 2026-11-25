@@ -2694,18 +2694,24 @@ class ExtentFileBackend(HiCacheStorage):
         victims = []
         selected = set()
         used = self._allocator.used_bytes
-        recency = list(self._allocator._recency)
-        while recency:
+        # Filesystem free space is invariant during this read-only victim
+        # selection (the write has not started yet). Sample it once rather
+        # than issuing statvfs for every LRU key. Walk OrderedDict directly:
+        # copying every key and pop(0) made a full-pressure scan quadratic.
+        free_bytes = None
+        if self._min_free_bytes > 0:
+            st = os.statvfs(self._storage_dir)
+            free_bytes = st.f_bavail * st.f_frsize
+        free_space_pressure = (
+            free_bytes is not None and free_bytes < self._min_free_bytes
+        )
+        for key in self._allocator._recency:
             pressure = (
                 self._max_size_bytes > 0
                 and used > int(self._max_size_bytes * self._eviction_ratio)
-            )
-            if not pressure and self._min_free_bytes > 0:
-                st = os.statvfs(self._storage_dir)
-                pressure = st.f_bavail * st.f_frsize < self._min_free_bytes
+            ) or free_space_pressure
             if not pressure:
                 break
-            key = recency.pop(0)
             ref = self._allocator._index.get(key)
             if ref is None or ref.extent_id in selected:
                 continue
@@ -2723,6 +2729,11 @@ class ExtentFileBackend(HiCacheStorage):
         """
         if self._max_size_bytes <= 0 and self._min_free_bytes <= 0:
             return
+        # Free space is re-read after each reclaimed slot: this loop runs once
+        # per evicted extent (bytes needed / extent_size, a handful), not once
+        # per LRU key, so the statvfs cost stays bounded while the sweep still
+        # stops as soon as free space recovers instead of over-evicting to a
+        # stale pressure reading.
         while True:
             pressure = (
                 self._max_size_bytes > 0
@@ -2731,8 +2742,7 @@ class ExtentFileBackend(HiCacheStorage):
             )
             if not pressure and self._min_free_bytes > 0:
                 st = os.statvfs(self._storage_dir)
-                if st.f_bavail * st.f_frsize < self._min_free_bytes:
-                    pressure = True
+                pressure = st.f_bavail * st.f_frsize < self._min_free_bytes
             if not pressure:
                 return
             evicted = self._allocator.evict_slot_lru(trace_context=trace_context)

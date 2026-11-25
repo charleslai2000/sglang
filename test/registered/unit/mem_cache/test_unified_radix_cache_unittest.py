@@ -3060,7 +3060,7 @@ class UnifiedRadixCacheSuite:
 
         host_pool.free(filler)
         cache.write_backup_storage(child)
-        cache._drain_write_through_acks()
+        cache.drain_storage_control_queues()
         cache._flush_pending_storage_writes()
         self._flush_l3_backups(cache)
         self.assertTrue(cache.tree_core.is_backuped(parent))
@@ -3121,10 +3121,14 @@ class UnifiedRadixCacheSuite:
         if not self.cfg.has_mamba or self.cfg.has_swa:
             self.skipTest("requires Unified FULL+MAMBA")
 
+        # Four KV *pages*: the page count (not the token count) is what the
+        # trailing Mamba checkpoint is keyed by, so derive the token list from
+        # the fixture's page size instead of assuming page_size == 1.
+        seq = list(range(1, 4 * self.cfg.page_size + 1))
         cache, allocator, req_pool = build_fixture(self.cfg)
-        self._insert(cache, allocator, req_pool, [1, 2, 3, 4])
+        self._insert(cache, allocator, req_pool, seq)
         node = cache.match_prefix(
-            MatchPrefixParams(key=RadixKey(array("q", [1, 2, 3, 4])))
+            MatchPrefixParams(key=RadixKey(array("q", seq)))
         ).last_device_node
         cache.enable_storage = True
         cache.tree_core.backfill_missing_hash_values()
@@ -3154,8 +3158,8 @@ class UnifiedRadixCacheSuite:
             tree_node,
             CacheTransferPhase.PREFETCH,
             host_indices=host_slot,
-            token_ids=[1, 2, 3, 4],
-            prefetch_tokens=4,
+            token_ids=seq,
+            prefetch_tokens=len(seq),
         )
         self.assertEqual(prefetch[0].name, PoolName.MAMBA)
         self.assertEqual(prefetch[0].keys, ["__placeholder__"])

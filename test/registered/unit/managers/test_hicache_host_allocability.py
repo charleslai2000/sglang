@@ -283,6 +283,117 @@ class HostAllocabilityWakeTests(unittest.TestCase):
         self.assertEqual(cache._host_allocability_generations["kv"], 2)
 
 
+class _CountingSnapshotCache(_SnapshotCache):
+    """Snapshot cache that records every allocability query it serves."""
+
+    def __init__(self, snapshot):
+        super().__init__(snapshot)
+        self.queries = []
+
+    def host_allocability_snapshot(self, required=None):
+        self.queries.append(tuple(required or ()))
+        return self.snapshot
+
+
+class HostAllocSnapshotReuseTests(unittest.TestCase):
+    """A pass reuses allocability state instead of rescanning per waiter."""
+
+    def _scheduler(self, cache):
+        scheduler = Scheduler.__new__(Scheduler)
+        scheduler.tree_cache = cache
+        scheduler.waiting_queue = []
+        scheduler.server_args = SimpleNamespace(hicache_restore_wait_timeout_s=60.0)
+        scheduler._host_alloc_wake_arbiter = HostAllocWakeArbiter()
+        return scheduler
+
+    def test_pass_scope_serves_one_snapshot_per_pool_set(self):
+        initial = _snapshot(free_kv=1024)
+        cache = _CountingSnapshotCache(initial)
+        scheduler = self._scheduler(cache)
+        requests = [_request(f"r{i}", initial) for i in range(6)]
+        scheduler.waiting_queue = list(requests)
+        for req in requests:
+            scheduler._host_alloc_wake_arbiter.enqueue(req.rid)
+
+        scheduler._begin_host_alloc_pass()
+        try:
+            # Global vector + every waiter share the same blocked domains, so a
+            # single scan serves the whole pass.
+            self.assertIsNone(scheduler._select_host_alloc_waiter())
+            for req in requests:
+                scheduler._host_alloc_wait_eligible(req)
+        finally:
+            scheduler._end_host_alloc_pass(None)
+
+        # One ``()`` query for the global generation vector and one "kv"
+        # query shared by all waiters (not one per waiter).
+        self.assertEqual(cache.queries.count(("kv",)), 1)
+        self.assertLessEqual(len(cache.queries), 2)
+
+    def test_pass_scope_drops_its_snapshot_when_resources_change(self):
+        initial = _snapshot(free_kv=1024)
+        cache = _CountingSnapshotCache(initial)
+        scheduler = self._scheduler(cache)
+        req = _request("r", initial)
+        scheduler.waiting_queue = [req]
+        scheduler._host_alloc_wake_arbiter.enqueue(req.rid)
+
+        scheduler._begin_host_alloc_pass()
+        try:
+            self.assertFalse(scheduler._host_alloc_wait_eligible(req))
+            # A retry issued in this pass may have claimed or freed host slots.
+            cache.snapshot = _snapshot(kv=1, free_kv=54976)
+            scheduler._invalidate_host_alloc_pass_snapshots()
+            self.assertTrue(scheduler._host_alloc_wait_eligible(req))
+        finally:
+            scheduler._end_host_alloc_pass(None)
+
+        # The scope is closed: an outside read is never served by the memo.
+        before = len(cache.queries)
+        cache.snapshot = _snapshot(kv=2, free_kv=54976)
+        self.assertTrue(scheduler._host_alloc_wait_eligible(req))
+        self.assertEqual(len(cache.queries), before + 1)
+
+    def test_evictable_signature_memo_is_generation_keyed(self):
+        cache = UnifiedRadixCache.__new__(UnifiedRadixCache)
+        cache._host_allocability_generations = {"kv": 0}
+        scans = []
+
+        def _signature(pool):
+            scans.append(pool)
+            return (7, frozenset({3}))
+
+        cache._host_evictable_signature = _signature
+        self.assertEqual(cache._host_evictable_signature_cached("kv"), (7, frozenset({3})))
+        self.assertEqual(cache._host_evictable_signature_cached("kv"), (7, frozenset({3})))
+        self.assertEqual(scans, ["kv"])
+
+        # A mutation advances the generation: the next read rescans.
+        cache._host_allocability_generations["kv"] = 1
+        self.assertEqual(cache._host_evictable_signature_cached("kv"), (7, frozenset({3})))
+        self.assertEqual(scans, ["kv", "kv"])
+
+        # The pass boundary drops the memo even without a generation bump.
+        cache.reset_host_allocability_signature_memo()
+        cache._host_evictable_signature_cached("kv")
+        self.assertEqual(scans, ["kv", "kv", "kv"])
+
+    def test_evictable_signature_snapshot_matches_uncached_scan(self):
+        cache = UnifiedRadixCache.__new__(UnifiedRadixCache)
+        cache._host_allocability_generations = {"kv": 0}
+        cache._host_allocability_instance_id = 1
+        cache.cache_controller = SimpleNamespace(
+            mem_pool_host=SimpleNamespace(
+                available_size=lambda pool=None: 11
+            )
+        )
+        cache._host_evictable_signature = lambda pool: (5, frozenset({1, 2}))
+        snapshot = cache.host_allocability_snapshot(["kv"])
+        self.assertEqual(snapshot.free_units_by_pool, {"kv": 11})
+        self.assertEqual(snapshot.evictable_units_by_pool, {"kv": 5})
+        self.assertEqual(snapshot.generation_by_pool, {"kv": 0})
+
+
 class HostAllocWaitEligibilityTests(unittest.TestCase):
     """Per-domain ``_host_alloc_wait_eligible`` semantics.
 
