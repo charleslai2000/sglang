@@ -2,7 +2,7 @@
 
 ## gemma4-rtx3090-throughput-scheduling
 - T007-gpu-throughput-scheduling Gemma4 RTX3090 GPU吞吐与调度性能优化 — ACTIVE
-  - frontier: 复用T006 C-8基线及已有DeviceTimer/FPM/NVTX/Nsight工具。先证明DeviceTimer在实际Gemma服务的env→import→scheduler绑定→GPU forward区间→metrics输出链路生效；再对未缓存Prefill、Decode、memcpy、GPU busy union/inter-forward gap、Scheduler/Radix/HiCache等待及admission拒绝做同一运行关联。基于证据优化后以相同800请求/资源/缓存功能对照验证。
+  - frontier: DeviceTimer activation、当前源C-8 baseline/4096对照与两侧Nsight窗口均完成；4096为+8.14%无trace候选（profile repeat +11.33%），非已证明的GPU busy率提升。RID级WAIT_CAPACITY区间已按已有ts_ms与Nsight session UTC对齐：baseline idle 13.592s中6.072s与唯一容量等待区间重叠；4096 idle 31.870s全部与容量等待重叠。仅为时间相关性，尚未证明因果或具体scheduler决策。4096窗口最长4.377s GPU gap期间，多个RID处于容量等待且3个RID在gap尾部转为NONE后出现Prefill；提示restore状态可能限流，但尚无waiter→selected-batch直接连接。下一步归因per-gap具体调度/缓存路径，并完善restore/recompute time-token ledger（目前L1-only、telemetry partial）；不追12-token差异，不声称cache正确性或安全容量。无可归因runtime源码优化已成立。报告/trace见goal runs和`/data/.../T007-C8-BASELINE-AND-CHUNK4096.md`。
   - task: control/gemma4-rtx3090-throughput-scheduling/tasks/T007-gpu-throughput-scheduling.md
 
 ## gemma4-g1-e5m2-postbos-numerical-closure
