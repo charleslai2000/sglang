@@ -300,3 +300,7 @@ experimental/sgl-router/tests/fixtures/tiny_tokenizer.json
 # These two paths were reported in a prior size scan but are not present in this checkout.
 test/srt/Llama-3.1-8B-Instruct.json
 test/manual/double-sparsity-config-Llama-3.1-8B-Instruct.json
+
+# Local agent/developer tooling state (pi LSP settings, pyright config, nested
+# tool git dir). Machine-local, not part of the repo.
+.pi/

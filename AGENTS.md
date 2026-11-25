@@ -1,0 +1,10 @@
+# Repository execution rules
+
+## Long-running commands and workload orchestration
+
+- Never run a potentially long-running command synchronously in the foreground when it may block on model loading, CUDA graph capture, GPU work, HTTP requests, service shutdown, `wait`, or a child process. Start it with the background execution tool and continue useful work while it runs.
+- Do not turn a background task into a foreground wait by polling in a shell loop, waiting on its PID, or repeatedly sleeping/checking until completion. Use a single non-blocking status check or inspect the task's log/artifacts; return to other work if it is still active. This forbids agent-side wait loops, not bounded service-readiness checks or deadline-limited process cleanup inside a workload wrapper; wrappers must still reap their own children.
+- Every long-running workload must have an explicit, bounded timeout and a durable output directory. Record its command, start time, process/task identity, and expected completion condition before launch. Use timeout escalation only to clean up that workload's own process tree.
+- Service wrappers must finish when their declared client action/acceptance condition is complete, then stop and reap the service, monitors, and children and release the GPU lock. Never leave a wrapper waiting indefinitely for a server that is intentionally kept alive. A persistent service is allowed only when explicitly required for a finite, named sequence of client actions; that sequence must have a deadline and guaranteed cleanup.
+- Before starting another workload, inspect the previous task's status, process tree, service port, GPU use, output artifacts, and lock ownership. Do not start duplicate work while an earlier run is active.
+- For a failed or unexpectedly slow workload, inspect its latest log and process state promptly. Stop only the confirmed process tree owned by that run, preserve its artifacts, and continue with a corrected bounded invocation; do not leave an idle GPU service or lock held while diagnosing offline.
