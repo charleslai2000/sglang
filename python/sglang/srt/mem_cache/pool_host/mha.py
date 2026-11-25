@@ -412,6 +412,21 @@ class MHATokenToKVPoolHost(HostKVCache):
                 self.packed_device_k_buffers,
                 self.packed_device_v_buffers,
             )
+        # The owner logical->physical order and the per-layer buffer list are
+        # fixed once the pool is built, but resolving them allocates two CUDA
+        # tensors, copies one, and compares them on device (a synchronizing
+        # bounce) -- per backup. Resolve once per pool instead.
+        cached = getattr(device_pool, "_hicache_transfer_buffers", None)
+        if cached is not None:
+            return cached
+        resolved = self._resolve_device_transfer_buffers_uncached(device_pool)
+        try:
+            device_pool._hicache_transfer_buffers = resolved
+        except AttributeError:
+            pass
+        return resolved
+
+    def _resolve_device_transfer_buffers_uncached(self, device_pool):
         if hasattr(device_pool, "logical_owner_layer_ids"):
             logical_to_physical = device_pool._hicache_logical_to_physical
             logical_ids = device_pool.logical_owner_layer_ids

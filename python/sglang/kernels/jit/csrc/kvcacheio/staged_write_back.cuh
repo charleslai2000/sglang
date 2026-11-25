@@ -81,12 +81,38 @@ inline void copy_page_first_pages_fallback(
     const size_t src_page_bytes = static_cast<size_t>(page_size * src_stride0 * elem_size);
     const size_t dst_page_bytes = static_cast<size_t>(page_size * dst_stride0 * elem_size);
     RuntimeCheck(src_page_bytes == dst_page_bytes, "Source and destination page spans must match");
-    for (const auto page_offset : irange(num_pages)) {
-      const char* src_ptr = static_cast<const char*>(src_ptrs[tensor_id].data_ptr()) +
-                            static_cast<size_t>(page_offset * page_size * src_stride0 * elem_size);
-      char* dst_ptr = static_cast<char*>(dst_ptrs[tensor_id].data_ptr()) +
-                      static_cast<size_t>(dst_indices_ptr[page_offset * page_size] * dst_stride0 * elem_size);
-      RuntimeDeviceCheck(cudaMemcpyAsync(dst_ptr, src_ptr, src_page_bytes, cudaMemcpyDeviceToHost, stream));
+    // Consecutive destination pages map to one contiguous host span, so a run
+    // of them is a single copy instead of one copy per page. Backups allocate
+    // their host slots as one block, which makes whole chunks land in a single
+    // run; a fragmented range still falls back to one copy per page for the
+    // pages that did not coalesce.
+    constexpr int64_t kMinCoalescedPages = 2;
+    int64_t run_begin = 0;
+    while (run_begin < num_pages) {
+      int64_t run_end = run_begin + 1;
+      while (run_end < num_pages &&
+             dst_indices_ptr[run_end * page_size] ==
+                 dst_indices_ptr[(run_end - 1) * page_size] + page_size) {
+        ++run_end;
+      }
+      const int64_t run_pages = run_end - run_begin;
+      if (run_pages >= kMinCoalescedPages) {
+        const char* src_ptr = static_cast<const char*>(src_ptrs[tensor_id].data_ptr()) +
+                              static_cast<size_t>(run_begin * page_size * src_stride0 * elem_size);
+        char* dst_ptr = static_cast<char*>(dst_ptrs[tensor_id].data_ptr()) +
+                        static_cast<size_t>(dst_indices_ptr[run_begin * page_size] * dst_stride0 * elem_size);
+        RuntimeDeviceCheck(cudaMemcpyAsync(
+            dst_ptr, src_ptr, static_cast<size_t>(run_pages) * src_page_bytes, cudaMemcpyDeviceToHost, stream));
+      } else {
+        for (const auto page_offset : irange(run_begin, run_end)) {
+          const char* src_ptr = static_cast<const char*>(src_ptrs[tensor_id].data_ptr()) +
+                                static_cast<size_t>(page_offset * page_size * src_stride0 * elem_size);
+          char* dst_ptr = static_cast<char*>(dst_ptrs[tensor_id].data_ptr()) +
+                          static_cast<size_t>(dst_indices_ptr[page_offset * page_size] * dst_stride0 * elem_size);
+          RuntimeDeviceCheck(cudaMemcpyAsync(dst_ptr, src_ptr, src_page_bytes, cudaMemcpyDeviceToHost, stream));
+        }
+      }
+      run_begin = run_end;
     }
   }
 }
@@ -104,6 +130,7 @@ inline bool try_copy_page_first_pages_batch(
 #else
   host::RuntimeCheck(src_ptrs.size() == dst_ptrs.size(), "Source and destination tensors must have the same count");
   constexpr size_t kLargeCopyThresholdBytes = 128 * 1024;
+  constexpr size_t kBatchMinCopies = 256;
   thread_local std::vector<CudaMemcpyBatchPtr> batch_srcs;
   thread_local std::vector<CudaMemcpyBatchPtr> batch_dsts;
   thread_local std::vector<size_t> batch_sizes;

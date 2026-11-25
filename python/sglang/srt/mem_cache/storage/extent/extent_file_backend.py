@@ -105,7 +105,7 @@ from sglang.srt.mem_cache.storage.extent.extent_metadata import (
     write_manifest_atomic,
 )
 from sglang.srt.mem_cache.storage.file.lru_file_evictor import _parse_size_to_bytes
-from sglang.srt.mem_cache.trace_context import attach_trace_context
+from sglang.srt.mem_cache.trace_context import attach_trace_context, marker_present
 from sglang.srt.utils.common import human_readable_int
 
 logger = logging.getLogger(__name__)
@@ -292,7 +292,7 @@ def _t38c_log(rec):
     try:
         import json as _json
 
-        if not os.path.exists("/tmp/t38c-on"):
+        if not marker_present("/tmp/t38c-on"):
             return
         rec["ts"] = round(time.time(), 3)
         with open("/tmp/t38c-probe.log", "a") as _f:
@@ -304,7 +304,7 @@ def _t38c_log(rec):
 def _t38c_durable_log(rec):
     """Marker-gated p0_durable.v2 trace; identities/counters only."""
     try:
-        if not os.path.exists("/tmp/t38c-durable-trace"):
+        if not marker_present("/tmp/t38c-durable-trace"):
             return
         thread_id = threading.get_ident()
         with _T38C_DURABLE_SEQ_LOCK:
@@ -1768,7 +1768,7 @@ class ExtentFileBackend(HiCacheStorage):
             query_context = getattr(extra_info, "extra_info", None) or {}
 
             def log_mamba_query(logical_key: str, present_result: bool) -> None:
-                if not os.path.exists("/tmp/t38c-durable-trace"):
+                if not marker_present("/tmp/t38c-durable-trace"):
                     return
                 storage_key = self._component_key(PoolName.MAMBA, logical_key)
                 ref = self._allocator.lookup(storage_key)

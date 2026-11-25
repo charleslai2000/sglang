@@ -309,6 +309,7 @@ from sglang.srt.managers.utils import (
     validate_input_length,
 )
 from sglang.srt.mem_cache import kv_cache_builder
+from sglang.srt.mem_cache.trace_context import marker_present
 from sglang.srt.mem_cache.telemetry_context import (
     configure_producer_context,
     host_alloc_lineage,
@@ -403,7 +404,7 @@ logger = logging.getLogger(__name__)
 # Gate on /tmp/t38c-on, the same file gate as the t38c probe: touch the file
 # to enable, remove it to disable (no restart needed).
 def _p2a_trace(fmt, *args):
-    if os.path.exists("/tmp/t38c-on"):
+    if marker_present("/tmp/t38c-on"):
         logger.info(fmt, *args)
 
 
@@ -551,7 +552,7 @@ def _t38c_log(rec):
         import json as _json
         import time as _time
         import os as _os
-        if not _os.path.exists("/tmp/t38c-on"):
+        if not marker_present("/tmp/t38c-on"):
             return
         rec["ts"] = round(_time.time(), 3)
         with open("/tmp/t38c-probe.log", "a") as _f:

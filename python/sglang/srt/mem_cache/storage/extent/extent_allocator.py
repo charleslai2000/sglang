@@ -40,7 +40,7 @@ from typing import Callable, List, Optional, Sequence, Tuple
 
 import msgspec
 
-from sglang.srt.mem_cache.trace_context import attach_trace_context
+from sglang.srt.mem_cache.trace_context import attach_trace_context, marker_present
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ _T38C_DURABLE_SEQ_LOCK = threading.Lock()
 
 
 def _t38c_durable_log(rec):
-    if not os.path.exists("/tmp/t38c-durable-trace"):
+    if not marker_present("/tmp/t38c-durable-trace"):
         return
     try:
         thread_id = threading.get_ident()

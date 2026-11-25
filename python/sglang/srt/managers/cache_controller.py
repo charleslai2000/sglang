@@ -41,6 +41,7 @@ from sglang.srt.layers.dp_attention import (
     is_dp_attention_enabled,
 )
 from sglang.srt.mem_cache.l2_transfer import L2Transfer, L2TransferEngine
+from sglang.srt.mem_cache.trace_context import marker_present
 from sglang.srt.mem_cache.memory_pool import MLATokenToKVPool
 from sglang.srt.runtime_context import get_parallel
 from sglang.srt.utils import get_device_module
@@ -72,7 +73,7 @@ def _t38c_log(rec):
         import json as _json
         import time as _time
         import os as _os
-        if not _os.path.exists("/tmp/t38c-on"):
+        if not marker_present("/tmp/t38c-on"):
             return
         rec["ts"] = round(_time.time(), 3)
         with open("/tmp/t38c-probe.log", "a") as _f:

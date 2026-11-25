@@ -42,6 +42,7 @@ from sglang.srt.mem_cache.trace_context import (
     INERT_RELEASE_TOKEN,
     ordered_key_set_digest,
     remember_slot_context,
+    marker_present,
 )
 from sglang.srt.mem_cache.telemetry_context import next_event_id, producer_context
 from sglang.srt.mem_cache.p2a_timing_probe import begin_storage_query_probe
@@ -63,7 +64,7 @@ def _t38c_log(rec):
         import json as _json
         import time as _time
         import os as _os
-        if not _os.path.exists("/tmp/t38c-on"):
+        if not marker_present("/tmp/t38c-on"):
             return
         rec["ts"] = round(_time.time(), 3)
         with open("/tmp/t38c-probe.log", "a") as _f:
@@ -75,7 +76,7 @@ def _t38c_log(rec):
 def _t38c_durable_log(rec):
     """Marker-gated p0_durable.v2 trace; identities/counters only."""
     try:
-        if not os.path.exists("/tmp/t38c-durable-trace"):
+        if not marker_present("/tmp/t38c-durable-trace"):
             return
         thread_id = threading.get_ident()
         with _T38C_DURABLE_SEQ_LOCK:
@@ -141,7 +142,7 @@ def _t38c_durable_log(rec):
 
 
 def _t38c_slot_digest(pool, values) -> str | None:
-    if not os.path.exists("/tmp/t38c-durable-trace"):
+    if not marker_present("/tmp/t38c-durable-trace"):
         return None
     import hashlib
 

@@ -29,6 +29,7 @@ from sglang.srt.mem_cache.trace_context import (
     attach_trace_context,
     durable_trace_enabled,
     slot_context,
+    marker_present,
 )
 from sglang.srt.mem_cache.telemetry_context import producer_context
 from sglang.srt.mem_cache.unified_cache.cache_action import (
@@ -71,7 +72,7 @@ _T38C_DURABLE_SEQ_LOCK = threading.Lock()
 
 
 def _t38c_durable_enabled() -> bool:
-    return os.path.exists("/tmp/t38c-durable-trace")
+    return marker_present("/tmp/t38c-durable-trace")
 
 
 def _t38c_slot_digest(pool, values) -> str | None:
