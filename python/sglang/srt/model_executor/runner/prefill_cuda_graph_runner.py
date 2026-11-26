@@ -286,6 +286,7 @@ class PrefillCudaGraphRunner(BaseCudaGraphRunner):
         assert capture_tokens is not None, "cuda_graph_config[prefill].bs is not set"
         self.capture_num_tokens = sorted(capture_tokens)
         assert self.capture_num_tokens, "cuda_graph_config[prefill].bs is empty"
+        self._capture_num_tokens_set = frozenset(self.capture_num_tokens)
 
         # --- runner bounds --------------------------------------------
         self.max_num_tokens = max(self.capture_num_tokens)
@@ -1152,14 +1153,57 @@ class PrefillCudaGraphRunner(BaseCudaGraphRunner):
             return True
         if num_tokens > self.max_num_tokens:
             return False
-        # No exact-shape check: load_batch bucket-pads; only reject
-        # disproportionate padding waste.
+        # Replay must hit a captured bucket exactly. load_batch can only pad
+        # the token axis, but the captured body derives each token's request
+        # from the live seq_lens / extend_start_loc: a padded tail belongs to
+        # no request, so token->request gathers run out of bounds (observed as
+        # a device-side assert in vectorized_gather_kernel on a multi-request
+        # batch). Exact-shape replay keeps every token owned.
+        if num_tokens not in self._capture_num_tokens_set:
+            return False
         padded_num_tokens = self._pad_to_bucket(num_tokens, self.capture_num_tokens)
         if padded_num_tokens > num_tokens * _MAX_PREFILL_CUDA_GRAPH_PADDING_FACTOR:
             return False
         return True
 
+    def _has_pending_kv_load(self) -> bool:
+        """Whether a host->device KV load for this batch is still in flight.
+
+        ``MemoryPool.get_kv_buffer`` waits per layer on the cache controller's
+        layer-transfer events (``LayerDoneCounter.wait_until``). Capture runs
+        with no load in flight, so a wait taken during capture is either
+        absent from the captured segment or bound to a stale event record;
+        replaying a batch that is still waiting for an H2D copy could read KV
+        slots before the copy lands. Any batch that depends on an in-flight
+        load therefore stays eager.
+
+        ``tp_worker`` installs the batch's consumer index on the counter right
+        before this forward, so this reads the current batch's load state.
+        """
+        pool = getattr(self.model_runner, "token_to_kv_pool", None)
+        counter = getattr(pool, "layer_transfer_counter", None)
+        if counter is None:
+            return False
+        index = getattr(counter, "consumer_index", -1)
+        if index is None or index < 0:
+            return False
+        events = getattr(counter, "events", None)
+        if not events or index >= len(events):
+            return True
+        try:
+            return not events[index].finish_event.query()
+        except Exception:
+            # Unqueryable event state cannot prove the copy completed.
+            return True
+
     def can_run_graph(self, forward_batch: ForwardBatch) -> bool:
+        # HiCache H2D dependency: a batch that is still waiting on a host->device
+        # KV copy must not replay, because the per-layer wait lives inside the
+        # captured body. Eager keeps the load ordering authoritative.
+        if self._has_pending_kv_load():
+            self._eager_load_fallbacks = getattr(self, "_eager_load_fallbacks", 0) + 1
+            return False
+
         # DP check: group verdict from the schedule-time all-gather
         # (min-reduced votes; also requires every rank to hold tokens).
         if (
@@ -1305,9 +1349,12 @@ class PrefillCudaGraphRunner(BaseCudaGraphRunner):
                 forward_mode=ForwardMode.EXTEND,
                 batch_size=bs,
                 input_ids=_slot("input_ids"),
-                input_embeds=(
-                    _slot("input_embeds") if registry.has_slot("input_embeds") else None
-                ),
+                # The captured body is the input_ids -> embed -> transformer
+                # path. Replay only ever sees batches without input_embeds
+                # (can_replay_locally rejects them), so the capture batch must
+                # match: passing both makes models that require exactly one
+                # (e.g. Gemma4's text body) raise at capture time.
+                input_embeds=None,
                 req_pool_indices=shape_inputs["req_pool_indices"],
                 seq_lens=shape_inputs["seq_lens"],
                 next_token_logits_buffer=self._next_token_logits_buffer(bs),
@@ -1539,9 +1586,9 @@ class PrefillCudaGraphRunner(BaseCudaGraphRunner):
         )
 
         input_ids = _slot("input_ids")
-        input_embeds = (
-            _slot("input_embeds") if registry.has_slot("input_embeds") else None
-        )
+        # Mirrors capture_prepare: the body is captured on the input_ids path
+        # and replay is only eligible for batches without input_embeds.
+        input_embeds = None
         positions = _slot("positions")
         out_cache_loc = _slot("out_cache_loc")
         mrope_positions = (
