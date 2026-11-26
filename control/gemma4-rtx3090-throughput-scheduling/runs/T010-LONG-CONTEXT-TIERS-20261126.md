@@ -119,3 +119,43 @@ D2H feeding them) but the lookup never turns them into a served span for a retur
 Next step is still the anchor-based longest-durable-span restore, now with the sizing hypothesis
 explicitly excluded — and it must explain why a written node's hash chain is no longer readable
 after L1/L2 eviction rather than assuming it.
+
+---
+
+# Correction: the "L3 serves zero" reading was a counter-attribution artifact
+
+The `l3` series in the table above is not "tokens the Extent tier delivered". Tracing it:
+`sglang:hicache_prompt_tokens_total{source="l3"}` is fed from
+`matched_prefix_l3_tokens`, i.e. the **match-time authority** of the radix tree
+(`scheduler._final_storage_survivability` -> `tree_cache.is_l3_durable(anchor)`), and it only
+becomes non-zero when the *tree node* itself is still alive and flagged durable. Tokens that come
+back through a storage prefetch are staged into the host pool first and then matched as `l2`.
+
+Two independent checks agree with that reading:
+
+* cell A2's restore grants sum to ~830K tokens (32 x 5,000 + 21 x 10,256 + 17 x 15,512 +
+  7 x 20,768 + 3 x 4,999 + 2 x 15,511), the same order as the measured `l2` total of 714,896
+  (some grants hit shortfall/admission losses), and the run logged **723 `extent_read`**
+  operations — the third tier is being read.
+* the largest grant per request is `requested - ~one output turn`, and several are
+  `requested + 1` (15,511 -> 15,512; 20,767 -> 20,768), i.e. the restore covers essentially the
+  whole requested span for those requests; the `PARTIAL` label there is an off-by-one in the
+  disposition comparison, not a functional shortfall.
+
+So the correct statement of the three-tier result is:
+
+* the tier stack (L2 host DRAM + L3 Extent, with L3 feeding restores through host staging) is
+  worth **+43% TPS / −30% wall** against L1-only on the identical workload;
+* `source="l3"` staying at 0 does **not** mean the third tier is idle — it means no request was
+  served by a *tree-resident, durable-flagged* node, which is expected once the working set
+  (3.5M tokens) exceeds L1+L2 (2.32M) and the tree keeps only the LRU window;
+* the residual cost is therefore not a broken L3 path: it is 6.6M re-prefilled tokens (extend
+  ~1.1 s/K-token) plus ~0.5 s/K-token of eviction, i.e. the price of a working set that is 51%
+  larger than the two fast tiers, with the third tier returning a few hundred thousand tokens per
+  pass.
+
+Consequence for the next step: an anchor-based restore is still the way to convert more re-prefill
+into H2D loads, but it must be justified as *widening* what one restore returns (the per-request
+grant already reaches the full span when the chain is resident), not as repairing a dead tier.
+Any future claim about L3 must cite `extent_read` counts and restore grants, not the `l3`
+counter alone.

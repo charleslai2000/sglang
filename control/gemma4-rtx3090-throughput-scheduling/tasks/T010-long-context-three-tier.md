@@ -14,7 +14,14 @@ Result (2026-11-26):
 - Cell A (three tiers): **112.51 TPS, 1310.6 s (−30.1%), duty 93.36%**, L1 3,438,033 (32.9%),
   L2 687,524 (6.6%), **L3 0**, re-prefilled 6,323,084 (60.5%); extend 1107.1 s vs 1747.0 s
   (−640 s); D2H 7.34M tokens / 64.9 GB / 22.4 s; L3 writes 3.26M tokens.
-- L3 restore never succeeds: 522 prefetch attempts → 436 `miss_reason=miss`, 77
+- **Correction (same day):** the `source="l3"` counter staying at 0 is a match-time authority
+  artifact, not a dead tier. Prefetch-restored spans are staged into the host pool and counted as
+  `l2`; cell A2's restore grants sum to ~830K tokens against `l2` = 714,896, and the run logged 723
+  `extent_read` operations. Several grants equal `requested ± 1` (15,511 -> 15,512), i.e. the full
+  span, so the `PARTIAL` label there is an off-by-one in the disposition comparison. The tier stack
+  is worth +43% TPS / −30% wall versus L1-only; the residual is 6.6M re-prefilled tokens plus
+  ~0.5 s/K-token eviction from a working set 51% larger than L1+L2.
+- Original (superseded) reading — L3 restore never succeeds: 522 prefetch attempts → 436 `miss_reason=miss`, 77
   `PARTIAL requested=15511 granted=5000 reason=shortfall`, 723 extent reads, 0 tokens served.
   Diagnosis: the lookup requires a root-contiguous durable chain, and the partial path caps at one
   turn, so sessions whose older spans left L2 without a contiguous L3 chain restore nothing.
