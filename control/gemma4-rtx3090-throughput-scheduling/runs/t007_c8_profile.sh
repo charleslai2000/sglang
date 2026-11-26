@@ -180,6 +180,7 @@ BENCH_ARGS=(--num-clients 40 --num-rounds 20 --request-length 1024 --output-leng
 ( cd "$ROOT" && PYTHONPATH="$BENCH_PP" exec timeout -k 60 7200 "$VENV/bin/python" benchmark/hicache/bench_multiturn.py "${BENCH_ARGS[@]}" ) > "$OUT/bench.log" 2>&1 &
 BENCH_PID=$!
 BENCH_START=$(date +%s)
+BENCH_START_UTC=$(date -u +%FT%TZ)
 
 # Bounded, same-run profiling window in the steady-state part of the workload.
 # A zero window disables capture (used only for an unprofiled full acceptance).
@@ -187,15 +188,140 @@ if [[ $WINDOW_SECONDS != 0 ]]; then
 sleep "$WINDOW_DELAY"
 # launch already fixed the trace options; start must not repeat them.
 "$NSYS" start --session="$SESSION" -o "$OUT/t007-c8-window" > "$OUT/nsys-start.log" 2>&1 || printf 'NSYS_START_FAILED rc=%s\n' "$?" >> "$OUT/nsys-start.log"
-echo "window_start=$(date -Is) bench_elapsed_s=$(( $(date +%s) - BENCH_START ))" > "$OUT/window.txt"
+echo "window_start=$(date -Is) window_start_epoch=$(date +%s) bench_elapsed_s=$(( $(date +%s) - BENCH_START ))" > "$OUT/window.txt"
 sleep "$WINDOW_SECONDS"
 "$NSYS" stop --session="$SESSION" > "$OUT/nsys-stop.log" 2>&1 || true
-echo "window_end=$(date -Is) bench_elapsed_s=$(( $(date +%s) - BENCH_START ))" >> "$OUT/window.txt"
+echo "window_end=$(date -Is) window_end_epoch=$(date +%s) bench_elapsed_s=$(( $(date +%s) - BENCH_START ))" >> "$OUT/window.txt"
 fi
 
 if wait "$BENCH_PID"; then BENCH_RC=0; else BENCH_RC=$?; fi
 BENCH_PID=
+BENCH_END=$(date +%s)
 printf 'bench_exit=%s finished=%s\n' "$BENCH_RC" "$(date -u +%FT%TZ)" > "$OUT/bench-exit.txt"
+printf 'client_wall_seconds=%s start_utc=%s end_utc=%s\n' \
+  "$(( BENCH_END - BENCH_START ))" "$BENCH_START_UTC" "$(date -u +%FT%TZ)" > "$OUT/client-wall.txt"
 curl -fsS --max-time 5 "http://127.0.0.1:$PORT/metrics" > "$OUT/metrics-at-end.prom" 2>"$OUT/metrics-at-end.err" || true
 grep -E 'forward_execution_seconds_total|sglang:fwd_occupancy' "$OUT/metrics-at-end.prom" > "$OUT/timer-at-end.txt" || true
+# Official summary: the benchmark's own aggregate plus what this wrapper
+# observed. A profiled run is labelled so its TPS is never read as the
+# unprofiled acceptance number, and an aborted run is labelled incomplete.
+"$VENV/bin/python" - "$OUT" "$BENCH_RC" "$(( BENCH_END - BENCH_START ))" "$WINDOW_SECONDS" <<'SUMPY'
+import json, os, sys
+out, bench_rc, client_wall, window_seconds = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4])
+summary = {}
+try:
+    with open(os.path.join(out, "perf.jsonl")) as fh:
+        for line in fh:
+            line = line.strip()
+            if line:
+                record = json.loads(line)
+                if "summary" in record:
+                    summary = record["summary"]
+                break
+except FileNotFoundError:
+    pass
+
+
+def counters(path, name):
+    values = {}
+    try:
+        with open(path) as fh:
+            for line in fh:
+                if line.startswith(name):
+                    labels = line.split("{", 1)[1].split("}", 1)[0] if "{" in line else ""
+                    # The engine exports extra labels (engine_type, model_name);
+                    # key the series by category only so lookups below match.
+                    category = None
+                    for part in labels.split(","):
+                        key, _, value = part.partition("=")
+                        if key == "category":
+                            category = value.strip('"')
+                    values[category if category is not None else labels] = float(
+                        line.rsplit(" ", 1)[1]
+                    )
+    except FileNotFoundError:
+        pass
+    return values
+
+
+start = counters(os.path.join(out, "metrics-at-start.prom"), "sglang:forward_execution_seconds_total")
+end = counters(os.path.join(out, "metrics-at-end.prom"), "sglang:forward_execution_seconds_total")
+
+
+def delta(category):
+    left, right = start.get(category), end.get(category)
+    return None if left is None or right is None else right - left
+
+
+decode_s, extend_s = delta("decode"), delta("extend")
+bench_s = summary.get("duration_seconds")
+# Two duty bases: the benchmark's own window (acceptance-facing) and the
+# wrapper's client wall clock (includes ramp-up and teardown).
+duty = (
+    100.0 * (decode_s + extend_s) / bench_s
+    if None not in (decode_s, extend_s) and bench_s
+    else None
+)
+duty_client_wall = (
+    100.0 * (decode_s + extend_s) / client_wall
+    if None not in (decode_s, extend_s) and client_wall
+    else None
+)
+window_elapsed = None
+try:
+    with open(os.path.join(out, "window.txt")) as fh:
+        stamps = {}
+        for line in fh:
+            for token in line.split():
+                if "=" in token:
+                    key, value = token.split("=", 1)
+                    stamps[key] = value
+        if stamps.get("window_start_epoch") and stamps.get("window_end_epoch"):
+            window_elapsed = float(stamps["window_end_epoch"]) - float(stamps["window_start_epoch"])
+except FileNotFoundError:
+    pass
+completed, total = summary.get("completed_requests"), summary.get("total_requests")
+result = {
+    "profiled": window_seconds > 0,
+    "profile_window_seconds": window_seconds or 0,
+    "profile_window_elapsed_s": window_elapsed,
+    "official_output_token_throughput": summary.get("output_token_throughput"),
+    "official_input_token_throughput": summary.get("input_token_throughput"),
+    "official_request_throughput": summary.get("throughput"),
+    "bench_duration_seconds": summary.get("duration_seconds"),
+    "client_wall_seconds": client_wall,
+    "total_requests": total,
+    "completed_requests": completed,
+    "failed_requests": summary.get("failed_requests"),
+    "cache_hit_rate": summary.get("cache_hit_rate"),
+    "average_latency_s": summary.get("average_latency"),
+    "average_ttft_s": summary.get("average_ttft"),
+    "average_itl_s": summary.get("average_itl"),
+    "decode_forward_seconds": decode_s,
+    "extend_forward_seconds": extend_s,
+    "forward_duty_pct_vs_bench_window": duty,
+    "forward_duty_pct_vs_client_wall": duty_client_wall,
+    "bench_exit": bench_rc,
+    "bench_complete": bool(total is not None and completed == total and not summary.get("failed_requests")),
+}
+try:
+    result["git_head"] = open(os.path.join(out, "source-head.txt")).read().strip()
+except FileNotFoundError:
+    pass
+with open(os.path.join(out, "official-summary.json"), "w") as fh:
+    json.dump(result, fh, indent=2, sort_keys=True, default=str)
+tps = result["official_output_token_throughput"]
+line = "official_tps=%s duty_pct=%s duty_clientwall_pct=%s bench_s=%s client_wall_s=%s completed=%s/%s failed=%s profiled=%s head=%s" % (
+    None if tps is None else round(tps, 2),
+    None if duty is None else round(duty, 2),
+    None if duty_client_wall is None else round(duty_client_wall, 2),
+    None if bench_s is None else round(bench_s, 2),
+    client_wall, completed, total, result["failed_requests"], result["profiled"],
+    str(result.get("git_head", ""))[:10])
+open(os.path.join(out, "official-summary.txt"), "w").write(line + "\n")
+print(line)
+if not result["bench_complete"]:
+    print("BENCH_INCOMPLETE: official TPS is not an acceptance number")
+    sys.exit(3)
+SUMPY
 [[ $BENCH_RC == 0 ]]

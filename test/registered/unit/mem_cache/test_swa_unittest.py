@@ -330,6 +330,76 @@ class TestSWA(unittest.TestCase):
             torch.isin(new_swa, allocator.swa_attn_allocator.free_pages).item()
         )
 
+    @staticmethod
+    def _swa_free_page_set(allocator):
+        free_pages = allocator.swa_attn_allocator.free_pages
+        if free_pages is None:
+            return set()
+        return {int(x) for x in free_pages.tolist()}
+
+    def test_free_swa_group_filters_padding_once_at_group_end(self):
+        """A group keeps each release verbatim and drops padding once, so a
+        tombstoned range contributes nothing and slot 0 is never freed."""
+        _, allocator, _ = _build_swa_tree(is_eagle=False, kv_size=32, kv_size_swa=32)
+        live = _swa_alloc(allocator, 3)
+        tomb = _swa_alloc(allocator, 2)
+        assert live is not None and tomb is not None
+        live_swa = allocator.full_to_swa_index_mapping[live].clone()
+        before = self._swa_free_page_set(allocator)
+        # A tombstoned range's mapping entries read as the padding slot.
+        allocator.clear_full_to_swa_mapping(tomb)
+
+        allocator.free_group_begin()
+        allocator.free_swa(live)
+        allocator.free_swa(tomb)
+        # Nothing is filtered per call: the group holds both releases whole.
+        self.assertEqual(
+            sum(batch.numel() for batch in allocator.swa_free_group),
+            live.numel() + tomb.numel(),
+        )
+        allocator.free_group_end()
+
+        after = self._swa_free_page_set(allocator)
+        self.assertEqual({int(x) for x in live_swa.tolist()}, after - before)
+        self.assertNotIn(0, after)
+
+    def test_free_swa_group_duplicate_release_frees_once(self):
+        """Releasing the same full range twice in one group frees its SWA slots
+        once: the second release reads the mapping this change already cleared."""
+        _, allocator, _ = _build_swa_tree(is_eagle=False, kv_size=32, kv_size_swa=32)
+        indices = _swa_alloc(allocator, 2)
+        assert indices is not None
+        swa_indices = allocator.full_to_swa_index_mapping[indices].clone()
+        before = self._swa_free_page_set(allocator)
+
+        allocator.free_group_begin()
+        allocator.free_swa(indices)
+        allocator.free_swa(indices)
+        self.assertEqual(len(allocator.swa_free_group), 2)
+        allocator.free_group_end()
+
+        after = self._swa_free_page_set(allocator)
+        self.assertEqual({int(x) for x in swa_indices.tolist()}, after - before)
+        self.assertNotIn(0, after)
+
+    def test_free_swa_ungrouped_keeps_padding_filter(self):
+        """Without a group the call cannot prove its mappings are live slots, so
+        the padding filter stays on that path."""
+        _, allocator, _ = _build_swa_tree(is_eagle=False, kv_size=32, kv_size_swa=32)
+        indices = _swa_alloc(allocator, 2)
+        assert indices is not None
+        before = self._swa_free_page_set(allocator)
+        allocator.clear_full_to_swa_mapping(indices)
+
+        allocator.free_swa(indices)
+
+        after = self._swa_free_page_set(allocator)
+        self.assertEqual(before, after)
+        self.assertNotIn(0, after)
+        self.assertEqual(
+            allocator.full_to_swa_index_mapping[indices].tolist(), [0, 0]
+        )
+
     def test_swa_radix_cache_1(self):
         # args
         req_size = 10

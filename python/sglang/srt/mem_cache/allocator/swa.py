@@ -365,16 +365,21 @@ class SWATokenToKVPoolAllocator(BaseTokenToKVPoolAllocator):
             mapping_indices = self._expand_to_full_pages(free_index)
 
         swa_indices = self.full_to_swa_index_mapping[mapping_indices]
-        swa_indices = swa_indices[swa_indices > 0]
         self.clear_full_to_swa_mapping(mapping_indices)
 
         if self.free_group is not None:
             # Resolve ownership now. A cache action later in this group may
-            # install a new mapping for the same full index.
+            # install a new mapping for the same full index. Keep the mapping
+            # exactly as read at this instant (padding included): the padding
+            # filter is a mask kernel per call, and applying it once over the
+            # concatenated group frees the same set of slots.
             self.swa_free_group.append(swa_indices)
             return
 
-        self.swa_attn_allocator.free(swa_indices)
+        # A tombstoned range's entries read as the padding slot, so the filter
+        # has to stay on this path: the caller cannot prove every mapping here
+        # is a live SWA slot, and freeing slot 0 would corrupt the free list.
+        self.swa_attn_allocator.free(swa_indices[swa_indices > 0])
 
     def free_full(self, free_index: torch.Tensor):
         if free_index.numel() == 0:
@@ -400,7 +405,11 @@ class SWATokenToKVPoolAllocator(BaseTokenToKVPoolAllocator):
         if self.swa_free_group:
             swa_free_group = self.swa_free_group
             self.swa_free_group = []
-            self.swa_attn_allocator.free(torch.cat(swa_free_group))
+            freed = torch.cat(swa_free_group)
+            # One padding filter for the whole group instead of one per
+            # release; entries that read as 0 (tombstone/padding) are dropped
+            # here exactly as they were dropped per call before.
+            self.swa_attn_allocator.free(freed[freed > 0])
         if self.full_free_group:
             full_free_group = self.full_free_group
             self.full_free_group = []

@@ -130,7 +130,6 @@ inline bool try_copy_page_first_pages_batch(
 #else
   host::RuntimeCheck(src_ptrs.size() == dst_ptrs.size(), "Source and destination tensors must have the same count");
   constexpr size_t kLargeCopyThresholdBytes = 128 * 1024;
-  constexpr size_t kBatchMinCopies = 256;
   thread_local std::vector<CudaMemcpyBatchPtr> batch_srcs;
   thread_local std::vector<CudaMemcpyBatchPtr> batch_dsts;
   thread_local std::vector<size_t> batch_sizes;
@@ -146,6 +145,23 @@ inline bool try_copy_page_first_pages_batch(
     return false;
   }
 
+  // A page below the threshold cannot use this path, and the list this
+  // function builds is per copy: leave before building it rather than filling
+  // the vectors and discarding them. The fallback the caller runs next
+  // validates every tensor and copies in the same order, so nothing is skipped.
+  {
+    const auto& first_src = src_ptrs[0];
+    const auto& first_dst = dst_ptrs[0];
+    const size_t first_page_bytes = static_cast<size_t>(
+        page_size * first_src.stride(0) * host::dtype_bytes(first_src.dtype()));
+    const size_t first_dst_page_bytes = static_cast<size_t>(
+        page_size * first_dst.stride(0) * host::dtype_bytes(first_dst.dtype()));
+    if (first_page_bytes < kLargeCopyThresholdBytes ||
+        first_dst_page_bytes < kLargeCopyThresholdBytes) {
+      return false;
+    }
+  }
+
   const size_t num_copies = static_cast<size_t>(src_ptrs.size()) * static_cast<size_t>(num_pages);
   batch_srcs.clear();
   batch_dsts.clear();
@@ -154,7 +170,6 @@ inline bool try_copy_page_first_pages_batch(
   batch_dsts.reserve(num_copies);
   batch_sizes.reserve(num_copies);
 
-  size_t first_page_bytes = 0;
   for (const auto tensor_id : host::irange(src_ptrs.size())) {
     host::RuntimeCheck(
         src_ptrs[tensor_id].dtype() == dst_ptrs[tensor_id].dtype(),
@@ -165,9 +180,6 @@ inline bool try_copy_page_first_pages_batch(
     const size_t src_page_bytes = static_cast<size_t>(page_size * src_stride0 * elem_size);
     const size_t dst_page_bytes = static_cast<size_t>(page_size * dst_stride0 * elem_size);
     host::RuntimeCheck(src_page_bytes == dst_page_bytes, "Source and destination page spans must match");
-    if (tensor_id == 0) {
-      first_page_bytes = src_page_bytes;
-    }
     for (const auto page_offset : host::irange(num_pages)) {
       char* src_ptr = static_cast<char*>(src_ptrs[tensor_id].data_ptr()) +
                       static_cast<size_t>(page_offset * page_size * src_stride0 * elem_size);
@@ -178,10 +190,6 @@ inline bool try_copy_page_first_pages_batch(
       batch_sizes.push_back(src_page_bytes);
     }
   }
-  if (first_page_bytes < kLargeCopyThresholdBytes) {
-    return false;
-  }
-
   std::vector<size_t> attrs_idxs(1, 0);
   cudaMemcpyAttributes attrs{};
   attrs.srcAccessOrder = cudaMemcpySrcAccessOrderStream;
