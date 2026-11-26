@@ -43,6 +43,18 @@ class FreeDeviceKVFullOnly(msgspec.Struct, frozen=True):
     indices: list[torch.Tensor]
 
 
+class FreeRequestRowKV(msgspec.Struct, frozen=True):
+    """Free request-row ranges with proven live SWA peers at logical positions."""
+
+    indices: list[torch.Tensor]
+    start_positions: list[int]
+    swa_evicted_seqlen: int
+
+    def __post_init__(self):
+        if len(self.indices) != len(self.start_positions):
+            raise ValueError("indices and start_positions must be aligned")
+
+
 class ComponentAction(msgspec.Struct, frozen=True):
     """Base for component-routed actions; the cache dispatches each one to
     ``component_type``'s class-level ``apply_component_action``; every subclass
@@ -108,5 +120,9 @@ class SWARebuild(ComponentAction, frozen=True):
 
 # Cache-owned actions, applied by UnifiedRadixCache itself.
 CacheAction = (
-    ReplaceWriteThroughOnNodeSplit | FreeDeviceKV | FreeDeviceKVFullOnly | BackupKV
+    ReplaceWriteThroughOnNodeSplit
+    | FreeDeviceKV
+    | FreeDeviceKVFullOnly
+    | FreeRequestRowKV
+    | BackupKV
 )

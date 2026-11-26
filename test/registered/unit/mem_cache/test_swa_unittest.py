@@ -1,6 +1,7 @@
 import unittest
 from array import array
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import torch
 
@@ -15,7 +16,10 @@ from sglang.srt.mem_cache.base_prefix_cache import (
     MatchPrefixParams,
 )
 from sglang.srt.mem_cache.cache_init_params import CacheInitParams
-from sglang.srt.mem_cache.common import available_and_evictable_str
+from sglang.srt.mem_cache.common import (
+    available_and_evictable_str,
+    free_kv_row_segments,
+)
 from sglang.srt.mem_cache.memory_pool import ReqToTokenPool
 from sglang.srt.mem_cache.radix_cache import RadixKey
 from sglang.srt.mem_cache.swa_memory_pool import SWAKVPool
@@ -354,7 +358,7 @@ class TestSWA(unittest.TestCase):
         allocator.free_swa(tomb)
         # Nothing is filtered per call: the group holds both releases whole.
         self.assertEqual(
-            sum(batch.numel() for batch in allocator.swa_free_group),
+            sum(indices.numel() for indices, _ in allocator.swa_free_group),
             live.numel() + tomb.numel(),
         )
         allocator.free_group_end()
@@ -362,6 +366,87 @@ class TestSWA(unittest.TestCase):
         after = self._swa_free_page_set(allocator)
         self.assertEqual({int(x) for x in live_swa.tolist()}, after - before)
         self.assertNotIn(0, after)
+
+    def test_row_range_free_splits_tombstones_and_live_peers(self):
+        _, allocator, _ = _build_swa_tree(
+            is_eagle=False, kv_size=32, kv_size_swa=32
+        )
+        full = _swa_alloc(allocator, 8)
+        assert full is not None
+        swa = allocator.full_to_swa_index_mapping[full].clone()
+        swa_before_pages = self._swa_free_page_set(allocator)
+        allocator.clear_full_to_swa_mapping(full[:4])
+        full_before = allocator.full_available_size()
+        swa_before = allocator.swa_available_size()
+
+        free_kv_row_segments(
+            allocator,
+            [(full, 0)],
+            swa_evicted_seqlen=4,
+        )
+
+        self.assertEqual(allocator.full_available_size(), full_before + 8)
+        self.assertEqual(allocator.swa_available_size(), swa_before + 4)
+        free_swa = self._swa_free_page_set(allocator)
+        newly_freed = free_swa - swa_before_pages
+        self.assertEqual(set(swa[4:].tolist()), newly_freed)
+        self.assertFalse(set(swa[:4].tolist()) & newly_freed)
+        self.assertNotIn(0, newly_freed)
+
+    def test_row_range_free_paged_mixed_dead_live_ownership(self):
+        _, allocator, _ = _build_swa_tree(
+            is_eagle=False,
+            page_size=4,
+            kv_size=32,
+            kv_size_swa=32,
+        )
+        full = _swa_alloc(allocator, 12)
+        assert full is not None
+        swa = allocator.full_to_swa_index_mapping[full].clone()
+        swa_before = self._swa_free_page_set(allocator)
+        allocator.clear_full_to_swa_mapping(full[:4])
+
+        free_kv_row_segments(
+            allocator,
+            [(full, 0)],
+            swa_evicted_seqlen=4,
+        )
+
+        newly_freed = self._swa_free_page_set(allocator) - swa_before
+        self.assertEqual(
+            newly_freed,
+            set((swa[4:] // allocator.page_size).tolist()),
+        )
+        self.assertNotIn(0, newly_freed)
+        self.assertEqual(allocator.full_available_size(), 32)
+        self.assertEqual(allocator.swa_available_size(), 32 - 4)
+
+    def test_row_range_free_group_snapshots_proven_live_ownership(self):
+        _, allocator, _ = _build_swa_tree(
+            is_eagle=False, kv_size=32, kv_size_swa=32
+        )
+        full = _swa_alloc(allocator, 4)
+        replacement = _swa_alloc(allocator, 4)
+        assert full is not None and replacement is not None
+        old_swa = allocator.full_to_swa_index_mapping[full].clone()
+        new_swa = allocator.full_to_swa_index_mapping[replacement].clone()
+        allocator.free_group_begin()
+        free_kv_row_segments(
+            allocator,
+            [(full, 0)],
+            swa_evicted_seqlen=0,
+        )
+        # A later action reuses the full slot before group drain. The queued
+        # release must retain the old SWA peer, not the replacement mapping.
+        allocator.set_full_to_swa_mapping(full, new_swa)
+        allocator.free_group_end()
+
+        free_swa = self._swa_free_page_set(allocator)
+        self.assertTrue(set(old_swa.tolist()).issubset(free_swa))
+        self.assertFalse(set(new_swa.tolist()) & free_swa)
+        torch.testing.assert_close(
+            allocator.full_to_swa_index_mapping[full], new_swa
+        )
 
     def test_free_swa_group_duplicate_release_frees_once(self):
         """Releasing the same full range twice in one group frees its SWA slots
@@ -734,6 +819,45 @@ class TestSWA(unittest.TestCase):
         self.assertTrue(last_node.key.is_bigram)
         self.assertEqual(list(last_node.key), [(5, 60), (60, 70)])
 
+    def test_pure_swa_cache_finished_frees_only_live_window_and_skips_dead_prefix(self):
+        from sglang.srt.mem_cache.pure_swa_radix_cache import PureSWARadixCache
+
+        tree = PureSWARadixCache.__new__(PureSWARadixCache)
+        tree.page_size = 1
+        tree.is_eagle = False
+        tree.disable = False
+        tree.disable_finished_insert = False
+        row = torch.arange(1, 9, dtype=torch.int64)
+        tree.req_to_token_pool = SimpleNamespace(
+            req_to_token=row.unsqueeze(0).clone()
+        )
+        allocator = MagicMock()
+        allocator.page_size = 1
+        allocator.free_swa_segment = MagicMock()
+        allocator.free_full_segment = MagicMock()
+        tree.token_to_kv_pool_allocator = allocator
+        tree.insert = MagicMock(return_value=SimpleNamespace(prefix_len=0))
+        tree.dec_lock_ref = MagicMock()
+        req = SimpleNamespace(
+            origin_input_ids=list(range(8)),
+            output_ids=[],
+            req_pool_idx=0,
+            extra_key=None,
+            cache_salt=None,
+            cache_protected_len=0,
+            swa_evict_floor=8,
+            kv=SimpleNamespace(swa_evicted_seqlen=4),
+            last_node=None,
+        )
+
+        tree.cache_finished_req(req, is_insert=False, kv_len_to_handle=8)
+
+        # Dead prefix was already released, live window is released now.
+        live = allocator.free_swa_segment.call_args.args[0]
+        self.assertTrue(torch.equal(live, row[4:8]))
+        self.assertEqual(allocator.free_swa_segment.call_args.kwargs["peer_live"], True)
+        self.assertEqual(allocator.free_full_segment.call_count, 2)
+
     def test_swa_cache_finished_req_eagle_uses_cache_protected_len_and_bigram_key(self):
         tree, allocator, req_to_token_pool = _build_swa_tree(is_eagle=True)
 
@@ -793,14 +917,14 @@ class TestSWA(unittest.TestCase):
         req2.cache_protected_len = 1
         req2.prefix_indices = torch.tensor([21, 22, 23, 24, 25], device=tree.device)
 
-        freed_lens = []
-        original_free = allocator.free
+        freed_segments = []
+        original_free_full_segment = allocator.free_full_segment
 
-        def wrapped_free(indices):
-            freed_lens.append(int(indices.numel()))
-            return original_free(indices)
+        def wrapped_free_full_segment(indices, *, start_pos):
+            freed_segments.append((int(indices.numel()), start_pos))
+            return original_free_full_segment(indices, start_pos=start_pos)
 
-        allocator.free = wrapped_free
+        allocator.free_full_segment = wrapped_free_full_segment
         tree.cache_finished_req(
             req2, is_insert=False, kv_len_to_handle=req2._kv_committed_len
         )
@@ -809,7 +933,7 @@ class TestSWA(unittest.TestCase):
         # Expected frees:
         #   overlap range [1:5] -> 4
         #   tail range [5:]     -> 1
-        self.assertEqual(freed_lens, [4, 1])
+        self.assertEqual(freed_segments, [(4, 1), (1, 5)])
 
 
 # Optimization: SGLANG_OPT_SWA_SPLIT_LEAF_ON_INSERT.

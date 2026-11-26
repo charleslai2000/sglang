@@ -31,6 +31,8 @@ if TYPE_CHECKING:
     from sglang.srt.mem_cache.cache_init_params import CacheInitParams
     from sglang.srt.server_args import ServerArgs
 
+from sglang.srt.mem_cache.common import free_kv_row_segments
+
 
 logger = logging.getLogger(__name__)
 
@@ -202,20 +204,32 @@ class RadixCacheCpp(BasePrefixCache):
             )
             # NOTE: kv_indices[:old_prefix_len] == req.prefix_indices
             assert old_prefix_len <= new_prefix_len, "Wrong prefix indices"
-            # Free duplicates that were already in the pool
             if old_prefix_len < new_prefix_len:
-                self.token_to_kv_pool_allocator.free(
-                    kv_indices[old_prefix_len:new_prefix_len]
+                free_kv_row_segments(
+                    self.token_to_kv_pool_allocator,
+                    [(kv_indices[old_prefix_len:new_prefix_len], old_prefix_len)],
+                    swa_evicted_seqlen=(
+                        req.kv.swa_evicted_seqlen if req.kv is not None else 0
+                    ),
                 )
         else:
-            self.token_to_kv_pool_allocator.free(
-                kv_indices[old_prefix_len:page_aligned_overall_len]
+            free_kv_row_segments(
+                self.token_to_kv_pool_allocator,
+                [(kv_indices[old_prefix_len:page_aligned_overall_len], old_prefix_len)],
+                swa_evicted_seqlen=(
+                    req.kv.swa_evicted_seqlen if req.kv is not None else 0
+                ),
             )
 
-        # need to free the unaligned part, since it cannot be inserted into the radix tree
+        # The unaligned tail is not inserted into the radix tree.
         if page_aligned_overall_len < kv_len_to_handle:
-            # NOTE: sglang PagedAllocator support unaligned free (which will automatically align it)
-            self.token_to_kv_pool_allocator.free(kv_indices[page_aligned_overall_len:])
+            free_kv_row_segments(
+                self.token_to_kv_pool_allocator,
+                [(kv_indices[page_aligned_overall_len:], page_aligned_overall_len)],
+                swa_evicted_seqlen=(
+                    req.kv.swa_evicted_seqlen if req.kv is not None else 0
+                ),
+            )
 
         # Remove req slot release the cache lock
         self.dec_lock_ref(req.last_node)

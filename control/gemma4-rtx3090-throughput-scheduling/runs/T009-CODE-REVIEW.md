@@ -2,7 +2,15 @@
 
 **Status:** T009 remains ACTIVE. Performance reruns are paused by user direction. This is a source review and evidence recovery only; no GPU workload was started.
 
-**Review base/current source:** base `cb0132a6f6b0875b07eea6a911e02ef053d87f83`; current production tree `308e7d6b9b9e5c8674942fbfa2f8a76d7563c007`. `git diff cb0132a6f6 -- python/sglang/srt` shows exactly one production file changed: `python/sglang/srt/layers/attention/triton_backend.py`. `allocator/swa.py` was not changed between the T009 base and current HEAD; its relevant release implementation and actual callers are included in full below as requested. The four +/- edits below are the complete production diff (unchanged surrounding lines omitted only where explicitly shown by unified diff context).
+**Review base/current source:** base `cb0132a6f6b0875b07eea6a911e02ef053d87f83`; the earlier 2026-11-26 snapshot reviewed below predates the allocator work subsequently requested. The current implementation changes allocator release ownership, row-range handling in normal and SWA Radix paths, and UnifiedTreeCore duplicate-overlap actions. The prior code-review text remains historical for the pre-implementation source; see its dated snapshot and findings, not as a description of current source.
+
+## 0. Current ownership patch — status and coverage
+
+The current uncommitted patch adds a request-row-specific `FreeRequestRowKV` cache action and `free_kv_row_segments` helper. `FreeDeviceKV` remains the safe arbitrary/cache-owned path (including padding filtering); proven request-row paths split at `swa_evicted_seqlen`, releasing dead SWA peers Full-only and live peers by the fixed-shape row path. The helper trims shared physical boundary pages and preserves non-SWA allocator behavior. Grouped SWA frees snapshot mapping and proof class at enqueue. Normal Radix, SWARadix, PureSWARadix and UnifiedTreeCore request cleanup have been routed through the ownership contract. HiSparse wrappers release logical and C4 sidecars and retain segment positions for grouped drains. Arbitrary LRU/node frees retain tombstone-safe filtering.
+
+Latest focused verification: allocator/SWA/HiCache suite (`test_hisparse_allocator.py`, `test_pure_swa_chunk_cache.py`, `test_swa_unittest.py`, `test_swa_eviction_boundary.py`, `test_swa_lock_release_lifecycle.py`, `test_paged_free_segment.py`, `test_hicache_load_back_timing.py`) **73 passed, 18 subtests**. Unified Radix action/fixture tests **3 passed**. Two `test_hicache_swa_load_back_uses_full_pool_capacity` cases initially failed because default promotion margin (2048 tokens) exceeded the 256-token Full pool in the test fixture; no eviction/controller load was reached. As the test isolates per-pool allocator behavior, it now sets `promotion_margin_tokens=0`. Both SW=4 and SW=128 pass; cause was fixture admission sizing, not load-back/ownership regression. Relevant Unified selection (including load-back ownership stress and mapping rebuild): **20 passed, 39 skipped, 2273 deselected**. The full Unified suite was attempted: **963 passed, 1180 skipped, 189 failed**; many failures are host-memory admission (`~100 MiB` requested with `20 MiB` available); other failures are not attributed without baseline. Static `py_compile` and `git diff --check` pass. PureSWARadix request cleanup and DeepSeekV4 HiSparse sidecar/grouped segment handling were included in the audit and tests. Performance, GPU smoke and L3 restore have not been run on this patch.
+
+Still required: finish grouped-free and owner-alias audit; run resource-valid Unified test subsets; then authorized ownership/load-back GPU smoke and sync attribution before C-8 acceptance. Changes remain uncommitted and unpushed.
 
 ## 1. Complete production diff from `cb0132a6f6`
 
@@ -355,5 +363,39 @@ No prior run hash log remained under `/data` or the worktree: the current run di
 ## Verification and status
 
 - `git diff cb0132a6f6 -- python/sglang/srt` confirms the complete production diff shown in §1 and no allocator production edit.
-- The C-8 rerun was not repeated. Latest available outcome remains 570.88 official output TPS, 800/800, zero failures, below the ≥600 gate. Gate unmet; T009 remains ACTIVE.
+- The C-8 rerun on the final source is recorded in §6 and `runs/T009-C8-R5-R6-20261126.md`: 587.94 official output TPS, 800/800, zero failures, exact payload multiset, no pool-invariant failure. The ≥600 gate is still unmet; T009 remains ACTIVE.
 - No GPU load, experiment, or new run directory was created for this review or payload recovery.
+
+## 6. Row-ownership implementation review outcome (2026-11-26)
+
+The request-row contract is implemented as `free_kv_row_segments()` plus a
+`FreeRequestRowKV` action, and it does satisfy §4's obstacle for the *request-row*
+subset: the SWA floor (`swa_evicted_seqlen`) is carried at the request level, grouped
+frees snapshot the full→SWA mapping and the page position at enqueue time, and the
+proof class travels with the enqueued range. Cache-owned and arbitrary frees keep the
+tombstone filter.
+
+Two review findings changed the shipped shape of the patch:
+
+1. **Double release at the SWA component's Branch 3.** Giving Branch 3 ("the whole
+   incoming overlap is outside this request's window") its own
+   `FreeDeviceKVFullOnly([value_slice[:free_end]])` overlaps the dead-prefix Full-only
+   release the caller emits for the duplicate overlap whenever `prev_prefix_len` sits
+   inside the node and the floor is past the node end (`dup_start < free_end`). The
+   same Full slots were then released twice; the acceptance run with that variant
+   (`…-acceptance-r5`) ended with a pool invariant over-credited by exactly 7 Full
+   tokens. Branch 3 returns `prefix_len` again, which restores the pre-patch contract
+   that the caller's duplicate release alone owns that range.
+2. **`free_segment` is not a row-floor proof.** Its call sites are generic node
+   eviction and overallocated tails, so it keeps the tombstone filter
+   (`peer_live=False`); the unfiltered path is reachable only through
+   `free_swa_segment(peer_live=True)`, i.e. only from the row contract.
+
+Measured effect of the resulting patch on the unchanged C-8 workload: the mask-index
+class that §3 identified as the remaining sync is reduced from 1,025 calls / 14.83 s
+to 832 calls / 1.82 s of host time per 120 s window, i.e. only cache-owned node
+evictions still pay it. Official output TPS 570.88 → **587.94** with identical tier
+counters (L1 9,533,440, newly-prefilled 1,013,761) and no invariant failure. Gate
+(≥600) still unmet by 2.05%; the residual is extend-path launch bubbles and FRONTIER
+durability parkings, not this sync class. Full record:
+`runs/T009-C8-R5-R6-20261126.md`.

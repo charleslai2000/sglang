@@ -2103,6 +2103,7 @@ class UnifiedSWATokenToKVPoolAllocator(SWATokenToKVPoolAllocator):
         )
 
         self.free_group = None
+        self.full_free_group: list[torch.Tensor] = []
         # Empty (not None) for the leak checker.
         self.free_pages = torch.empty(0, dtype=torch.int64, device=device)
         self.release_pages = torch.empty(0, dtype=torch.int64, device=device)
@@ -2448,6 +2449,76 @@ class UnifiedSWATokenToKVPoolAllocator(SWATokenToKVPoolAllocator):
         self.swa_attn_allocator.free(live)
         self.swa_attn_allocator.clear_inverse_history()
 
+    def free_group_begin(self) -> None:
+        """Defer pair releases and Full-only tombstone releases together."""
+        self.free_group = []
+        self.full_free_group = []
+        self.full_attn_allocator.free_group_begin()
+        self.swa_attn_allocator.free_group_begin()
+
+    def free_group_end(self) -> None:
+        """Drain both-peer frees before Full-only frees, preserving ownership."""
+        pending, self.free_group = self.free_group, None
+        if pending:
+            self.free(torch.cat(pending))
+        full_only, self.full_free_group = self.full_free_group, []
+        if full_only:
+            self.full_attn_allocator.free(torch.cat(full_only).detach().to(torch.int64))
+        self.swa_attn_allocator.free_group_end()
+        self.full_attn_allocator.free_group_end()
+        self.full_attn_allocator.clear_inverse_history()
+        self.swa_attn_allocator.clear_inverse_history()
+
+    def free_swa_segment(
+        self,
+        free_index: torch.Tensor,
+        *,
+        start_pos: int,
+        peer_live: bool = False,
+    ) -> None:
+        """Free SWA virtual pages, using row ownership only for complete pages.
+
+        This composite inherits from the static SWA allocator for interface
+        compatibility, but has no ``full_to_swa_index_mapping``: its SWA
+        virtual-to-physical map is authoritative. Keep arbitrary/partial ranges
+        on the tombstone-safe path.
+        """
+        if free_index is None or free_index.numel() == 0:
+            return
+        if not peer_live:
+            self.free_swa(free_index)
+            return
+        ps = self.page_size
+        offset = start_pos % ps
+        if offset == 0 and free_index.numel() % ps == 0:
+            self.swa_attn_allocator.free(free_index.detach().to(torch.int64))
+            self.swa_attn_allocator.clear_inverse_history()
+            return
+        # Partial page ownership is not established by a row-floor proof.
+        # Keep the existing v2p tombstone filter for those edge pages.
+        if offset:
+            head = min(free_index.numel(), ps - offset)
+            self.free_swa(free_index[:head])
+            free_index = free_index[head:]
+        full_len = free_index.numel() // ps * ps
+        if full_len:
+            self.swa_attn_allocator.free(free_index[:full_len].detach().to(torch.int64))
+            self.swa_attn_allocator.clear_inverse_history()
+        if full_len < free_index.numel():
+            self.free_swa(free_index[full_len:])
+
+    def free_full_segment(
+        self, free_index: torch.Tensor, *, start_pos: int
+    ) -> None:
+        """Release only Full/virtual ownership for a row segment."""
+        del start_pos
+        self.free_full(free_index)
+
+    def free_segment(self, free_index: torch.Tensor, *, start_pos: int) -> None:
+        """Release both shared-pool peers for a request-row segment."""
+        del start_pos
+        self.free(free_index)
+
     def free_full(self, free_index: torch.Tensor) -> None:
         """Release the full-physical page and the virtual id, leaving the swa
         side alone -- the caller already tombstoned it (`swa.v2p_page == -1`)."""
@@ -2476,6 +2547,7 @@ class UnifiedSWATokenToKVPoolAllocator(SWATokenToKVPoolAllocator):
         self.full_attn_allocator.clear()
         self.swa_attn_allocator.clear()
         self.free_group = None
+        self.full_free_group = []
 
     # -- Lazy compaction hooks --
 

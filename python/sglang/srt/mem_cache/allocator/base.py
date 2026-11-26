@@ -137,6 +137,10 @@ class BaseTokenToKVPoolAllocator(abc.ABC):
         data-dependent dedup. Default: plain free()."""
         self.free(free_index)
 
+    def free_full_segment(self, free_index: torch.Tensor, *, start_pos: int):
+        """Release only Full ownership for a row segment whose SWA peer is dead."""
+        self.free_segment(free_index, start_pos=start_pos)
+
     def free_segments(self, segments):
         """Free disjoint ascending ``(free_index, start_pos)`` segments of one
         request's kv row; a boundary page shared by consecutive segments is

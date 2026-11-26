@@ -13,6 +13,7 @@ from sglang.srt.mem_cache.base_prefix_cache import (
     InsertParams,
 )
 from sglang.srt.mem_cache.cache_init_params import CacheInitParams
+from sglang.srt.mem_cache.common import free_kv_row_segments
 from sglang.srt.mem_cache.radix_cache import RadixCache, RadixKey
 
 if TYPE_CHECKING:
@@ -76,11 +77,16 @@ class PureSWARadixCache(RadixCache):
             is_insert = False
 
         kv_committed_len = kv_len_to_handle
+        swa_floor = req.kv.swa_evicted_seqlen if req.kv is not None else 0
         if self.disable:
             kv_indices = self.req_to_token_pool.req_to_token[
                 req.req_pool_idx, :kv_committed_len
             ]
-            self.token_to_kv_pool_allocator.free(kv_indices)
+            free_kv_row_segments(
+                self.token_to_kv_pool_allocator,
+                [(kv_indices, 0)],
+                swa_evicted_seqlen=swa_floor,
+            )
             return
 
         token_ids = (req.origin_input_ids + req.output_ids)[:kv_committed_len]
@@ -98,7 +104,7 @@ class PureSWARadixCache(RadixCache):
 
         old_prefix_len = req.cache_protected_len
         swa_evict_floor = req.swa_evict_floor
-        swa_evicted_seqlen = req.kv.swa_evicted_seqlen
+        swa_evicted_seqlen = swa_floor
 
         if self.page_size > 1 and swa_evict_floor > 0:
             swa_evict_floor = -(-swa_evict_floor // self.page_size) * self.page_size
@@ -115,25 +121,30 @@ class PureSWARadixCache(RadixCache):
             )
             new_prefix_len = result.prefix_len
             if new_prefix_len > old_prefix_len:
-                self.token_to_kv_pool_allocator.free(
-                    kv_indices[old_prefix_len:new_prefix_len]
+                free_kv_row_segments(
+                    self.token_to_kv_pool_allocator,
+                    [(kv_indices[old_prefix_len:new_prefix_len], old_prefix_len)],
+                    swa_evicted_seqlen=swa_evicted_seqlen,
                 )
             alive_start = max(swa_evicted_seqlen, insert_end)
             if alive_start < keys_len:
-                self.token_to_kv_pool_allocator.free(kv_indices[alive_start:keys_len])
-        else:
-            free_end = (
-                min(swa_evict_floor, keys_len) if swa_evict_floor > 0 else keys_len
-            )
-            if free_end > old_prefix_len:
-                self.token_to_kv_pool_allocator.free(
-                    kv_indices[old_prefix_len:free_end]
+                free_kv_row_segments(
+                    self.token_to_kv_pool_allocator,
+                    [(kv_indices[alive_start:keys_len], alive_start)],
+                    swa_evicted_seqlen=swa_evicted_seqlen,
                 )
-            alive_start = max(swa_evicted_seqlen, old_prefix_len)
-            if swa_evicted_seqlen > 0 and alive_start < keys_len:
-                self.token_to_kv_pool_allocator.free(kv_indices[alive_start:keys_len])
+        else:
+            free_kv_row_segments(
+                self.token_to_kv_pool_allocator,
+                [(kv_indices[old_prefix_len:keys_len], old_prefix_len)],
+                swa_evicted_seqlen=swa_evicted_seqlen,
+            )
 
-        self.token_to_kv_pool_allocator.free(kv_indices[keys_len:])
+        free_kv_row_segments(
+            self.token_to_kv_pool_allocator,
+            [(kv_indices[keys_len:], keys_len)],
+            swa_evicted_seqlen=swa_evicted_seqlen,
+        )
 
         if req.last_node is not None:
             self.dec_lock_ref(req.last_node)

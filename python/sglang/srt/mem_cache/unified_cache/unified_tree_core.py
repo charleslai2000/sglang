@@ -59,6 +59,7 @@ from sglang.srt.mem_cache.unified_cache.cache_action import (
     ComponentAction,
     FreeDeviceKV,
     FreeDeviceKVFullOnly,
+    FreeRequestRowKV,
     ReplaceWriteThroughOnNodeSplit,
 )
 from sglang.srt.mem_cache.unified_cache.components import (
@@ -1285,7 +1286,12 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         """Fire-and-forget actions safe to batch until the next barrier."""
         return isinstance(
             action,
-            (FreeDeviceKV, FreeDeviceKVFullOnly, ReplaceWriteThroughOnNodeSplit),
+            (
+                FreeDeviceKV,
+                FreeDeviceKVFullOnly,
+                FreeRequestRowKV,
+                ReplaceWriteThroughOnNodeSplit,
+            ),
         )
 
     def _insert_walk_step(self, state: _InsertWalkState) -> None:
@@ -1337,9 +1343,31 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
 
             dup_start = max(0, state.params.prev_prefix_len - state.total_prefix_length)
             if dup_start < consumed_from:
-                step_actions.append(
-                    FreeDeviceKV([value_slice[dup_start:consumed_from]])
+                duplicate = value_slice[dup_start:consumed_from]
+                # Incoming request rows can already have lost their SWA prefix.
+                # Release dead peers as Full-only, but route live peers through
+                # a distinct action so page-aligned tree values elsewhere keep
+                # their safe tombstone filtering semantics.
+                swa_floor = state.params.swa_evicted_seqlen
+                dead_end = min(
+                    consumed_from,
+                    max(dup_start, swa_floor - state.total_prefix_length),
                 )
+                if ComponentType.SWA in self.component_types:
+                    if dup_start < dead_end:
+                        step_actions.append(
+                            FreeDeviceKVFullOnly([duplicate[: dead_end - dup_start]])
+                        )
+                    if dead_end < consumed_from:
+                        step_actions.append(
+                            FreeRequestRowKV(
+                                [duplicate[dead_end - dup_start :]],
+                                [state.total_prefix_length + dead_end],
+                                state.params.swa_evicted_seqlen,
+                            )
+                        )
+                else:
+                    step_actions.append(FreeDeviceKV([duplicate]))
 
         if self._inc_hit_count_and_check(node, state.params.chunked):
             step_actions.append(self._build_backup_kv_action(node))

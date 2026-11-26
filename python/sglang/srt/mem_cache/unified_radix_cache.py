@@ -43,7 +43,7 @@ from sglang.srt.mem_cache.buffer_mode.pipeline import (
 from sglang.srt.mem_cache.buffer_mode.storage_existence_cache import (
     StorageExistenceCache,
 )
-from sglang.srt.mem_cache.common import RetractionBackup
+from sglang.srt.mem_cache.common import RetractionBackup, free_kv_row_segments
 from sglang.srt.mem_cache.hicache_storage import (
     PoolHitPolicy,
     PoolName,
@@ -88,6 +88,7 @@ from sglang.srt.mem_cache.unified_cache.cache_action import (
     FreeComponentDeviceSlot,
     FreeDeviceKV,
     FreeDeviceKVFullOnly,
+    FreeRequestRowKV,
     ReplaceWriteThroughOnNodeSplit,
 )
 
@@ -3694,12 +3695,22 @@ class UnifiedRadixCache(BasePrefixCache):
                 [action.new_node_id, action.new_child_node_id],
             )
         elif isinstance(action, FreeDeviceKV):
-            # tree values are page-aligned copies of a kv row: page-exact segments
+            # Tree values are page-aligned copies of a kv row. These are
+            # cache-owned values, not request-row ranges; their SWA mapping may
+            # be tombstoned, so keep the safe filter here.
             for indices in action.indices:
                 self.token_to_kv_pool_allocator.free_segment(indices, start_pos=0)
         elif isinstance(action, FreeDeviceKVFullOnly):
             for indices in action.indices:
                 self.token_to_kv_pool_allocator.free_full(indices)
+        elif isinstance(action, FreeRequestRowKV):
+            assert len(action.indices) == len(action.start_positions)
+            for indices, start_pos in zip(action.indices, action.start_positions):
+                free_kv_row_segments(
+                    self.token_to_kv_pool_allocator,
+                    [(indices, start_pos)],
+                    swa_evicted_seqlen=action.swa_evicted_seqlen,
+                )
         elif isinstance(action, BackupKV):
             self._execute_and_commit_kv_backup(action)
         else:

@@ -317,7 +317,10 @@ class SWAComponent(TreeComponent):
             cache_actions.append(SWARebuild(node.id, new_full))
             return start_idx
         else:
-            # Branch 3: entire value_slice is outside SWA window — not consumed
+            # Branch 3: entire value_slice is outside SWA window — not consumed.
+            # The caller's duplicate-overlap release already covers this range
+            # (its dead prefix is released Full-only there), so freeing it here
+            # as well would release the same Full slots twice.
             return prefix_len
 
     def recover_after_unevict(

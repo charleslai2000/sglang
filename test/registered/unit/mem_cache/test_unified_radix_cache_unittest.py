@@ -57,6 +57,7 @@ from sglang.srt.mem_cache.unified_cache.cache_action import (
     FreeComponentDeviceSlot,
     FreeComponentHostSlot,
     FreeDeviceKV,
+    FreeRequestRowKV,
     RebuildFullToSWAMapping,
     RecoverSWAWithLockedFull,
     ReplaceWriteThroughOnNodeSplit,
@@ -6494,6 +6495,9 @@ class UnifiedRadixCacheSuite:
             self.skipTest("page_size==1 for direct swa_attn_allocator access")
 
         cache, allocator, req_to_token_pool = self._build_hicache_fixture()
+        # This test isolates per-pool allocator/eviction behavior; the default
+        # promotion safety margin exceeds the deliberately tiny fixture pool.
+        cache.promotion_margin_tokens = 0
 
         sw = self.cfg.sliding_window_size
         kv_tokens = sw + 2
@@ -7201,6 +7205,19 @@ class TestUnifiedRadixCacheActionRouting(CustomTestCase):
         cache.token_to_kv_pool_allocator.free_segment.assert_has_calls(
             [mock.call(first, start_pos=0), mock.call(second, start_pos=0)]
         )
+
+    def test_apply_cache_action_routes_free_request_row_kv(self):
+        cache = mock.MagicMock()
+        cache.is_swa_enabled = True
+        first = torch.tensor([4, 5, 6])
+        action = FreeRequestRowKV([first], [4], 4)
+        UnifiedRadixCache._apply_cache_action(cache, action)
+        swa_call = cache.token_to_kv_pool_allocator.free_swa_segment.call_args
+        torch.testing.assert_close(swa_call.args[0], first)
+        self.assertEqual(swa_call.kwargs, {"start_pos": 4, "peer_live": True})
+        full_call = cache.token_to_kv_pool_allocator.free_full_segment.call_args
+        torch.testing.assert_close(full_call.args[0], first)
+        self.assertEqual(full_call.kwargs, {"start_pos": 4})
 
     def test_apply_cache_action_routes_free_component_device_kv(self):
         cache = mock.MagicMock()
@@ -8033,6 +8050,9 @@ class TestPrefetchCommitOrdering(CustomTestCase):
         cache.tree_core.insert_host.return_value = insert_result
         operation = mock.MagicMock()
         operation.request_id = "req"
+        operation.completed_tokens = 8
+        operation.hash_value = [f"h{i}" for i in range(8)]
+        operation.stats_requested_tokens = 8
         cache.ongoing_prefetch = {
             operation.request_id: (
                 7,
@@ -8041,6 +8061,7 @@ class TestPrefetchCommitOrdering(CustomTestCase):
                 operation,
                 None,
                 {},
+                None,
             )
         }
         cache.cache_controller.terminate_prefetch.return_value = (

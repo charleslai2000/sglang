@@ -17,6 +17,36 @@ register_cpu_ci(est_time=1, suite="base-a-test-cpu")
 
 
 class TestDeepSeekV4HiSparseAllocator(CustomTestCase):
+    def test_forwards_full_segment_free_to_hisparse_owner(self):
+        allocator = object.__new__(DeepSeekV4HiSparseTokenToKVPoolAllocator)
+        indices = torch.tensor([4, 5, 6, 7])
+        logical_allocator = MagicMock()
+        allocator.logical_attn_allocator = logical_allocator
+        allocator.free_group = None
+        allocator.free_hisparse = MagicMock()
+
+        allocator.free_full_segment(indices, start_pos=12)
+
+        logical_allocator.free_full_segment.assert_called_once_with(
+            indices, start_pos=12
+        )
+        allocator.free_hisparse.assert_called_once_with(indices)
+
+    def test_grouped_full_segment_preserves_start_position_for_drain(self):
+        allocator = object.__new__(DeepSeekV4HiSparseTokenToKVPoolAllocator)
+        indices = torch.tensor([4, 5, 6, 7])
+        allocator.logical_attn_allocator = MagicMock()
+        allocator.free_group = []
+        allocator.full_free_group = []
+        allocator._copy_for_free_group = lambda tensor: tensor.clone()
+
+        allocator.free_full_segment(indices, start_pos=12)
+
+        self.assertEqual(len(allocator.full_free_group), 1)
+        grouped, start_pos = allocator.full_free_group[0]
+        self.assertEqual(start_pos, 12)
+        self.assertTrue(torch.equal(grouped, indices))
+
     def test_forwards_swa_tail_allocation_to_logical_allocator(self):
         allocator = object.__new__(DeepSeekV4HiSparseTokenToKVPoolAllocator)
         logical_allocator = MagicMock(spec=["alloc_extend_swa_tail"])

@@ -102,8 +102,88 @@ def free_swa_out_of_window_slots(
         free_slots = req_to_token_pool.req_to_token[
             req.req_pool_idx, req.kv.swa_evicted_seqlen : new_swa_evicted_seqlen
         ]
-        token_to_kv_pool_allocator.free_swa(free_slots)
+        free_swa_segment = getattr(
+            token_to_kv_pool_allocator, "free_swa_segment", None
+        )
+        if free_swa_segment is None:
+            token_to_kv_pool_allocator.free_swa(free_slots)
+        else:
+            free_swa_segment(
+                free_slots,
+                start_pos=req.kv.swa_evicted_seqlen,
+                peer_live=True,
+            )
         req.kv.swa_evicted_seqlen = new_swa_evicted_seqlen
+
+
+def free_kv_row_segments(
+    allocator: BaseTokenToKVPoolAllocator,
+    segments: list[tuple[torch.Tensor, int]],
+    *,
+    swa_evicted_seqlen: int,
+) -> None:
+    """Free ascending request-row segments split by the SWA ownership floor.
+
+    Full KV always belongs to the row's caller. SWA peers below the recorded
+    floor have already been released; peers at/after it are live and may use
+    the allocator's fixed-shape segment path. Arbitrary/cache-owned frees must
+    not use this helper.
+    """
+    # Normalize shared physical boundary pages before splitting by ownership.
+    # Some callers pass a radix-aligned range followed by its unaligned tail;
+    # those ranges can both name the same allocator page.
+    normalized: list[tuple[torch.Tensor, int]] = []
+    prev_end = None
+    page_size = getattr(allocator, "page_size", 1)
+    for indices, start_pos in segments:
+        if indices.numel() == 0:
+            continue
+        if prev_end is not None and start_pos // page_size == (prev_end - 1) // page_size:
+            boundary = (start_pos // page_size + 1) * page_size
+            indices = indices[boundary - start_pos :]
+            start_pos = boundary
+        prev_end = start_pos + indices.numel()
+        if indices.numel():
+            normalized.append((indices, start_pos))
+
+    swa_dead: list[tuple[torch.Tensor, int]] = []
+    swa_live: list[tuple[torch.Tensor, int]] = []
+    for indices, start_pos in normalized:
+        if indices.numel() == 0:
+            continue
+        if not callable(getattr(allocator, "free_swa_segment", None)):
+            # Non-SWA allocations do not participate in SWA ownership splitting.
+            swa_live.append((indices, start_pos))
+            continue
+        dead = min(max(swa_evicted_seqlen - start_pos, 0), indices.numel())
+        if dead:
+            swa_dead.append((indices[:dead], start_pos))
+        if dead < indices.numel():
+            swa_live.append((indices[dead:], start_pos + dead))
+
+    if swa_dead and swa_live:
+        assert swa_evicted_seqlen % page_size == 0, (
+            f"SWA eviction floor {swa_evicted_seqlen} splits a page "
+            f"(page_size {page_size})"
+        )
+    full_only_segment = getattr(allocator, "free_full_segment", None)
+    free_swa_segment = getattr(allocator, "free_swa_segment", None)
+    if not callable(free_swa_segment) or not callable(full_only_segment):
+        free_segments = getattr(type(allocator), "free_segments", None)
+        if free_segments is not None:
+            allocator.free_segments(normalized)
+        else:
+            if normalized:
+                allocator.free(torch.cat([indices for indices, _ in normalized]))
+        return
+
+    for indices, start_pos in swa_dead:
+        full_only_segment(indices, start_pos=start_pos)
+    for indices, start_pos in swa_live:
+        # Split ownership explicitly: the row-range floor proves these SWA
+        # peers are live, while Full and optional HiSparse are each released.
+        free_swa_segment(indices, start_pos=start_pos, peer_live=True)
+        full_only_segment(indices, start_pos=start_pos)
 
 
 def maybe_cache_unfinished_req(req: Req, tree_cache: BasePrefixCache, **kwargs):

@@ -266,6 +266,19 @@ class HiSparseTokenToKVPoolAllocator(BaseTokenToKVPoolAllocator):
             <= self.hisparse_attn_allocator.size
         )
 
+    def free_swa_segment(
+        self, free_index: torch.Tensor, *, start_pos: int, peer_live: bool = False
+    ):
+        self.logical_attn_allocator.free_swa_segment(
+            free_index, start_pos=start_pos, peer_live=peer_live
+        )
+
+    def free_full_segment(self, free_index: torch.Tensor, *, start_pos: int):
+        self.logical_attn_allocator.free_full_segment(
+            free_index, start_pos=start_pos
+        )
+        self.free_hisparse(free_index)
+
 
 class DeepSeekV4HiSparseTokenToKVPoolAllocator(BaseTokenToKVPoolAllocator):
 
@@ -361,18 +374,6 @@ class DeepSeekV4HiSparseTokenToKVPoolAllocator(BaseTokenToKVPoolAllocator):
 
     def swa_available_size(self):
         return self.logical_attn_allocator.swa_available_size()
-
-    def free_swa(self, free_indices: torch.Tensor):
-        self.logical_attn_allocator.free_swa(free_indices)
-
-    def free_full(self, free_indices: torch.Tensor):
-        if free_indices.numel() == 0:
-            return
-
-        if self.free_group is None:
-            self.logical_attn_allocator.free_full(free_indices)
-        else:
-            self.full_free_group.append(self._copy_for_free_group(free_indices))
 
     def available_size(self) -> int:
         return min(
@@ -588,6 +589,42 @@ class DeepSeekV4HiSparseTokenToKVPoolAllocator(BaseTokenToKVPoolAllocator):
         else:
             self.free_group.append(self._copy_for_free_group(free_index))
 
+    def free_full(self, free_index: torch.Tensor):
+        if free_index.numel() == 0:
+            return
+        if self.free_group is None:
+            self.logical_attn_allocator.free_full(free_index)
+            self.free_hisparse(free_index)
+        else:
+            self.full_free_group.append(self._copy_for_free_group(free_index))
+
+    def free_swa(self, free_index: torch.Tensor):
+        if free_index.numel() == 0:
+            return
+        self.logical_attn_allocator.free_swa(free_index)
+
+    def free_swa_segment(
+        self, free_index: torch.Tensor, *, start_pos: int, peer_live: bool = False
+    ):
+        if free_index.numel() == 0:
+            return
+        self.logical_attn_allocator.free_swa_segment(
+            free_index, start_pos=start_pos, peer_live=peer_live
+        )
+
+    def free_full_segment(self, free_index: torch.Tensor, *, start_pos: int):
+        if free_index.numel() == 0:
+            return
+        if self.free_group is None:
+            self.logical_attn_allocator.free_full_segment(
+                free_index, start_pos=start_pos
+            )
+            self.free_hisparse(free_index)
+        else:
+            self.full_free_group.append(
+                (self._copy_for_free_group(free_index), start_pos)
+            )
+
     def free_group_begin(self):
         super().free_group_begin()
         self.full_free_group = []
@@ -597,4 +634,11 @@ class DeepSeekV4HiSparseTokenToKVPoolAllocator(BaseTokenToKVPoolAllocator):
         if self.full_free_group:
             full_free_group = self.full_free_group
             self.full_free_group = []
-            self.free_full(torch.cat(full_free_group))
+            for indices, start_pos in full_free_group:
+                if start_pos is None:
+                    self.logical_attn_allocator.free_full(indices)
+                else:
+                    self.logical_attn_allocator.free_full_segment(
+                        indices, start_pos=start_pos
+                    )
+                self.free_hisparse(indices)

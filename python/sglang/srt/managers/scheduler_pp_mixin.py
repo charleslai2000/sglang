@@ -24,6 +24,7 @@ from sglang.srt.layers.dp_attention import (
     set_is_extend_in_batch,
 )
 from sglang.srt.layers.logits_processor import LogitsProcessorOutput
+from sglang.srt.mem_cache.common import free_kv_row_segments
 from sglang.srt.managers.overlap_utils import RelayPayload
 from sglang.srt.managers.schedule_batch import FINISH_ABORT, Req, ScheduleBatch
 from sglang.srt.managers.utils import (
@@ -727,7 +728,11 @@ class SchedulerPPMixin:
                     kv_indices = self.req_to_token_pool.req_to_token[
                         req.req_pool_idx, : req.extend_range.end
                     ]
-                    self.token_to_kv_pool_allocator.free(kv_indices)
+                    free_kv_row_segments(
+                        self.token_to_kv_pool_allocator,
+                        [(kv_indices, 0)],
+                        swa_evicted_seqlen=getattr(req.kv, "swa_evicted_seqlen", 0),
+                    )
                     if req.mamba_pool_idx is not None:
                         self.req_to_token_pool.free_mamba_cache(req)
                     self.req_to_token_pool.free(req)

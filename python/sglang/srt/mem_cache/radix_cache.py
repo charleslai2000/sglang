@@ -45,6 +45,7 @@ from sglang.srt.mem_cache.base_prefix_cache import (
     MatchPrefixParams,
     MatchResult,
 )
+from sglang.srt.mem_cache.common import free_kv_row_segments
 from sglang.srt.mem_cache.events import KVCacheEventRecorder
 from sglang.srt.mem_cache.utils import (
     get_eviction_strategy,
@@ -492,21 +493,34 @@ class RadixCache(BasePrefixCache):
         if is_insert:
             priority = getattr(req, "priority", 0) or 0
             result = self.insert(
-                InsertParams(key=radix_key, value=values, priority=priority)
+                InsertParams(
+                    key=radix_key,
+                    value=values,
+                    priority=priority,
+                    swa_evicted_seqlen=(
+                        req.kv.swa_evicted_seqlen if req.kv is not None else 0
+                    ),
+                )
             )
             freed_end = result.prefix_len
         else:
             freed_end = key_len
 
-        # duplicates / uninserted range, then the unaligned tail
-        self.token_to_kv_pool_allocator.free_segments(
+        # Duplicate/uninserted row frees must respect the per-request SWA
+        # eviction floor. Regular non-SWA allocators receive floor zero and
+        # retain their existing fixed-shape segment behavior.
+        free_kv_row_segments(
+            self.token_to_kv_pool_allocator,
             [
                 (
                     kv_indices[req.cache_protected_len : freed_end],
                     req.cache_protected_len,
                 ),
                 (kv_indices[key_len:], key_len),
-            ]
+            ],
+            swa_evicted_seqlen=(
+                req.kv.swa_evicted_seqlen if req.kv is not None else 0
+            ),
         )
 
         # Remove req slot release the cache lock

@@ -771,6 +771,65 @@ class TestUnifiedSWATokenToKVPoolAllocator(unittest.TestCase):
         )
         self.assertIn(tgt, drained)
 
+    def test_swa_row_segment_free_preserves_tombstone_without_mask(self):
+        _, allocator, kvcache = self._build()
+        v = self._alloc(allocator, kvcache, 8)
+        dead = v[:4]
+        live = v[4:]
+
+        dead_swa = allocator.swa_attn_allocator.virtual_to_physical[dead]
+        kvcache.swa_kv_pool.buf[dead_swa] = -1
+        allocator.free_swa(dead)
+
+        allocator.free_swa_segment(live, start_pos=4, peer_live=True)
+
+        for vi in dead.tolist():
+            self.assertEqual(
+                int(allocator.swa_attn_allocator.virtual_to_physical[vi].item()), -1
+            )
+            self.assertGreaterEqual(
+                int(allocator.full_attn_allocator.virtual_to_physical[vi].item()), 0
+            )
+        for vi in live.tolist():
+            self.assertEqual(
+                int(allocator.swa_attn_allocator.virtual_to_physical[vi].item()), -1
+            )
+            self.assertGreaterEqual(
+                int(allocator.full_attn_allocator.virtual_to_physical[vi].item()), 0
+            )
+
+        allocator.free_full_segment(dead, start_pos=0)
+        allocator.free_full_segment(live, start_pos=4)
+        for vi in v.tolist():
+            self.assertEqual(
+                int(allocator.full_attn_allocator.virtual_to_physical[vi].item()), -1
+            )
+
+    def test_swa_row_segment_free_group_drains_live_and_full_only(self):
+        _, allocator, kvcache = self._build()
+        v = self._alloc(allocator, kvcache, 8)
+        dead, live = v[:4], v[4:]
+        dead_swa = allocator.swa_attn_allocator.virtual_to_physical[dead]
+        kvcache.swa_kv_pool.buf[dead_swa] = -1
+        allocator.free_swa(dead)
+
+        allocator.free_group_begin()
+        allocator.free_full_segment(dead, start_pos=0)
+        allocator.free_swa_segment(live, start_pos=4, peer_live=True)
+        allocator.free_full_segment(live, start_pos=4)
+        # The group has not recycled Full virtual IDs until drain.
+        before = set(int(x) for x in allocator.full_attn_allocator.free_virtual_ids)
+        self.assertTrue(set(v.tolist()).isdisjoint(before))
+        allocator.free_group_end()
+
+        for vi in v.tolist():
+            self.assertEqual(
+                int(allocator.full_attn_allocator.virtual_to_physical[vi].item()), -1
+            )
+            self.assertEqual(
+                int(allocator.swa_attn_allocator.virtual_to_physical[vi].item()), -1
+            )
+
     # 4. Compaction diverges between the two sub-pools (each runs its own).
     def test_swa_compaction_diverges_physical_layout(self):
         _, allocator, kvcache = self._build()

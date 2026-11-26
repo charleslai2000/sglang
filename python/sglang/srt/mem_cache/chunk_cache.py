@@ -23,6 +23,7 @@ from sglang.srt.mem_cache.base_prefix_cache import (
     MatchPrefixParams,
     MatchResult,
 )
+from sglang.srt.mem_cache.common import free_kv_row_segments
 
 if TYPE_CHECKING:
     from sglang.srt.managers.schedule_batch import Req
@@ -84,7 +85,13 @@ class ChunkCache(BasePrefixCache):
         kv_indices = self.req_to_token_pool.req_to_token[
             req.req_pool_idx, req.cache_protected_len : kv_len_to_handle
         ]
-        self.token_to_kv_pool_allocator.free(kv_indices)
+        free_kv_row_segments(
+            self.token_to_kv_pool_allocator,
+            [(kv_indices, req.cache_protected_len)],
+            swa_evicted_seqlen=(
+                req.kv.swa_evicted_seqlen if req.kv is not None else 0
+            ),
+        )
 
     def cache_unfinished_req(self, req: Req, chunked=False):
         kv_indices = self.req_to_token_pool.req_to_token[
@@ -165,14 +172,21 @@ class PureSWAChunkCache(SWAChunkCache):
         evict_floor = req.swa_evict_floor
         evicted_seqlen = req.kv.swa_evicted_seqlen
         if evicted_seqlen > evict_floor:
-            parts = []
+            segments = []
             if evict_floor > protected_len:
-                parts.append(kv_indices[protected_len:evict_floor])
-            if evicted_seqlen < kv_committed_len:
-                parts.append(
-                    kv_indices[max(evicted_seqlen, protected_len) : kv_committed_len]
+                segments.append(
+                    (kv_indices[protected_len:evict_floor], protected_len)
                 )
-            if parts:
-                self.token_to_kv_pool_allocator.free(torch.cat(parts))
+            alive_start = max(evicted_seqlen, protected_len)
+            if alive_start < kv_committed_len:
+                segments.append((kv_indices[alive_start:kv_committed_len], alive_start))
+            if segments:
+                self.token_to_kv_pool_allocator.free(
+                    torch.cat([indices for indices, _ in segments])
+                )
         else:
-            self.token_to_kv_pool_allocator.free(kv_indices[protected_len:])
+            free_kv_row_segments(
+                self.token_to_kv_pool_allocator,
+                [(kv_indices[protected_len:], protected_len)],
+                swa_evicted_seqlen=evicted_seqlen,
+            )
