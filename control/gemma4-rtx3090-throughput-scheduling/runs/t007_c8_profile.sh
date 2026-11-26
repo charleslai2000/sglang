@@ -151,7 +151,11 @@ trap cleanup EXIT
 trap 'exit 143' TERM
 trap 'exit 130' INT
 
-"$NSYS" launch --session-new="$SESSION" --trace=cuda,nvtx --cuda-graph-trace=node --cuda-event-trace=false --wait=all \
+# T007_NSYS_EXTRA carries extra launch-time options (word-split on purpose):
+# e.g. "--cudabacktrace=sync:100 --python-backtrace=cuda --python-sampling=true" for sync attribution.
+NSYS_EXTRA=${T007_NSYS_EXTRA:-}
+# shellcheck disable=SC2086
+"$NSYS" launch --session-new="$SESSION" --trace=cuda,nvtx --cuda-graph-trace=node --cuda-event-trace=false --wait=all $NSYS_EXTRA \
   "$VENV/bin/python" -u -m sglang.launch_server "${ARGS[@]}" > "$OUT/server.log" 2>&1 &
 NSYS_PID=$!
 echo "$NSYS_PID" > "$OUT/nsys-launch.pid"
