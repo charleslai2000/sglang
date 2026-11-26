@@ -740,8 +740,12 @@ class TritonAttnBackend(AttentionBackend):
             self.cuda_graph_kv_indices[:n_kv] = self._translate_kv_loc(
                 self.cuda_graph_kv_indices[:n_kv]
             )
-        # SWA window read path. window_kv_indptr[bs] == sum(min(seq_len, window)).
+        # SWA window read path. The buffer is maximum-capacity while
+        # window_kv_indptr delimits the live prefix, so both the exact live
+        # length (CPU mirror) and the fixed capacity are correct. Never read the
+        # device prefix sum here: that was a per-step blocking D2H.
         if self.sliding_window_size is not None and self.sliding_window_size > 0:
+            buf = self.cuda_graph_window_kv_indices
             if have_cpu_mirror:
                 n_win = int(
                     forward_batch.seq_lens_cpu[:bs]
@@ -749,12 +753,14 @@ class TritonAttnBackend(AttentionBackend):
                     .sum()
                 )
             else:
-                n_win = int(self.window_kv_indptr[bs].item())
+                # No trusted mirror (gpu_only batch): translate the whole
+                # fixed-capacity buffer. The tail is outside indptr and unused,
+                # and the window builder zero-initializes it to the sink, so the
+                # translate gather stays in-bounds.
+                n_win = buf.shape[0]
             if n_win > 0:
-                self.cuda_graph_window_kv_indices[:n_win] = (
-                    self.token_to_kv_pool.translate_loc_from_full_to_swa(
-                        self.cuda_graph_window_kv_indices[:n_win]
-                    )
+                buf[:n_win] = self.token_to_kv_pool.translate_loc_from_full_to_swa(
+                    buf[:n_win]
                 )
         # Full-attention write path: translate out_cache_loc -> physical into the
         # capture-stable buffer and RETURN the [:n] view.
@@ -2177,14 +2183,15 @@ def update_sliding_window_buffer(
     )
     window_kv_indptr[1 : bs + 1] = torch.cumsum(window_kv_lens, dim=0)
     window_kv_indptr = window_kv_indptr[: bs + 1]
-    # Reading the token total off the prefix sums is a device->host sync. Read it
-    # once and reuse it for both the buffer size and the translate slice.
-    total_tokens = None
+    # The sum of window lengths is data-dependent on device. Allocate maximum
+    # capacity and let indptr delimit the live prefix; never read the prefix sum
+    # back to size a Python tensor/slice. Clear it because reused eager buffers
+    # may otherwise retain stale ids in the unused tail.
     if window_kv_indices is None:
-        total_tokens = int(window_kv_indptr[-1])
         window_kv_indices = torch.empty(
-            total_tokens, dtype=torch.int64, device=device
+            bs * sliding_window_size, dtype=torch.int64, device=device
         )
+    window_kv_indices.zero_()
     window_kv_start_idx = seq_lens - window_kv_lens
     create_flashinfer_kv_indices_triton[(bs,)](
         req_to_token,
@@ -2198,11 +2205,9 @@ def update_sliding_window_buffer(
     if not skip_full_to_swa_translation and hasattr(
         token_to_kv_pool, "translate_loc_from_full_to_swa"
     ):
-        if total_tokens is None:
-            total_tokens = int(window_kv_indptr[-1])
-        window_kv_indices[:total_tokens] = (
-            token_to_kv_pool.translate_loc_from_full_to_swa(
-                window_kv_indices[:total_tokens]
-            )
+        # Unused capacity was initialized to the sink above, so translating
+        # the fixed-capacity buffer cannot observe stale indices beyond indptr.
+        window_kv_indices[:] = token_to_kv_pool.translate_loc_from_full_to_swa(
+            window_kv_indices
         )
     return window_kv_indptr, window_kv_indices, window_kv_lens, window_kv_start_idx

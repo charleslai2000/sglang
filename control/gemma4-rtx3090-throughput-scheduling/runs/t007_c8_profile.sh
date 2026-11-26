@@ -158,6 +158,7 @@ trap 'exit 130' INT
 # T007_NSYS_EXTRA carries extra launch-time options (word-split on purpose):
 # e.g. "--cudabacktrace=sync:100 --python-backtrace=cuda --python-sampling=true" for sync attribution.
 NSYS_EXTRA=${T007_NSYS_EXTRA:-}
+NSYS_START_EXTRA=${T007_NSYS_START_EXTRA:-}
 # shellcheck disable=SC2086
 "$NSYS" launch --session-new="$SESSION" --trace=cuda,nvtx --cuda-graph-trace=node --cuda-event-trace=false --wait=all $NSYS_EXTRA \
   "$VENV/bin/python" -u -m sglang.launch_server "${ARGS[@]}" > "$OUT/server.log" 2>&1 &
@@ -195,7 +196,8 @@ BENCH_START_UTC=$(date -u +%FT%TZ)
 if [[ $WINDOW_SECONDS != 0 ]]; then
 sleep "$WINDOW_DELAY"
 # launch already fixed the trace options; start must not repeat them.
-"$NSYS" start --session="$SESSION" -o "$OUT/t007-c8-window" > "$OUT/nsys-start.log" 2>&1 || printf 'NSYS_START_FAILED rc=%s\n' "$?" >> "$OUT/nsys-start.log"
+# shellcheck disable=SC2086
+"$NSYS" start --session="$SESSION" -o "$OUT/t007-c8-window" $NSYS_START_EXTRA > "$OUT/nsys-start.log" 2>&1 || printf 'NSYS_START_FAILED rc=%s\n' "$?" >> "$OUT/nsys-start.log"
 echo "window_start=$(date -Is) window_start_epoch=$(date +%s) bench_elapsed_s=$(( $(date +%s) - BENCH_START ))" > "$OUT/window.txt"
 sleep "$WINDOW_SECONDS"
 "$NSYS" stop --session="$SESSION" > "$OUT/nsys-stop.log" 2>&1 || true

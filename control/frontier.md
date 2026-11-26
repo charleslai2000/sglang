@@ -1,9 +1,9 @@
 # Frontier
 
 ## gemma4-rtx3090-throughput-scheduling
-- T007/T008 Gemma4 RTX3090 Throughput and HiCache Restore Scheduling — ACTIVE
-  - frontier: Current explicit acceptance remains **≥600 official output TPS** on unchanged full-tier C-8 40×20. Unprofiled exact-payload run at HEAD `77fd9ab9f3`: 800/800, zero failures/retractions/sanity errors, **560.58 TPS** (39.42 below gate); transient allocator OOM and host-pressure drops/aux staging failures recorded, matching prior write-back runs at lower levels. CUDA sync attribution found SWA scalar-length reads and required slot-0 filters; neither removed. C32 figures remain diagnostics only. Next: inspect existing exact-revision metrics and narrow an in-contract source-backed candidate toward remaining ~7%, then remeasure original C-8. Run artifact and complete caveats in T007 Task.
-  - task: control/gemma4-rtx3090-throughput-scheduling/tasks/T007-gpu-throughput-scheduling.md
+- T007/T008/T009 Gemma4 RTX3090 Throughput and HiCache Restore Scheduling — ACTIVE
+  - frontier: Explicit acceptance remains **≥600 official output TPS** on unchanged full-tier C-8 40×20. T009 removed the SWA window metadata device scalar read and measured **575.50 official TPS** (800/800, exact payload multiset, zero sanity failures, +2.66% vs the 560.58 baseline) — still 24.50 short. The remaining in-window host sync is the required `swa_indices[swa_indices > 0]` padding `nonzero`; a caller peer-liveness variant was measured unsafe (494.41 TPS, 108,800 host-pressure drops, SWA backup collapse) and reverted. Next: allocator-level bounded deferred/bitmask SWA free list, then the unchanged C-8 gate. All `/data/.../runs` artifacts (including historical runs) were deleted externally; numbers are recorded in the T009 task.
+  - task: control/gemma4-rtx3090-throughput-scheduling/tasks/T009-eliminate-scheduler-cuda-sync.md
 
 
 ## gemma4-g1-e5m2-postbos-numerical-closure
