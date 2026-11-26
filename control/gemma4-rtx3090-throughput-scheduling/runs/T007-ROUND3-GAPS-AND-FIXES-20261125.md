@@ -143,3 +143,17 @@ Measurement bases differ and are not interchangeable: the DeviceTimer duty above
 (89.06 %) counts event-to-event forward spans, while Nsight kernel/ memcpy
 busy-union over the same build is 73.14 % because it also counts the ≈10 s per
 window of sub-millisecond inter-kernel launch gaps.
+
+## 6. Negative result on naming the sync call sites
+
+`torch.cuda.set_sync_debug_mode("warn")`, applied at interpreter start and in
+every thread and child process through a temporary `sitecustomize.py`, produced
+**no** synchronizing-operation warnings during a 193-request slice of the
+official C-8 (`20261125T-t007-r3-syncattr2-c8`; the first attempt
+`…-syncattr-c8` only proved the hook must reach the scheduler thread). Torch
+documents this feature as covering only a subset of synchronizing operations, so
+the 48.5 s is either an implicit read it does not instrument or a block inside a
+non-torch extension. The named-and-measured phase split in §5 stands; naming the
+individual call sites needs `nsys profile --python-sampling=true` (Python stacks
+joined to the `cudaStreamSynchronize` runtime rows) rather than torch warnings.
+The temporary hook was removed; the worktree is clean at the delivery commit.
