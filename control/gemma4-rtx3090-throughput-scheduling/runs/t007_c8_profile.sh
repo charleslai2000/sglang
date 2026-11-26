@@ -12,6 +12,7 @@ AOT=/data/sglang-hicache/g2-quasar-runs/20261110T-g2-postrope-e5m2-quality/aot-s
 OVERLAY=$ROOT/control/gemma4-w4a16-3090-performance-capacity/runs/overlay
 RUNS=$ROOT/control/gemma4-w4a16-3090-performance-capacity/runs
 T006=/data/sglang-hicache/gemma4/runs/20261124T-g5-live-capacity-65536/c8-800-r2
+BASELINE_ARGV=${T007_BASELINE_ARGV:-$T006/launch-argv.txt}
 OUT=${T007_OUT:?set T007_OUT}
 PORT=31401
 LOCK=/tmp/f1-r16b-gpu-exclusive.lock
@@ -64,9 +65,11 @@ ident={"project_root":root,"git_head":subprocess.check_output(["git","-C",root,"
 json.dump(ident,open(sys.argv[2],"w"),indent=2); print(json.dumps({k:ident[k] for k in ("git_head","python")},sort_keys=True))
 PY
 
-# Reuse T006's exact recorded argv, overriding only metrics/artifact paths and
-# (for the L1+L2 diagnostic) removing the L3 storage backend.
-eval "ARGS=($(cat "$T006/launch-argv.txt"))"
+# Reuse the exact recorded baseline argv, overriding only metrics/artifact
+# paths and (for the L1+L2 diagnostic) removing the L3 storage backend. Allow an
+# explicit archived argv path when old run artifacts have been cleaned up.
+[[ -r "$BASELINE_ARGV" ]] || { echo "missing baseline argv: $BASELINE_ARGV" >&2; exit 2; }
+eval "ARGS=($(cat "$BASELINE_ARGV"))"
 NEW=(); skip=0
 for ((i=0;i<${#ARGS[@]};i++)); do
   if [[ $skip == 1 ]]; then skip=0; continue; fi
