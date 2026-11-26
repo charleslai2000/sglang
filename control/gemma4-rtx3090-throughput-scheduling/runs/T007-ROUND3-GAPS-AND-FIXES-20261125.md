@@ -112,12 +112,34 @@ rather than as a TPS-only claim.
 
 ## 5. Remaining largest item
 
-The 40 s of pass-level idle, which is host submission latency inside the
-scheduler (`get_next_batch_to_run` 7.5 % of wall, pre-launch work in `run_batch`
-4.9 %, `process_input_requests` 4.2 %). A previous window analysis already
-localised 48.5 s/120 s of `cudaStreamSynchronize` inside `run_batch`, which is
-the single largest host stall and is *not* addressed by this round: eliminating
-it changes overlap/scheduling semantics and needs its own instrumented pass
-trace (per-iteration phase timeline) plus a full re-verification, not another
-blind micro-optimisation. Second item: fragmented (non-coalesced) backup copies,
-≈1.0 s per 40.5 s host sample.
+The scheduler thread is saturated, not idle: NVTX inclusive time over the
+120.06 s window is `run_batch` 64.05 s + `process_batch_result` 23.44 s +
+`get_next_batch_to_run` 16.43 s + `process_input_requests` 15.10 s (2 003
+iterations), and the single largest host stall inside it is
+**`cudaStreamSynchronize`: 11 302 calls, 48.51 s of the 120 s window (40 %)**.
+Joined to NVTX ranges by `correlationId`/`globalTid`:
+
+| range | sync host time | calls | per call |
+|---|---|---|---|
+| `scheduler.run_batch` | 25.27 s | 4 095 | 6.2 ms |
+| `scheduler.process_batch_result` | 16.82 s | 210 | 80.1 ms |
+| `scheduler.process_input_requests` | 5.89 s | 4 836 | 1.2 ms |
+| `scheduler.get_next_batch_to_run` | 0.53 s | 2 160 | 0.2 ms |
+
+There is no explicit `.synchronize()` on this path (the `copy_done` waits are
+`cudaEventSynchronize`: 2 897 calls, 24.6 ms total), so these are **implicit
+syncs from `.item()`/`.tolist()` reads**: ≈2 per iteration in `run_batch` and
+≈2.4 per iteration in `process_input_requests` (one full pass of waiting each,
+≈6 ms and ≈1.2 ms), plus ≈210 one-pass drains in `process_batch_result`. That
+is the item to attack next, and it must be attacked by naming the call sites
+with `torch.cuda.set_sync_debug_mode("warn")` on a short instrumented window
+first: several of the candidate reads are KV/HiCache ownership reads, where
+removing the sync would relax persistence ordering — explicitly out of bounds.
+Second item: fragmented (non-coalesced) backup copies, ≈1.0 s per 40.5 s host
+sample; third: `update_sliding_window_buffer` on the extend path, 2.5 s per
+40.5 s sample (≈7 ms per prefill batch, one device sync plus two allocations).
+
+Measurement bases differ and are not interchangeable: the DeviceTimer duty above
+(89.06 %) counts event-to-event forward spans, while Nsight kernel/ memcpy
+busy-union over the same build is 73.14 % because it also counts the ≈10 s per
+window of sub-millisecond inter-kernel launch gaps.
