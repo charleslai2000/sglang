@@ -28,8 +28,12 @@ EXTENT_OUT=${T007_EXTENT_OUT:-$OUT/l3-extent}
 [[ -z $WRITE_POLICY || $WRITE_POLICY == write_through || $WRITE_POLICY == write_back || $WRITE_POLICY == write_through_selective ]] || { echo "invalid T007_WRITE_POLICY=$WRITE_POLICY" >&2; exit 2; }
 [[ -z $PREFETCH_POLICY || $PREFETCH_POLICY == wait_complete || $PREFETCH_POLICY == best_effort || $PREFETCH_POLICY == timeout ]] || { echo "invalid T007_PREFETCH_POLICY=$PREFETCH_POLICY" >&2; exit 2; }
 
-[[ -d "$OUT" && -z "$(ls -A "$OUT")" ]] || { echo "T007_OUT must be an empty directory: $OUT" >&2; exit 2; }
-mkdir -p "$OUT"
+[[ -d "$OUT" ]] || { echo "T007_OUT must exist with its run intent: $OUT" >&2; exit 2; }
+mapfile -t OUT_CONTENTS < <(find "$OUT" -mindepth 1 -maxdepth 1 -printf '%f\n')
+[[ ${#OUT_CONTENTS[@]} == 1 && ${OUT_CONTENTS[0]} == intent.txt ]] || {
+  echo "T007_OUT must contain only intent.txt before launch: $OUT" >&2
+  exit 2
+}
 exec 9>"$LOCK"
 flock -n 9 || { echo GPU_LOCK_BUSY | tee "$OUT/preflight.txt"; exit 90; }
 [[ $(sha256sum "$MODEL/model.safetensors"|awk '{print $1}') == 19d89d2a4b3e401a3eae75ec08ab112810421a036c91d8c8226b686be7fe0c5d ]]

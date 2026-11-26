@@ -2,7 +2,7 @@
 
 ## gemma4-rtx3090-throughput-scheduling
 - T007/T008 Gemma4 RTX3090 Throughput and HiCache Restore Scheduling — ACTIVE
-  - frontier: Current explicit acceptance target is **≥600 official output TPS** on the unchanged original full-tier C-8 40×20 workload, with 800/800, identical payload multiset, and no new correctness errors. Prior exact-revision full-tier runs reached ~550 TPS and remain below this gate. CUDA sync Python backtraces mapped dominant sampled syncs to SWA window `indptr[-1]` scalar reads and required SWA padding/tombstone filters; do not remove dependencies without authoritative batch CPU lengths / slot-0-safe free semantics. Continuous short-context C32 diagnostic: token-correct rotating 819.20 TPS and cached 1,774.92 TPS, not C-8 acceptance. Next: continue with source-backed candidate narrowing, then unprofiled original C-8 acceptance; no runtime sync patch made.
+  - frontier: Current explicit acceptance remains **≥600 official output TPS** on unchanged full-tier C-8 40×20. Unprofiled exact-payload run at HEAD `77fd9ab9f3`: 800/800, zero failures/retractions/sanity errors, **560.58 TPS** (39.42 below gate); transient allocator OOM and host-pressure drops/aux staging failures recorded, matching prior write-back runs at lower levels. CUDA sync attribution found SWA scalar-length reads and required slot-0 filters; neither removed. C32 figures remain diagnostics only. Next: inspect existing exact-revision metrics and narrow an in-contract source-backed candidate toward remaining ~7%, then remeasure original C-8. Run artifact and complete caveats in T007 Task.
   - task: control/gemma4-rtx3090-throughput-scheduling/tasks/T007-gpu-throughput-scheduling.md
 
 

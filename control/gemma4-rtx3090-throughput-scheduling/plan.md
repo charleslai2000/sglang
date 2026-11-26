@@ -1,6 +1,6 @@
 # T007 HiCache performance-loss plan
 
-Status: ACTIVE (per user direction; 132.724 tok/s is not a performance acceptance; new explicit gate >=540 official TPS).
+Status: ACTIVE (explicit acceptance gate ≥600 official output TPS on unchanged full-tier C-8; current best unprofiled repeat 560.58 TPS remains below gate).
 
 ## Established baseline
 
@@ -44,4 +44,4 @@ Selective and write-back results are materially above write-through, but do not 
 
 A continuously replenished short-context C32 diagnostic completed with token counts verified/corrected: rotating suffix 819.20 output TPS (288×256/90s; p50/p95 9.20/9.87s); fully cached 1,774.92 output TPS (416×256/60s; p50/p95 4.68/5.18s); zero errors. These use a different prompt/load shape, are not C-8 acceptance, and do not imply equivalent C-8 headroom. The first harness pass mistakenly counted decoded characters; corrected token-aware driver is committed and the invalid figures are retained only as an explicit harness defect record.
 
-T007 remains ACTIVE by the user's ≥600 TPS objective; the repeat unprofiled original three-tier C-8 acceptance at current source is outstanding. Previous frozen `write_back` C-8 evidence (~550 TPS) remains valid only for the prior frozen configuration/revision and does not meet this newly explicit gate.
+T007 remains ACTIVE by the user's ≥600 TPS objective. The unprofiled original three-tier C-8 repeat at pushed HEAD `77fd9ab9f3` completed 800/800 with exact payload multiset, zero failures/retractions/sanity errors, and 560.58 official output TPS; this valid result is 39.42 TPS below gate. The run had transient startup allocator OOM warning, host-pressure drops, and 5,116 aux staging-failure tokens (also present at higher levels in prior accepted write-back runs); record these as capacity signals, not as user-visible request failures. The wrapper cleaned up; port/lock clear and GPU idle. Details in `tasks/T007-gpu-throughput-scheduling.md`. No runtime optimization is justified by this repeat alone. Next decisive action: inspect exact-revision C8 metrics and existing scheduler/backup attribution for a narrow in-contract source candidate that can plausibly recover the remaining ~7%; retain full workload/tiers/capacities, then remeasure unprofiled C8. Do not treat C32 diagnostics or profiled TPS as acceptance.
