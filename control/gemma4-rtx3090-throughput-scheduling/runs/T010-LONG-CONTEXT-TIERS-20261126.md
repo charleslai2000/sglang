@@ -79,3 +79,43 @@ T007_BASELINE_ARGV=runs/t007_c8_baseline_argv.txt T007_OUT=<out> T007_WINDOW_SEC
 # comparison table
 python3 runs/t010_compare_cells.py <cellA_dir> <cellB_dir>
 ```
+
+---
+
+# Follow-up: L3 capacity hypothesis tested and falsified
+
+Cell A's third tier served **zero** tokens while the extent file sat at its 32 GiB `max_size`
+(`du -sh l3-extent` = 33 GB) and the backend logged `extent_eviction_radix_invalidate`. The
+working set evicted from L2 is ~2.6M tokens ≈ 26 GB, so the natural hypothesis was capacity:
+the tier evicts itself before a session returns. Cell A2 re-ran the identical workload with the
+extent tier set to **64 GiB** (`runs/t010_c8_l3_64g_argv.txt`; `file_size` = `max_size` =
+68,719,476,736), everything else unchanged.
+
+| | cell B L1 only | cell A three tiers (32 GiB L3) | cell A2 three tiers (64 GiB L3) |
+|---|---|---|---|
+| official TPS | 78.66 | **112.51** | 108.30 |
+| bench seconds | 1874.5 | **1310.6** | 1361.6 |
+| forward duty | 99.54% | 93.36% | 93.78% |
+| prompt tokens | 10,448,641 | 10,448,641 | 10,448,641 |
+| L1 hit | 264,759 | 3,438,033 | 3,129,659 |
+| L2 hit | 0 | 687,524 | 714,896 |
+| **L3 hit** | 0 | **0** | **0** |
+| re-prefilled | 10,183,882 | 6,323,084 | 6,604,086 |
+| extend device | 1747.0 s | 1107.1 s | 1157.3 s |
+| eviction | 486.4 s | 509.9 s | 543.8 s |
+| L3 writes | – | 3.26M tokens | 3.30M tokens |
+| extent self-eviction | – | yes (file at max_size) | **none** (0 events) |
+
+Verdict: **capacity is not the blocker.** Doubling the third tier removed self-eviction entirely
+and still served 0 tokens from L3 — it even cost ~4 TPS through the larger extent directory's
+bookkeeping. The residual behaviour is identical in both cells: 3.3M tokens are written to L3,
+`prefetch_revoke ... storage_hit=0 miss_reason=miss` dominates, and the partial path grants at most
+about one to two turns (`granted=5000` of 15,511; best observed `granted=10,256` of 20,767), so
+~63% of prompt tokens are recomputed.
+
+Therefore the two tiers that work are L1+L2 (+43% TPS, −30% wall versus L1-only), and the open
+item is the L3 **read/durability contract**, not tier sizing: writes land (3.3M tokens, 65.9 GB of
+D2H feeding them) but the lookup never turns them into a served span for a returning session.
+Next step is still the anchor-based longest-durable-span restore, now with the sizing hypothesis
+explicitly excluded — and it must explain why a written node's hash chain is no longer readable
+after L1/L2 eviction rather than assuming it.

@@ -22,6 +22,10 @@ Result (2026-11-26):
 - Reproduce: `runs/t010_compare_cells.py` over the two cell directories; report
   `runs/T010-LONG-CONTEXT-TIERS-20261126.md`.
 
+Follow-up (cell A2, L3 = 64 GiB): capacity hypothesis **falsified** — no extent self-eviction and
+still **0 L3-served tokens** (108.30 TPS, 1361.6 s vs A's 112.51 / 1310.6), 3.30M tokens written,
+63% of prompt tokens re-prefilled. The blocker is the L3 read/durability contract, not sizing.
+
 Remaining:
 - Implement anchor-based longest-durable-span restore (walk to the deepest durable ancestor, load
   from there, re-prefill only the tail), keeping the L2 correctness proofs and the per-layer
