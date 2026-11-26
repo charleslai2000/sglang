@@ -6,6 +6,12 @@
   - task: control/gemma4-rtx3090-throughput-scheduling/tasks/T009-eliminate-scheduler-cuda-sync.md
 
 
+## gemma4-rtx3090-long-context-tiers (T010)
+- T010 long-context three-tier cache — ACTIVE
+  - frontier: 36.5K-context, 96-session workload (working set 3.5M vs L1+L2 2.32M): three tiers **112.51 TPS / 1310.6 s**, L1-only **78.66 TPS / 1874.5 s** → **+43% TPS / −30% wall**; L1 3.44M, L2 687,524 (valid restores), **L3 0 restores** (522 prefetches → 436 miss, 77 partial granted 5,000/15,511) with 3.26M tokens written to L3 and never read; extend 1107 s of which 510 s is eviction; duty 93.4%. Next: restore the longest durable L3 anchor span instead of requiring a root-contiguous chain (each 1M tokens returned to L3 ≈ −175 s extend). Evidence: `control/gemma4-rtx3090-throughput-scheduling/runs/T010-LONG-CONTEXT-TIERS-20261126.md`.
+  - task: control/gemma4-rtx3090-throughput-scheduling/tasks/T010-long-context-three-tier.md
+
+
 ## gemma4-g1-e5m2-postbos-numerical-closure
 - T004-bos-e5m2-and-numerical-closure Gemma4 E5M2数值专项 — DONE
   - frontier: 用户确认接受约0.91pp GSM8K损失并关闭数值专项；既有E5M2/eager/Decode Graph证据保留，不再扩充数值对照。

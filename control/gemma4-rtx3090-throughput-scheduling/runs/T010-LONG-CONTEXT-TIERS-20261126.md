@@ -1,0 +1,81 @@
+# T010 — long-context three-tier cache: cells, telemetry, and where the time goes
+
+Frozen source `e3beda6088`. This round ends the T007/T009 optimisation lines: the prefill CUDA
+graph stays **disabled**, and Full/SWA capacity, the 8 GiB host quota, max-running 32,
+chunked-prefill 4096 and `write_back` + `wait_complete` are all untouched.
+
+## 1. Workload (same harness, more logical sessions)
+
+`benchmark/hicache/bench_multiturn.py`, now driven through the existing wrapper with
+env-overridable bench flags (`T007_BENCH_CLIENTS/ROUNDS/REQ_LEN/OUT_LEN/RATE/MAXPAR/TAG`):
+
+```
+96 clients x 6 rounds, 5000-token turns, 256-token outputs, Poisson 8, seed 42,
+--fixed-history-tokens, --max-parallel 64
+final context/session = 5000 x 7 + 256 x 6 = 36.5K
+working set            = 96 x 36.5K = 3.5M tokens  vs  L1 1.44M + L2 0.877M = 2.32M  (+51%)
+total prompt tokens    = 10,448,641  (identical in both cells, verified from metrics)
+```
+
+No GPU capacity was shrunk to manufacture hits; the working set exceeds the two device+host tiers
+by geometry. Host pool confirmed at 876,899 tokens (7.18 GB), SWA host 39,866.
+
+## 2. Same-load cells
+
+| | cell B — L1 only | cell A — L1+L2+L3 |
+|---|---|---|
+| official TPS | 78.66 | **112.51 (+43.0%)** |
+| bench seconds | 1874.5 | **1310.6 (−30.1%)** |
+| completed | 576/576 | 576/576 (0 failed) |
+| forward duty | 99.54% | 93.36% |
+| prompt tokens | 10,448,641 | 10,448,641 |
+| … L1 hit | 264,759 (2.5%) | 3,438,033 (32.9%) |
+| … L2 hit | 0 | 687,524 (6.6%) |
+| … **L3 hit** | 0 | **0 (0.0%)** |
+| … re-prefilled | 10,183,882 | 6,323,084 (60.5%) |
+| extend device time | 1747.0 s | 1107.1 s (**−640 s**) |
+| decode device time | 119.0 s | 116.6 s |
+| eviction time | 486.4 s | 509.9 s |
+| D2H backup | – | 7.34M tokens / 64.9 GB / 22.4 s |
+| L3 writes | – | 3.26M tokens (7,224 extent_write) |
+
+The tier stack is worth **+43% throughput / −30% wall** at 36.5K context, and L2 restores are
+substantial and valid (687,524 tokens served from host DRAM). **L3 delivers nothing**: 522
+prefetch attempts produced 436 `miss_reason=miss` revocations, 77 `PARTIAL requested=15511
+granted=5000 reason=shortfall`, and 723 extent reads that never became a hit.
+
+## 3. Where the remaining time goes (cell A, 1107 s extend)
+
+1. **Re-prefill of 6.32M tokens is the dominant loss**, and its cause is the L3 restore contract:
+   the lookup needs a contiguous durable chain from the root, so a session whose older spans were
+   evicted from L2 without a completed/dedup'd L3 chain gets *no* restore at all, and the partial
+   path caps at one turn (granted 5,000 of 15,511 requested). L3 holds 3.26M tokens of writes that
+   are never read back.
+2. **Eviction costs 510 s (46% of extend)** for 4.27M evicted tokens (1,232 eviction passes,
+   0.41 ms/K-token) — the second-largest single item, and it exists only because 3.5M tokens
+   churn through a 2.32M two-tier window.
+3. GPU idle is small (duty 93.4%); there is no sync/launch bottleneck to chase here, which is why
+   the T007/T009 line is closed rather than reopened.
+
+## 4. Next implementation step (largest loss first)
+
+Target the L3 restore contract, not eviction: restore the **longest durable L3 span for the
+request's anchor** (walk to the deepest durable ancestor, load from there down, re-prefill only the
+uncovered tail) instead of requiring the root-contiguous chain that the current lookup demands.
+Expected effect: convert most of the 6.32M re-prefilled tokens back into H2D restores; at the
+measured 0.17–0.18 ms/token extend cost, each 1M tokens returned to L3 saves ~175 s of extend
+(~+13 TPS on this cell). Correctness must stay anchored on the same proofs the L2 path already
+uses (host material + completed H2D event), with the prefill graph left disabled so the
+per-layer `LayerDoneCounter` wait remains authoritative.
+
+## 5. Reproduce
+
+```
+# cell A (three tiers)
+T007_BASELINE_ARGV=runs/t007_c8_baseline_argv.txt T007_OUT=<out> T007_WINDOW_SECONDS=0 \
+  T007_CHUNK=4096 T007_HICACHE_MODE=on T007_BENCH_CLIENTS=96 T007_BENCH_ROUNDS=6 \
+  T007_BENCH_REQ_LEN=5000 T007_BENCH_TAG=T010-l3 bash runs/t007_c8_profile.sh
+# cell B (L1 only): same with T007_HICACHE_MODE=off
+# comparison table
+python3 runs/t010_compare_cells.py <cellA_dir> <cellB_dir>
+```

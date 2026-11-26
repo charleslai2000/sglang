@@ -188,7 +188,18 @@ grep -E '^(sglang:)?forward_execution_seconds_total|sglang:fwd_occupancy' "$OUT/
 nvidia-smi --query-gpu=timestamp,utilization.gpu,memory.used,memory.total --format=csv --loop-ms=1000 > "$OUT/gpu-samples.csv" & GPU_MON=$!
 
 BENCH_PP="$RUNS:$AOT:$ROOT/python:$VENV/lib/python3.12/site-packages:$ROOT/python/sglang/kernels/aot/python:$OVERLAY"
-BENCH_ARGS=(--num-clients 40 --num-rounds 20 --request-length 1024 --output-length 256 --distribution poisson --request-rate 8 --seed 42 --max-parallel 64 --disable-auto-run --fixed-history-tokens --host 127.0.0.1 --port "$PORT" --model-path "$MODEL" --dataset-path /data/sglang-hicache/datasets/ShareGPT_V3_unfiltered_cleaned_split.json --log-file "$OUT/perf.jsonl" --tag T007-profile --request-hash-log "$OUT/hashes.jsonl")
+# Workload shape is env-overridable so later tasks (T010 long-context tier study)
+# reuse this same, already-validated wrapper; defaults stay the frozen C-8 shape.
+BENCH_CLIENTS=${T007_BENCH_CLIENTS:-40}
+BENCH_ROUNDS=${T007_BENCH_ROUNDS:-20}
+BENCH_REQ_LEN=${T007_BENCH_REQ_LEN:-1024}
+BENCH_OUT_LEN=${T007_BENCH_OUT_LEN:-256}
+BENCH_RATE=${T007_BENCH_RATE:-8}
+BENCH_MAXPAR=${T007_BENCH_MAXPAR:-64}
+BENCH_TAG=${T007_BENCH_TAG:-T007-profile}
+printf 'bench_clients=%s rounds=%s req_len=%s out_len=%s rate=%s max_parallel=%s tag=%s\n' \
+  "$BENCH_CLIENTS" "$BENCH_ROUNDS" "$BENCH_REQ_LEN" "$BENCH_OUT_LEN" "$BENCH_RATE" "$BENCH_MAXPAR" "$BENCH_TAG" >> "$OUT/manifest.txt"
+BENCH_ARGS=(--num-clients "$BENCH_CLIENTS" --num-rounds "$BENCH_ROUNDS" --request-length "$BENCH_REQ_LEN" --output-length "$BENCH_OUT_LEN" --distribution poisson --request-rate "$BENCH_RATE" --seed 42 --max-parallel "$BENCH_MAXPAR" --disable-auto-run --fixed-history-tokens --host 127.0.0.1 --port "$PORT" --model-path "$MODEL" --dataset-path /data/sglang-hicache/datasets/ShareGPT_V3_unfiltered_cleaned_split.json --log-file "$OUT/perf.jsonl" --tag "$BENCH_TAG" --request-hash-log "$OUT/hashes.jsonl")
 ( cd "$ROOT" && PYTHONPATH="$BENCH_PP" exec timeout -k 60 7200 "$VENV/bin/python" benchmark/hicache/bench_multiturn.py "${BENCH_ARGS[@]}" ) > "$OUT/bench.log" 2>&1 &
 BENCH_PID=$!
 BENCH_START=$(date +%s)
