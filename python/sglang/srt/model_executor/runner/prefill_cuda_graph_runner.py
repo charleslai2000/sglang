@@ -1202,6 +1202,14 @@ class PrefillCudaGraphRunner(BaseCudaGraphRunner):
         # captured body. Eager keeps the load ordering authoritative.
         if self._has_pending_kv_load():
             self._eager_load_fallbacks = getattr(self, "_eager_load_fallbacks", 0) + 1
+            # Observability only: prove the fallback fires instead of trusting
+            # the guard. Rate-limited so a restore-heavy batch cannot spam.
+            if self._eager_load_fallbacks <= 3 or self._eager_load_fallbacks % 32 == 0:
+                logger.info(
+                    "prefill CUDA graph eager fallback: pending HiCache H2D "
+                    "layer transfer (count=%d)",
+                    self._eager_load_fallbacks,
+                )
             return False
 
         # DP check: group verdict from the schedule-time all-gather

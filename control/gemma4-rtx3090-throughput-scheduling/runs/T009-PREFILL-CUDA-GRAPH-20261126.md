@@ -119,3 +119,69 @@ T009_PCG_BUCKETS="1024 1280 1536 2048" bash runs/t009_pcg_smoke.sh graph <out>
 T007_BASELINE_ARGV=runs/t009_pcg_baseline_argv.txt T007_OUT=<out> T007_WINDOW_SECONDS=0 \
   T007_CHUNK=4096 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True bash runs/t007_c8_profile.sh
 ```
+
+---
+
+# Final convergence round (frozen at `8b607f6756`)
+
+## 1. Upstream mechanism audit — nothing missing
+
+| upstream piece | status in this tree |
+|---|---|
+| `BreakableCudaGraphBackend` segmented capture, shared output buffer | inherited: one `_shared_output_buffer` per backend, `_alloc_full_buffer` on the largest (first) bucket, `_slice_output` per bucket; per-bucket `_outputs`/`_graphs` are views/refs, not copies |
+| graph pool reuse | inherited: `get_or_create_global_graph_memory_pool()` + `set_graph_pool_id()` in `capture_session`, so every bucket (and the decode phase) carves the same pool; no per-bucket pool |
+| intermediate tensor lifetime / replay-time transients | inherited as the borrow path (`runner_utils/pool.py` + `BumpArenaStub`), wired into this backend through `graph_pool_capture_scope()` / `graph_pool_replay_scope()` |
+| `GraphPoolPrecarve` | no such symbol exists in this tree; the same role is played by the borrow/bump-arena path above, which is gated by `SGLANG_ENABLE_GRAPH_POOL_BORROW` (default **False**) |
+
+The only lever that was not already exercised is that env default, so it was measured rather than
+assumed:
+
+| run | borrow | buckets | capture | official TPS | duty |
+|---|---|---|---|---|---|
+| r10 | off | 1024/1280/1536/2048/4096 | 0.71 GB | **594.23** | 90.69% |
+| r11 | on | same | 0.71 GB | 593.52 | 90.35% |
+
+No net gain (−0.71 TPS, inside the 0.4–0.7 TPS run-to-run spread established by r6/r8), capture
+footprint unchanged. **No code was added for this item** and the default stays off.
+
+## 2. Per-bucket economics — 3584 deliberately not added
+
+Residual eager shapes in r10 (the best run): 2560×26, 2304×23, 3328×22, 3840×2, 3072×2,
+**3584×1** → ≈210k tokens, 21% of new tokens. 3584 would cover a single batch, so adding it is
+pure memory cost. Measured bucket costs: ~0.11 GB per small bucket, +0.27 GB for 4096; capture
+headroom (0.70 GB left after r10) is the binding constraint, not the mechanism. Even covering the
+whole residual is bounded by the measured r9→r10 slope (47% more tokens for +2.21 TPS) at roughly
++0.5–0.9 TPS, i.e. ~595 — below the 600 gate. No new kernels, no KV change.
+
+## 3. Correctness with the graph on (`20261126T-t009-pcg-validate`)
+
+Config: `--max-total-tokens 65536`, `--hicache-size 1`, fresh Extent, five buckets, graph on.
+
+* **Alternating replay across buckets**: 160 graph replays spread over 1024/1280/1536/2048/4096
+  with the probes sent twice in interleaved (ascending then descending) order. Cold-vs-repeat ids
+  are identical for 1024/1280/4096 and differ for 1536/2048; those two compare a cold batch with a
+  prefix-hit batch (extend 1 token), and the same class of difference appears between two *eager*
+  runs, so it is batch-composition nondeterminism (fp8 KV + different attention tilings), not a
+  replay defect. The earlier dedicated parity run is the decisive control: a replayed 1024-token
+  prefill matched eager token-for-token.
+* **Real L3 restore with the graph on**: target 20,000 tokens → 16 × 20k pressure requests →
+  `/flush_cache` → re-request: **19,999 cached tokens restored**, one `disposition=RESTORE`, 38
+  extent read/storage-hit log lines. Restore still comes from the Extent tier with capture active.
+* **HiCache H2D fallback**: the guard (`can_run_graph` → eager while the batch's layer-transfer
+  `finish_event` is incomplete) is in place and now logs at info (rate-limited). In this workload
+  it did **not** need to fire: `wait_complete` gates admission, so the transfer is complete before
+  the prefill batch runs. Recorded as a safety contract with no observed trip, not as an exercised
+  path.
+
+## 4. Verdict for this round
+
+No further net gain is available from the prefill-graph direction at the frozen KV capacity:
+mechanisms are fully inherited, borrow adds nothing, the only uncovered buckets are worth
+≤0.9 TPS, and the memory envelope forbids the rest. Per the round's own stop condition:
+
+* **Keep the `594.23` TPS opt-in result** (`r10`, five buckets, 0.71 GB capture).
+* **≥600 TPS is not reached** — best measured is 594.23, 5.77 TPS (0.96%) short.
+* Production default remains `--cuda-graph-backend-prefill disabled`; the enabled configuration is
+  reproducible from `runs/t009_pcg_baseline_argv.txt`.
+* This direction is closed. Reaching 600 needs extend-path kernel/launch fusion or a KV-capacity
+  trade, both outside this task.
