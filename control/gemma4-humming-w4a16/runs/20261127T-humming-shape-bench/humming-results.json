@@ -1,0 +1,153 @@
+{
+  "torch": "2.13.0+cu129",
+  "cuda": "12.9",
+  "gpu": "NVIDIA GeForce RTX 3090",
+  "capability": [
+    8,
+    6
+  ],
+  "results": [
+    {
+      "prefix": "model.language_model.layers.0.mlp.gate_proj",
+      "N": 10240,
+      "K": 2560,
+      "group_size": 32,
+      "weight_bits_equal": true,
+      "scale_bf16_exact": true,
+      "dtype": "bf16",
+      "shapes": [
+        {
+          "M": 8,
+          "humming_ms_median": 0.22208000719547272,
+          "output_shape": [
+            8,
+            10240
+          ],
+          "output_dtype": "torch.bfloat16",
+          "finite": true
+        },
+        {
+          "M": 16,
+          "humming_ms_median": 0.2234880030155182,
+          "output_shape": [
+            16,
+            10240
+          ],
+          "output_dtype": "torch.bfloat16",
+          "finite": true
+        },
+        {
+          "M": 32,
+          "humming_ms_median": 0.20496000349521637,
+          "output_shape": [
+            32,
+            10240
+          ],
+          "output_dtype": "torch.bfloat16",
+          "finite": true
+        },
+        {
+          "M": 1024,
+          "humming_ms_median": 0.6082559823989868,
+          "output_shape": [
+            1024,
+            10240
+          ],
+          "output_dtype": "torch.bfloat16",
+          "finite": true
+        },
+        {
+          "M": 1280,
+          "humming_ms_median": 0.7280640006065369,
+          "output_shape": [
+            1280,
+            10240
+          ],
+          "output_dtype": "torch.bfloat16",
+          "finite": true
+        },
+        {
+          "M": 4096,
+          "humming_ms_median": 1.8777600526809692,
+          "output_shape": [
+            4096,
+            10240
+          ],
+          "output_dtype": "torch.bfloat16",
+          "finite": true
+        }
+      ]
+    },
+    {
+      "prefix": "model.language_model.layers.0.mlp.down_proj",
+      "N": 2560,
+      "K": 10240,
+      "group_size": 32,
+      "weight_bits_equal": true,
+      "scale_bf16_exact": true,
+      "dtype": "bf16",
+      "shapes": [
+        {
+          "M": 8,
+          "humming_ms_median": 0.23059199750423431,
+          "output_shape": [
+            8,
+            2560
+          ],
+          "output_dtype": "torch.bfloat16",
+          "finite": true
+        },
+        {
+          "M": 16,
+          "humming_ms_median": 0.23049600422382355,
+          "output_shape": [
+            16,
+            2560
+          ],
+          "output_dtype": "torch.bfloat16",
+          "finite": true
+        },
+        {
+          "M": 32,
+          "humming_ms_median": 0.24063999950885773,
+          "output_shape": [
+            32,
+            2560
+          ],
+          "output_dtype": "torch.bfloat16",
+          "finite": true
+        },
+        {
+          "M": 1024,
+          "humming_ms_median": 0.6286399960517883,
+          "output_shape": [
+            1024,
+            2560
+          ],
+          "output_dtype": "torch.bfloat16",
+          "finite": true
+        },
+        {
+          "M": 1280,
+          "humming_ms_median": 0.7657920122146606,
+          "output_shape": [
+            1280,
+            2560
+          ],
+          "output_dtype": "torch.bfloat16",
+          "finite": true
+        },
+        {
+          "M": 4096,
+          "humming_ms_median": 1.8503680229187012,
+          "output_shape": [
+            4096,
+            2560
+          ],
+          "output_dtype": "torch.bfloat16",
+          "finite": true
+        }
+      ]
+    }
+  ]
+}

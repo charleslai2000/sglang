@@ -1,0 +1,15 @@
+{
+ "gemm_max_abs": 0.05973625183105469,
+ "gemm_rel_of_reference_mean": 0.02804943174123764,
+ "group_size": 32,
+ "layer_shape": [
+  1024,
+  2560
+ ],
+ "replay_executes_humming": true,
+ "replay_humming_kernel_count": 1,
+ "replay_kernels": [
+  "void humming<MmaOpClass, Shape<0u, 1024u, 2560u>, Shape<16u, 64u, 256u>, Shape<16u, 64u, 32u>, Shape<0u, 0u, 0u>, FloatingPointType<16u, 8u, 7u>, IntegerType<false, 4u>, FloatingPointType<16u, 8u, 7u>, FloatingPointType<16u, 8u, 7u>, LayerConfig, ComputeConfig, TuningConfig>(KernelTensorParamType<TuningConfig::kUseTmaA>::Type, KernelTensorParamType<TuningConfig::kUseTmaB>::Type, KernelTensorParamType<TuningConfig::kUseTmaC>::Type, KernelTensorParamType<TuningConfig::kUseTmaAS>::Type, KernelTensorParamType<TuningConfig::kUseTmaBS>::Type, KernelTensorParamType<TuningConfig::kUseTmaBZP>::Type, KernelTensorParamType<TuningConfig::kUseTmaBias>::Type, KernelTensorParamType<TuningConfig::kUseTmaBS2>::Type, unsigned int const*, unsigned int const*, unsigned int const*, unsigned int const*, CUtensorMap_st*, int*, unsigned int, unsigned int, bool)",
+  "memcpy32_post"
+ ]
+}

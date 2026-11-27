@@ -1,0 +1,31 @@
+Run: T012 paired CT-loader / Humming post-load qualification (2026-11-27)
+Purpose: prove the unchanged compressed-tensors loader places the checkpoint's
+packed INT4 words and BF16 group scales on every Text Core WNA16 layer, then
+convert those very tensors to Humming post-load and check whole-model behaviour.
+
+Arms: identical argv (no --quantization override). Only the post-load branch
+differs: `SGLANG_CTWNA16_HUMMING=1` on the Humming arm.
+Shared: Gemma4 checkpoint, BF16 compute, FP8-E5M2 KV, Triton attention,
+Decode CUDA Graph bs<=32, FA2 disabled, radix cache disabled.
+
+Audit (qualification only, env-gated, absent from the production hot path):
+- `SGLANG_CTWNA16_AUDIT_DIR`: per-parameter SHA256 of `weight_packed` /
+  `weight_scale` plus `weight_shape`, taken in `process_weights_after_loading`
+  BEFORE Marlin repack or Humming transform, in both arms.
+- `SGLANG_CTWNA16_AUDIT_GEMM`: for six named layers, an FP32 dequantized
+  reference GEMM built from the same CT words/scales, compared with the
+  converted layer's real GEMM output.
+- `auditlib/sitecustomize.py` (on PYTHONPATH, run-scoped): counts
+  humming::humming_gemm and Marlin linear dispatch per process, saves the first
+  pre-sampling logits vector, and profiles the first CUDA graph replays to check
+  that a Humming kernel actually appears in the replayed graph.
+
+Gates (compare_arms.py): identical pre-conversion SHA256 set, loaded element
+counts equal to checkpoint totals, no missing Text Core WNA16 tensors, no CT
+packed parameter left resident after conversion, converted GEMM within tolerance
+of the segment reference and of Marlin, Humming-only dispatch with capture-phase
+and replay kernel evidence, identical greedy tokens, matching logits.
+
+Timeout: 600 s per arm startup gate, 1500 s hard wrapper timeout.
+Outputs: marlin/, humming/, checkpoint-textcore.json, verdict.json, compare.log.
+GPU lock: /tmp/f1-r16b-gpu-exclusive.lock.

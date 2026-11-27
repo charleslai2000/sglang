@@ -1,0 +1,1810 @@
+{
+ "checks": {
+  "checkpoint_coverage": {
+   "checkpoint_packed_numel": 496599040,
+   "checkpoint_scale_numel": 124149760,
+   "delta_packed_numel": 6881280,
+   "delta_scale_numel": 1720320,
+   "extra_confined_to_shared_kv": true,
+   "extra_sum_matches_total": true,
+   "layers": 253,
+   "layers_exact": [
+    "language_model.layers.0.mlp.down_proj",
+    "language_model.layers.0.mlp.gate_up_proj",
+    "language_model.layers.0.per_layer_input_gate",
+    "language_model.layers.0.per_layer_projection",
+    "language_model.layers.0.self_attn.o_proj",
+    "language_model.layers.0.self_attn.qkv_proj",
+    "language_model.layers.1.mlp.down_proj",
+    "language_model.layers.1.mlp.gate_up_proj",
+    "language_model.layers.1.per_layer_input_gate",
+    "language_model.layers.1.per_layer_projection",
+    "language_model.layers.1.self_attn.o_proj",
+    "language_model.layers.1.self_attn.qkv_proj",
+    "language_model.layers.10.mlp.down_proj",
+    "language_model.layers.10.mlp.gate_up_proj",
+    "language_model.layers.10.per_layer_input_gate",
+    "language_model.layers.10.per_layer_projection",
+    "language_model.layers.10.self_attn.o_proj",
+    "language_model.layers.10.self_attn.qkv_proj",
+    "language_model.layers.11.mlp.down_proj",
+    "language_model.layers.11.mlp.gate_up_proj",
+    "language_model.layers.11.per_layer_input_gate",
+    "language_model.layers.11.per_layer_projection",
+    "language_model.layers.11.self_attn.o_proj",
+    "language_model.layers.11.self_attn.qkv_proj",
+    "language_model.layers.12.mlp.down_proj",
+    "language_model.layers.12.mlp.gate_up_proj",
+    "language_model.layers.12.per_layer_input_gate",
+    "language_model.layers.12.per_layer_projection",
+    "language_model.layers.12.self_attn.o_proj",
+    "language_model.layers.12.self_attn.qkv_proj",
+    "language_model.layers.13.mlp.down_proj",
+    "language_model.layers.13.mlp.gate_up_proj",
+    "language_model.layers.13.per_layer_input_gate",
+    "language_model.layers.13.per_layer_projection",
+    "language_model.layers.13.self_attn.o_proj",
+    "language_model.layers.13.self_attn.qkv_proj",
+    "language_model.layers.14.mlp.down_proj",
+    "language_model.layers.14.mlp.gate_up_proj",
+    "language_model.layers.14.per_layer_input_gate",
+    "language_model.layers.14.per_layer_projection",
+    "language_model.layers.14.self_attn.o_proj",
+    "language_model.layers.14.self_attn.qkv_proj",
+    "language_model.layers.15.mlp.down_proj",
+    "language_model.layers.15.mlp.gate_up_proj",
+    "language_model.layers.15.per_layer_input_gate",
+    "language_model.layers.15.per_layer_projection",
+    "language_model.layers.15.self_attn.o_proj",
+    "language_model.layers.15.self_attn.qkv_proj",
+    "language_model.layers.16.mlp.down_proj",
+    "language_model.layers.16.mlp.gate_up_proj",
+    "language_model.layers.16.per_layer_input_gate",
+    "language_model.layers.16.per_layer_projection",
+    "language_model.layers.16.self_attn.o_proj",
+    "language_model.layers.16.self_attn.qkv_proj",
+    "language_model.layers.17.mlp.down_proj",
+    "language_model.layers.17.mlp.gate_up_proj",
+    "language_model.layers.17.per_layer_input_gate",
+    "language_model.layers.17.per_layer_projection",
+    "language_model.layers.17.self_attn.o_proj",
+    "language_model.layers.17.self_attn.qkv_proj",
+    "language_model.layers.18.mlp.down_proj",
+    "language_model.layers.18.mlp.gate_up_proj",
+    "language_model.layers.18.per_layer_input_gate",
+    "language_model.layers.18.per_layer_projection",
+    "language_model.layers.18.self_attn.o_proj",
+    "language_model.layers.18.self_attn.qkv_proj",
+    "language_model.layers.19.mlp.down_proj",
+    "language_model.layers.19.mlp.gate_up_proj",
+    "language_model.layers.19.per_layer_input_gate",
+    "language_model.layers.19.per_layer_projection",
+    "language_model.layers.19.self_attn.o_proj",
+    "language_model.layers.19.self_attn.qkv_proj",
+    "language_model.layers.2.mlp.down_proj",
+    "language_model.layers.2.mlp.gate_up_proj",
+    "language_model.layers.2.per_layer_input_gate",
+    "language_model.layers.2.per_layer_projection",
+    "language_model.layers.2.self_attn.o_proj",
+    "language_model.layers.2.self_attn.qkv_proj",
+    "language_model.layers.20.mlp.down_proj",
+    "language_model.layers.20.mlp.gate_up_proj",
+    "language_model.layers.20.per_layer_input_gate",
+    "language_model.layers.20.per_layer_projection",
+    "language_model.layers.20.self_attn.o_proj",
+    "language_model.layers.20.self_attn.qkv_proj",
+    "language_model.layers.21.mlp.down_proj",
+    "language_model.layers.21.mlp.gate_up_proj",
+    "language_model.layers.21.per_layer_input_gate",
+    "language_model.layers.21.per_layer_projection",
+    "language_model.layers.21.self_attn.o_proj",
+    "language_model.layers.21.self_attn.qkv_proj",
+    "language_model.layers.22.mlp.down_proj",
+    "language_model.layers.22.mlp.gate_up_proj",
+    "language_model.layers.22.per_layer_input_gate",
+    "language_model.layers.22.per_layer_projection",
+    "language_model.layers.22.self_attn.o_proj",
+    "language_model.layers.22.self_attn.qkv_proj",
+    "language_model.layers.23.mlp.down_proj",
+    "language_model.layers.23.mlp.gate_up_proj",
+    "language_model.layers.23.per_layer_input_gate",
+    "language_model.layers.23.per_layer_projection",
+    "language_model.layers.23.self_attn.o_proj",
+    "language_model.layers.23.self_attn.qkv_proj",
+    "language_model.layers.24.mlp.down_proj",
+    "language_model.layers.24.mlp.gate_up_proj",
+    "language_model.layers.24.per_layer_input_gate",
+    "language_model.layers.24.per_layer_projection",
+    "language_model.layers.24.self_attn.o_proj",
+    "language_model.layers.25.mlp.down_proj",
+    "language_model.layers.25.mlp.gate_up_proj",
+    "language_model.layers.25.per_layer_input_gate",
+    "language_model.layers.25.per_layer_projection",
+    "language_model.layers.25.self_attn.o_proj",
+    "language_model.layers.26.mlp.down_proj",
+    "language_model.layers.26.mlp.gate_up_proj",
+    "language_model.layers.26.per_layer_input_gate",
+    "language_model.layers.26.per_layer_projection",
+    "language_model.layers.26.self_attn.o_proj",
+    "language_model.layers.27.mlp.down_proj",
+    "language_model.layers.27.mlp.gate_up_proj",
+    "language_model.layers.27.per_layer_input_gate",
+    "language_model.layers.27.per_layer_projection",
+    "language_model.layers.27.self_attn.o_proj",
+    "language_model.layers.28.mlp.down_proj",
+    "language_model.layers.28.mlp.gate_up_proj",
+    "language_model.layers.28.per_layer_input_gate",
+    "language_model.layers.28.per_layer_projection",
+    "language_model.layers.28.self_attn.o_proj",
+    "language_model.layers.29.mlp.down_proj",
+    "language_model.layers.29.mlp.gate_up_proj",
+    "language_model.layers.29.per_layer_input_gate",
+    "language_model.layers.29.per_layer_projection",
+    "language_model.layers.29.self_attn.o_proj",
+    "language_model.layers.3.mlp.down_proj",
+    "language_model.layers.3.mlp.gate_up_proj",
+    "language_model.layers.3.per_layer_input_gate",
+    "language_model.layers.3.per_layer_projection",
+    "language_model.layers.3.self_attn.o_proj",
+    "language_model.layers.3.self_attn.qkv_proj",
+    "language_model.layers.30.mlp.down_proj",
+    "language_model.layers.30.mlp.gate_up_proj",
+    "language_model.layers.30.per_layer_input_gate",
+    "language_model.layers.30.per_layer_projection",
+    "language_model.layers.30.self_attn.o_proj",
+    "language_model.layers.31.mlp.down_proj",
+    "language_model.layers.31.mlp.gate_up_proj",
+    "language_model.layers.31.per_layer_input_gate",
+    "language_model.layers.31.per_layer_projection",
+    "language_model.layers.31.self_attn.o_proj",
+    "language_model.layers.32.mlp.down_proj",
+    "language_model.layers.32.mlp.gate_up_proj",
+    "language_model.layers.32.per_layer_input_gate",
+    "language_model.layers.32.per_layer_projection",
+    "language_model.layers.32.self_attn.o_proj",
+    "language_model.layers.33.mlp.down_proj",
+    "language_model.layers.33.mlp.gate_up_proj",
+    "language_model.layers.33.per_layer_input_gate",
+    "language_model.layers.33.per_layer_projection",
+    "language_model.layers.33.self_attn.o_proj",
+    "language_model.layers.34.mlp.down_proj",
+    "language_model.layers.34.mlp.gate_up_proj",
+    "language_model.layers.34.per_layer_input_gate",
+    "language_model.layers.34.per_layer_projection",
+    "language_model.layers.34.self_attn.o_proj",
+    "language_model.layers.35.mlp.down_proj",
+    "language_model.layers.35.mlp.gate_up_proj",
+    "language_model.layers.35.per_layer_input_gate",
+    "language_model.layers.35.per_layer_projection",
+    "language_model.layers.35.self_attn.o_proj",
+    "language_model.layers.36.mlp.down_proj",
+    "language_model.layers.36.mlp.gate_up_proj",
+    "language_model.layers.36.per_layer_input_gate",
+    "language_model.layers.36.per_layer_projection",
+    "language_model.layers.36.self_attn.o_proj",
+    "language_model.layers.37.mlp.down_proj",
+    "language_model.layers.37.mlp.gate_up_proj",
+    "language_model.layers.37.per_layer_input_gate",
+    "language_model.layers.37.per_layer_projection",
+    "language_model.layers.37.self_attn.o_proj",
+    "language_model.layers.38.mlp.down_proj",
+    "language_model.layers.38.mlp.gate_up_proj",
+    "language_model.layers.38.per_layer_input_gate",
+    "language_model.layers.38.per_layer_projection",
+    "language_model.layers.38.self_attn.o_proj",
+    "language_model.layers.39.mlp.down_proj",
+    "language_model.layers.39.mlp.gate_up_proj",
+    "language_model.layers.39.per_layer_input_gate",
+    "language_model.layers.39.per_layer_projection",
+    "language_model.layers.39.self_attn.o_proj",
+    "language_model.layers.4.mlp.down_proj",
+    "language_model.layers.4.mlp.gate_up_proj",
+    "language_model.layers.4.per_layer_input_gate",
+    "language_model.layers.4.per_layer_projection",
+    "language_model.layers.4.self_attn.o_proj",
+    "language_model.layers.4.self_attn.qkv_proj",
+    "language_model.layers.40.mlp.down_proj",
+    "language_model.layers.40.mlp.gate_up_proj",
+    "language_model.layers.40.per_layer_input_gate",
+    "language_model.layers.40.per_layer_projection",
+    "language_model.layers.40.self_attn.o_proj",
+    "language_model.layers.41.mlp.down_proj",
+    "language_model.layers.41.mlp.gate_up_proj",
+    "language_model.layers.41.per_layer_input_gate",
+    "language_model.layers.41.per_layer_projection",
+    "language_model.layers.41.self_attn.o_proj",
+    "language_model.layers.5.mlp.down_proj",
+    "language_model.layers.5.mlp.gate_up_proj",
+    "language_model.layers.5.per_layer_input_gate",
+    "language_model.layers.5.per_layer_projection",
+    "language_model.layers.5.self_attn.o_proj",
+    "language_model.layers.5.self_attn.qkv_proj",
+    "language_model.layers.6.mlp.down_proj",
+    "language_model.layers.6.mlp.gate_up_proj",
+    "language_model.layers.6.per_layer_input_gate",
+    "language_model.layers.6.per_layer_projection",
+    "language_model.layers.6.self_attn.o_proj",
+    "language_model.layers.6.self_attn.qkv_proj",
+    "language_model.layers.7.mlp.down_proj",
+    "language_model.layers.7.mlp.gate_up_proj",
+    "language_model.layers.7.per_layer_input_gate",
+    "language_model.layers.7.per_layer_projection",
+    "language_model.layers.7.self_attn.o_proj",
+    "language_model.layers.7.self_attn.qkv_proj",
+    "language_model.layers.8.mlp.down_proj",
+    "language_model.layers.8.mlp.gate_up_proj",
+    "language_model.layers.8.per_layer_input_gate",
+    "language_model.layers.8.per_layer_projection",
+    "language_model.layers.8.self_attn.o_proj",
+    "language_model.layers.8.self_attn.qkv_proj",
+    "language_model.layers.9.mlp.down_proj",
+    "language_model.layers.9.mlp.gate_up_proj",
+    "language_model.layers.9.per_layer_input_gate",
+    "language_model.layers.9.per_layer_projection",
+    "language_model.layers.9.self_attn.o_proj",
+    "language_model.layers.9.self_attn.qkv_proj",
+    "language_model.per_layer_model_projection"
+   ],
+   "layers_extra": {
+    "language_model.layers.24.self_attn.qkv_proj": 327680,
+    "language_model.layers.25.self_attn.qkv_proj": 327680,
+    "language_model.layers.26.self_attn.qkv_proj": 327680,
+    "language_model.layers.27.self_attn.qkv_proj": 327680,
+    "language_model.layers.28.self_attn.qkv_proj": 327680,
+    "language_model.layers.29.self_attn.qkv_proj": 655360,
+    "language_model.layers.30.self_attn.qkv_proj": 327680,
+    "language_model.layers.31.self_attn.qkv_proj": 327680,
+    "language_model.layers.32.self_attn.qkv_proj": 327680,
+    "language_model.layers.33.self_attn.qkv_proj": 327680,
+    "language_model.layers.34.self_attn.qkv_proj": 327680,
+    "language_model.layers.35.self_attn.qkv_proj": 655360,
+    "language_model.layers.36.self_attn.qkv_proj": 327680,
+    "language_model.layers.37.self_attn.qkv_proj": 327680,
+    "language_model.layers.38.self_attn.qkv_proj": 327680,
+    "language_model.layers.39.self_attn.qkv_proj": 327680,
+    "language_model.layers.40.self_attn.qkv_proj": 327680,
+    "language_model.layers.41.self_attn.qkv_proj": 655360
+   },
+   "layers_missing": [],
+   "loaded_packed_numel": 503480320,
+   "loaded_scale_numel": 125870080,
+   "scale_consistent_per_layer": true,
+   "scale_delta_matches_packed_delta": true,
+   "unknown_layers": []
+  },
+  "converted_gemm": {
+   "language_model.layers.0.mlp.down_proj": {
+    "humming_max_abs": 0.03012371063232422,
+    "humming_rel": 0.03652524245693744,
+    "marlin_max_abs": 0.021959304809570312,
+    "marlin_rel": 0.02662583445130723,
+    "reference_abs_mean": 0.8247367739677429
+   },
+   "language_model.layers.0.mlp.gate_up_proj": {
+    "humming_max_abs": 0.018904924392700195,
+    "humming_rel": 0.024266849964376915,
+    "marlin_max_abs": 0.01409769058227539,
+    "marlin_rel": 0.018096160296540764,
+    "reference_abs_mean": 0.7790431976318359
+   },
+   "language_model.layers.0.self_attn.o_proj": {
+    "humming_max_abs": 0.02238178253173828,
+    "humming_rel": 0.02929298106305007,
+    "marlin_max_abs": 0.016127586364746094,
+    "marlin_rel": 0.021107571807799215,
+    "reference_abs_mean": 0.7640663981437683
+   },
+   "language_model.layers.0.self_attn.qkv_proj": {
+    "humming_max_abs": 0.022616863250732422,
+    "humming_rel": 0.02799897994481785,
+    "marlin_max_abs": 0.014758110046386719,
+    "marlin_rel": 0.01827008558310203,
+    "reference_abs_mean": 0.807774543762207
+   },
+   "language_model.layers.24.per_layer_projection": {
+    "humming_max_abs": 0.018278121948242188,
+    "humming_rel": 0.02617572947466898,
+    "marlin_max_abs": 0.018278121948242188,
+    "marlin_rel": 0.02617572947466898,
+    "reference_abs_mean": 0.6982851028442383
+   },
+   "language_model.per_layer_model_projection": {
+    "humming_max_abs": 0.0005125999450683594,
+    "humming_rel": 0.03274665417724507,
+    "marlin_max_abs": 0.000292852520942688,
+    "marlin_rel": 0.01870843007399411,
+    "reference_abs_mean": 0.01565350592136383
+   }
+  },
+  "dispatch": {
+   "humming": {
+    "graph_replay": 548,
+    "humming_gemm": 8608,
+    "humming_gemm_capture": 2024,
+    "layers": 253,
+    "marlin_linear": 0,
+    "processes": 1
+   },
+   "marlin": {
+    "graph_replay": 548,
+    "humming_gemm": 0,
+    "humming_gemm_capture": 0,
+    "layers": 253,
+    "marlin_linear": 8608,
+    "processes": 1
+   }
+  },
+  "divergence": {
+   "decode_ids": {
+    "humming": [
+     1280,
+     1281,
+     1282,
+     1283,
+     1284,
+     1285,
+     1286,
+     1287,
+     1288,
+     1289,
+     1290,
+     1291,
+     1292,
+     1293,
+     1294,
+     1295,
+     1296,
+     1297,
+     1298,
+     1299,
+     1280,
+     1281,
+     1283
+    ],
+    "marlin": [
+     1280,
+     1281,
+     1282,
+     1283,
+     1284,
+     1285,
+     1286,
+     1287,
+     1288,
+     1289,
+     1290,
+     1291,
+     1292,
+     1293,
+     1294,
+     1295,
+     1296,
+     1297,
+     1298,
+     1299,
+     1280,
+     1281,
+     1283
+    ]
+   },
+   "decode_ids_equal_across_backends": true,
+   "decode_margin_humming": 4.631167193874717,
+   "decode_margin_marlin": 2.510316923260689,
+   "decode_top1_humming": 1283,
+   "decode_top1_marlin": 1283,
+   "decode_top5_humming": [
+    {
+     "logprob": -0.022409657016396523,
+     "token": 1283
+    },
+    {
+     "logprob": -4.653576850891113,
+     "token": 676
+    },
+    {
+     "logprob": -5.106021881103516,
+     "token": 1282
+    },
+    {
+     "logprob": -5.908658027648926,
+     "token": 582
+    },
+    {
+     "logprob": -6.871138095855713,
+     "token": 553
+    }
+   ],
+   "decode_top5_marlin": [
+    {
+     "logprob": -0.17000333964824677,
+     "token": 1283
+    },
+    {
+     "logprob": -2.6803202629089355,
+     "token": 1282
+    },
+    {
+     "logprob": -3.406348705291748,
+     "token": 553
+    },
+    {
+     "logprob": -3.4627223014831543,
+     "token": 676
+    },
+    {
+     "logprob": -5.069651126861572,
+     "token": 582
+    }
+   ],
+   "decode_top5_overlap": 5,
+   "divergence_is_path_fragile": true,
+   "position": 22,
+   "prefill_argmax_humming": 1282,
+   "prefill_argmax_marlin": 1282
+  },
+  "greedy_tokens": {
+   "capture_equal": true,
+   "capture_ids": {
+    "humming": [
+     2009
+    ],
+    "marlin": [
+     2009
+    ]
+   },
+   "graph_equal": true,
+   "graph_len": 32,
+   "long": [
+    {
+     "equal": true,
+     "first_diff": null,
+     "len": 128,
+     "tag": "long-0"
+    },
+    {
+     "equal": false,
+     "first_diff": 22,
+     "len": 128,
+     "tag": "long-300"
+    },
+    {
+     "equal": true,
+     "first_diff": null,
+     "len": 128,
+     "tag": "long-600"
+    },
+    {
+     "equal": true,
+     "first_diff": null,
+     "len": 128,
+     "tag": "long-900"
+    }
+   ],
+   "long_all_equal": false
+  },
+  "humming_resident_params": {
+   "language_model.layers.0.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.0.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.0.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.0.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.0.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.0.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.1.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.1.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.1.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.1.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.1.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.1.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.10.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.10.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.10.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.10.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.10.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.10.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.11.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.11.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.11.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.11.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.11.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.11.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.12.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.12.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.12.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.12.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.12.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.12.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.13.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.13.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.13.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.13.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.13.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.13.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.14.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.14.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.14.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.14.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.14.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.14.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.15.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.15.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.15.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.15.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.15.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.15.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.16.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.16.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.16.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.16.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.16.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.16.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.17.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.17.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.17.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.17.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.17.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.17.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.18.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.18.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.18.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.18.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.18.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.18.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.19.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.19.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.19.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.19.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.19.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.19.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.2.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.2.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.2.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.2.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.2.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.2.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.20.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.20.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.20.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.20.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.20.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.20.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.21.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.21.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.21.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.21.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.21.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.21.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.22.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.22.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.22.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.22.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.22.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.22.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.23.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.23.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.23.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.23.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.23.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.23.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.24.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.24.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.24.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.24.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.24.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.24.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.25.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.25.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.25.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.25.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.25.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.25.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.26.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.26.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.26.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.26.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.26.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.26.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.27.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.27.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.27.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.27.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.27.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.27.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.28.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.28.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.28.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.28.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.28.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.28.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.29.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.29.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.29.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.29.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.29.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.29.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.3.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.3.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.3.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.3.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.3.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.3.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.30.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.30.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.30.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.30.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.30.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.30.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.31.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.31.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.31.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.31.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.31.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.31.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.32.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.32.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.32.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.32.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.32.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.32.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.33.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.33.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.33.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.33.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.33.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.33.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.34.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.34.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.34.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.34.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.34.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.34.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.35.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.35.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.35.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.35.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.35.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.35.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.36.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.36.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.36.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.36.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.36.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.36.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.37.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.37.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.37.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.37.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.37.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.37.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.38.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.38.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.38.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.38.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.38.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.38.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.39.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.39.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.39.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.39.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.39.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.39.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.4.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.4.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.4.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.4.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.4.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.4.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.40.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.40.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.40.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.40.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.40.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.40.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.41.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.41.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.41.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.41.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.41.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.41.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.5.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.5.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.5.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.5.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.5.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.5.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.6.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.6.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.6.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.6.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.6.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.6.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.7.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.7.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.7.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.7.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.7.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.7.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.8.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.8.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.8.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.8.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.8.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.8.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.9.mlp.down_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.9.mlp.gate_up_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.9.per_layer_input_gate": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.9.per_layer_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.9.self_attn.o_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.layers.9.self_attn.qkv_proj": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   },
+   "language_model.per_layer_model_projection": {
+    "has_weight_packed": false,
+    "has_weight_scale": true,
+    "has_weight_shape": false
+   }
+  },
+  "layer_count": {
+   "checkpoint_fused_layers": 253,
+   "checkpoint_tensors": 343,
+   "equal": true,
+   "humming": 253,
+   "marlin": 253
+  },
+  "missing_text_core_weights": {
+   "humming": [],
+   "marlin": []
+  },
+  "pre_conversion_identity": {
+   "compared": 253,
+   "mismatched": [],
+   "only_humming": [],
+   "only_marlin": []
+  },
+  "replay_kernel_check": {
+   "gemm_max_abs": 0.05973625183105469,
+   "gemm_rel_of_reference_mean": 0.02804943174123764,
+   "group_size": 32,
+   "layer_shape": [
+    1024,
+    2560
+   ],
+   "replay_executes_humming": true,
+   "replay_humming_kernel_count": 1,
+   "replay_kernels": [
+    "void humming<MmaOpClass, Shape<0u, 1024u, 2560u>, Shape<16u, 64u, 256u>, Shape<16u, 64u, 32u>, Shape<0u, 0u, 0u>, FloatingPointType<16u, 8u, 7u>, IntegerType<false, 4u>, FloatingPointType<16u, 8u, 7u>, FloatingPointType<16u, 8u, 7u>, LayerConfig, ComputeConfig, TuningConfig>(KernelTensorParamType<TuningConfig::kUseTmaA>::Type, KernelTensorParamType<TuningConfig::kUseTmaB>::Type, KernelTensorParamType<TuningConfig::kUseTmaC>::Type, KernelTensorParamType<TuningConfig::kUseTmaAS>::Type, KernelTensorParamType<TuningConfig::kUseTmaBS>::Type, KernelTensorParamType<TuningConfig::kUseTmaBZP>::Type, KernelTensorParamType<TuningConfig::kUseTmaBias>::Type, KernelTensorParamType<TuningConfig::kUseTmaBS2>::Type, unsigned int const*, unsigned int const*, unsigned int const*, unsigned int const*, CUtensorMap_st*, int*, unsigned int, unsigned int, bool)",
+    "memcpy32_post"
+   ]
+  },
+  "whole_model_logits": {
+   "cosine": 0.9943100810050964,
+   "l2_rel": 0.10822025686502457,
+   "max_abs_diff": 2.1436705589294434,
+   "reference_max_abs": 19.709714889526367,
+   "shape": [
+    1,
+    262144
+   ],
+   "top10_overlap": 10,
+   "top1_equal": true
+  }
+ },
+ "details": {},
+ "failed_gates": [],
+ "gates": {
+  "checkpoint_coverage": false,
+  "converted_gemm_matches_reference": false,
+  "greedy_tokens_identical": false,
+  "humming_forward_and_graph": false,
+  "loader_untouched_layers": [],
+  "missing_text_core_weights_absent": false,
+  "no_ct_params_after_conversion": false,
+  "whole_model_logits_match": false
+ },
+ "verdict": "PASS"
+}

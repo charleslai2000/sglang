@@ -1,0 +1,12 @@
+{
+ "audited_layers": 253,
+ "graph_replay": 548,
+ "humming_gemm": 8608,
+ "humming_gemm_capture": 2024,
+ "logits_saved": 1,
+ "marlin_linear": 0,
+ "name_map_size": 1748,
+ "pid": 853082,
+ "profiled_replays": 0,
+ "replay_kernels": []
+}

@@ -1,0 +1,11 @@
+Run: T012 matched Marlin actual-weight GEMM timing continuation
+Start: 2026-11-27T06:47Z (will be recorded precisely by wrapper)
+Frozen source: c4f6b50da7940ff28fefae2eb3fb0b71eb1014cc
+Command: /tmp/t012_humming_bench_wrapper.sh (updated to run bench_marlin.py with SM86 AOT package)
+GPU lock: /tmp/f1-r16b-gpu-exclusive.lock, held exclusively by wrapper.
+Shapes: actual checkpoint q_proj, MLP gate/down, group32 INT4 BF16 weights/scale, M=8,16,32,1024,1280,4096; 21 CUDA-event samples after warmup.
+Expected completion: marlin-results.json and marlin-exit.txt, lock automatically released.
+retry=2026-11-27T06:53:49+00:00 reason=wrapper treated inline PYTHONPATH assignment as executable path; failed before CUDA operation
+retry=2026-11-27T06:54:26+00:00 reason=env executable path was resolved incorrectly; no GPU workload started
+retry=2026-11-27T06:55:00+00:00 reason=string replacement retained interpreter prefix; failed before GPU operation
+retry=2026-11-27T06:55:58+00:00 reason=benchmark parameter object needed a no-op loader; failed before GEMM

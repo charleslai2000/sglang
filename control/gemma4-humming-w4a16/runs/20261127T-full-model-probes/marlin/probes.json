@@ -1,0 +1,95 @@
+{
+ "capture": {
+  "tag": "logits-capture",
+  "input_len": 1024,
+  "ids": [
+   2009
+  ],
+  "meta": {
+   "id": "2732e29370e7434c9f30124b2661dbc7",
+   "finish_reason": {
+    "type": "length",
+    "length": 1
+   },
+   "prompt_tokens": 1024,
+   "weight_version": "default",
+   "num_retractions": 0,
+   "reasoning_tokens": 0,
+   "completion_tokens": 1,
+   "cached_tokens": 0,
+   "weight_versions": [
+    {
+     "version": "default",
+     "start": 0,
+     "end": 1
+    }
+   ],
+   "cached_tokens_details": null,
+   "dp_rank": null,
+   "e2e_latency": 0.13759030820801854,
+   "response_sent_to_client_ts": 1795772151.104185
+  }
+ },
+ "graph": {
+  "tag": "decode-graph",
+  "input_len": 1024,
+  "ids": [
+   2009,
+   2010,
+   2011,
+   2012,
+   2013,
+   2014,
+   2015,
+   2016,
+   2017,
+   2018,
+   2019,
+   2020,
+   2021,
+   2022,
+   2023,
+   2009,
+   2010,
+   2011,
+   2012,
+   2013,
+   2014,
+   2015,
+   2016,
+   2017,
+   2018,
+   2019,
+   2020,
+   2021,
+   2022,
+   2023,
+   2009,
+   2010
+  ],
+  "meta": {
+   "id": "190b85fee9c24c91894f713ea9eb868f",
+   "finish_reason": {
+    "type": "length",
+    "length": 32
+   },
+   "prompt_tokens": 1024,
+   "weight_version": "default",
+   "num_retractions": 0,
+   "reasoning_tokens": 0,
+   "completion_tokens": 32,
+   "cached_tokens": 0,
+   "weight_versions": [
+    {
+     "version": "default",
+     "start": 0,
+     "end": 32
+    }
+   ],
+   "cached_tokens_details": null,
+   "dp_rank": null,
+   "e2e_latency": 0.36640347889624536,
+   "response_sent_to_client_ts": 1795772152.2793813
+  }
+ }
+}

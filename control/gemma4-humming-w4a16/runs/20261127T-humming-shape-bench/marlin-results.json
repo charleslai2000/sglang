@@ -1,0 +1,197 @@
+{
+  "torch": "2.13.0+cu129",
+  "cuda": "12.9",
+  "gpu": "NVIDIA GeForce RTX 3090",
+  "capability": [
+    8,
+    6
+  ],
+  "results": [
+    {
+      "prefix": "model.language_model.layers.0.self_attn.q_proj",
+      "N": 2048,
+      "K": 2560,
+      "dtype": "bf16",
+      "shapes": [
+        {
+          "M": 8,
+          "marlin_ms_median": 0.18943999707698822,
+          "output_shape": [
+            8,
+            2048
+          ],
+          "finite": true
+        },
+        {
+          "M": 16,
+          "marlin_ms_median": 0.16076800227165222,
+          "output_shape": [
+            16,
+            2048
+          ],
+          "finite": true
+        },
+        {
+          "M": 32,
+          "marlin_ms_median": 0.1534080058336258,
+          "output_shape": [
+            32,
+            2048
+          ],
+          "finite": true
+        },
+        {
+          "M": 1024,
+          "marlin_ms_median": 0.20608000457286835,
+          "output_shape": [
+            1024,
+            2048
+          ],
+          "finite": true
+        },
+        {
+          "M": 1280,
+          "marlin_ms_median": 0.22729599475860596,
+          "output_shape": [
+            1280,
+            2048
+          ],
+          "finite": true
+        },
+        {
+          "M": 4096,
+          "marlin_ms_median": 0.477183997631073,
+          "output_shape": [
+            4096,
+            2048
+          ],
+          "finite": true
+        }
+      ]
+    },
+    {
+      "prefix": "model.language_model.layers.0.mlp.gate_proj",
+      "N": 10240,
+      "K": 2560,
+      "dtype": "bf16",
+      "shapes": [
+        {
+          "M": 8,
+          "marlin_ms_median": 0.151296004652977,
+          "output_shape": [
+            8,
+            10240
+          ],
+          "finite": true
+        },
+        {
+          "M": 16,
+          "marlin_ms_median": 0.15360000729560852,
+          "output_shape": [
+            16,
+            10240
+          ],
+          "finite": true
+        },
+        {
+          "M": 32,
+          "marlin_ms_median": 0.1504960060119629,
+          "output_shape": [
+            32,
+            10240
+          ],
+          "finite": true
+        },
+        {
+          "M": 1024,
+          "marlin_ms_median": 0.5806080102920532,
+          "output_shape": [
+            1024,
+            10240
+          ],
+          "finite": true
+        },
+        {
+          "M": 1280,
+          "marlin_ms_median": 0.6993920207023621,
+          "output_shape": [
+            1280,
+            10240
+          ],
+          "finite": true
+        },
+        {
+          "M": 4096,
+          "marlin_ms_median": 2.1667840480804443,
+          "output_shape": [
+            4096,
+            10240
+          ],
+          "finite": true
+        }
+      ]
+    },
+    {
+      "prefix": "model.language_model.layers.0.mlp.down_proj",
+      "N": 2560,
+      "K": 10240,
+      "dtype": "bf16",
+      "shapes": [
+        {
+          "M": 8,
+          "marlin_ms_median": 0.16793599724769592,
+          "output_shape": [
+            8,
+            2560
+          ],
+          "finite": true
+        },
+        {
+          "M": 16,
+          "marlin_ms_median": 0.16281600296497345,
+          "output_shape": [
+            16,
+            2560
+          ],
+          "finite": true
+        },
+        {
+          "M": 32,
+          "marlin_ms_median": 0.16383999586105347,
+          "output_shape": [
+            32,
+            2560
+          ],
+          "finite": true
+        },
+        {
+          "M": 1024,
+          "marlin_ms_median": 0.5478079915046692,
+          "output_shape": [
+            1024,
+            2560
+          ],
+          "finite": true
+        },
+        {
+          "M": 1280,
+          "marlin_ms_median": 0.7321599721908569,
+          "output_shape": [
+            1280,
+            2560
+          ],
+          "finite": true
+        },
+        {
+          "M": 4096,
+          "marlin_ms_median": 2.1381120681762695,
+          "output_shape": [
+            4096,
+            2560
+          ],
+          "finite": true
+        }
+      ]
+    }
+  ]
+}

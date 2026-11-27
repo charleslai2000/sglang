@@ -1,0 +1,26 @@
+{
+ "cross_backend_max_abs_diff": 1.3263540267944336,
+ "cross_backend_mean_abs_diff": 0.3424547016620636,
+ "humming_logit_of_marlin_top1": 10.75072193145752,
+ "humming_top1": 1282,
+ "humming_top1_margin": 1.8400707244873047,
+ "humming_top5": [
+  1282,
+  553,
+  1283,
+  991,
+  107
+ ],
+ "margin_within_noise": false,
+ "marlin_logit_of_humming_top1": 11.183884620666504,
+ "marlin_top1": 1282,
+ "marlin_top1_margin": 1.9325981140136719,
+ "marlin_top5": [
+  1282,
+  553,
+  1283,
+  991,
+  107
+ ],
+ "top5_overlap": 5
+}

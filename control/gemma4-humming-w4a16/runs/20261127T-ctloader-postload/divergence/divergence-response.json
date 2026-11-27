@@ -1,0 +1,30 @@
+{
+ "text": "add",
+ "output_ids": [
+  1282
+ ],
+ "meta_info": {
+  "id": "20ab3fac5a7646adbdcbd402ec17dde6",
+  "finish_reason": {
+   "type": "length",
+   "length": 1
+  },
+  "prompt_tokens": 1046,
+  "weight_version": "default",
+  "num_retractions": 0,
+  "reasoning_tokens": 0,
+  "completion_tokens": 1,
+  "cached_tokens": 0,
+  "weight_versions": [
+   {
+    "version": "default",
+    "start": 0,
+    "end": 1
+   }
+  ],
+  "cached_tokens_details": null,
+  "dp_rank": null,
+  "e2e_latency": 0.18866529199294746,
+  "response_sent_to_client_ts": 1795778126.0470357
+ }
+}

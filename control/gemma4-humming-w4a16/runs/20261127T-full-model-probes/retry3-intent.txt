@@ -1,0 +1,4 @@
+start=2026-11-27T08:37:19Z
+source=c4f6b50da7940ff28fefae2eb3fb0b71eb1014cc + current worktree
+command=control/gemma4-humming-w4a16/runs/20261127T-full-model-probes/run_pair.sh
+expected=matched backend-dispatch trace through HummingConfig.get_quant_method, graph decode and cleanup

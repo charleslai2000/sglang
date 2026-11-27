@@ -1,0 +1,19 @@
+Cell intent: T012 original C-8 L1-only A/B, one cell.
+
+Frozen baseline argv (L1 only, HiCache disabled, chunked prefill 4096, context 131072,
+mem-fraction .94, FP8-E5M2 KV, Triton attention, decode CUDA graph bs<=32):
+`/data/sglang-hicache/gemma4/runs/20261127T-t011-l1only-off2/launch-argv.txt`.
+
+Workload: `benchmark/hicache/bench_multiturn.py`, 40 clients x 20 rounds, 1024 input /
+256 output, Poisson rate 8, seed 42, max parallel 64, fixed history tokens;
+800 requests per cell with a request-hash log so the payload multiset can be compared.
+
+Cells: `off` = production Marlin (no opt-in), `on1`/`on2` = identical argv plus
+`SGLANG_CTWNA16_HUMMING=1`, which only switches the compressed-tensors WNA16 post-load
+branch from Marlin repack to the Humming conversion. No `--quantization` override, no
+FA2, no prefill graph, no audit instrumentation on PYTHONPATH for these cells.
+
+Acceptance: all cells complete 800/800 with zero failures and an identical payload
+multiset; both candidate repetitions beat the control's official output-token
+throughput and the mean gain is at least 2.0% (run-to-run spread in this harness has
+been <=0.4%). Any KV-capacity or correctness regression voids the gain.

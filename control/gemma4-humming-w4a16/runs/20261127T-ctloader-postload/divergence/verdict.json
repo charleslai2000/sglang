@@ -1,0 +1,108 @@
+{
+ "decode_ids": {
+  "humming": [
+   1280,
+   1281,
+   1282,
+   1283,
+   1284,
+   1285,
+   1286,
+   1287,
+   1288,
+   1289,
+   1290,
+   1291,
+   1292,
+   1293,
+   1294,
+   1295,
+   1296,
+   1297,
+   1298,
+   1299,
+   1280,
+   1281,
+   1283
+  ],
+  "marlin": [
+   1280,
+   1281,
+   1282,
+   1283,
+   1284,
+   1285,
+   1286,
+   1287,
+   1288,
+   1289,
+   1290,
+   1291,
+   1292,
+   1293,
+   1294,
+   1295,
+   1296,
+   1297,
+   1298,
+   1299,
+   1280,
+   1281,
+   1283
+  ]
+ },
+ "decode_ids_equal_across_backends": true,
+ "decode_margin_humming": 4.631167193874717,
+ "decode_margin_marlin": 2.510316923260689,
+ "decode_top1_humming": 1283,
+ "decode_top1_marlin": 1283,
+ "decode_top5_humming": [
+  {
+   "logprob": -0.022409657016396523,
+   "token": 1283
+  },
+  {
+   "logprob": -4.653576850891113,
+   "token": 676
+  },
+  {
+   "logprob": -5.106021881103516,
+   "token": 1282
+  },
+  {
+   "logprob": -5.908658027648926,
+   "token": 582
+  },
+  {
+   "logprob": -6.871138095855713,
+   "token": 553
+  }
+ ],
+ "decode_top5_marlin": [
+  {
+   "logprob": -0.17000333964824677,
+   "token": 1283
+  },
+  {
+   "logprob": -2.6803202629089355,
+   "token": 1282
+  },
+  {
+   "logprob": -3.406348705291748,
+   "token": 553
+  },
+  {
+   "logprob": -3.4627223014831543,
+   "token": 676
+  },
+  {
+   "logprob": -5.069651126861572,
+   "token": 582
+  }
+ ],
+ "decode_top5_overlap": 5,
+ "divergence_is_path_fragile": true,
+ "position": 22,
+ "prefill_argmax_humming": 1282,
+ "prefill_argmax_marlin": 1282
+}

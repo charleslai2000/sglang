@@ -1,0 +1,6 @@
+run_start=2026-11-27T11:06:53Z
+argv=/home/ubuntu/workspaces/3rdparty/sglang-hicache/control/gemma4-humming-w4a16/runs/20261127T-ctloader-postload/launch-argv.txt
+arm=marlin ready=1 probes=1
+arm=humming ready=1 probes=1
+run_end=2026-11-27T11:10:06Z
+verdict_exit=1

@@ -2,11 +2,14 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+import json
 import logging
 from typing import Callable, Optional
 
 import torch
 from compressed_tensors.quantization import ActivationOrdering
+
+from sglang.srt.environ import envs
 
 # yapf conflicts with isort for this block
 # yapf: disable
@@ -208,6 +211,10 @@ class CompressedTensorsWNA16(CompressedTensorsLinearScheme):
     # Checkpoints are serialized in compressed-tensors format, which is
     # different from the format the kernel may want. Handle repacking here.
     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
+        if envs.SGLANG_CTWNA16_HUMMING.get():
+            self._process_weights_after_loading_humming(layer)
+            return
+
         # Default names since marlin requires empty parameters for these,
         # TODO: remove this requirement from marlin (allow optional tensors)
         self.w_q_name = "weight_packed"
@@ -301,8 +308,138 @@ class CompressedTensorsWNA16(CompressedTensorsLinearScheme):
         _transform_param(layer, self.w_q_name, transform_w_q)
         _transform_param(layer, self.w_s_name, transform_w_s)
 
+    def _process_weights_after_loading_humming(self, layer: torch.nn.Module) -> None:
+        """Convert CT's already-loaded WNA16 tensors to Humming before Marlin repack.
+
+        The compressed-tensors loader has already put the checkpoint's packed
+        INT4 words and BF16 group scales on this layer under the exact names a
+        native Humming layer uses (``weight_packed`` / ``weight_scale`` /
+        ``weight_shape``). This mirrors HummingLinearMethod's own post-load
+        conversion instead of building a second loader or re-deriving the fused
+        shard layout, so the kernel gets the very tensors Marlin would repack.
+        """
+        from humming.schema.compressed_tensors import CompressedTensorsWeightSchema
+        from sglang.srt.layers.quantization import humming as humming_method
+
+        humming_method._lazy_import_humming()
+        HummingMethod = humming_method.HummingMethod
+
+        prefix = getattr(layer, "prefix", "") or (
+            f"<{type(layer).__name__} n={int(layer.weight_packed.shape[0])} "
+            f"k={int(layer.weight_packed.shape[1]) * self.pack_factor}>"
+        )
+        required = ("weight_packed", "weight_scale")
+        missing = [name for name in required if getattr(layer, name, None) is None]
+        if missing:
+            raise RuntimeError(
+                f"Humming post-load requires the CT checkpoint tensors {missing} "
+                f"on {prefix}; refusing to convert a partially loaded layer"
+            )
+        if self.has_g_idx or not self.symmetric:
+            raise RuntimeError(
+                f"Humming post-load opt-in requires symmetric INT4 without "
+                f"activation-order indices, got {prefix}"
+            )
+
+        weight = layer.weight_packed
+        scale = layer.weight_scale
+        # The CT scheme never sets ``param_dtype`` on the layer (Humming's own
+        # create_weights does). The checkpoint's scale dtype is the BF16 compute
+        # dtype this layer was quantized for, so use it as the authority.
+        param_dtype = scale.dtype
+        layer.param_dtype = param_dtype
+        # Derive the local partition shape from the tensors the unchanged loader
+        # already filled; ``input_size_per_partition`` is only passed to
+        # create_weights and not retained by every linear class.
+        output_size = int(weight.shape[0])
+        input_size = int(weight.shape[1]) * self.pack_factor
+        output_partition_sizes = [int(v) for v in getattr(layer, "output_partition_sizes", [output_size])]
+        # `weight_shape` is an optional bookkeeping parameter: several towers (and
+        # some Text Core layers) never receive it from the checkpoint, so it is not
+        # used as evidence here. The tensors themselves are validated by shape and,
+        # in the paired run, by per-parameter SHA256.
+        expected_weight_shape = (output_size, input_size // self.pack_factor)
+        expected_scale_shape = (
+            output_size,
+            input_size // self.group_size if self.group_size != -1 else 1,
+        )
+        if tuple(weight.shape) != expected_weight_shape:
+            raise RuntimeError(
+                f"Humming post-load packed-weight shape mismatch on {prefix}: "
+                f"actual={tuple(weight.shape)}, expected={expected_weight_shape}"
+            )
+        if tuple(scale.shape) != expected_scale_shape:
+            raise RuntimeError(
+                f"Humming post-load scale shape mismatch on {prefix}: "
+                f"actual={tuple(scale.shape)}, expected={expected_scale_shape}"
+            )
+
+        schema = CompressedTensorsWeightSchema(
+            quant_method="compressed-tensors",
+            format="pack-quantized",
+            type="int",
+            num_bits=32 // self.pack_factor,
+            strategy="group" if self.group_size != -1 else "channel",
+            symmetric=True,
+            group_size=self.group_size if self.group_size != -1 else None,
+        )
+        humming_schema, tensors = schema.convert_humming(
+            tensors=dict(layer.state_dict()),
+            shape_n_stacks=output_partition_sizes,
+            shape_k_stacks=[input_size],
+            param_dtype=param_dtype,
+        )
+        if tensors["weight"].dtype != torch.int32:
+            raise RuntimeError("Humming conversion did not preserve packed INT4 storage")
+
+        # Drop the CT storage parameters before installing the Humming ones so the
+        # packed matrix is never resident twice. Humming's schema conversion only
+        # re-views the same INT32 words, it does not requantize.
+        for name in list(layer._parameters):
+            if layer._parameters[name] is not None:
+                delattr(layer, name)
+        for name, tensor in tensors.items():
+            setattr(layer, name, torch.nn.Parameter(tensor, requires_grad=False))
+        del tensors
+
+        layer.output_partition_sizes_sum = output_size
+        HummingMethod.prepare_layer_meta(
+            layer=layer,
+            shape_n=output_size,
+            shape_k=input_size,
+            weight_schema=humming_schema,
+            input_schema=None,
+            pad_n_to_multiple=256,
+            pad_k_to_multiple=128,
+            has_bias=getattr(layer, "bias", None) is not None,
+            torch_dtype=param_dtype,
+        )
+        HummingMethod.transform_humming_layer(layer)
+
+        layer.humming_compute_config = json.dumps(
+            {
+                "use_f16_accum": envs.SGLANG_HUMMING_USE_F16_ACCUM.get(),
+                "gemm_type": "dense",
+            }
+        )
+        if getattr(layer, "locks", None) is None:
+            layer.register_buffer(
+                "locks", torch.zeros(1024, dtype=torch.int32, device=weight.device)
+            )
+        layer.is_humming_converted = True
+
     def apply_weights(self, layer: torch.nn.Module, x: torch.Tensor,
                       bias: Optional[torch.Tensor]) -> torch.Tensor:
+        if getattr(layer, "is_humming_converted", False):
+            from sglang.srt.layers.quantization.humming import HummingMethod
+
+            output = HummingMethod.forward_layer(
+                layer=layer,
+                inputs=x.reshape(-1, x.size(-1)),
+                compute_config=layer.humming_compute_config,
+            )
+            return output.view(*x.shape[:-1], output.size(-1))
+
         c = self.kernel_config
 
         def _get_weight_params(

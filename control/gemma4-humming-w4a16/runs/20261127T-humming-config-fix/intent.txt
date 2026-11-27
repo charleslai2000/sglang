@@ -1,0 +1,5 @@
+Run: T012 retry full-model upstream Humming smoke after explicit compatibility fix
+Source: working tree based on c4f6b50da7940ff28fefae2eb3fb0b71eb1014cc; scoped loader changes in model_config.py and weight_utils.py preserve the source compressed-tensors metadata for the upstream HummingConfig. Independent loader check verifies modelquant=humming and HummingConfig.full_config.quant_method=compressed-tensors.
+Command: bounded full server launch using checkpoint Gemma4, --quantization humming, FP32 accumulation, triton attention/FA2 disabled, Decode CUDA Graph full bs32; service used only for readiness and a small deterministic generation.
+Resources: hold /tmp/f1-r16b-gpu-exclusive.lock; port 31411; cleanup/reap service and verify GPU/port/lock after.
+Expected: load log reports quant=humming, full cache allocation/capture works, request returns finite output; establish Humming selected rather than silently retaining compressed-tensors Marlin.

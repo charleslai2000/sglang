@@ -1,0 +1,7 @@
+Run: T012 actual-weight Humming shape benchmark
+Started: 2026-11-27T06:37:55Z
+Source: c4f6b50da7940ff28fefae2eb3fb0b71eb1014cc
+Command: timeout --signal=TERM --kill-after=20s 300s /tmp/t012_humming_bench_wrapper.sh; process PID recorded in process.txt; CUDA work held /tmp/f1-r16b-gpu-exclusive.lock exclusively.
+Workload: RTX 3090 SM86; exact Gemma4 safetensors group-32 INT4 weights/scales; BF16 activation; N/K=(10240,2560) gate and (2560,10240) down; M=8,16,32,1024,1280,4096; 15 CUDA-event samples/shape after warmup.
+Expected completion: bench_shapes.py exits and writes humming-results.json; wrapper writes exit.txt and releases lock.
+Run finished 2026-11-27T06:41:37Z, exit 0. First wrapper launch failed before model operation (PATH missing python); corrected to absolute venv interpreter. First in-GPU attempt failed at CPU invocation of CUDA-only Humming repack; corrected to move checkpoint tensors onto GPU before the exact layout transform. Final bounded run completed all shapes.

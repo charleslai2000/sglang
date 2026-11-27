@@ -1,0 +1,6 @@
+Run: T012 paired full-model Marlin/Humming validation with checkpoint-preserving loader adapter
+Start: 2026-11-27T08:45Z (actual start recorded in wrapper log)
+Deadline: max 600 s startup per arm, 45 s cleanup; arms sequential; wrapper bounded to 1500 s.
+Command: run_pair.sh after change to pass original serialized compressed-tensors config_groups into HummingConfig (not synthesized target_scheme_map). Existing capture_server.py records selected methods from HummingConfig.get_quant_method and records Humming post-load schema. Humming loader logs must have no missing/uninitialized target projections; method markers should cover all expected language-model projections. Probe capture/logits and greedy graph-32 outputs compared to Marlin; graph captured/replayed.
+Expected completion: wrapper exit=0, pair outputs and method/schema marker exist, service/children reaped, GPU idle, port 31412 unused, exclusive lock released.
+GPU lock: /tmp/f1-r16b-gpu-exclusive.lock. Fixed source does not change checkpoint values/scales; Humming's existing schema conversion only transforms storage layout.

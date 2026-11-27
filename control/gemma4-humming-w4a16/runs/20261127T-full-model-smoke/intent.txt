@@ -1,0 +1,6 @@
+Run: T012 full-model upstream Humming smoke
+Start: 2026-11-27 (local)
+Source: current checkout based on frozen c4f6b50da7940ff28fefae2eb3fb0b71eb1014cc; only control docs modified so far.
+Command: bounded server smoke using original Gemma4 W4A16 checkpoint and `--quantization humming`, with production triton attention (FA2 disabled), decode CUDA graphs enabled as frozen, L1-only (no HiCache) for this smoke; identical requests will be used for baseline/Humming.
+GPU: acquire `/tmp/f1-r16b-gpu-exclusive.lock` exclusively; record process/command/exit, memory and service cleanup.
+Expected completion: service loads full model; report selected quantization method, Humming conversion/runtime, BF16 outputs and CUDA Graph status, or preserve concrete startup/runtime failure before deciding next fix.

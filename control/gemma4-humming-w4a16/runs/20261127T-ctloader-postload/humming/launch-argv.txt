@@ -1,0 +1,1 @@
+--model-path /data/sglang-hicache/gemma4/model --trust-remote-code --host 127.0.0.1 --port 31412 --context-length 32768 --max-running-requests 32 --mem-fraction-static .92 --kv-cache-dtype fp8_e5m2 --attention-backend triton --cuda-graph-backend-decode full --cuda-graph-max-bs-decode 32 --log-level info --skip-server-warmup --disable-radix-cache 
