@@ -1,0 +1,61 @@
+{
+  "arms": {
+    "triton": {
+      "restored_tokens": 0,
+      "warm_cached_tokens": 10304,
+      "ids_match_cold": true,
+      "cold_ids": null,
+      "restored_ids": null,
+      "extent": {
+        "before": {
+          "extent_read": 0,
+          "extent_hit": 0,
+          "restore_disposition": 0
+        },
+        "after_flush": {
+          "extent_read": 0,
+          "extent_hit": 1,
+          "restore_disposition": 0
+        },
+        "after": {
+          "extent_read": 0,
+          "extent_hit": 2,
+          "restore_disposition": 0
+        }
+      }
+    },
+    "fa2": {
+      "restored_tokens": 0,
+      "warm_cached_tokens": 10304,
+      "ids_match_cold": true,
+      "cold_ids": null,
+      "restored_ids": null,
+      "extent": {
+        "before": {
+          "extent_read": 0,
+          "extent_hit": 0,
+          "restore_disposition": 0
+        },
+        "after_flush": {
+          "extent_read": 0,
+          "extent_hit": 1,
+          "restore_disposition": 0
+        },
+        "after": {
+          "extent_read": 0,
+          "extent_hit": 2,
+          "restore_disposition": 0
+        }
+      }
+    }
+  },
+  "arms_agree": true,
+  "short_greedy_equal": {
+    "short-0": true,
+    "short-1": true,
+    "short-2": true,
+    "short-3": true
+  },
+  "short_greedy_all_equal": true,
+  "verdict": "FAIL"
+}

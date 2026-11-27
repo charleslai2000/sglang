@@ -1,0 +1,38 @@
+{
+  "arms": {
+    "triton": {
+      "primed_ids": null,
+      "primed_cached_second_pass": 10304,
+      "restored_ids": null,
+      "restored_cached_tokens": 10304,
+      "restore_storage_hit": 0,
+      "restore_disposition": 1,
+      "restore_recompute": 3,
+      "ids_match_prime": true,
+      "short_greedy": {
+        "short-0": null,
+        "short-1": null,
+        "short-2": null,
+        "short-3": null
+      }
+    },
+    "fa2": {
+      "primed_ids": null,
+      "primed_cached_second_pass": 10304,
+      "restored_ids": null,
+      "restored_cached_tokens": 10304,
+      "restore_storage_hit": 0,
+      "restore_disposition": 1,
+      "restore_recompute": 3,
+      "ids_match_prime": true,
+      "short_greedy": {
+        "short-0": null,
+        "short-1": null,
+        "short-2": null,
+        "short-3": null
+      }
+    }
+  },
+  "short_greedy_equal": true,
+  "verdict": "FAIL"
+}

@@ -1,0 +1,30 @@
+{
+  "triton": {
+    "prompt_tokens": 10305,
+    "restored_cached_tokens": 10304,
+    "extent_read": 11,
+    "restore_disposition": 1,
+    "restore_line": "[2026-11-27 23:27:29] [P2A] ts_ms=1795822049704 evt=restore_disposition rid=3fc3142c92f34c8781c79281685fe7ae disposition=RESTORE requested=10304 granted=10304 reason=full",
+    "second_pass_short": {
+      "short-0": null,
+      "short-1": null,
+      "short-2": null,
+      "short-3": null
+    }
+  },
+  "fa2": {
+    "prompt_tokens": 10305,
+    "restored_cached_tokens": 10304,
+    "extent_read": 11,
+    "restore_disposition": 1,
+    "restore_line": "[2026-11-27 23:28:58] [P2A] ts_ms=1795822138886 evt=restore_disposition rid=546743c1fc25468b87ef4d2dc02a5ad5 disposition=RESTORE requested=10304 granted=10304 reason=full",
+    "second_pass_short": {
+      "short-0": null,
+      "short-1": null,
+      "short-2": null,
+      "short-3": null
+    }
+  },
+  "full_restore_both_arms": true,
+  "verdict": "PASS"
+}

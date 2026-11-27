@@ -1,0 +1,94 @@
+{
+  "arms": {
+    "triton": {
+      "arm": "triton",
+      "target": {
+        "text": "\n",
+        "prompt_tokens": 20001,
+        "cached_tokens": 10304,
+        "output_ids": null
+      },
+      "short": {
+        "short-0": {
+          "text": "\n\n",
+          "prompt_tokens": 385,
+          "cached_tokens": 0,
+          "output_ids": null
+        },
+        "short-1": {
+          "text": "\n",
+          "prompt_tokens": 577,
+          "cached_tokens": 384,
+          "output_ids": null
+        },
+        "short-2": {
+          "text": "\n",
+          "prompt_tokens": 801,
+          "cached_tokens": 576,
+          "output_ids": null
+        },
+        "short-3": {
+          "text": "\n",
+          "prompt_tokens": 993,
+          "cached_tokens": 800,
+          "output_ids": null
+        }
+      },
+      "log": {
+        "restore_full": 0,
+        "restore_disposition": 0,
+        "extent_read": 11
+      }
+    },
+    "fa2": {
+      "arm": "fa2",
+      "target": {
+        "text": "\n",
+        "prompt_tokens": 20001,
+        "cached_tokens": 10304,
+        "output_ids": null
+      },
+      "short": {
+        "short-0": {
+          "text": "\n\n",
+          "prompt_tokens": 385,
+          "cached_tokens": 0,
+          "output_ids": null
+        },
+        "short-1": {
+          "text": "\n",
+          "prompt_tokens": 577,
+          "cached_tokens": 384,
+          "output_ids": null
+        },
+        "short-2": {
+          "text": "\n",
+          "prompt_tokens": 801,
+          "cached_tokens": 576,
+          "output_ids": null
+        },
+        "short-3": {
+          "text": "\n",
+          "prompt_tokens": 993,
+          "cached_tokens": 800,
+          "output_ids": null
+        }
+      },
+      "log": {
+        "restore_full": 0,
+        "restore_disposition": 0,
+        "extent_read": 11
+      }
+    }
+  },
+  "target_text_equal": true,
+  "short_text_equal": true,
+  "restored_tokens": {
+    "triton": 10304,
+    "fa2": 10304
+  },
+  "restore_full": {
+    "triton": 0,
+    "fa2": 0
+  }
+}

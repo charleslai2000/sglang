@@ -1,0 +1,19 @@
+T013 combo cell — one (quantisation, attention) combination per cell.
+
+Fixed: gemma4 checkpoint, C-8 context 131072, mem-fraction .94, FP8-E5M2 KV, decode CUDA graph
+bs<=32, chunked prefill 4096, max-running 32, request load and seeds from the frozen baseline argv.
+
+Combinations:
+  triton : SGLANG_CTWNA16_HUMMING=1                       (A — Humming + Triton)
+  fa2    : SGLANG_CTWNA16_HUMMING=1 SGLANG_FA2_RAGGED_EXTEND=1  (B — Humming + FA2)
+
+Workloads:
+  c8    : original C-8 L1-only, 40 clients x 20 rounds, 1024 in / 256 out, Poisson 8, 800 requests.
+  tiers : same workload with the production three-tier HiCache stack (L1+L2+extent, write_back,
+          wait_complete, chunk 4096) from the frozen C-8 acceptance argv.
+  long  : T010 long-context load, 96 clients x 6 rounds, 5000-token turns, 256 out, Poisson 8,
+          max-parallel 64, three-tier stack, final context 36.5K/session.
+
+FA2 settings restored from T011: per-Forward plan reuse, transient BF16 prefix budget 128 MiB
+(its hard ceiling), 8 MiB FlashInfer float scratch, coverage counters on (timing stride default).
+No command-line flag changes, no cache-policy change, no capacity change.

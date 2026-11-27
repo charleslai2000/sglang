@@ -1,0 +1,1 @@
+official_tps=739.17 duty_pct=99.27 duty_clientwall_pct=84.63 bench_s=277.07 client_wall_s=325 completed=800/800 failed=0 profiled=False head=7ed79dab11

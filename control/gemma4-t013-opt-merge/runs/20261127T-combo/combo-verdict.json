@@ -1,0 +1,472 @@
+{
+ "failures": [],
+ "workloads": {
+  "c8": {
+   "all_cells_complete": true,
+   "capacity": {
+    "fa2": [
+     1443628.0,
+     1443628.0
+    ],
+    "triton": [
+     1443628.0,
+     1443628.0
+    ]
+   },
+   "cells": {
+    "c8-fa2-r5": {
+     "bench_s": 269.3,
+     "completed": "800/800",
+     "counters": {
+      "sglang:backuped_tokens_total": null,
+      "sglang:cached_tokens_total": 9533440.0,
+      "sglang:cuda_graph_passes_total": 7179.0,
+      "sglang:evicted_tokens_total": 186366.0,
+      "sglang:extend_device_time_total": null,
+      "sglang:hicache_backup_tokens_total": null,
+      "sglang:hicache_prompt_tokens_total": 10547201.0,
+      "sglang:max_total_num_tokens": 1443628.0,
+      "sglang:max_total_num_tokens_swa": 65536.0
+     },
+     "coverage": {
+      "coverage": {
+       "max_prefix_bytes": 341835776,
+       "owner_conversions": 1020.0,
+       "plans": 256.0,
+       "shared_reuses": 765.0,
+       "skip_no_prefix": 27.0,
+       "skip_over_budget": 84.0
+      },
+      "forwards_seen": 256,
+      "ms": {
+       "extend_attention": 116.56428799033165,
+       "gather_cast": 70.30342419818044,
+       "merge": 21.81932795792818,
+       "plan": 18.640959948301315,
+       "prefix_attention": 1171.1265941262245
+      },
+      "prefix_budget_bytes": 134217728,
+      "stride": 8
+     },
+     "decode_graph_captured": true,
+     "decode_s": 119.7,
+     "duty": 99.18,
+     "extend_s": 147.4,
+     "failed": 0,
+     "peak_mem_mib": 24124.0,
+     "tps": 760.48,
+     "ttft_s": 2.992
+    },
+    "c8-fa2-r6": {
+     "bench_s": 269.5,
+     "completed": "800/800",
+     "counters": {
+      "sglang:backuped_tokens_total": null,
+      "sglang:cached_tokens_total": 9533440.0,
+      "sglang:cuda_graph_passes_total": 7172.0,
+      "sglang:evicted_tokens_total": 186364.0,
+      "sglang:extend_device_time_total": null,
+      "sglang:hicache_backup_tokens_total": null,
+      "sglang:hicache_prompt_tokens_total": 10547201.0,
+      "sglang:max_total_num_tokens": 1443628.0,
+      "sglang:max_total_num_tokens_swa": 65536.0
+     },
+     "coverage": {
+      "coverage": {
+       "max_prefix_bytes": 248512512,
+       "owner_conversions": 764.0,
+       "plans": 192.0,
+       "shared_reuses": 573.0,
+       "skip_no_prefix": 29.0,
+       "skip_over_budget": 40.0
+      },
+      "forwards_seen": 192,
+      "ms": {
+       "extend_attention": 99.28137603402138,
+       "gather_cast": 41.45840008184314,
+       "merge": 18.172575931996107,
+       "plan": 13.485344052314758,
+       "prefix_attention": 747.1883221268654
+      },
+      "prefix_budget_bytes": 134217728,
+      "stride": 8
+     },
+     "decode_graph_captured": true,
+     "decode_s": 120.0,
+     "duty": 99.29,
+     "extend_s": 147.6,
+     "failed": 0,
+     "peak_mem_mib": 24124.0,
+     "tps": 759.87,
+     "ttft_s": 3.003
+    },
+    "c8-triton-r5": {
+     "bench_s": 278.3,
+     "completed": "800/800",
+     "counters": {
+      "sglang:backuped_tokens_total": null,
+      "sglang:cached_tokens_total": 9533440.0,
+      "sglang:cuda_graph_passes_total": 7165.0,
+      "sglang:evicted_tokens_total": 186365.0,
+      "sglang:extend_device_time_total": null,
+      "sglang:hicache_backup_tokens_total": null,
+      "sglang:hicache_prompt_tokens_total": 10547201.0,
+      "sglang:max_total_num_tokens": 1443628.0,
+      "sglang:max_total_num_tokens_swa": 65536.0
+     },
+     "coverage": null,
+     "decode_graph_captured": true,
+     "decode_s": 120.3,
+     "duty": 99.25,
+     "extend_s": 155.9,
+     "failed": 0,
+     "peak_mem_mib": 24098.0,
+     "tps": 735.92,
+     "ttft_s": 3.125
+    },
+    "c8-triton-r6": {
+     "bench_s": 277.1,
+     "completed": "800/800",
+     "counters": {
+      "sglang:backuped_tokens_total": null,
+      "sglang:cached_tokens_total": 9533440.0,
+      "sglang:cuda_graph_passes_total": 7161.0,
+      "sglang:evicted_tokens_total": 186365.0,
+      "sglang:extend_device_time_total": null,
+      "sglang:hicache_backup_tokens_total": null,
+      "sglang:hicache_prompt_tokens_total": 10547201.0,
+      "sglang:max_total_num_tokens": 1443628.0,
+      "sglang:max_total_num_tokens_swa": 65536.0
+     },
+     "coverage": null,
+     "decode_graph_captured": true,
+     "decode_s": 119.5,
+     "duty": 99.27,
+     "extend_s": 155.6,
+     "failed": 0,
+     "peak_mem_mib": 24098.0,
+     "tps": 739.17,
+     "ttft_s": 3.057
+    }
+   },
+   "decode_graph_captured": true,
+   "fa2_coverage": {
+    "max_prefix_bytes": [
+     341835776,
+     248512512
+    ],
+    "owner_conversions": [
+     1020.0,
+     764.0
+    ],
+    "plans": [
+     256.0,
+     192.0
+    ],
+    "shared_reuses": [
+     765.0,
+     573.0
+    ],
+    "skip_no_prefix": [
+     27.0,
+     29.0
+    ],
+    "skip_over_budget": [
+     84.0,
+     40.0
+    ]
+   },
+   "payload_counts": [
+    800,
+    800,
+    800,
+    800
+   ],
+   "payload_multiset_identical": true,
+   "peak_mem_mib": {
+    "fa2": [
+     24124.0,
+     24124.0
+    ],
+    "triton": [
+     24098.0,
+     24098.0
+    ]
+   },
+   "tag": "original C-8 L1-only",
+   "tiers": null,
+   "tps": {
+    "delta_pct": 3.07,
+    "fa2_mean": 760.17,
+    "fa2_spread_pct": 0.08,
+    "triton_mean": 737.55
+   }
+  },
+  "long": {
+   "all_cells_complete": true,
+   "capacity": {
+    "fa2": [
+     1443628.0
+    ],
+    "triton": [
+     1443628.0
+    ]
+   },
+   "cells": {
+    "long-fa2-r2": {
+     "bench_s": 1090.5,
+     "completed": "576/576",
+     "counters": {
+      "sglang:backuped_tokens_total": 3346668.0,
+      "sglang:cached_tokens_total": 3954671.0,
+      "sglang:cuda_graph_passes_total": 6728.0,
+      "sglang:evicted_tokens_total": 4397571.0,
+      "sglang:extend_device_time_total": null,
+      "sglang:hicache_backup_tokens_total": 7441839.0,
+      "sglang:hicache_prompt_tokens_total": 10448641.0,
+      "sglang:max_total_num_tokens": 1443628.0,
+      "sglang:max_total_num_tokens_swa": 65536.0
+     },
+     "coverage": {
+      "coverage": {
+       "max_prefix_bytes": 232488960,
+       "owner_conversions": 5628.0,
+       "plans": 1408.0,
+       "shared_reuses": 4221.0,
+       "skip_no_prefix": 25.0,
+       "skip_over_budget": 100.0
+      },
+      "forwards_seen": 1408,
+      "ms": {
+       "extend_attention": 3456.8472614884377,
+       "gather_cast": 545.4524164255708,
+       "merge": 258.5512963309884,
+       "plan": 244.755102455616,
+       "prefix_attention": 16626.89931023121
+      },
+      "prefix_budget_bytes": 134217728,
+      "stride": 8
+     },
+     "decode_graph_captured": true,
+     "decode_s": 104.4,
+     "duty": 92.91,
+     "extend_s": 908.7,
+     "failed": 0,
+     "peak_mem_mib": 23896.0,
+     "tps": 135.22,
+     "ttft_s": 79.119
+    },
+    "long-triton-r2": {
+     "bench_s": 1265.7,
+     "completed": "576/576",
+     "counters": {
+      "sglang:backuped_tokens_total": 3306963.0,
+      "sglang:cached_tokens_total": 3781740.0,
+      "sglang:cuda_graph_passes_total": 6770.0,
+      "sglang:evicted_tokens_total": 4512261.0,
+      "sglang:extend_device_time_total": null,
+      "sglang:hicache_backup_tokens_total": 7516101.0,
+      "sglang:hicache_prompt_tokens_total": 10448641.0,
+      "sglang:max_total_num_tokens": 1443628.0,
+      "sglang:max_total_num_tokens_swa": 65536.0
+     },
+     "coverage": null,
+     "decode_graph_captured": true,
+     "decode_s": 104.6,
+     "duty": 93.12,
+     "extend_s": 1073.9,
+     "failed": 0,
+     "peak_mem_mib": 23798.0,
+     "tps": 116.51,
+     "ttft_s": 93.991
+    }
+   },
+   "decode_graph_captured": true,
+   "fa2_coverage": {
+    "max_prefix_bytes": [
+     232488960
+    ],
+    "owner_conversions": [
+     5628.0
+    ],
+    "plans": [
+     1408.0
+    ],
+    "shared_reuses": [
+     4221.0
+    ],
+    "skip_no_prefix": [
+     25.0
+    ],
+    "skip_over_budget": [
+     100.0
+    ]
+   },
+   "payload_counts": [
+    576,
+    576
+   ],
+   "payload_multiset_identical": true,
+   "peak_mem_mib": {
+    "fa2": [
+     23896.0
+    ],
+    "triton": [
+     23798.0
+    ]
+   },
+   "tag": "T010 long-context three-tier",
+   "tiers": {
+    "long-fa2-r2": {
+     "l1_cached_tokens": 3954671.0,
+     "l2_backup_tokens": 7441839.0,
+     "prompt_tokens": 10448641.0
+    },
+    "long-triton-r2": {
+     "l1_cached_tokens": 3781740.0,
+     "l2_backup_tokens": 7516101.0,
+     "prompt_tokens": 10448641.0
+    }
+   },
+   "tps": {
+    "delta_pct": 16.06,
+    "fa2_mean": 135.22,
+    "fa2_spread_pct": 0.0,
+    "triton_mean": 116.51
+   }
+  },
+  "tiers": {
+   "all_cells_complete": true,
+   "capacity": {
+    "fa2": [
+     1443628.0
+    ],
+    "triton": [
+     1443628.0
+    ]
+   },
+   "cells": {
+    "tiers-fa2-r3": {
+     "bench_s": 317.9,
+     "completed": "800/800",
+     "counters": {
+      "sglang:backuped_tokens_total": 1092043.0,
+      "sglang:cached_tokens_total": 9533440.0,
+      "sglang:cuda_graph_passes_total": 7251.0,
+      "sglang:evicted_tokens_total": 188339.0,
+      "sglang:extend_device_time_total": null,
+      "sglang:hicache_backup_tokens_total": 1752215.0,
+      "sglang:hicache_prompt_tokens_total": 10547201.0,
+      "sglang:max_total_num_tokens": 1443628.0,
+      "sglang:max_total_num_tokens_swa": 65536.0
+     },
+     "coverage": {
+      "coverage": {
+       "max_prefix_bytes": 381681664,
+       "owner_conversions": 508.0,
+       "plans": 128.0,
+       "shared_reuses": 381.0,
+       "skip_no_prefix": 26.0,
+       "skip_over_budget": 134.0
+      },
+      "forwards_seen": 128,
+      "ms": {
+       "extend_attention": 77.28512033820152,
+       "gather_cast": 122.29907072335482,
+       "merge": 15.67212799936533,
+       "plan": 22.675744235515594,
+       "prefix_attention": 566.4336994886398
+      },
+      "prefix_budget_bytes": 134217728,
+      "stride": 8
+     },
+     "decode_graph_captured": true,
+     "decode_s": 120.3,
+     "duty": 88.26,
+     "extend_s": 160.3,
+     "failed": 0,
+     "peak_mem_mib": 24102.0,
+     "tps": 644.21,
+     "ttft_s": 5.1
+    },
+    "tiers-triton-r3": {
+     "bench_s": 327.8,
+     "completed": "800/800",
+     "counters": {
+      "sglang:backuped_tokens_total": 1138425.0,
+      "sglang:cached_tokens_total": 9533440.0,
+      "sglang:cuda_graph_passes_total": 7094.0,
+      "sglang:evicted_tokens_total": 187904.0,
+      "sglang:extend_device_time_total": null,
+      "sglang:hicache_backup_tokens_total": 1769744.0,
+      "sglang:hicache_prompt_tokens_total": 10547201.0,
+      "sglang:max_total_num_tokens": 1443628.0,
+      "sglang:max_total_num_tokens_swa": 65536.0
+     },
+     "coverage": null,
+     "decode_graph_captured": true,
+     "decode_s": 119.9,
+     "duty": 87.98,
+     "extend_s": 168.5,
+     "failed": 0,
+     "peak_mem_mib": 23982.0,
+     "tps": 624.85,
+     "ttft_s": 4.26
+    }
+   },
+   "decode_graph_captured": true,
+   "fa2_coverage": {
+    "max_prefix_bytes": [
+     381681664
+    ],
+    "owner_conversions": [
+     508.0
+    ],
+    "plans": [
+     128.0
+    ],
+    "shared_reuses": [
+     381.0
+    ],
+    "skip_no_prefix": [
+     26.0
+    ],
+    "skip_over_budget": [
+     134.0
+    ]
+   },
+   "payload_counts": [
+    800,
+    800
+   ],
+   "payload_multiset_identical": true,
+   "peak_mem_mib": {
+    "fa2": [
+     24102.0
+    ],
+    "triton": [
+     23982.0
+    ]
+   },
+   "tag": "production three-tier HiCache",
+   "tiers": {
+    "tiers-fa2-r3": {
+     "l1_cached_tokens": 9533440.0,
+     "l2_backup_tokens": 1752215.0,
+     "prompt_tokens": 10547201.0
+    },
+    "tiers-triton-r3": {
+     "l1_cached_tokens": 9533440.0,
+     "l2_backup_tokens": 1769744.0,
+     "prompt_tokens": 10547201.0
+    }
+   },
+   "tps": {
+    "delta_pct": 3.1,
+    "fa2_mean": 644.21,
+    "fa2_spread_pct": 0.0,
+    "triton_mean": 624.85
+   }
+  }
+ }
+}

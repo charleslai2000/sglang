@@ -291,6 +291,12 @@ class TritonAttnBackend(AttentionBackend):
         self.enable_deterministic = (
             get_exec().deterministic.enable_deterministic_inference
         )
+        # T013 opt-in: FlashInfer FA2 BF16 ragged Full extend with one plan per
+        # Forward (restored T011 candidate; default off, Triton stays authoritative).
+        self.enable_fa2_ragged_extend = envs.SGLANG_FA2_RAGGED_EXTEND.get()
+        self._fa2_ragged_state = None
+        self._fa2_ragged_plan = None
+        self._fa2_ragged_planned = False
 
         if self.enable_deterministic:
             # Fixed split tile size for batch invariance
@@ -1022,6 +1028,11 @@ class TritonAttnBackend(AttentionBackend):
             out_cache_loc_full_physical=out_cache_loc_full_physical,
         )
 
+        # One ragged plan per Forward (built lazily by the first eligible Full
+        # layer, because the plan needs that layer's head geometry and scale).
+        self._fa2_ragged_plan = None
+        self._fa2_ragged_planned = False
+
     def init_cuda_graph_state(
         self,
         max_bs: int,
@@ -1396,6 +1407,30 @@ class TritonAttnBackend(AttentionBackend):
         ):
             causal = False
 
+        # T013 opt-in FA2 ragged Full extend: uses this Forward's shared plan,
+        # never re-plans in the layer path, and returns only when it really ran.
+        if (
+            self.enable_fa2_ragged_extend
+            and score_mod is None
+            and sinks is None
+            and causal
+        ):
+            plan = self._fa2_ragged_plan
+            if (
+                plan is None
+                and not self._fa2_ragged_planned
+                and self._fa2_ragged_layer_supported(layer)
+            ):
+                # Plan on the first Full layer that is itself eligible; SWA and
+                # other layers of this Forward keep their existing kernels.
+                self._fa2_ragged_planned = True
+                plan = self._plan_fa2_ragged_extend(forward_batch, layer)
+                self._fa2_ragged_plan = plan
+            if plan is not None and self._run_fa2_ragged_extend(
+                plan, q, k, v, o, layer, logits_soft_cap
+            ):
+                return o
+
         if self.dcp_size > 1:
             if score_mod is not None:
                 raise NotImplementedError(
@@ -1514,6 +1549,125 @@ class TritonAttnBackend(AttentionBackend):
             extend_seq_lens_cpu=forward_batch.extend_seq_lens_cpu,
         )
         return o
+
+    # ==================================================================
+    # T013 opt-in: FlashInfer FA2 BF16 ragged Full extend (T011 restoration)
+    # ==================================================================
+    def _fa2_ragged_blocker(self, layer):
+        """Why this layer cannot use the ragged Full extend path (None = it can)."""
+        if not self.enable_fa2_ragged_extend:
+            return "flag"
+        if self.use_mla or self.dcp_size != 1:
+            return "mla_or_dcp"
+        if self.enable_deterministic:
+            return "deterministic"
+        if self._translate_kv_loc is not None or self.page_size != 1:
+            return "pool_or_page"
+        if layer.is_cross_attention:
+            return "cross_attention"
+        window = layer.sliding_window_size
+        if window is not None and window > -1:
+            return "sliding_window"
+        if layer.qk_head_dim != layer.v_head_dim or layer.qk_head_dim != 512:
+            return f"head_dim_{layer.qk_head_dim}_{layer.v_head_dim}"
+        if layer.tp_q_head_num != self.num_head:
+            return f"q_heads_{layer.tp_q_head_num}_{self.num_head}"
+        if layer.tp_k_head_num != self.num_kv_head:
+            return f"kv_heads_{layer.tp_k_head_num}_{self.num_kv_head}"
+        xai_len = getattr(layer, "xai_temperature_len", -1)
+        if xai_len is not None and xai_len > 0:
+            return "xai_temperature"
+        if layer.scaling is None:
+            return "no_scaling"
+        meta = self.forward_metadata
+        if meta.qo_indptr is None or meta.kv_indptr is None:
+            return "no_indptr"
+        if meta.kv_indices is None or meta.custom_mask is not None:
+            return "mask"
+        if meta.mask_indptr is not None:
+            return "mask_indptr"
+        return None
+
+    def _fa2_ragged_layer_supported(self, layer) -> bool:
+        """Static eligibility of one layer for the ragged Full extend path."""
+        return self._fa2_ragged_blocker(layer) is None
+
+    def _plan_fa2_ragged_extend(self, forward_batch, layer):
+        """Plan both ragged wrappers once for this Forward from host lengths."""
+        # Plain prefill only: MIXED and target-verify batches keep their
+        # existing kernel paths, and speculative decoding is out of scope.
+        blocker = self._fa2_ragged_blocker(layer)
+        if forward_batch.forward_mode != ForwardMode.EXTEND:
+            blocker = blocker or "forward_mode"
+        prefix_lens = forward_batch.extend_prefix_lens_cpu
+        extend_lens = forward_batch.extend_seq_lens_cpu
+        if prefix_lens is None or extend_lens is None:
+            blocker = blocker or "no_host_lens"
+        elif not len(prefix_lens) or len(prefix_lens) != len(extend_lens):
+            blocker = blocker or "lens_shape"
+        if blocker is not None:
+            return None
+
+        from sglang.srt.layers.attention import bf16_ragged_extend as ragged
+
+        if self._fa2_ragged_state is None:
+            self._fa2_ragged_state = ragged.BF16RaggedExtendState(self.device)
+        qo_indptr_host = [0]
+        for value in extend_lens:
+            qo_indptr_host.append(qo_indptr_host[-1] + int(value))
+        return ragged.plan_forward(
+            self._fa2_ragged_state,
+            qo_indptr_host,
+            [int(value) for value in prefix_lens],
+            [int(value) for value in extend_lens],
+            self.num_head,
+            self.num_kv_head,
+            layer.qk_head_dim,
+            float(layer.scaling),
+            logit_capping_mod(layer.logit_capping_method, layer.logit_cap),
+        )
+
+    def _run_fa2_ragged_extend(self, plan, q, k, v, o, layer, logits_soft_cap):
+        """Run one Full layer through the Forward's plan; False means fall back."""
+        if not self._fa2_ragged_layer_supported(layer):
+            return False
+        if (
+            plan.head_dim != layer.qk_head_dim
+            or plan.sm_scale != float(layer.scaling)
+            or plan.logits_soft_cap != logits_soft_cap
+            or plan.num_qo_heads != layer.tp_q_head_num
+            or plan.num_kv_heads != layer.tp_k_head_num
+        ):
+            return False
+
+        from sglang.srt.layers.attention import bf16_ragged_extend as ragged
+
+        pool = self.token_to_kv_pool
+        k_pool, v_pool = pool.get_kv_buffer(layer.layer_id)
+        cache_dtype = getattr(pool, "dtype", None) or k_pool.dtype
+        k_prefix, v_prefix = ragged.prefix_kv_for_owner(
+            plan,
+            self._fa2_ragged_state,
+            layer.layer_id,
+            k_pool,
+            v_pool,
+            self.forward_metadata.kv_indices,
+            cache_dtype,
+            q.dtype,
+        )
+        ragged.run_layer(
+            plan,
+            self._fa2_ragged_state,
+            q,
+            k,
+            v,
+            k_prefix,
+            v_prefix,
+            o,
+            layer.k_scale_float if layer.k_scale is not None else 1.0,
+            layer.v_scale_float if layer.v_scale is not None else 1.0,
+        )
+        return True
 
     def _forward_extend_dcp(
         self,

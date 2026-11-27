@@ -1,0 +1,11 @@
+{
+  "launcher_env": [
+    "SGLANG_FA2_RAGGED_EXTEND=1",
+    "SGLANG_T011_BF16_TIMING_STRIDE=8",
+    "SGLANG_T011_BF16_PREFIX_BUDGET_MB=128",
+    "SGLANG_CTWNA16_HUMMING=1",
+    "SGLANG_T011_BF16_TIMING_PATH=/home/ubuntu/workspaces/3rdparty/sglang-hicache/control/gemma4-t013-opt-merge/runs/20261127T-engage/engage/ragged-coverage.json"
+  ],
+  "coverage_file": false,
+  "verdict": "FAIL"
+}

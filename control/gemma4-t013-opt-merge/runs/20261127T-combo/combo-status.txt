@@ -1,0 +1,60 @@
+CELL_START cell=c8-triton-r1 at=2026-11-27T12:55:47Z
+cell=c8-triton-r1 done=2026-11-27T13:05:01Z summary=official_tps=728.23 duty_pct=98.51 duty_clientwall_pct=82.95 bench_s=281.23 client_wall_s=334 completed=800/800 failed=0 profiled=False head=7ed79dab11
+CELL_START cell=c8-fa2-r1 at=2026-11-27T13:05:01Z
+cell=c8-fa2-r1 done=2026-11-27T13:14:02Z summary=official_tps=723.45 duty_pct=98.51 duty_clientwall_pct=83.75 bench_s=283.09 client_wall_s=333 completed=800/800 failed=0 profiled=False head=7ed79dab11
+CELL_START cell=c8-fa2-r2 at=2026-11-27T13:14:02Z
+cell=c8-fa2-r2 done=2026-11-27T13:23:00Z summary=official_tps=736.65 duty_pct=99.26 duty_clientwall_pct=83.88 bench_s=278.01 client_wall_s=329 completed=800/800 failed=0 profiled=False head=7ed79dab11
+CELL_START cell=tiers-triton-r1 at=2026-11-27T13:23:00Z
+cell=tiers-triton-r1 done=2026-11-27T13:33:02Z summary=official_tps=619.27 duty_pct=87.28 duty_clientwall_pct=74.78 bench_s=330.71 client_wall_s=386 completed=800/800 failed=0 profiled=False head=7ed79dab11
+20G	/home/ubuntu/workspaces/3rdparty/sglang-hicache/control/gemma4-t013-opt-merge/runs/20261127T-combo/cells/tiers-triton-r1/l3-extent
+cell=tiers-triton-r1 extent_log_lines=5380
+CELL_START cell=tiers-fa2-r1 at=2026-11-27T13:33:03Z
+cell=tiers-fa2-r1 done=2026-11-27T13:43:06Z summary=official_tps=627.98 duty_pct=87.13 duty_clientwall_pct=74.58 bench_s=326.12 client_wall_s=381 completed=800/800 failed=0 profiled=False head=7ed79dab11
+21G	/home/ubuntu/workspaces/3rdparty/sglang-hicache/control/gemma4-t013-opt-merge/runs/20261127T-combo/cells/tiers-fa2-r1/l3-extent
+cell=tiers-fa2-r1 extent_log_lines=5492
+CELL_START cell=tiers-fa2-r2 at=2026-11-27T13:43:08Z
+cell=tiers-fa2-r2 done=2026-11-27T13:53:14Z summary=official_tps=626.97 duty_pct=87.39 duty_clientwall_pct=74.92 bench_s=326.65 client_wall_s=381 completed=800/800 failed=0 profiled=False head=7ed79dab11
+21G	/home/ubuntu/workspaces/3rdparty/sglang-hicache/control/gemma4-t013-opt-merge/runs/20261127T-combo/cells/tiers-fa2-r2/l3-extent
+cell=tiers-fa2-r2 extent_log_lines=5487
+CELL_START cell=long-triton-r1 at=2026-11-27T13:53:15Z
+cell=long-triton-r1 done=2026-11-27T14:19:29Z summary=official_tps=114.38 duty_pct=92.3 duty_clientwall_pct=88.34 bench_s=1289.2 client_wall_s=1347 completed=576/576 failed=0 profiled=False head=7ed79dab11
+33G	/home/ubuntu/workspaces/3rdparty/sglang-hicache/control/gemma4-t013-opt-merge/runs/20261127T-combo/cells/long-triton-r1/l3-extent
+cell=long-triton-r1 extent_log_lines=8416
+CELL_START cell=long-fa2-r1 at=2026-11-27T14:19:31Z
+cell=long-fa2-r1 done=2026-11-27T14:44:40Z summary=official_tps=119.78 duty_pct=92.29 duty_clientwall_pct=88.42 bench_s=1231.06 client_wall_s=1285 completed=576/576 failed=0 profiled=False head=7ed79dab11
+33G	/home/ubuntu/workspaces/3rdparty/sglang-hicache/control/gemma4-t013-opt-merge/runs/20261127T-combo/cells/long-fa2-r1/l3-extent
+cell=long-fa2-r1 extent_log_lines=8437
+CELL_START cell=c8-triton-r2 at=2026-11-27T14:56:27Z
+cell=c8-triton-r2 done=2026-11-27T15:05:31Z summary=official_tps=743.02 duty_pct=99.21 duty_clientwall_pct=83.88 bench_s=275.63 client_wall_s=326 completed=800/800 failed=0 profiled=False head=7ed79dab11
+CELL_START cell=tiers-triton-r2 at=2026-11-27T15:05:31Z
+cell=tiers-triton-r2 done=2026-11-27T15:15:34Z summary=official_tps=621.74 duty_pct=87.92 duty_clientwall_pct=75.22 bench_s=329.4 client_wall_s=385 completed=800/800 failed=0 profiled=False head=7ed79dab11
+19G	/home/ubuntu/workspaces/3rdparty/sglang-hicache/control/gemma4-t013-opt-merge/runs/20261127T-combo/cells/tiers-triton-r2/l3-extent
+cell=tiers-triton-r2 extent_log_lines=5179
+CELL_START cell=c8-fa2-r3 at=2026-11-27T15:15:35Z
+cell=c8-fa2-r3 done=2026-11-27T15:25:06Z summary=official_tps=675.05 duty_pct=98.6 duty_clientwall_pct=84.26 bench_s=303.38 client_wall_s=355 completed=800/800 failed=0 profiled=False head=7ed79dab11
+CELL_START cell=c8-triton-r3 at=2026-11-27T15:25:06Z
+cell=c8-triton-r3 done=2026-11-27T15:34:06Z summary=official_tps=736.69 duty_pct=99.23 duty_clientwall_pct=83.85 bench_s=278.0 client_wall_s=329 completed=800/800 failed=0 profiled=False head=7ed79dab11
+CELL_START cell=c8-triton-r5 at=2026-11-27T16:24:03Z
+cell=c8-triton-r5 done=2026-11-27T16:33:01Z summary=official_tps=735.92 duty_pct=99.25 duty_clientwall_pct=84.21 bench_s=278.29 client_wall_s=328 completed=800/800 failed=0 profiled=False head=7ed79dab11
+CELL_START cell=c8-fa2-r5 at=2026-11-27T16:33:01Z
+cell=c8-fa2-r5 done=2026-11-27T16:41:44Z summary=official_tps=760.48 duty_pct=99.18 duty_clientwall_pct=83.73 bench_s=269.3 client_wall_s=319 completed=800/800 failed=0 profiled=False head=7ed79dab11
+CELL_START cell=tiers-triton-r3 at=2026-11-27T16:41:44Z
+cell=tiers-triton-r3 done=2026-11-27T16:51:37Z summary=official_tps=624.85 duty_pct=87.98 duty_clientwall_pct=75.1 bench_s=327.76 client_wall_s=384 completed=800/800 failed=0 profiled=False head=7ed79dab11
+21G	/home/ubuntu/workspaces/3rdparty/sglang-hicache/control/gemma4-t013-opt-merge/runs/20261127T-combo/cells/tiers-triton-r3/l3-extent
+cell=tiers-triton-r3 extent_log_lines=5531
+CELL_START cell=tiers-fa2-r3 at=2026-11-27T16:51:38Z
+cell=tiers-fa2-r3 done=2026-11-27T17:01:26Z summary=official_tps=644.21 duty_pct=88.26 duty_clientwall_pct=75.43 bench_s=317.91 client_wall_s=372 completed=800/800 failed=0 profiled=False head=7ed79dab11
+19G	/home/ubuntu/workspaces/3rdparty/sglang-hicache/control/gemma4-t013-opt-merge/runs/20261127T-combo/cells/tiers-fa2-r3/l3-extent
+cell=tiers-fa2-r3 extent_log_lines=5175
+CELL_START cell=long-triton-r2 at=2026-11-27T17:01:27Z
+cell=long-triton-r2 done=2026-11-27T17:26:56Z summary=official_tps=116.51 duty_pct=93.12 duty_clientwall_pct=89.42 bench_s=1265.65 client_wall_s=1318 completed=576/576 failed=0 profiled=False head=7ed79dab11
+33G	/home/ubuntu/workspaces/3rdparty/sglang-hicache/control/gemma4-t013-opt-merge/runs/20261127T-combo/cells/long-triton-r2/l3-extent
+cell=long-triton-r2 extent_log_lines=8404
+CELL_START cell=long-fa2-r2 at=2026-11-27T17:26:57Z
+cell=long-fa2-r2 done=2026-11-27T17:49:23Z summary=official_tps=135.22 duty_pct=92.91 duty_clientwall_pct=88.72 bench_s=1090.47 client_wall_s=1142 completed=576/576 failed=0 profiled=False head=7ed79dab11
+33G	/home/ubuntu/workspaces/3rdparty/sglang-hicache/control/gemma4-t013-opt-merge/runs/20261127T-combo/cells/long-fa2-r2/l3-extent
+cell=long-fa2-r2 extent_log_lines=8563
+CELL_START cell=c8-triton-r6 at=2026-11-27T17:50:29Z
+cell=c8-triton-r6 done=2026-11-27T17:59:07Z summary=official_tps=739.17 duty_pct=99.27 duty_clientwall_pct=84.63 bench_s=277.07 client_wall_s=325 completed=800/800 failed=0 profiled=False head=7ed79dab11
+CELL_START cell=c8-fa2-r6 at=2026-11-27T17:59:07Z
+cell=c8-fa2-r6 done=2026-11-27T18:07:32Z summary=official_tps=759.87 duty_pct=99.29 duty_clientwall_pct=84.15 bench_s=269.52 client_wall_s=318 completed=800/800 failed=0 profiled=False head=7ed79dab11

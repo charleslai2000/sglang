@@ -1,0 +1,56 @@
+{
+  "arm": "triton",
+  "short_greedy": {
+    "short-0": null,
+    "short-1": null,
+    "short-2": null,
+    "short-3": null
+  },
+  "cold": {
+    "output_ids": null,
+    "prompt_tokens": 10305,
+    "completion_tokens": 8,
+    "cached_tokens": 0,
+    "text_head": "\n"
+  },
+  "warm": {
+    "output_ids": null,
+    "prompt_tokens": 10305,
+    "completion_tokens": 8,
+    "cached_tokens": 10304,
+    "text_head": "\n"
+  },
+  "restored": {
+    "output_ids": null,
+    "prompt_tokens": 10305,
+    "completion_tokens": 8,
+    "cached_tokens": 0,
+    "text_head": "\n"
+  },
+  "flush": {
+    "status_code": 200,
+    "body": "Cache flushed.\nPlease check backend logs for more details. (When there are running or waiting requests, the operation will not be performed.)\n"
+  },
+  "extent": {
+    "before": {
+      "extent_read": 0,
+      "extent_hit": 0,
+      "restore_disposition": 0
+    },
+    "after_flush": {
+      "extent_read": 0,
+      "extent_hit": 1,
+      "restore_disposition": 0
+    },
+    "after": {
+      "extent_read": 0,
+      "extent_hit": 2,
+      "restore_disposition": 0
+    }
+  },
+  "pressure_requests": 16,
+  "ids_match_cold": true,
+  "ids_match_warm": true,
+  "restored_tokens": 0,
+  "warm_cached_tokens": 10304
+}

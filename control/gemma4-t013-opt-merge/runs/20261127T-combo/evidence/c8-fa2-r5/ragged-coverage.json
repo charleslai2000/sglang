@@ -1,0 +1,20 @@
+{
+  "forwards_seen": 256,
+  "stride": 8,
+  "ms": {
+    "plan": 18.640959948301315,
+    "gather_cast": 70.30342419818044,
+    "prefix_attention": 1171.1265941262245,
+    "extend_attention": 116.56428799033165,
+    "merge": 21.81932795792818
+  },
+  "coverage": {
+    "plans": 256.0,
+    "skip_no_prefix": 27.0,
+    "skip_over_budget": 84.0,
+    "max_prefix_bytes": 341835776,
+    "owner_conversions": 1020.0,
+    "shared_reuses": 765.0
+  },
+  "prefix_budget_bytes": 134217728
+}

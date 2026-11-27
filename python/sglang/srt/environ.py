@@ -928,6 +928,7 @@ class Envs:
     SGLANG_HUMMING_USE_F16_ACCUM = EnvBool(False)
     SGLANG_HUMMING_MOE_GEMM_TYPE = EnvStr("")
     SGLANG_CTWNA16_HUMMING = EnvBool(False)
+    SGLANG_FA2_RAGGED_EXTEND = EnvBool(False)
 
     # ===================================================================
     # FlashInfer, FlashMLA, and TRT-LLM
