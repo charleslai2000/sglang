@@ -1,0 +1,67 @@
+{
+ "verdict": "PASS",
+ "failed": []
+}
+{
+ "bench_complete": {
+  "off": true,
+  "on1": true,
+  "on2": true
+ },
+ "cells": {
+  "off": {
+   "bench_s": 313.20329809514806,
+   "client_wall_s": 364,
+   "completed": 800,
+   "decode_s": 142.5973803381919,
+   "duty_pct": 99.17474572347308,
+   "extend_s": 168.0211941452026,
+   "failed": 0,
+   "itl_s": 0.03990446969610068,
+   "total": 800,
+   "tps": 653.8883889331963,
+   "ttft_s": 3.8366747712687355
+  },
+  "on1": {
+   "bench_s": 278.0751692240592,
+   "client_wall_s": 331,
+   "completed": 800,
+   "decode_s": 120.0843198447224,
+   "duty_pct": 99.27007523015898,
+   "extend_s": 155.96110984039305,
+   "failed": 0,
+   "itl_s": 0.03882023922778557,
+   "total": 800,
+   "tps": 736.4915054137117,
+   "ttft_s": 3.143018056915316
+  },
+  "on2": {
+   "bench_s": 277.6895298010204,
+   "client_wall_s": 328,
+   "completed": 800,
+   "decode_s": 120.01714329528832,
+   "duty_pct": 99.28396791741784,
+   "extend_s": 155.68404038238523,
+   "failed": 0,
+   "itl_s": 0.03865402909096869,
+   "total": 800,
+   "tps": 737.514302922225,
+   "ttft_s": 3.067195777974557
+  }
+ },
+ "decode_time_delta_pct": {
+  "on1": -15.78784998719911,
+  "on2": -15.834959232316203
+ },
+ "payload_counts": {
+  "off": 800,
+  "on1": 800,
+  "on2": 800
+ },
+ "payload_multiset_identical": true,
+ "tps_gain_mean_pct": 12.71081068901857,
+ "tps_gain_pct": {
+  "on1": 12.632601813786671,
+  "on2": 12.78901956425047
+ }
+}

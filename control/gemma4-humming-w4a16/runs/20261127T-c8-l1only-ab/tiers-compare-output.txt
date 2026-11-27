@@ -1,0 +1,58 @@
+{
+ "verdict": "PASS",
+ "failed": []
+}
+{
+ "capacity_ratio": {
+  "sglang:max_total_num_tokens": 1.001420663438727,
+  "sglang:max_total_num_tokens_swa": 1.0
+ },
+ "cells": {
+  "off": {
+   "bench_s": 358.88964751409367,
+   "completed": 800,
+   "counters": {
+    "sglang:backuped_tokens_total": 1147370.0,
+    "sglang:cache_hit_rate": 0.0,
+    "sglang:cached_tokens_total": 9533440.0,
+    "sglang:evicted_tokens_total": 188401.0,
+    "sglang:hicache_backup_tokens_total": 1763808.0,
+    "sglang:hicache_prompt_tokens_total": 10547201.0,
+    "sglang:max_total_num_tokens": 1441580.0,
+    "sglang:max_total_num_tokens_swa": 65536.0
+   },
+   "extent_events": 5570,
+   "failed": 0,
+   "host_backup_events": 1,
+   "total": 800,
+   "tps": 570.6489485516784
+  },
+  "on": {
+   "bench_s": 329.56686583696865,
+   "completed": 800,
+   "counters": {
+    "sglang:backuped_tokens_total": 1141749.0,
+    "sglang:cache_hit_rate": 0.0,
+    "sglang:cached_tokens_total": 9533440.0,
+    "sglang:evicted_tokens_total": 187132.0,
+    "sglang:hicache_backup_tokens_total": 1763841.0,
+    "sglang:hicache_prompt_tokens_total": 10547201.0,
+    "sglang:max_total_num_tokens": 1443628.0,
+    "sglang:max_total_num_tokens_swa": 65536.0
+   },
+   "extent_events": 5504,
+   "failed": 0,
+   "host_backup_events": 1,
+   "total": 800,
+   "tps": 621.4216938340859
+  }
+ },
+ "extent_tier_used_both_arms": true,
+ "host_tier_used_both_arms": true,
+ "payload_counts": {
+  "off": 800,
+  "on": 800
+ },
+ "payload_multiset_identical": true,
+ "tps_delta_pct": 8.897369461780325
+}

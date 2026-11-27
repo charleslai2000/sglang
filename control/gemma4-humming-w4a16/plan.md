@@ -1,6 +1,6 @@
 # T012 Humming W4A16 plan
 
-Status: ACTIVE — CT-loader + Humming post-load weight/correctness gate PASS (see `runs/T012-CTLOADER-HUMMING-QUALIFICATION.md`); original C-8 L1-only A/B is next, three-tier validation is conditional on a stable net benefit.
+Status: DONE. Weight/correctness gate PASS (`runs/T012-CTLOADER-HUMMING-QUALIFICATION.md`); original C-8 L1-only **+12.71%** mean TPS and the production three-tier stack **+8.90%** (`runs/T012-C8-AB-AND-TIERS.md`). The scoped opt-in is retained behind `SGLANG_CTWNA16_HUMMING` (default off).
 
 ## Established inputs
 Frozen source `c4f6b50da7940ff28fefae2eb3fb0b71eb1014cc`; checkpoint is group-32 symmetric INT4 with BF16 scales/compute. Humming 0.1.12 runs on RTX 3090 SM86; prior actual-weight isolated results are archived in `runs/T012-SHAPE-COMPATIBILITY-AND-BENCHMARK.md` and will not be repeated.
@@ -16,5 +16,7 @@ Environment-controlled opt-in branch in `CompressedTensorsWNA16.process_weights_
 ## Audit (qualification only)
 `runs/20261127T-ctloader-postload/auditlib/sitecustomize.py` (run-scoped `PYTHONPATH`, never imported by production) maps parameters to their `named_parameters()` names, then records per-parameter SHA256 of the loaded `weight_packed`/`weight_scale` before conversion in both arms, plus dispatch counters, the probe logits and replay evidence. No hashing or audit code exists in `python/`.
 
-## Next
-Original C-8 L1-only A/B on the frozen argv with FA2 disabled and no audit instrumentation (`runs/20261127T-c8-l1only-ab/`), three cells (`off`, `on1`, `on2`), identical payload multiset, keep only on stable net benefit; then conditional three-tier validation. Preserve unrelated T011 work.
+## Outcome
+C-8 L1-only (`runs/20261127T-c8-l1only-ab/`, arms `off`/`on1`/`on2`, frozen argv, no audit instrumentation): 653.89 → 736.49/737.51 official TPS, +12.63%/+12.79%, decode device −15.8%, extend −7.2%, 800/800 with an identical payload multiset, KV capacity −0.19% and not binding. Three-tier production stack: 570.65 → 621.42 TPS (+8.90%), identical payloads and L1 cached tokens, same-order L2/extent activity, capacity not reduced.
+
+Retained as an opt-in flag with Marlin as the default; enabling it in production is a launch-time `SGLANG_CTWNA16_HUMMING=1`. FA2 remains excluded. Preserved unrelated T011 work throughout.

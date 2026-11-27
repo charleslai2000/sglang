@@ -1,0 +1,15 @@
+
+chunked_prefill_size_override=4096
+hicache_mode=off
+write_policy_override=from-baseline
+prefetch_policy_override=from-baseline
+window_delay_s=150
+window_seconds=0
+task_started=2026-11-27T11:33:14Z
+wrapper_pid=857540
+wrapper_command=/home/ubuntu/workspaces/3rdparty/sglang-hicache/control/gemma4-rtx3090-throughput-scheduling/runs/t007_c8_profile.sh
+extent_dir=/home/ubuntu/workspaces/3rdparty/sglang-hicache/control/gemma4-humming-w4a16/runs/20261127T-c8-l1only-ab/c8-off/l3-extent
+SGLANG_ENABLE_METRICS_DEVICE_TIMER=1
+SGLANG_ENABLE_NVTX_SCHEDULER=1
+git_head=872bfe1d55a18de6a40b01be848a8a4a3b619f98
+bench_clients=40 rounds=20 req_len=1024 out_len=256 rate=8 max_parallel=64 tag=T012-c8-l1only-off

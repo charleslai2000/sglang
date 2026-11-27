@@ -1,0 +1,14 @@
+Cell intent: T012 conditional three-tier validation (production HiCache stack).
+
+Frozen C-8 acceptance argv with the full tier stack: `--enable-hierarchical-cache`,
+`--hicache-size 8`, `write_back`, kernel IO backend, page_first layout, host memory
+mode cache, extent storage backend (64 MiB extents, 32 GiB file), prefetch policy
+`wait_complete`, chunked prefill 4096. Same C-8 workload as the L1-only A/B (40
+clients x 20 rounds, 800 requests, Poisson 8, seed 42).
+
+Cells: `off` = production Marlin, `on` = identical argv plus `SGLANG_CTWNA16_HUMMING=1`.
+No `--quantization` override, no FA2, no prefill graph, no audit instrumentation.
+
+Acceptance: both arms complete 800/800 with an identical payload multiset; the host
+tier and the extent tier are both exercised in both arms; KV capacity is not reduced
+by more than 2%; throughput does not regress by more than 1%.

@@ -1,6 +1,6 @@
 # T012 — Humming W4A16 GEMM qualification
 
-Status: ACTIVE — weight/correctness gate PASS; original C-8 L1-only A/B pending
+Status: DONE — weight/correctness gate PASS; C-8 L1-only +12.71%; three-tier +8.90%; opt-in retained
 
 ## Work area
 `python/sglang/srt/layers/quantization/`, existing SGLang/vLLM Humming sources and installed package, `control/gemma4-humming-w4a16/`, C-8/T010 Nsight artifacts under `/data/sglang-hicache/gemma4/runs/`.
@@ -29,5 +29,14 @@ Report: `runs/T012-CTLOADER-HUMMING-QUALIFICATION.md`; artifacts `runs/20261127T
 - Humming arm: 8,608 Humming GEMMs, 2,024 during decode-graph capture (253×8 buckets), 0 Marlin dispatches; separate replay check shows a `void humming<...>` kernel on replayed graph.
 - Greedy: 1-token and 32-token graph probes identical; 3/4 128-token graph decodes identical (511/512 tokens). The single divergence sits where the model's own prefill and decode paths prefer different tokens in both backends; same prompt with `return_logprob` gave identical 23-token sequences in both arms.
 
+## Performance gates (PASS)
+Report: `runs/T012-C8-AB-AND-TIERS.md`; drivers/evidence `runs/20261127T-c8-l1only-ab/`, raw runs under `/data/sglang-hicache/gemma4/runs/20261127T-t012-{ab,tiers}/`.
+- Original C-8 L1-only, frozen argv, 800 requests: Marlin 653.89 TPS; Humming 736.49 / 737.51 TPS (**+12.63% / +12.79%, mean +12.71%**), decode device time −15.8%, extend −7.2%, TTFT −0.7 s, all cells 800/800 with an identical payload multiset.
+- KV capacity 1,488,985 → 1,486,169 tokens (−0.19%, padded repack footprint +20 MB); not binding on this workload.
+- Three-tier production stack (HiCache L1+L2+extent, `write_back`, `wait_complete`, chunk 4096): 570.65 → 621.42 TPS (**+8.90%**), 800/800 both arms, identical payloads, identical L1 cached tokens (9,533,440), same-order L2 backup (1.7638M) and extent activity (5,570 vs 5,504), capacity not reduced, SWA identical.
+
+## Decision
+Retain the scoped opt-in implementation (committed with its qualification evidence). It stays behind `SGLANG_CTWNA16_HUMMING` (default off): the production launch must export `SGLANG_CTWNA16_HUMMING=1` to obtain the gain. Frozen argv, checkpoint, tier configuration and Marlin default are unchanged, so any other model or a fallback is unaffected.
+
 ## Remaining
-Original C-8 L1-only Marlin/Humming A/B (identical frozen argv, FA2 disabled, no audit instrumentation), then three-tier validation only if there is a stable net benefit. Keep the opt-in branch only if those pass; otherwise revert it.
+None. FA2 stays excluded. Further gains would need a new scope.

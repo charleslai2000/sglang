@@ -22,9 +22,10 @@ for CELL in off on1 on2; do
     ENVV+=(SGLANG_CTWNA16_HUMMING=1)
   fi
   echo "CELL_START cell=$CELL at=$(date -u +%FT%TZ)"
-  if ! env "${ENVV[@]}" bash "$WRAP" > "$DIR/wrapper.log" 2>&1; then
-    printf 'cell=%s wrapper_failed=%s\n' "$CELL" "$?" >> "$OUT/ab-status.txt"
-    tail -20 "$DIR/wrapper.log" || true
+  mkdir -p "$OUT/logs"
+  if ! env "${ENVV[@]}" bash "$WRAP" > "$OUT/logs/$CELL-wrapper.log" 2>&1; then
+    printf 'cell=%s wrapper_failed\n' "$CELL" >> "$OUT/ab-status.txt"
+    tail -20 "$OUT/logs/$CELL-wrapper.log" || true
     exit 4
   fi
   printf 'cell=%s done=%s summary=%s\n' "$CELL" "$(date -u +%FT%TZ)" \

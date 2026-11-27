@@ -1,0 +1,3 @@
+cell=off done=2026-11-27T11:40:28Z summary=official_tps=653.89 duty_pct=99.17 duty_clientwall_pct=85.33 bench_s=313.2 client_wall_s=364 completed=800/800 failed=0 profiled=False head=872bfe1d55
+cell=on1 done=2026-11-27T11:49:33Z summary=official_tps=736.49 duty_pct=99.27 duty_clientwall_pct=83.4 bench_s=278.08 client_wall_s=331 completed=800/800 failed=0 profiled=False head=872bfe1d55
+cell=on2 done=2026-11-27T11:58:38Z summary=official_tps=737.51 duty_pct=99.28 duty_clientwall_pct=84.06 bench_s=277.69 client_wall_s=328 completed=800/800 failed=0 profiled=False head=872bfe1d55

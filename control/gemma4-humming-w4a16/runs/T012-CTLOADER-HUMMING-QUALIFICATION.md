@@ -7,6 +7,8 @@ the model then runs Humming for real forwards and inside the replayed decode CUD
 This report covers the weight/correctness gate only. Performance (original C-8 L1-only
 A/B) and the conditional three-tier validation are recorded separately.
 
+Performance gates: `T012-C8-AB-AND-TIERS.md` (C-8 L1-only +12.71%, three-tier +8.90%).
+
 ## Scope and method
 
 Production code change is limited to an opt-in branch in
