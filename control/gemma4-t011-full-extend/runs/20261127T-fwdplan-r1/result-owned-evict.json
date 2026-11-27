@@ -1,0 +1,65 @@
+{
+  "device": "NVIDIA GeForce RTX 3090",
+  "torch": "2.13.0+cu129",
+  "flashinfer": "0.6.17",
+  "prefix_lens": [
+    1024,
+    2048,
+    512
+  ],
+  "extend_lens": [
+    700,
+    300,
+    1500
+  ],
+  "plan_created": true,
+  "plan_unchanged_after_layers": true,
+  "prefix_cache_owners": [
+    [
+      132042421313536,
+      132042429825024
+    ]
+  ],
+  "owner23_reused_by_shared": true,
+  "over_cap_falls_back": true,
+  "layers": {
+    "5": {
+      "engaged": true,
+      "shared": false,
+      "vs_triton_max_abs": 0.00091552734375
+    },
+    "11": {
+      "engaged": true,
+      "shared": false,
+      "vs_triton_max_abs": 0.00091552734375
+    },
+    "17": {
+      "engaged": true,
+      "shared": false,
+      "vs_triton_max_abs": 0.00091552734375
+    },
+    "23": {
+      "engaged": true,
+      "shared": false,
+      "vs_triton_max_abs": 0.00091552734375
+    },
+    "29": {
+      "engaged": true,
+      "shared": true,
+      "vs_triton_max_abs": 0.00091552734375
+    },
+    "35": {
+      "engaged": true,
+      "shared": true,
+      "vs_triton_max_abs": 0.00091552734375
+    },
+    "41": {
+      "engaged": true,
+      "shared": true,
+      "vs_triton_max_abs": 0.00091552734375
+    }
+  },
+  "workspace_bytes": 8388608,
+  "prefix_bf16_bytes": 14680064,
+  "temporary_prefix_limit_bytes": 134217728
+}

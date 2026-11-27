@@ -1,0 +1,6 @@
+T011 forward-plan GPU checks on RTX 3090 SM86, source checkout HEAD 371521fc99.
+- result.json: first plan/correctness check; exposed total-prefix sum bug and incorrect shared-Triton reference dtype, fixed before scored validation.
+- result-8mib.json: 8 MiB FlashInfer float workspace correctness check.
+- result-budget32.json: configurable prefix budget check.
+- result-owned-evict.json: final owner-buffer keyed cache/release check, all seven Full layers vs Triton; owner 23 shared reuse confirmed.
+The source candidate has been reverted and is archived under runs/archive/. These are validation artifacts, not production implementation.

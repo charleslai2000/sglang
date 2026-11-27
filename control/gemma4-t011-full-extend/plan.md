@@ -1,34 +1,22 @@
 # T011 Full Attention Extend plan
 
-Status: DONE — BF16 Ragged candidate closed on measured end-to-end regression; production source restored.
+Status: DONE — authorized Forward-level plan-reuse continuation measured and closed; production source restored.
 
 ## Established results
 
-1. **Native FP8 FA2 is unsupported on the target.** FlashInfer 0.6.17 builds the one-byte large-head
-   FA2 variant only for SM100+; RTX 3090 (SM86) fails at `paged.plan()` with
-   `No supported CUDA architectures found for major versions [10, 11, 12]`. No gate override.
-
-2. **Runtime geometry is Full `head_dim=512`, Q/KV 8/2, SWA 256.** The earlier "head_dim=256" stop
-   used the unconverted source config and is superseded.
-
-3. **BF16 Ragged candidate works at the operator level.** FP8-index gather + transient BF16 prefix,
-   two bf16 ragged attentions and `merge_state` (log2 LSE kept through the merge) beat complete Triton
-   extend by 27–48% on every isolated shape, with FP32 oracle error ~1e-5 and 112 MiB prefix memory
-   (inside the 128 MiB cap). Evidence: `runs/T011-BF16-RAGGED-QUALIFICATION.md`,
-   `runs/20261127T-bf16-ragged-r1..r9/`.
-
-4. **It does not transfer to the frozen workload.** Official C-8 L1-only A/B on the same source:
-   650.06 TPS control vs 561.55 TPS with the candidate (−13.6%), extend 169.5 s → 219.1 s (+29.2%),
-   decode unchanged, 800/800 both cells. The isolated loop still shows −48.5% at 4096+9216, so the
-   loss is per-forward/per-layer integration overhead (two blocking `plan()` readbacks per Full layer
-   plus per-layer prefix materialisation), not kernel throughput.
+1. **Native FP8 FA2 is unsupported on SM86.** FlashInfer 0.6.17 refuses one-byte large-head FA2 on RTX 3090; no architecture-gate override was made.
+2. **Runtime geometry:** Gemma4 Full `head_dim=512`, Q/KV heads 8/2; SWA is 256.
+3. **Operator-level BF16 Ragged qualification passed.** Across tested shapes, complete isolated path improved 27–48%, with FP32-oracle error around 1e-5, 112 MiB prefix at the qualified long shape, and log2 LSE preserved through merge. Evidence: `runs/T011-BF16-RAGGED-QUALIFICATION.md`.
+4. **Forward-level plan-reuse continuation passed its real 42-layer extend gate.** Plans built once from host lengths; three-request ragged backend check passed all seven Full layers, preserved plan identity, and reused owner 23 for Shared-KV consumers. Real multi-request complete-Forward extend fell from 166.55 to 140.29 ms/1k prefill tokens (**−15.8%**, ≥10% gate passed). Component event aggregates: plan 178.5 ms, gather/cast 238.8 ms, prefix attention 15.881 s, extend attention 3.792 s, merge 249.8 ms (192 forwards; stride 1).
+5. **C-8 L1-only keep gate failed.** Same-source control: 661.27 TPS, extend 168.76 s, decode 138.70 s. Candidate repeats: 672.90 and 672.15 TPS (+1.76%, +1.65%; mean +1.71%), extend 162.12 and 162.17 s (~−3.9%), decode 139.46 and 139.74 s. All scored runs completed 800/800 with zero failed requests. The required stable ≥5% net TPS gain was not achieved.
+6. Two earlier candidate C-8 attempts OOMed while retaining all four owners' BF16 prefixes. The implementation then bounded residency to one owner, passed its plan/correctness check, and completed the two scored candidate repeats at the 128 MiB hard prefix ceiling. This did not change the throughput decision.
 
 ## Decision
-Candidate closed; no production integration retained. `triton_backend.py` is back to the frozen
-source; the module is archived at `runs/archive/bf16_ragged_extend.py` for the record. Decode, SWA,
-Marlin, KV capacity, quantization, scheduling and cache tiers were never modified.
 
-## Reopen condition
-Only if the per-layer `plan()` readbacks and repeated prefix conversion are removed (build prefix
-indptr from the host lists already present, convert once per forward) and a fresh L1-only A/B is
-authorised. That is new scope, not a continuation of this task.
+**Candidate closed and reverted.** The complete-Forward gate alone is insufficient: the explicitly required C-8 L1-only net gate failed. Production `python/` is restored to frozen source `a76206a5fb`. No Decode, SWA, Marlin, KV capacity, quantization, scheduler, or cache-tier behavior was changed. Candidate module, scripts, and check outputs are retained under `runs/archive/` and `runs/20261127T-fwdplan-r1/` for evidence only.
+
+Full continuation report: `runs/T011-FORWARD-PLAN-REUSE-QUALIFICATION.md`. Prior operator/native-FA2 reports remain valid for their own scoped results. The deliberately untracked `T011-ATTENTION-REVIEW.md` was left untouched. No T011 frontier entry remains.
+
+## Remaining
+
+None. Any further FA2 investigation requires new scope; this candidate is not production-enabled.
