@@ -1,0 +1,68 @@
+{
+  "device": "NVIDIA GeForce RTX 3090",
+  "capability": [
+    8,
+    6
+  ],
+  "torch": "2.13.0+cu129",
+  "flashinfer": "0.6.17",
+  "workspace_bytes": 67108864,
+  "temporary_prefix_limit_bytes": 134217728,
+  "results": [
+    {
+      "case": "single-4096-28672",
+      "prefix_lens": [
+        28672
+      ],
+      "extend_lens": [
+        4096
+      ],
+      "total_prefix": 28672,
+      "total_new": 4096,
+      "prefix_bf16_bytes": 117440512,
+      "candidate_total_us": 41445.74920646846,
+      "triton_total_us": 70040.7737866044,
+      "net_latency_reduction": 0.40826254528908223,
+      "fp32_oracle_max_abs_output": 8.799484930932522e-06,
+      "vs_triton_max_abs_output": 0.00014495849609375
+    },
+    {
+      "case": "ragged-batch-unequal",
+      "prefix_lens": [
+        1024,
+        2048,
+        512
+      ],
+      "extend_lens": [
+        700,
+        300,
+        1500
+      ],
+      "total_prefix": 3584,
+      "total_new": 2500,
+      "prefix_bf16_bytes": 14680064,
+      "candidate_total_us": 2476.215595379472,
+      "triton_total_us": 3125.5124136805534,
+      "net_latency_reduction": 0.20774091808404627,
+      "fp32_oracle_max_abs_output": 6.388779729604721e-05,
+      "vs_triton_max_abs_output": 0.0008392333984375
+    },
+    {
+      "case": "short-1024-7168",
+      "prefix_lens": [
+        7168
+      ],
+      "extend_lens": [
+        1024
+      ],
+      "total_prefix": 7168,
+      "total_new": 1024,
+      "prefix_bf16_bytes": 29360128,
+      "candidate_total_us": 4564.58842381835,
+      "triton_total_us": 5646.68639563024,
+      "net_latency_reduction": 0.19163415426245134,
+      "fp32_oracle_max_abs_output": 1.7330283299088478e-05,
+      "vs_triton_max_abs_output": 0.000274658203125
+    }
+  ]
+}

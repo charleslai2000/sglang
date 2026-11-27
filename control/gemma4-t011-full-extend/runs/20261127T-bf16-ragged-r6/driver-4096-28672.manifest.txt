@@ -1,0 +1,3 @@
+Task: T011 corrected prefix-only scale semantics r6
+Baseline: 48e2ecffae981fedf55fdfc8db552eaeddd2be9a; source a76206a5fb
+Command bounded 240s, lock `/tmp/f1-r16b-gpu-exclusive.lock`, scale k=.73/v=1.21, log/result captured at launch.

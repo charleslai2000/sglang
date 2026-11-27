@@ -1,4 +1,4 @@
-# T011 — Full Extend FA2 qualification and conditional integration
+# T011 — Full Extend optimization (head_dim=512)
 
 Status: DONE
 
@@ -6,19 +6,38 @@ Status: DONE
 `python/sglang/srt/layers/attention/`, `python/sglang/kernels/ops/attention/`, `control/gemma4-t011-full-extend/`, durable run artifacts under `/data/sglang-hicache/gemma4/runs/`.
 
 ## Objective
-At frozen baseline `c102ccbc5cfd17b510f896b23107204daf5ed0d7` / production source `a76206a5fb`, qualify and, only if effective, integrate the user-specified FlashInfer FA2 Paged Prefix + Ragged Extend + MergeState path for Full Attention Extend with head_dim=512. No substitute algorithm.
-
-## Inputs
-- Existing trace: `/data/sglang-hicache/gemma4/runs/20261127T-t010-hwprof/nsys/gemma4.sqlite`.
-- Prior evidence/report: `control/gemma4-rtx3090-throughput-scheduling/runs/T010-GPU-HARDWARE-PROFILING-20261127.md`, `runs/T011-ATTENTION-REVIEW.md`.
-- Reference path: `python/sglang/srt/layers/attention/flashinfer_backend.py`; FlashInfer FA2 `attention/prefill.cuh`, paged/ragged wrappers and `cascade.merge_state`.
-- Fixed shapes: (new,prefix) = (1024,7168), (4096,12288), (4096,28672); SM86, BF16 Q, FP8 E5M2 prefix KV, head_dim512, page_size1, actual GQA geometry.
+At frozen production source `a76206a5fbd65b81ddbb470ac8088a46cf78697a` (continuation baseline
+`48e2ecffae981fedf55fdfc8db552eaeddd2be9a`), improve only Gemma4 Full Attention Extend
+(`head_dim=512`, GQA 8/2). Native FP8 FA2 was closed as SM86-unsupported; the authorised follow-up
+was FlashInfer v0.6.17 BF16 large-head Ragged Attention over a transient BF16 prefix gathered from the
+FP8 pool, with a 128 MiB temporary cap, no resident BF16 cache and no pool reduction. Integrate and
+run L1-only acceptance only on clear net benefit; otherwise close without kernel rewrites.
 
 ## Completion
-First correlate trace grid `(1,8,128)` to actual layer/type and source-derived head_dim/BLOCK_M/BLOCK_N/context, without full recapture. Then isolate supported FlashInfer APIs and measure complete plan + Attention + merge cost against current complete Triton Extend for all three shapes, including memory overhead. If unsupported or no clear net benefit, stop the candidate with evidence and no production edit. If it passes, integrate only the Full Extend route using existing pool/metadata/owner mapping; preserve FP8 prefix+descale, original-precision new K/V+causal mask, Shared-KV semantics, LSE log-base and empty Prefix. Verify outputs/LSE against FP32 oracle, then one original C-8 L1-only acceptance and full three-tier restore. Report operator speedup, actual memory cost, end-to-end outcome and source SHA; commit/push authorized T011 changes.
+Qualify the operator against complete Triton extend including gather, conversion, planning, both
+attentions, merge and memory, for 4096+28672 first and other shapes only after ≥20%. Verify outputs
+against an FP32 oracle. If it passes, integrate Full Extend with Triton fallback preserved and run the
+original C-8 L1-only acceptance. Report measured effects and source SHA; commit/push.
 
 ## Result
-The earlier head_dim=256 applicability STOP was incorrect and is superseded. Correct conversion and independent checkpoint shapes establish Full head_dim=512, Q/KV heads 8/2, SWA head_dim=256. The bounded qualification reached FlashInfer `paged.plan()` and failed before timing with `No supported CUDA architectures found for major versions [10, 11, 12]`. Installed FlashInfer 0.6.17 requests only SM100+ for one-byte KV with head_dim>256 (except its NVFP4 opt-in); target is RTX 3090 SM86 and requested KV is FP8 E5M2. The specific FA2 path is therefore unsupported under the frozen production constraints. No shape measurements, oracle, production integration, C-8 acceptance, or three-tier restore were run; no speedup, memory, or end-to-end claim is made. Production remains unchanged at `a76206a5fb`. Evidence: `runs/T011-FULL-EXTEND-FA2-QUALIFICATION.md` and `runs/20261127T-fa2-op-r1/driver.log`.
+Closed. Operator qualification passed and was replicated on the shipped module
+(4096+28672 −42.6%, 4096+12288 −46.1%, 1024+7168 −27.1%, 4096+9216 −48.5%, 4096+16384 −43.8%;
+FP32 oracle error 8e-6–6e-5; 112 MiB BF16 prefix, 64 MiB workspace, 218 MB peak incremental
+allocation; log2 LSE preserved through `merge_state`). Glue checks confirmed engagement on dim-512 Full
+cases and correct fallback for zero/oversized prefix, shared-KV, sliding window, non-unit scales and
+the disabled flag.
+
+The opt-in integration was then measured end-to-end with the official C-8 L1-only protocol on the same
+source: control **650.06 TPS** (extend 169.5 s, decode 143.1 s) versus candidate **561.55 TPS**
+(extend 219.1 s, decode 142.2 s), i.e. **−13.6% TPS / +29.2% extend**, 800/800 in both cells. Since
+the isolated operator is still 48.5% faster at C-8 prefix scale, the loss is integration overhead:
+two blocking `plan()` metadata readbacks per Full layer per extend step, plus per-layer prefix
+materialisation. Acceptance therefore fails and the candidate is closed.
+
+Production source was restored (no changes under `python/`); the module is archived at
+`runs/archive/bf16_ragged_extend.py`. Full evidence: `runs/T011-BF16-RAGGED-QUALIFICATION.md`,
+`runs/20261127T-bf16-ragged-r1..r9/`, `/data/sglang-hicache/gemma4/runs/20261127T-t011-l1only-{off,on}`.
 
 ## Remaining
-None within the authorized candidate. Resumption requires a material scope change to supported hardware/library or KV representation, outside current authorization.
+None. Reopening requires new scope: remove the per-layer plan readbacks and repeated conversion, then
+re-run the L1-only A/B.

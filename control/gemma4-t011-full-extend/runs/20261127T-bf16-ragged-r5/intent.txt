@@ -1,0 +1,5 @@
+# Intent — T011 production-scale corrected rerun r5
+
+Baseline `48e2ecffae981fedf55fdfc8db552eaeddd2be9a`; source remains `a76206a5fb`. Audit found earlier r1-r4 benchmark drivers incorrectly used sm_scale=1/sqrt(512), while actual Gemma4 Full sets RadixAttention scaling=1 and production Triton explicitly uses sm_scale=layer.scaling (verified `gemma4_causal.py` and `triton_backend.py`). Those timings/accuracy results are superseded and cannot qualify production. The candidate driver is corrected to use scale=1 and non-unit k/v scales 0.73/1.21; oracle models FP8 stored values and pool descale. Re-run all three shapes under exact scale, requiring >=20% full-path benefit and FP32 oracle. No production integration has been made; an unqualified integration draft was discarded.
+
+Run cases sequentially under `/tmp/f1-r16b-gpu-exclusive.lock`, each bounded 240s and durable logs/results. Workspace 64 MiB; BF16 prefix <=128 MiB (112MiB max). Report all runtime output and LSE errors, time, and incremental memory. If candidate passes, still inspect service path (shared KV `k=None,v=None`, graph capture, pool indices/layout) before any integration.

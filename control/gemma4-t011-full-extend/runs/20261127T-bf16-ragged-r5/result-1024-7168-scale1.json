@@ -1,0 +1,36 @@
+{
+  "shape": {
+    "new": 1024,
+    "prefix": 7168,
+    "q_heads": 8,
+    "kv_heads": 2,
+    "head_dim": 512
+  },
+  "logit_scale": 1.0,
+  "effective_qk_scale_with_k_quant_scale": 1.0,
+  "device": "NVIDIA GeForce RTX 3090",
+  "capability": [
+    8,
+    6
+  ],
+  "torch": "2.13.0+cu129",
+  "flashinfer": "0.6.17",
+  "k_scale": 1.0,
+  "v_scale": 1.0,
+  "prefix_bf16_kv_bytes": 29360128,
+  "prefix_gathered_fp8_transient_bytes": 14680064,
+  "temporary_prefix_limit_bytes": 134217728,
+  "workspace_bytes": 67108864,
+  "plan_wall_us": 566.418981179595,
+  "candidate_forward_wall_us_including_gather_cast_attention_merge": 3543.4037912636995,
+  "candidate_total_wall_us_including_plan": 4118.392383679748,
+  "triton_complete_extend_wall_us": 5651.592183858156,
+  "net_latency_reduction_vs_triton": 0.27128634733367185,
+  "speedup_vs_triton": 1.372281137235522,
+  "fp32_oracle_sampled_max_abs_output": 1.5112105756998062e-05,
+  "flashinfer_lse_log2_converted_to_natural_for_oracle": true,
+  "fp32_oracle_sampled_max_abs_lse": 9.5367431640625e-07,
+  "allocated_before_candidate_bytes": 165734912,
+  "candidate_peak_incremental_allocated_bytes": 54624256,
+  "candidate_peak_total_allocated_bytes": 249820160
+}

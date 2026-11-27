@@ -1,0 +1,7 @@
+# Intent — T011 BF16 Ragged r3 LSE contract
+
+Baseline `48e2ecffae981fedf55fdfc8db552eaeddd2be9a`; production source `a76206a5fb`. r1 had 42.5% lower latency but LSE error because log2 LSE was compared directly to ln oracle. r2 mistakenly converted LSE before merge; this is also wrong because FlashInfer `merge_state` expects log2 LSE. FlashInfer source `data/include/flashinfer/attention/prefill.cuh` writes `math::ptx_log2(d)+m`; therefore candidate now merges native log2 states and converts merged LSE by ln(2) only for comparison to FP32 oracle.
+
+Run corrected driver on the same 4096+28672 case. FP8 Pool gather/dequant into 112MiB BF16 K/V, capped at 128MiB; full two-plan+two-ragged-attention+merge, workspace=64MiB, compare complete Triton wall time and sampled independent FP32 output/LSE. This rerun is required before claim/gate. No integration unless all gates pass.
+
+Run under project lock `/tmp/f1-r16b-gpu-exclusive.lock`, bounded 240s, log `driver.log`, output `result.json`.

@@ -1,0 +1,3 @@
+# Intent — r6a exact value-scale placement
+
+The first r6 trial was correct algebraically but multiplied the merged result by v_scale after merge. Production FP8 attention applies value scale inside each partial state; for stronger semantic correspondence, apply `o_prefix *= v_scale` before merge_state and retain extend partial unchanged. No other changes. Re-run 4096+28672, nonunit scale k=.73/v=1.21, FP32 oracle and full timing. Then repeat unit scales for representative shapes if result passes. Baseline `48e2ecffae981fedf55fdfc8db552eaeddd2be9a`; GPU lock required, 240s max.

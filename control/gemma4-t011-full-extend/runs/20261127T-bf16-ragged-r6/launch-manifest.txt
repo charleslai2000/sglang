@@ -1,0 +1,5 @@
+Task: T011 corrected FP8-prefix/BF16-extend scale semantics r6
+Baseline `48e2ecffae981fedf55fdfc8db552eaeddd2be9a`; production `a76206a5fb`
+Driver `control/gemma4-t011-full-extend/runs/t011_bf16_ragged_operator.py`
+First case 4096+28672, k_scale=.73 v_scale=1.21 to exercise separate-prefix semantics. Later unit-scale cases only after first passes.
+Command under `/tmp/f1-r16b-gpu-exclusive.lock`, timeout 240s, log `driver-4096-28672.log`, output `result-4096-28672.json`. Task identity: bg_db5e7697e9f686ea; exact start timestamp in log.

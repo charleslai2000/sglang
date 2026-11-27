@@ -1,12 +1,12 @@
 # T011 — Full Attention Extend Optimization
 
 ## Goal
-At frozen production baseline `c102ccbc5cfd17b510f896b23107204daf5ed0d7` (production source `a76206a5fb`), improve only Gemma4 Full Attention Extend for head_dim=512 by reusing FlashInfer FA2's Paged Prefix + Ragged Extend + MergeState implementation. The user has fixed this technical approach; this work does not authorize an alternative algorithm or wholesale backend replacement.
+At frozen production baseline `c102ccbc5cfd17b510f896b23107204daf5ed0d7` (production source `a76206a5fb`), improve only Gemma4 Full Attention Extend for head_dim=512 by reusing existing FlashInfer v0.6.17 BF16 large-head Ragged Attention + merge_state. The prior native FP8 FA2 paged candidate was closed as unsupported on SM86. The user now authorizes an explicitly bounded FP8-pool gather/dequantize-to-temporary-BF16 prefix path; no alternative attention algorithm or wholesale backend replacement is authorized.
 
 ## Scope
 - Use existing Nsight trace and frozen source to identify the `(1,8,128)` hotspot's actual layer ownership, head dimension, Triton BLOCK_M/BLOCK_N, and context geometry; do not repeat full profiling.
-- First qualify the isolated FA2 operator path on SM86 with BF16 Q, FP8 E5M2 prefix KV, head_dim 512, page_size 1, actual GQA geometry, including plan + attention + merge costs, for new-token/prefix lengths 1024/7168, 4096/12288, and 4096/28672, against complete current Triton Extend.
-- Only if supported and showing clear net benefit, integrate into existing Full Extend using its KV pool, metadata and owner mapping; preserve FP8 prefix plus descale, original-precision causal new K/V, Shared-KV source/numerical semantics, log-base correctness, and empty-prefix behavior.
+- Close the native FP8 FA2 candidate. First qualify existing FlashInfer v0.6.17 BF16 large-head Ragged Attention using gathered/dequantized BF16 prefix from the FP8 pool, paired noncausal Prefix and causal Extend ragged calls, and merge_state. First shape: 4096 new + 28672 prefix, Full head_dim=512, GQA 8/2. Include gather, conversion, both plans, both attentions, merge, synchronization, workspace and all temporary allocations against complete current Triton Extend. Require at least 20% net time reduction before expanding to other shapes.
+- BF16 temporary prefix allocation is bounded to 128 MiB, with no resident BF16 cache and no FP8 pool reduction. Count workspace and all extra memory. Preserve FP8-pool scale/descale semantics, original-precision causal new K/V, Shared-KV ownership/numerics, softcap, LSE merge semantics and empty-prefix behavior. Only if supported, ≥20% faster end-to-end for the first shape, and passing FP32 oracle, integrate Full Extend only with Triton fallback.
 - Verify Attention outputs and LSE against an FP32 oracle with no new numerical regression; then run one original C-8 L1-only acceptance and validate full three-tier cache restore.
 
 ## Constraints
@@ -16,4 +16,7 @@ At frozen production baseline `c102ccbc5cfd17b510f896b23107204daf5ed0d7` (produc
 - Preserve unrelated work; commit/push only authorized T011 changes and control/report artifacts.
 
 ## Completion
-Either (a) candidate falsified/unsupported and stopped with an evidence-backed report and no production change, or (b) optimized Full head_dim=512 Extend integrated and correctness-verified, original C-8 L1-only acceptance and full three-tier restore completed. Report operator speedups, actual memory overhead, end-to-end effect, and source SHA. Update Goal/Plan/Task/frontier and push the applicable commit(s).
+Either (a) candidate stopped with an evidence-backed report and no production change, or (b) optimised Full head_dim=512 Extend integrated, correctness-verified, and passing the original C-8 L1-only acceptance plus full three-tier restore. Report only measured operator speedup, memory overhead, end-to-end effect and source SHA; update Goal/Plan/Task/frontier and push applicable commits.
+
+## Outcome
+Closed under (a). Operator qualification passed (≥20% on every isolated shape, FP32 oracle ~1e-5, 112 MiB transient prefix), but the C-8 L1-only acceptance regressed: 650.06 → 561.55 TPS (−13.6%), extend +29.2%, decode unchanged. No production change retained; source restored. Report: `runs/T011-BF16-RAGGED-QUALIFICATION.md`.

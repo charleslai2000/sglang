@@ -1,0 +1,7 @@
+# Intent — T011 BF16 Ragged r2, LSE-contract correction
+
+Continuation baseline `48e2ecffae981fedf55fdfc8db552eaeddd2be9a`; frozen production source `a76206a5fb`. r1 measured 40.06 ms total vs Triton 69.61 ms (42.5% lower), BF16 prefix 112 MiB, but failed LSE oracle (4.60 absolute): FlashInfer FA2 LSE is log2-domain while Triton/FP32 oracle is natural-log. The first result is performance-only and not correctness-qualified.
+
+r2 changes the driver to convert both FlashInfer LSE values to natural log (`ln2 * LSE`) before merge_state; outputs, scale and softcap remain as before (Gemma Full scaling=1 -> sm_scale=1/sqrt(512), logit cap=0). Must rerun same 4096+28672 exact path, all-in timing and FP32 sample oracle. Prefix BF16 = 112 MiB; workspace=64 MiB; do not exceed prefix temporary limit 128 MiB. No integration unless r2 confirms >=20% savings and output/LSE oracle passes.
+
+Command: timeout 240s, project lock `/tmp/f1-r16b-gpu-exclusive.lock`, `PYTHONPATH=$PWD/python`, venv python, output `result.json`, durable `driver.log`. GPU preflight before launch required.

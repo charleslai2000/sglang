@@ -1,0 +1,6 @@
+Task: T011 BF16 Ragged representative cases r4
+Baseline: 48e2ecffae981fedf55fdfc8db552eaeddd2be9a; production a76206a5fb
+Driver: control/gemma4-t011-full-extend/runs/t011_bf16_ragged_operator.py
+Cases: 1024+7168 and 4096+12288, separate sequential invocations under lock; results in result-1024-7168.json and result-4096-12288.json
+Command template: timeout --signal=TERM --kill-after=10s 240s env PYTHONPATH=$PWD/python /home/ubuntu/venvs/sglang-3090/bin/python control/gemma4-t011-full-extend/runs/t011_bf16_ragged_operator.py --new-tokens N --prefix-tokens P --out control/gemma4-t011-full-extend/runs/20261127T-bf16-ragged-r4/result-N-P.json --reps 5 --warmup 2
+Lock: /tmp/f1-r16b-gpu-exclusive.lock; output logs per case.

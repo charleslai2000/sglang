@@ -1,0 +1,85 @@
+{
+  "device": "NVIDIA GeForce RTX 3090",
+  "capability": [
+    8,
+    6
+  ],
+  "torch": "2.13.0+cu129",
+  "checks": [
+    {
+      "name": "batch-1 4096/28672",
+      "engaged": true,
+      "expected": true,
+      "prefix_lens": [
+        28672
+      ],
+      "extend_lens": [
+        4096
+      ],
+      "workspace_bytes": 67108864,
+      "vs_triton_max_abs_output": 0.00014972686767578125
+    },
+    {
+      "name": "ragged 3 unequal",
+      "engaged": true,
+      "expected": true,
+      "prefix_lens": [
+        1024,
+        2048,
+        512
+      ],
+      "extend_lens": [
+        700,
+        300,
+        1500
+      ],
+      "workspace_bytes": 67108864,
+      "vs_triton_max_abs_output": 0.00092315673828125
+    },
+    {
+      "name": "no-prefix",
+      "engaged": false,
+      "expected": true,
+      "case": null
+    },
+    {
+      "name": "cap-exceeded falls back",
+      "engaged": false,
+      "expected": false,
+      "case": null
+    },
+    {
+      "name": "shared-kv (k=None) falls back",
+      "engaged": false,
+      "expected": false
+    },
+    {
+      "name": "sliding-window falls back",
+      "engaged": false,
+      "expected": false,
+      "case": {
+        "layer": {
+          "sliding_window_size": 512
+        }
+      }
+    },
+    {
+      "name": "non-unit k_scale falls back",
+      "engaged": false,
+      "expected": false,
+      "case": {
+        "layer": {
+          "k_scale_float": 0.5
+        }
+      }
+    },
+    {
+      "name": "flag-disabled falls back",
+      "engaged": false,
+      "expected": false,
+      "case": {
+        "enable_t011_bf16_ragged_full_extend": false
+      }
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+Task: T011 BF16 Ragged isolated operator comparison r1
+Start: 2026-11-27T03:08Z (launch wrapper stdout records exact START timestamp)
+Baseline: 48e2ecffae981fedf55fdfc8db552eaeddd2be9a
+Production source: a76206a5fbd65b81ddbb470ac8088a46cf78697a
+Driver: control/gemma4-t011-full-extend/runs/t011_bf16_ragged_operator.py
+Command: timeout --signal=TERM --kill-after=10s 240s env PYTHONPATH=$PWD/python /home/ubuntu/venvs/sglang-3090/bin/python control/gemma4-t011-full-extend/runs/t011_bf16_ragged_operator.py --out control/gemma4-t011-full-extend/runs/20261127T-bf16-ragged-r1/result.json --reps 5 --warmup 2
+Lock: /tmp/f1-r16b-gpu-exclusive.lock, must be held for command lifetime
+Durable log: control/gemma4-t011-full-extend/runs/20261127T-bf16-ragged-r1/driver.log
+Task identity: bg_5eeb9a420c9917b3; wrapper log `/tmp/pi-background-terminal/bg_5eeb9a420c9917b3.log`. Expected completion: command exits within timeout, reports all-in latency/memory and sampled FP32 oracle, leaves GPU idle and lock free.

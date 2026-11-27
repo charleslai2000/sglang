@@ -1,0 +1,6 @@
+Task: T011 BF16 Ragged operator r3, preserve FlashInfer log2 LSE through merge
+Start: 2026-11-27T03:37Z (exact timestamp in driver.log)
+Baseline: 48e2ecffae981fedf55fdfc8db552eaeddd2be9a; production source a76206a5fb
+Command: timeout --signal=TERM --kill-after=10s 240s env PYTHONPATH=$PWD/python /home/ubuntu/venvs/sglang-3090/bin/python control/gemma4-t011-full-extend/runs/t011_bf16_ragged_operator.py --out control/gemma4-t011-full-extend/runs/20261127T-bf16-ragged-r3/result.json --reps 5 --warmup 2
+Lock: /tmp/f1-r16b-gpu-exclusive.lock; durable log: driver.log
+Task identity: bg_1f0c5c8cb73eb027; wrapper log `/tmp/pi-background-terminal/bg_1f0c5c8cb73eb027.log`. Expected: sampled FP32 output/LSE check, full costs and memory, cleanup verified.

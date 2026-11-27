@@ -1,0 +1,16 @@
+# Intent — T011 integrated-module validation (bf16_ragged_extend.py)
+
+Baseline `48e2ecffae981fedf55fdfc8db552eaeddd2be9a`; production source `a76206a5fb`.
+The candidate math now lives in `python/sglang/srt/layers/attention/bf16_ragged_extend.py`
+and is called by `TritonAttnBackend._try_t011_bf16_ragged_full_extend` behind
+`SGLANG_ENABLE_T011_BF16_RAGGED_FULL_EXTEND` (default off). This run validates the
+*integrated module itself* (uint8 FP8 pool view, chunked gather/dequant, dual ragged
+plan+forward, log2 merge, output copy) against production Triton and an FP32 oracle,
+including a 3-request ragged batch with unequal prefix/extend lengths.
+
+Cases: single 4096+28672; ragged batch prefix [1024,2048,512] / extend [700,300,1500];
+short 1024+7168. All use Gemma4 Full scaling=1, unit cache scales (production), BF16
+compute, head_dim 512, GQA 8/2.
+
+Bounded run under `/tmp/f1-r16b-gpu-exclusive.lock`, timeout 240s, durable logs and
+`result.json`. Expected: per-case net reduction, FP32 oracle error, and Triton delta.

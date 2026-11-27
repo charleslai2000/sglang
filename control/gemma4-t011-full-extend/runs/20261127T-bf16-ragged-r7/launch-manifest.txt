@@ -1,0 +1,7 @@
+Task: T011 integrated-module validation r7
+Baseline: 48e2ecffae981fedf55fdfc8db552eaeddd2be9a; source a76206a5fb
+Driver: control/gemma4-t011-full-extend/runs/t011_integration_check.py
+Module under test: python/sglang/srt/layers/attention/bf16_ragged_extend.py
+Command: timeout --signal=TERM --kill-after=10s 240s env PYTHONPATH=$PWD/python /home/ubuntu/venvs/sglang-3090/bin/python control/gemma4-t011-full-extend/runs/t011_integration_check.py --out control/gemma4-t011-full-extend/runs/20261127T-bf16-ragged-r7/result.json --reps 5 --warmup 2
+Lock: /tmp/f1-r16b-gpu-exclusive.lock; durable log driver.log; task identity bg_383430cad371489d.
+Expected: 3 cases with timing, FP32 oracle error, Triton delta; GPU idle and lock free after exit.

@@ -1,0 +1,5 @@
+# Intent — T011 BF16 Ragged representative-shape qualification r4
+
+Baseline `48e2ecffae981fedf55fdfc8db552eaeddd2be9a`; production source `a76206a5fb`. Main shape 4096+28672 passed >=20% net (43.08% r3) and sampled FP32 output/LSE oracle (7.6e-6 / 9.54e-7), at 112 MiB BF16 prefix and 64 MiB workspace. Continue to other requested representative shapes 1024+7168 and 4096+12288 before integration. Preserve log2 LSE for merge; convert only oracle output.
+
+Run each shape sequentially, each under exclusive GPU lock, timeout 240s, reps 5/warmup2. Same production-like synthetic 8/2 dim512 E5M2 prefix and BF16 extend, complete gather/conversion+plans+attentions+merge vs Triton. Per-case BF16 prefix cap 128 MiB; collect output/LSE oracle and peak allocations. No integration until these pass and service-path design is resolved (dynamic per-batch length, shared-owner routing and graph safety).
