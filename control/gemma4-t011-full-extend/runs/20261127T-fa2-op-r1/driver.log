@@ -1,0 +1,33 @@
+RETRY_START 2026-11-27T02:50:25Z
+Traceback (most recent call last):
+  File "/home/ubuntu/workspaces/3rdparty/sglang-hicache/control/gemma4-t011-full-extend/runs/t011_fa2_operator.py", line 286, in <module>
+    main()
+  File "/home/ubuntu/workspaces/3rdparty/sglang-hicache/control/gemma4-t011-full-extend/runs/t011_fa2_operator.py", line 278, in main
+    rows.append(run_case(n, p, args.reps, args.warmup))
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/workspaces/3rdparty/sglang-hicache/control/gemma4-t011-full-extend/runs/t011_fa2_operator.py", line 107, in run_case
+    plan_both()
+  File "/home/ubuntu/workspaces/3rdparty/sglang-hicache/control/gemma4-t011-full-extend/runs/t011_fa2_operator.py", line 74, in plan_both
+    paged.plan(
+  File "/home/ubuntu/venvs/sglang-3090/lib/python3.12/site-packages/flashinfer/prefill.py", line 2406, in plan
+    self._cached_module = get_batch_prefill_module(
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/venvs/sglang-3090/lib/python3.12/site-packages/flashinfer/prefill.py", line 462, in get_batch_prefill_module
+    module = gen_batch_prefill_module(backend, *args).build_and_load()
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/venvs/sglang-3090/lib/python3.12/site-packages/flashinfer/jit/attention/modules.py", line 1068, in gen_batch_prefill_module
+    return gen_customize_batch_prefill_module(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/venvs/sglang-3090/lib/python3.12/site-packages/flashinfer/jit/attention/modules.py", line 1714, in gen_customize_batch_prefill_module
+    extra_cuda_cflags=_fa2_prefill_head_dim_nvcc_flags(
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/venvs/sglang-3090/lib/python3.12/site-packages/flashinfer/jit/attention/modules.py", line 1218, in _fa2_prefill_head_dim_nvcc_flags
+    return _fa2_head_dim_nvcc_flags(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/venvs/sglang-3090/lib/python3.12/site-packages/flashinfer/jit/attention/modules.py", line 1206, in _fa2_head_dim_nvcc_flags
+    return current_compilation_context.get_nvcc_flags_list(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/venvs/sglang-3090/lib/python3.12/site-packages/flashinfer/compilation_context.py", line 124, in get_nvcc_flags_list
+    raise RuntimeError(
+RuntimeError: No supported CUDA architectures found for major versions [10, 11, 12].
+EXIT 1

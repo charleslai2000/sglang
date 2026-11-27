@@ -1,0 +1,10 @@
+Task: T011 isolated FA2 operator qualification r1
+First attempt started 2026-11-27T02:48:51Z and exited 1 before CUDA initialization: missing PYTHONPATH, ModuleNotFoundError: sglang. No GPU work; lock released. Corrected retry below.
+Retry start: 2026-11-27T02:49:46Z.
+Repository HEAD: 8d8a262b29741e8829635b6bd1d17baf7c86e58d (control-only commit atop frozen production source)
+Frozen production source SHA: a76206a5fbd65b81ddbb470ac8088a46cf78697a
+Driver: control/gemma4-t011-full-extend/runs/t011_fa2_operator.py
+Command: timeout --signal=TERM --kill-after=10s 240s env PYTHONPATH=$PWD/python /home/ubuntu/venvs/sglang-3090/bin/python control/gemma4-t011-full-extend/runs/t011_fa2_operator.py --out control/gemma4-t011-full-extend/runs/20261127T-fa2-op-r1/results.json --reps 5 --warmup 2
+Project GPU lock: /tmp/f1-r16b-gpu-exclusive.lock, acquired by launch wrapper flock for the command lifetime
+Durable logs: control/gemma4-t011-full-extend/runs/20261127T-fa2-op-r1/driver.log
+Expected completion: command exits, all 3 fixed shapes either yield measurements or a captured failure; GPU memory returns to idle after process exit.

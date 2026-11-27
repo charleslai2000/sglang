@@ -1,0 +1,8 @@
+# Intent — T011 isolated FA2 operator qualification
+
+Baseline: repository `c102ccbc5cfd17b510f896b23107204daf5ed0d7`, production source `a76206a5fbd65b81ddbb470ac8088a46cf78697a`.
+Objective: bounded isolated operator comparison only; no production patch. Current Fork parsing confirms runtime Full head_dim=512, SWA=256; Full GQA 8/2. Device RTX 3090 SM86; torch 2.13.0+cu129; FlashInfer 0.6.17.
+Cases (new,prefix): 1024/7168, 4096/12288, 4096/28672. Compare complete Triton extend (FP8 prefix pool + BF16 current K/V) with FlashInfer FA2 paged prefix + ragged causal extend + cascade.merge_state. Measure FA2 plan separately and plan+both attention+merge total. Sampled FP32 oracle at causal boundary/interior positions.
+Command: `PYTHONPATH=$PWD/python /home/ubuntu/venvs/sglang-3090/bin/python control/gemma4-t011-full-extend/runs/t011_fa2_operator.py --out control/gemma4-t011-full-extend/runs/20261127T-fa2-op-r1/results.json --reps 5 --warmup 2`, under `/tmp/f1-r16b-gpu-exclusive.lock`.
+First invocation at 2026-11-27T02:48:51Z exited 1 before CUDA initialization because PYTHONPATH was not set (`ModuleNotFoundError: sglang`); GPU is idle and lock released. No measurement occurred. Corrected retry uses the repo's python/ path explicitly.
+Bound: `timeout 240s`; durable output in this directory. Expected completion: result JSON with all 3 cases and exit status; any FA2 unsupported exception is retained and candidate applicability/performance stop recorded.
