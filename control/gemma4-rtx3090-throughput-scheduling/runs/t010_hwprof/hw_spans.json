@@ -1,0 +1,9170 @@
+[
+ {
+  "start": 41949166559,
+  "end": 41949168255,
+  "dur_ms": 0.001696,
+  "busy_ms": 0.001696,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 41958431285,
+  "end": 41958432725,
+  "dur_ms": 0.00144,
+  "busy_ms": 0.00144,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 41960786369,
+  "end": 41960787553,
+  "dur_ms": 0.001184,
+  "busy_ms": 0.001184,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42214492601,
+  "end": 42214878129,
+  "dur_ms": 0.385528,
+  "busy_ms": 0.042015,
+  "n": 2,
+  "cls": "other",
+  "sm_active": 8.75,
+  "sm_issue": 1,
+  "tensor": 0,
+  "dram_r": 0.25,
+  "dram_w": 8.75,
+  "gpu": 10.5,
+  "clock": 1694836785.5,
+  "warps": 7.5,
+  "top": [
+   [
+    "void at::native::<unnamed>::distri",
+    1
+   ],
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42216044376,
+  "end": 42216045880,
+  "dur_ms": 0.001504,
+  "busy_ms": 0.001504,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42218326758,
+  "end": 42219414030,
+  "dur_ms": 1.087272,
+  "busy_ms": 0.005088,
+  "n": 4,
+  "cls": "other",
+  "sm_active": 0.2727272727272727,
+  "sm_issue": 0.2727272727272727,
+  "tensor": 0,
+  "dram_r": 0.18181818181818182,
+  "dram_w": 0.36363636363636365,
+  "gpu": 0.5454545454545454,
+  "clock": 1695000779.090909,
+  "warps": 0.2727272727272727,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    4
+   ]
+  ]
+ },
+ {
+  "start": 42221062794,
+  "end": 42222589480,
+  "dur_ms": 1.526686,
+  "busy_ms": 0.00768,
+  "n": 6,
+  "cls": "other",
+  "sm_active": 0.3125,
+  "sm_issue": 0.3125,
+  "tensor": 0,
+  "dram_r": 0.1875,
+  "dram_w": 0.4375,
+  "gpu": 1.5,
+  "clock": 1694998392.8125,
+  "warps": 0.3125,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    6
+   ]
+  ]
+ },
+ {
+  "start": 42224417568,
+  "end": 42225391819,
+  "dur_ms": 0.974251,
+  "busy_ms": 0.0048,
+  "n": 4,
+  "cls": "other",
+  "sm_active": 0.3,
+  "sm_issue": 0.3,
+  "tensor": 0,
+  "dram_r": 0.1,
+  "dram_w": 0.4,
+  "gpu": 0.6,
+  "clock": 1695001285.8,
+  "warps": 0.3,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    4
+   ]
+  ]
+ },
+ {
+  "start": 42227005768,
+  "end": 42228288300,
+  "dur_ms": 1.282532,
+  "busy_ms": 0.00784,
+  "n": 6,
+  "cls": "other",
+  "sm_active": 0.38461538461538464,
+  "sm_issue": 0.38461538461538464,
+  "tensor": 0,
+  "dram_r": 0.6153846153846154,
+  "dram_w": 0.7692307692307693,
+  "gpu": 0.7692307692307693,
+  "clock": 1694999450.4615386,
+  "warps": 0.38461538461538464,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    6
+   ]
+  ]
+ },
+ {
+  "start": 42230087460,
+  "end": 42231264459,
+  "dur_ms": 1.176999,
+  "busy_ms": 0.005088,
+  "n": 4,
+  "cls": "other",
+  "sm_active": 0.2727272727272727,
+  "sm_issue": 0.2727272727272727,
+  "tensor": 0,
+  "dram_r": 0.18181818181818182,
+  "dram_w": 0.36363636363636365,
+  "gpu": 0.6363636363636364,
+  "clock": 1694999350.6363637,
+  "warps": 0.2727272727272727,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    4
+   ]
+  ]
+ },
+ {
+  "start": 42232940870,
+  "end": 42234357927,
+  "dur_ms": 1.417057,
+  "busy_ms": 0.007968,
+  "n": 6,
+  "cls": "other",
+  "sm_active": 0.35714285714285715,
+  "sm_issue": 0.35714285714285715,
+  "tensor": 0,
+  "dram_r": 0.14285714285714285,
+  "dram_w": 0.35714285714285715,
+  "gpu": 0.8571428571428571,
+  "clock": 1695000816.357143,
+  "warps": 0.35714285714285715,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    6
+   ]
+  ]
+ },
+ {
+  "start": 42236230334,
+  "end": 42237225864,
+  "dur_ms": 0.99553,
+  "busy_ms": 0.004832,
+  "n": 4,
+  "cls": "other",
+  "sm_active": 0.3,
+  "sm_issue": 0.3,
+  "tensor": 0,
+  "dram_r": 0.7,
+  "dram_w": 0.9,
+  "gpu": 0.6,
+  "clock": 1694999285.7,
+  "warps": 0.3,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    4
+   ]
+  ]
+ },
+ {
+  "start": 42238723592,
+  "end": 42240268518,
+  "dur_ms": 1.544926,
+  "busy_ms": 0.007743,
+  "n": 6,
+  "cls": "other",
+  "sm_active": 0.3333333333333333,
+  "sm_issue": 0.3333333333333333,
+  "tensor": 0,
+  "dram_r": 0.26666666666666666,
+  "dram_w": 0.5333333333333333,
+  "gpu": 0.7333333333333333,
+  "clock": 1695000476.2,
+  "warps": 0.3333333333333333,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    6
+   ]
+  ]
+ },
+ {
+  "start": 42241976672,
+  "end": 42242902380,
+  "dur_ms": 0.925708,
+  "busy_ms": 0.004768,
+  "n": 4,
+  "cls": "other",
+  "sm_active": 0.3333333333333333,
+  "sm_issue": 0.3333333333333333,
+  "tensor": 0,
+  "dram_r": 0.2222222222222222,
+  "dram_w": 0.3333333333333333,
+  "gpu": 0.6666666666666666,
+  "clock": 1695000952.3333333,
+  "warps": 0.3333333333333333,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    4
+   ]
+  ]
+ },
+ {
+  "start": 42244773283,
+  "end": 42246036616,
+  "dur_ms": 1.263333,
+  "busy_ms": 0.007776,
+  "n": 6,
+  "cls": "other",
+  "sm_active": 0.4166666666666667,
+  "sm_issue": 0.4166666666666667,
+  "tensor": 0,
+  "dram_r": 0.08333333333333333,
+  "dram_w": 0.4166666666666667,
+  "gpu": 0.8333333333333334,
+  "clock": 1695000595.25,
+  "warps": 0.4166666666666667,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    6
+   ]
+  ]
+ },
+ {
+  "start": 42249350783,
+  "end": 42250304938,
+  "dur_ms": 0.954155,
+  "busy_ms": 0.004768,
+  "n": 4,
+  "cls": "other",
+  "sm_active": 0.3,
+  "sm_issue": 0.3,
+  "tensor": 0,
+  "dram_r": 0.1,
+  "dram_w": 0.2,
+  "gpu": 0.6,
+  "clock": 1695000285.7,
+  "warps": 0.3,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    4
+   ]
+  ]
+ },
+ {
+  "start": 42252088867,
+  "end": 42253591202,
+  "dur_ms": 1.502335,
+  "busy_ms": 0.007808,
+  "n": 6,
+  "cls": "other",
+  "sm_active": 0.3333333333333333,
+  "sm_issue": 0.3333333333333333,
+  "tensor": 0,
+  "dram_r": 0.06666666666666667,
+  "dram_w": 0.2,
+  "gpu": 0.7333333333333333,
+  "clock": 1695001142.9333334,
+  "warps": 0.3333333333333333,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    6
+   ]
+  ]
+ },
+ {
+  "start": 42255451674,
+  "end": 42256365382,
+  "dur_ms": 0.913708,
+  "busy_ms": 0.0048,
+  "n": 4,
+  "cls": "other",
+  "sm_active": 0.3333333333333333,
+  "sm_issue": 0.3333333333333333,
+  "tensor": 0,
+  "dram_r": 0.3333333333333333,
+  "dram_w": 0.3333333333333333,
+  "gpu": 0.7777777777777778,
+  "clock": 1695001111.1111112,
+  "warps": 0.3333333333333333,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    4
+   ]
+  ]
+ },
+ {
+  "start": 42257919396,
+  "end": 42259259814,
+  "dur_ms": 1.340418,
+  "busy_ms": 0.007776,
+  "n": 6,
+  "cls": "other",
+  "sm_active": 0.38461538461538464,
+  "sm_issue": 0.38461538461538464,
+  "tensor": 0,
+  "dram_r": 0.23076923076923078,
+  "dram_w": 0.46153846153846156,
+  "gpu": 0.7692307692307693,
+  "clock": 1694999890.2307692,
+  "warps": 0.38461538461538464,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    6
+   ]
+  ]
+ },
+ {
+  "start": 42260940642,
+  "end": 42262198246,
+  "dur_ms": 1.257604,
+  "busy_ms": 0.0048,
+  "n": 4,
+  "cls": "other",
+  "sm_active": 0.23076923076923078,
+  "sm_issue": 0.23076923076923078,
+  "tensor": 0,
+  "dram_r": 0.07692307692307693,
+  "dram_w": 0.38461538461538464,
+  "gpu": 0.6153846153846154,
+  "clock": 1695000989,
+  "warps": 0.23076923076923078,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    4
+   ]
+  ]
+ },
+ {
+  "start": 42263753028,
+  "end": 42265045128,
+  "dur_ms": 1.2921,
+  "busy_ms": 0.007776,
+  "n": 6,
+  "cls": "other",
+  "sm_active": 0.3076923076923077,
+  "sm_issue": 0.3076923076923077,
+  "tensor": 0,
+  "dram_r": 0.15384615384615385,
+  "dram_w": 0.23076923076923078,
+  "gpu": 0.7692307692307693,
+  "clock": 1695000439.6923077,
+  "warps": 0.3076923076923077,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    6
+   ]
+  ]
+ },
+ {
+  "start": 42266849984,
+  "end": 42267810891,
+  "dur_ms": 0.960907,
+  "busy_ms": 0.004832,
+  "n": 4,
+  "cls": "other",
+  "sm_active": 0.3,
+  "sm_issue": 0.3,
+  "tensor": 0,
+  "dram_r": 0.3,
+  "dram_w": 0.5,
+  "gpu": 0.6,
+  "clock": 1694998285.6,
+  "warps": 0.3,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    4
+   ]
+  ]
+ },
+ {
+  "start": 42269452359,
+  "end": 42270911687,
+  "dur_ms": 1.459328,
+  "busy_ms": 0.007743,
+  "n": 6,
+  "cls": "other",
+  "sm_active": 0.3333333333333333,
+  "sm_issue": 0.3333333333333333,
+  "tensor": 0,
+  "dram_r": 0.06666666666666667,
+  "dram_w": 0.3333333333333333,
+  "gpu": 0.7333333333333333,
+  "clock": 1694999237.9333334,
+  "warps": 0.3333333333333333,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    6
+   ]
+  ]
+ },
+ {
+  "start": 42272654113,
+  "end": 42273610156,
+  "dur_ms": 0.956043,
+  "busy_ms": 0.0048,
+  "n": 4,
+  "cls": "other",
+  "sm_active": 0.3,
+  "sm_issue": 0.3,
+  "tensor": 0,
+  "dram_r": 0.2,
+  "dram_w": 0.3,
+  "gpu": 0.6,
+  "clock": 1694999714.3,
+  "warps": 0.3,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    4
+   ]
+  ]
+ },
+ {
+  "start": 42275583073,
+  "end": 42276838342,
+  "dur_ms": 1.255269,
+  "busy_ms": 0.007808,
+  "n": 6,
+  "cls": "other",
+  "sm_active": 0.4166666666666667,
+  "sm_issue": 0.4166666666666667,
+  "tensor": 0,
+  "dram_r": 0.5833333333333334,
+  "dram_w": 0.8333333333333334,
+  "gpu": 0.8333333333333334,
+  "clock": 1694999642.8333333,
+  "warps": 0.4166666666666667,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    6
+   ]
+  ]
+ },
+ {
+  "start": 42278621631,
+  "end": 42279610185,
+  "dur_ms": 0.988554,
+  "busy_ms": 0.004768,
+  "n": 4,
+  "cls": "other",
+  "sm_active": 0.3,
+  "sm_issue": 0.3,
+  "tensor": 0,
+  "dram_r": 0.2,
+  "dram_w": 0.3,
+  "gpu": 0.6,
+  "clock": 1694999857.1,
+  "warps": 0.3,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    4
+   ]
+  ]
+ },
+ {
+  "start": 42281160935,
+  "end": 42282616551,
+  "dur_ms": 1.455616,
+  "busy_ms": 0.00784,
+  "n": 6,
+  "cls": "other",
+  "sm_active": 0.3333333333333333,
+  "sm_issue": 0.3333333333333333,
+  "tensor": 0,
+  "dram_r": 0.06666666666666667,
+  "dram_w": 0.3333333333333333,
+  "gpu": 0.7333333333333333,
+  "clock": 1695000095.2666667,
+  "warps": 0.3333333333333333,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    6
+   ]
+  ]
+ },
+ {
+  "start": 42284408672,
+  "end": 42284710106,
+  "dur_ms": 0.301434,
+  "busy_ms": 0.00368,
+  "n": 3,
+  "cls": "other",
+  "sm_active": 0.6666666666666666,
+  "sm_issue": 0.6666666666666666,
+  "tensor": 0,
+  "dram_r": 0,
+  "dram_w": 0.3333333333333333,
+  "gpu": 1.3333333333333333,
+  "clock": 1695000476,
+  "warps": 0.6666666666666666,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    3
+   ]
+  ]
+ },
+ {
+  "start": 42285876768,
+  "end": 42285877888,
+  "dur_ms": 0.00112,
+  "busy_ms": 0.00112,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42287587963,
+  "end": 42289046779,
+  "dur_ms": 1.458816,
+  "busy_ms": 0.007775,
+  "n": 6,
+  "cls": "other",
+  "sm_active": 0.35714285714285715,
+  "sm_issue": 0.35714285714285715,
+  "tensor": 0,
+  "dram_r": 0.07142857142857142,
+  "dram_w": 0.2857142857142857,
+  "gpu": 0.7857142857142857,
+  "clock": 1694998877.5,
+  "warps": 0.35714285714285715,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    6
+   ]
+  ]
+ },
+ {
+  "start": 42291296042,
+  "end": 42292308531,
+  "dur_ms": 1.012489,
+  "busy_ms": 0.004768,
+  "n": 4,
+  "cls": "other",
+  "sm_active": 0.3,
+  "sm_issue": 0.3,
+  "tensor": 0,
+  "dram_r": 0.2,
+  "dram_w": 0.3,
+  "gpu": 0.6,
+  "clock": 1694999571.3,
+  "warps": 0.3,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    4
+   ]
+  ]
+ },
+ {
+  "start": 42293895601,
+  "end": 42295154389,
+  "dur_ms": 1.258788,
+  "busy_ms": 0.007776,
+  "n": 6,
+  "cls": "other",
+  "sm_active": 0.4166666666666667,
+  "sm_issue": 0.4166666666666667,
+  "tensor": 0,
+  "dram_r": 0.08333333333333333,
+  "dram_w": 0.3333333333333333,
+  "gpu": 0.8333333333333334,
+  "clock": 1695000476.1666667,
+  "warps": 0.4166666666666667,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    6
+   ]
+  ]
+ },
+ {
+  "start": 42296959694,
+  "end": 42297862906,
+  "dur_ms": 0.903212,
+  "busy_ms": 0.004768,
+  "n": 4,
+  "cls": "other",
+  "sm_active": 0.3333333333333333,
+  "sm_issue": 0.3333333333333333,
+  "tensor": 0,
+  "dram_r": 0.4444444444444444,
+  "dram_w": 0.4444444444444444,
+  "gpu": 0.6666666666666666,
+  "clock": 1695001904.8888888,
+  "warps": 0.3333333333333333,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    4
+   ]
+  ]
+ },
+ {
+  "start": 42299567445,
+  "end": 42301014069,
+  "dur_ms": 1.446624,
+  "busy_ms": 0.00784,
+  "n": 6,
+  "cls": "other",
+  "sm_active": 0.4,
+  "sm_issue": 0.4,
+  "tensor": 0,
+  "dram_r": 0.13333333333333333,
+  "dram_w": 0.4666666666666667,
+  "gpu": 0.8666666666666667,
+  "clock": 1695000095.1333334,
+  "warps": 0.4,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    6
+   ]
+  ]
+ },
+ {
+  "start": 42302770575,
+  "end": 42303792280,
+  "dur_ms": 1.021705,
+  "busy_ms": 0.0048,
+  "n": 4,
+  "cls": "other",
+  "sm_active": 0.3,
+  "sm_issue": 0.3,
+  "tensor": 0,
+  "dram_r": 0.3,
+  "dram_w": 0.4,
+  "gpu": 0.6,
+  "clock": 1695001571.4,
+  "warps": 0.3,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    4
+   ]
+  ]
+ },
+ {
+  "start": 42305694671,
+  "end": 42307109104,
+  "dur_ms": 1.414433,
+  "busy_ms": 0.007936,
+  "n": 6,
+  "cls": "other",
+  "sm_active": 0.35714285714285715,
+  "sm_issue": 0.35714285714285715,
+  "tensor": 0,
+  "dram_r": 0.07142857142857142,
+  "dram_w": 0.2857142857142857,
+  "gpu": 0.7857142857142857,
+  "clock": 1694998775.5,
+  "warps": 0.35714285714285715,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    6
+   ]
+  ]
+ },
+ {
+  "start": 42308923240,
+  "end": 42309973041,
+  "dur_ms": 1.049801,
+  "busy_ms": 0.0048,
+  "n": 4,
+  "cls": "other",
+  "sm_active": 0.2727272727272727,
+  "sm_issue": 0.2727272727272727,
+  "tensor": 0,
+  "dram_r": 0.09090909090909091,
+  "dram_w": 0.36363636363636365,
+  "gpu": 0.5454545454545454,
+  "clock": 1695000519.4545455,
+  "warps": 0.2727272727272727,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    4
+   ]
+  ]
+ },
+ {
+  "start": 42311598510,
+  "end": 42312749780,
+  "dur_ms": 1.15127,
+  "busy_ms": 0.007968,
+  "n": 6,
+  "cls": "other",
+  "sm_active": 0.45454545454545453,
+  "sm_issue": 0.45454545454545453,
+  "tensor": 0,
+  "dram_r": 0.18181818181818182,
+  "dram_w": 0.5454545454545454,
+  "gpu": 1,
+  "clock": 1694997792.090909,
+  "warps": 0.45454545454545453,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    6
+   ]
+  ]
+ },
+ {
+  "start": 42314425328,
+  "end": 42316903098,
+  "dur_ms": 2.47777,
+  "busy_ms": 0.008832,
+  "n": 6,
+  "cls": "other",
+  "sm_active": 0.24,
+  "sm_issue": 0.2,
+  "tensor": 0,
+  "dram_r": 0.4,
+  "dram_w": 0.48,
+  "gpu": 0.56,
+  "clock": 1694965828.6,
+  "warps": 0.2,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    4
+   ],
+   [
+    "void at::native::<unnamed>::distri",
+    2
+   ]
+  ]
+ },
+ {
+  "start": 42317967970,
+  "end": 42319634046,
+  "dur_ms": 1.666076,
+  "busy_ms": 0.004576,
+  "n": 4,
+  "cls": "other",
+  "sm_active": 0.1875,
+  "sm_issue": 0.1875,
+  "tensor": 0,
+  "dram_r": 0.3125,
+  "dram_w": 0.375,
+  "gpu": 1,
+  "clock": 1694999732.1875,
+  "warps": 0.1875,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    4
+   ]
+  ]
+ },
+ {
+  "start": 42322248997,
+  "end": 42322250181,
+  "dur_ms": 0.001184,
+  "busy_ms": 0.001184,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void <unnamed>::elementwise_kernel",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42338623934,
+  "end": 42338627358,
+  "dur_ms": 0.003424,
+  "busy_ms": 0.003424,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::unrolled_elementw",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42371253013,
+  "end": 42371525711,
+  "dur_ms": 0.272698,
+  "busy_ms": 0.003296,
+  "n": 2,
+  "cls": "other",
+  "sm_active": 0.3333333333333333,
+  "sm_issue": 0.3333333333333333,
+  "tensor": 0,
+  "dram_r": 0.3333333333333333,
+  "dram_w": 0.3333333333333333,
+  "gpu": 2,
+  "clock": 1695002381,
+  "warps": 0.3333333333333333,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    2
+   ]
+  ]
+ },
+ {
+  "start": 42390621005,
+  "end": 42391955120,
+  "dur_ms": 1.334115,
+  "busy_ms": 0.005696,
+  "n": 3,
+  "cls": "other",
+  "sm_active": 0.15384615384615385,
+  "sm_issue": 0.15384615384615385,
+  "tensor": 0,
+  "dram_r": 0.15384615384615385,
+  "dram_w": 0.15384615384615385,
+  "gpu": 0.3076923076923077,
+  "clock": 1695001208.7692308,
+  "warps": 0.15384615384615385,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    2
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42393325042,
+  "end": 42395992184,
+  "dur_ms": 2.667142,
+  "busy_ms": 0.006208,
+  "n": 5,
+  "cls": "other",
+  "sm_active": 0.14814814814814814,
+  "sm_issue": 0.14814814814814814,
+  "tensor": 0,
+  "dram_r": 0.07407407407407407,
+  "dram_w": 0.25925925925925924,
+  "gpu": 0.7407407407407407,
+  "clock": 1695000211.5185184,
+  "warps": 0.14814814814814814,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    4
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42397029889,
+  "end": 42399259280,
+  "dur_ms": 2.229391,
+  "busy_ms": 0.006592,
+  "n": 5,
+  "cls": "other",
+  "sm_active": 0.18181818181818182,
+  "sm_issue": 0.18181818181818182,
+  "tensor": 0,
+  "dram_r": 0.36363636363636365,
+  "dram_w": 0.36363636363636365,
+  "gpu": 0.9090909090909091,
+  "clock": 1695000259.7272727,
+  "warps": 0.18181818181818182,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    4
+   ],
+   [
+    "void at::native::<unnamed>::distri",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42400351352,
+  "end": 42402172816,
+  "dur_ms": 1.821464,
+  "busy_ms": 0.005631,
+  "n": 5,
+  "cls": "other",
+  "sm_active": 0.21052631578947367,
+  "sm_issue": 0.21052631578947367,
+  "tensor": 0,
+  "dram_r": 0.10526315789473684,
+  "dram_w": 0.42105263157894735,
+  "gpu": 1.0526315789473684,
+  "clock": 1694999924.7894738,
+  "warps": 0.21052631578947367,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    5
+   ]
+  ]
+ },
+ {
+  "start": 42403206234,
+  "end": 42406272695,
+  "dur_ms": 3.066461,
+  "busy_ms": 0.017504,
+  "n": 11,
+  "cls": "other",
+  "sm_active": 0.2903225806451613,
+  "sm_issue": 0.2903225806451613,
+  "tensor": 0,
+  "dram_r": 0.12903225806451613,
+  "dram_w": 0.45161290322580644,
+  "gpu": 1.1290322580645162,
+  "clock": 1694999907.8709676,
+  "warps": 0.2903225806451613,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    8
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    2
+   ],
+   [
+    "void <unnamed>::elementwise_kernel",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42407472733,
+  "end": 42412851399,
+  "dur_ms": 5.378666,
+  "busy_ms": 0.012671,
+  "n": 10,
+  "cls": "other",
+  "sm_active": 0.16981132075471697,
+  "sm_issue": 0.16981132075471697,
+  "tensor": 0,
+  "dram_r": 0.09433962264150944,
+  "dram_w": 0.37735849056603776,
+  "gpu": 0.9811320754716981,
+  "clock": 1694999326.0754716,
+  "warps": 0.16981132075471697,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    8
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    1
+   ],
+   [
+    "void at::native::<unnamed>::distri",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42413898640,
+  "end": 42415684521,
+  "dur_ms": 1.785881,
+  "busy_ms": 0.005664,
+  "n": 5,
+  "cls": "other",
+  "sm_active": 0.2222222222222222,
+  "sm_issue": 0.2222222222222222,
+  "tensor": 0,
+  "dram_r": 0.16666666666666666,
+  "dram_w": 0.5555555555555556,
+  "gpu": 1.1111111111111112,
+  "clock": 1695000158.6666667,
+  "warps": 0.2222222222222222,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    5
+   ]
+  ]
+ },
+ {
+  "start": 42417186440,
+  "end": 42420193446,
+  "dur_ms": 3.007006,
+  "busy_ms": 0.016543,
+  "n": 11,
+  "cls": "other",
+  "sm_active": 0.26666666666666666,
+  "sm_issue": 0.26666666666666666,
+  "tensor": 0,
+  "dram_r": 0.4666666666666667,
+  "dram_w": 0.5666666666666667,
+  "gpu": 1.1333333333333333,
+  "clock": 1694999761.9333334,
+  "warps": 0.26666666666666666,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    8
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    2
+   ],
+   [
+    "void <unnamed>::elementwise_kernel",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42421325582,
+  "end": 42426837749,
+  "dur_ms": 5.512167,
+  "busy_ms": 0.012608,
+  "n": 10,
+  "cls": "other",
+  "sm_active": 0.16363636363636364,
+  "sm_issue": 0.16363636363636364,
+  "tensor": 0,
+  "dram_r": 0.14545454545454545,
+  "dram_w": 0.2909090909090909,
+  "gpu": 0.8909090909090909,
+  "clock": 1694999428.509091,
+  "warps": 0.16363636363636364,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    8
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    1
+   ],
+   [
+    "void at::native::<unnamed>::distri",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42428053658,
+  "end": 42429765269,
+  "dur_ms": 1.711611,
+  "busy_ms": 0.005696,
+  "n": 5,
+  "cls": "other",
+  "sm_active": 0.2222222222222222,
+  "sm_issue": 0.2222222222222222,
+  "tensor": 0,
+  "dram_r": 0.1111111111111111,
+  "dram_w": 0.3888888888888889,
+  "gpu": 1.1666666666666667,
+  "clock": 1694999523.7777777,
+  "warps": 0.2222222222222222,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    5
+   ]
+  ]
+ },
+ {
+  "start": 42430813406,
+  "end": 42433836860,
+  "dur_ms": 3.023454,
+  "busy_ms": 0.016576,
+  "n": 11,
+  "cls": "other",
+  "sm_active": 0.3,
+  "sm_issue": 0.3,
+  "tensor": 0,
+  "dram_r": 0.1,
+  "dram_w": 0.3333333333333333,
+  "gpu": 1.1,
+  "clock": 1695000238.0666666,
+  "warps": 0.3,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    8
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    2
+   ],
+   [
+    "void <unnamed>::elementwise_kernel",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42435010466,
+  "end": 42440499978,
+  "dur_ms": 5.489512,
+  "busy_ms": 0.012448,
+  "n": 10,
+  "cls": "other",
+  "sm_active": 0.16363636363636364,
+  "sm_issue": 0.16363636363636364,
+  "tensor": 0,
+  "dram_r": 0.36363636363636365,
+  "dram_w": 0.5454545454545454,
+  "gpu": 0.8909090909090909,
+  "clock": 1694998986.9272728,
+  "warps": 0.16363636363636364,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    8
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    1
+   ],
+   [
+    "void at::native::<unnamed>::distri",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42441573235,
+  "end": 42443359372,
+  "dur_ms": 1.786137,
+  "busy_ms": 0.0056,
+  "n": 5,
+  "cls": "other",
+  "sm_active": 0.23529411764705882,
+  "sm_issue": 0.23529411764705882,
+  "tensor": 0,
+  "dram_r": 0.4117647058823529,
+  "dram_w": 0.8823529411764706,
+  "gpu": 1.1764705882352942,
+  "clock": 1695000168.0588236,
+  "warps": 0.23529411764705882,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    5
+   ]
+  ]
+ },
+ {
+  "start": 42445937107,
+  "end": 42448916882,
+  "dur_ms": 2.979775,
+  "busy_ms": 0.01648,
+  "n": 11,
+  "cls": "other",
+  "sm_active": 0.3,
+  "sm_issue": 0.3,
+  "tensor": 0,
+  "dram_r": 0.1,
+  "dram_w": 0.26666666666666666,
+  "gpu": 1.1666666666666667,
+  "clock": 1694999999.9666667,
+  "warps": 0.3,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    8
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    2
+   ],
+   [
+    "void <unnamed>::elementwise_kernel",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42450109176,
+  "end": 42455504194,
+  "dur_ms": 5.395018,
+  "busy_ms": 0.012576,
+  "n": 10,
+  "cls": "other",
+  "sm_active": 0.16666666666666666,
+  "sm_issue": 0.16666666666666666,
+  "tensor": 0,
+  "dram_r": 0.09259259259259259,
+  "dram_w": 0.2777777777777778,
+  "gpu": 0.9074074074074074,
+  "clock": 1694999444.425926,
+  "warps": 0.16666666666666666,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    8
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    1
+   ],
+   [
+    "void at::native::<unnamed>::distri",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42456550827,
+  "end": 42458595038,
+  "dur_ms": 2.044211,
+  "busy_ms": 0.005632,
+  "n": 5,
+  "cls": "other",
+  "sm_active": 0.19047619047619047,
+  "sm_issue": 0.19047619047619047,
+  "tensor": 0,
+  "dram_r": 0.6190476190476191,
+  "dram_w": 0.6666666666666666,
+  "gpu": 0.9523809523809523,
+  "clock": 1695000544.1904762,
+  "warps": 0.19047619047619047,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    5
+   ]
+  ]
+ },
+ {
+  "start": 42459660167,
+  "end": 42462516425,
+  "dur_ms": 2.856258,
+  "busy_ms": 0.016544,
+  "n": 11,
+  "cls": "other",
+  "sm_active": 0.27586206896551724,
+  "sm_issue": 0.27586206896551724,
+  "tensor": 0,
+  "dram_r": 0.10344827586206896,
+  "dram_w": 0.3448275862068966,
+  "gpu": 1.206896551724138,
+  "clock": 1695000246.310345,
+  "warps": 0.27586206896551724,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    8
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    2
+   ],
+   [
+    "void <unnamed>::elementwise_kernel",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42463652848,
+  "end": 42465869439,
+  "dur_ms": 2.216591,
+  "busy_ms": 0.0064,
+  "n": 5,
+  "cls": "other",
+  "sm_active": 0.17391304347826086,
+  "sm_issue": 0.17391304347826086,
+  "tensor": 0,
+  "dram_r": 0.13043478260869565,
+  "dram_w": 0.43478260869565216,
+  "gpu": 0.8260869565217391,
+  "clock": 1695000062.1304348,
+  "warps": 0.17391304347826086,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    4
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42466940680,
+  "end": 42469176279,
+  "dur_ms": 2.235599,
+  "busy_ms": 0.006336,
+  "n": 5,
+  "cls": "other",
+  "sm_active": 0.17391304347826086,
+  "sm_issue": 0.17391304347826086,
+  "tensor": 0,
+  "dram_r": 0.13043478260869565,
+  "dram_w": 0.5652173913043478,
+  "gpu": 0.8260869565217391,
+  "clock": 1694999254.6086957,
+  "warps": 0.17391304347826086,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    4
+   ],
+   [
+    "void at::native::<unnamed>::distri",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42470323038,
+  "end": 42472128790,
+  "dur_ms": 1.805752,
+  "busy_ms": 0.005664,
+  "n": 5,
+  "cls": "other",
+  "sm_active": 0.2222222222222222,
+  "sm_issue": 0.2222222222222222,
+  "tensor": 0,
+  "dram_r": 0.1111111111111111,
+  "dram_w": 0.5555555555555556,
+  "gpu": 1.1111111111111112,
+  "clock": 1694999920.5555556,
+  "warps": 0.2222222222222222,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    5
+   ]
+  ]
+ },
+ {
+  "start": 42473392891,
+  "end": 42476323483,
+  "dur_ms": 2.930592,
+  "busy_ms": 0.016512,
+  "n": 11,
+  "cls": "other",
+  "sm_active": 0.27586206896551724,
+  "sm_issue": 0.27586206896551724,
+  "tensor": 0,
+  "dram_r": 0.3448275862068966,
+  "dram_w": 0.41379310344827586,
+  "gpu": 1.206896551724138,
+  "clock": 1695000295.689655,
+  "warps": 0.27586206896551724,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    8
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    2
+   ],
+   [
+    "void <unnamed>::elementwise_kernel",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42477560480,
+  "end": 42483011336,
+  "dur_ms": 5.450856,
+  "busy_ms": 0.012736,
+  "n": 10,
+  "cls": "other",
+  "sm_active": 0.16363636363636364,
+  "sm_issue": 0.16363636363636364,
+  "tensor": 0,
+  "dram_r": 0.21818181818181817,
+  "dram_w": 0.5818181818181818,
+  "gpu": 0.8909090909090909,
+  "clock": 1694998805.1272728,
+  "warps": 0.16363636363636364,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    8
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    1
+   ],
+   [
+    "void at::native::<unnamed>::distri",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42484036850,
+  "end": 42485763724,
+  "dur_ms": 1.726874,
+  "busy_ms": 0.0056,
+  "n": 5,
+  "cls": "other",
+  "sm_active": 0.23529411764705882,
+  "sm_issue": 0.23529411764705882,
+  "tensor": 0,
+  "dram_r": 0.058823529411764705,
+  "dram_w": 0.5882352941176471,
+  "gpu": 1.1764705882352942,
+  "clock": 1694998991.5294118,
+  "warps": 0.23529411764705882,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    5
+   ]
+  ]
+ },
+ {
+  "start": 42486785590,
+  "end": 42489711702,
+  "dur_ms": 2.926112,
+  "busy_ms": 0.01651,
+  "n": 11,
+  "cls": "other",
+  "sm_active": 0.3103448275862069,
+  "sm_issue": 0.3103448275862069,
+  "tensor": 0,
+  "dram_r": 0.06896551724137931,
+  "dram_w": 0.4482758620689655,
+  "gpu": 1.206896551724138,
+  "clock": 1694999458.137931,
+  "warps": 0.3103448275862069,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    8
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    2
+   ],
+   [
+    "void <unnamed>::elementwise_kernel",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42490951259,
+  "end": 42493284488,
+  "dur_ms": 2.333229,
+  "busy_ms": 0.006304,
+  "n": 5,
+  "cls": "other",
+  "sm_active": 0.16666666666666666,
+  "sm_issue": 0.16666666666666666,
+  "tensor": 0,
+  "dram_r": 0.041666666666666664,
+  "dram_w": 0.4166666666666667,
+  "gpu": 0.8333333333333334,
+  "clock": 1695000119,
+  "warps": 0.16666666666666666,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    4
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42494301169,
+  "end": 42496709725,
+  "dur_ms": 2.408556,
+  "busy_ms": 0.0064,
+  "n": 5,
+  "cls": "other",
+  "sm_active": 0.16666666666666666,
+  "sm_issue": 0.16666666666666666,
+  "tensor": 0,
+  "dram_r": 0.25,
+  "dram_w": 0.5416666666666666,
+  "gpu": 1.375,
+  "clock": 1694999642.7916667,
+  "warps": 0.16666666666666666,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    4
+   ],
+   [
+    "void at::native::<unnamed>::distri",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42497789637,
+  "end": 42499568414,
+  "dur_ms": 1.778777,
+  "busy_ms": 0.0056,
+  "n": 5,
+  "cls": "other",
+  "sm_active": 0.2222222222222222,
+  "sm_issue": 0.2222222222222222,
+  "tensor": 0,
+  "dram_r": 0.3333333333333333,
+  "dram_w": 0.6666666666666666,
+  "gpu": 1.1666666666666667,
+  "clock": 1695000238.1111112,
+  "warps": 0.2222222222222222,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    5
+   ]
+  ]
+ },
+ {
+  "start": 42500871682,
+  "end": 42503718787,
+  "dur_ms": 2.847105,
+  "busy_ms": 0.01651,
+  "n": 11,
+  "cls": "other",
+  "sm_active": 0.32142857142857145,
+  "sm_issue": 0.32142857142857145,
+  "tensor": 0,
+  "dram_r": 0.25,
+  "dram_w": 0.6071428571428571,
+  "gpu": 1.1785714285714286,
+  "clock": 1694999949,
+  "warps": 0.32142857142857145,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    8
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    2
+   ],
+   [
+    "void <unnamed>::elementwise_kernel",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42504813515,
+  "end": 42507194583,
+  "dur_ms": 2.381068,
+  "busy_ms": 0.006208,
+  "n": 5,
+  "cls": "other",
+  "sm_active": 0.16666666666666666,
+  "sm_issue": 0.16666666666666666,
+  "tensor": 0,
+  "dram_r": 0.125,
+  "dram_w": 0.3333333333333333,
+  "gpu": 0.8333333333333334,
+  "clock": 1694999940.375,
+  "warps": 0.16666666666666666,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    4
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42508242144,
+  "end": 42510504975,
+  "dur_ms": 2.262831,
+  "busy_ms": 0.006592,
+  "n": 5,
+  "cls": "other",
+  "sm_active": 0.17391304347826086,
+  "sm_issue": 0.17391304347826086,
+  "tensor": 0,
+  "dram_r": 0.13043478260869565,
+  "dram_w": 0.391304347826087,
+  "gpu": 0.8260869565217391,
+  "clock": 1695000372.7391305,
+  "warps": 0.17391304347826086,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    4
+   ],
+   [
+    "void at::native::<unnamed>::distri",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42511516313,
+  "end": 42513256051,
+  "dur_ms": 1.739738,
+  "busy_ms": 0.005599,
+  "n": 5,
+  "cls": "other",
+  "sm_active": 0.23529411764705882,
+  "sm_issue": 0.23529411764705882,
+  "tensor": 0,
+  "dram_r": 0.11764705882352941,
+  "dram_w": 0.47058823529411764,
+  "gpu": 1.1764705882352942,
+  "clock": 1694999915.9411764,
+  "warps": 0.23529411764705882,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    5
+   ]
+  ]
+ },
+ {
+  "start": 42514346203,
+  "end": 42517368697,
+  "dur_ms": 3.022494,
+  "busy_ms": 0.016543,
+  "n": 11,
+  "cls": "other",
+  "sm_active": 0.2903225806451613,
+  "sm_issue": 0.2903225806451613,
+  "tensor": 0,
+  "dram_r": 0.3548387096774194,
+  "dram_w": 0.5806451612903226,
+  "gpu": 1.1290322580645162,
+  "clock": 1695000829.483871,
+  "warps": 0.2903225806451613,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    8
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    2
+   ],
+   [
+    "void <unnamed>::elementwise_kernel",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42518641757,
+  "end": 42524129861,
+  "dur_ms": 5.488104,
+  "busy_ms": 0.012672,
+  "n": 10,
+  "cls": "other",
+  "sm_active": 0.16363636363636364,
+  "sm_issue": 0.16363636363636364,
+  "tensor": 0,
+  "dram_r": 0.16363636363636364,
+  "dram_w": 0.4,
+  "gpu": 0.8909090909090909,
+  "clock": 1694999298.709091,
+  "warps": 0.16363636363636364,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    8
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    1
+   ],
+   [
+    "void at::native::<unnamed>::distri",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42525160782,
+  "end": 42526854761,
+  "dur_ms": 1.693979,
+  "busy_ms": 0.005632,
+  "n": 5,
+  "cls": "other",
+  "sm_active": 0.23529411764705882,
+  "sm_issue": 0.23529411764705882,
+  "tensor": 0,
+  "dram_r": 0.29411764705882354,
+  "dram_w": 0.7058823529411765,
+  "gpu": 1.1764705882352942,
+  "clock": 1695000588.1764705,
+  "warps": 0.23529411764705882,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    5
+   ]
+  ]
+ },
+ {
+  "start": 42528392904,
+  "end": 42531389286,
+  "dur_ms": 2.996382,
+  "busy_ms": 0.016768,
+  "n": 11,
+  "cls": "other",
+  "sm_active": 0.26666666666666666,
+  "sm_issue": 0.26666666666666666,
+  "tensor": 0,
+  "dram_r": 0.13333333333333333,
+  "dram_w": 0.4,
+  "gpu": 1.1333333333333333,
+  "clock": 1694999190.4333334,
+  "warps": 0.26666666666666666,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    8
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    2
+   ],
+   [
+    "void <unnamed>::elementwise_kernel",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42532562413,
+  "end": 42537928343,
+  "dur_ms": 5.36593,
+  "busy_ms": 0.012767,
+  "n": 10,
+  "cls": "other",
+  "sm_active": 0.18518518518518517,
+  "sm_issue": 0.18518518518518517,
+  "tensor": 0,
+  "dram_r": 0.42592592592592593,
+  "dram_w": 0.6666666666666666,
+  "gpu": 0.9259259259259259,
+  "clock": 1694999338.5925925,
+  "warps": 0.18518518518518517,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    8
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    1
+   ],
+   [
+    "void at::native::<unnamed>::distri",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42539012831,
+  "end": 42540719642,
+  "dur_ms": 1.706811,
+  "busy_ms": 0.005632,
+  "n": 5,
+  "cls": "other",
+  "sm_active": 0.23529411764705882,
+  "sm_issue": 0.23529411764705882,
+  "tensor": 0,
+  "dram_r": 0.17647058823529413,
+  "dram_w": 0.47058823529411764,
+  "gpu": 1.1764705882352942,
+  "clock": 1695000336.0588236,
+  "warps": 0.23529411764705882,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    5
+   ]
+  ]
+ },
+ {
+  "start": 42541780547,
+  "end": 42544999708,
+  "dur_ms": 3.219161,
+  "busy_ms": 0.016575,
+  "n": 11,
+  "cls": "other",
+  "sm_active": 0.28125,
+  "sm_issue": 0.28125,
+  "tensor": 0,
+  "dram_r": 0.21875,
+  "dram_w": 0.375,
+  "gpu": 1.125,
+  "clock": 1694999821.4375,
+  "warps": 0.28125,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    8
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    2
+   ],
+   [
+    "void <unnamed>::elementwise_kernel",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42546302336,
+  "end": 42551632107,
+  "dur_ms": 5.329771,
+  "busy_ms": 0.012448,
+  "n": 10,
+  "cls": "other",
+  "sm_active": 0.16981132075471697,
+  "sm_issue": 0.16981132075471697,
+  "tensor": 0,
+  "dram_r": 0.11320754716981132,
+  "dram_w": 0.33962264150943394,
+  "gpu": 0.9056603773584906,
+  "clock": 1694998867.9433963,
+  "warps": 0.16981132075471697,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    8
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    1
+   ],
+   [
+    "void at::native::<unnamed>::distri",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42552734963,
+  "end": 42554486093,
+  "dur_ms": 1.75113,
+  "busy_ms": 0.006047,
+  "n": 5,
+  "cls": "other",
+  "sm_active": 0.2222222222222222,
+  "sm_issue": 0.2222222222222222,
+  "tensor": 0,
+  "dram_r": 0.2222222222222222,
+  "dram_w": 0.5555555555555556,
+  "gpu": 1.2222222222222223,
+  "clock": 1694998809.5,
+  "warps": 0.2222222222222222,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    5
+   ]
+  ]
+ },
+ {
+  "start": 42560995711,
+  "end": 42562320898,
+  "dur_ms": 1.325187,
+  "busy_ms": 0.013056,
+  "n": 7,
+  "cls": "other",
+  "sm_active": 0.46153846153846156,
+  "sm_issue": 0.46153846153846156,
+  "tensor": 0,
+  "dram_r": 0.23076923076923078,
+  "dram_w": 0.46153846153846156,
+  "gpu": 1.9230769230769231,
+  "clock": 1695000329.6923077,
+  "warps": 0.46153846153846156,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    4
+   ],
+   [
+    "void at::native::triu_tril_kernel<",
+    2
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42569477445,
+  "end": 42584689784,
+  "dur_ms": 15.212339,
+  "busy_ms": 14.975544,
+  "n": 10,
+  "cls": "other",
+  "sm_active": 97.86842105263158,
+  "sm_issue": 74.42763157894737,
+  "tensor": 0,
+  "dram_r": 0.7631578947368421,
+  "dram_w": 50.11842105263158,
+  "gpu": 98.0592105263158,
+  "clock": 1694907565.8092105,
+  "warps": 66.4407894736842,
+  "top": [
+   [
+    "void at::native::<unnamed>::distri",
+    5
+   ],
+   [
+    "void at::native::vectorized_elemen",
+    5
+   ]
+  ]
+ },
+ {
+  "start": 42585787424,
+  "end": 42587094308,
+  "dur_ms": 1.306884,
+  "busy_ms": 0.007456,
+  "n": 6,
+  "cls": "other",
+  "sm_active": 0.38461538461538464,
+  "sm_issue": 0.38461538461538464,
+  "tensor": 0,
+  "dram_r": 0.23076923076923078,
+  "dram_w": 0.46153846153846156,
+  "gpu": 1,
+  "clock": 1694998901.0769231,
+  "warps": 0.38461538461538464,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    5
+   ],
+   [
+    "void <unnamed>::elementwise_kernel",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42602258296,
+  "end": 42602697231,
+  "dur_ms": 0.438935,
+  "busy_ms": 0.002624,
+  "n": 2,
+  "cls": "other",
+  "sm_active": 0.2,
+  "sm_issue": 0.2,
+  "tensor": 0,
+  "dram_r": 0.2,
+  "dram_w": 0.2,
+  "gpu": 1.2,
+  "clock": 1695000000,
+  "warps": 0.2,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    2
+   ]
+  ]
+ },
+ {
+  "start": 42656970251,
+  "end": 42656973195,
+  "dur_ms": 0.002944,
+  "busy_ms": 0.002944,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::elementwise_kerne",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42674164595,
+  "end": 42675565269,
+  "dur_ms": 1.400674,
+  "busy_ms": 0.093278,
+  "n": 4,
+  "cls": "other",
+  "sm_active": 6.428571428571429,
+  "sm_issue": 3.2857142857142856,
+  "tensor": 0,
+  "dram_r": 0.5,
+  "dram_w": 5.714285714285714,
+  "gpu": 7.785714285714286,
+  "clock": 1693988469.357143,
+  "warps": 4.928571428571429,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    2
+   ],
+   [
+    "void <unnamed>::elementwise_kernel",
+    1
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42679320227,
+  "end": 42679486303,
+  "dur_ms": 0.166076,
+  "busy_ms": 0.166076,
+  "n": 1,
+  "cls": "other",
+  "sm_active": 62.5,
+  "sm_issue": 20.5,
+  "tensor": 0,
+  "dram_r": 27,
+  "dram_w": 28.5,
+  "gpu": 64.5,
+  "clock": 1694104285.5,
+  "warps": 51,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42682888181,
+  "end": 42683053329,
+  "dur_ms": 0.165148,
+  "busy_ms": 0.165148,
+  "n": 1,
+  "cls": "other",
+  "sm_active": 92,
+  "sm_issue": 35,
+  "tensor": 0,
+  "dram_r": 40,
+  "dram_w": 42,
+  "gpu": 94,
+  "clock": 1693545714,
+  "warps": 75,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42694459383,
+  "end": 42699907712,
+  "dur_ms": 5.448329,
+  "busy_ms": 0.341433,
+  "n": 16,
+  "cls": "other",
+  "sm_active": 4.333333333333333,
+  "sm_issue": 0.46296296296296297,
+  "tensor": 0,
+  "dram_r": 2.3518518518518516,
+  "dram_w": 2.425925925925926,
+  "gpu": 4.685185185185185,
+  "clock": 1694996666.7222223,
+  "warps": 3.9814814814814814,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    15
+   ],
+   [
+    "void at::native::<unnamed>::CatArr",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42700929898,
+  "end": 42703548721,
+  "dur_ms": 2.618823,
+  "busy_ms": 0.012544,
+  "n": 10,
+  "cls": "other",
+  "sm_active": 0.34615384615384615,
+  "sm_issue": 0.34615384615384615,
+  "tensor": 0,
+  "dram_r": 0.3076923076923077,
+  "dram_w": 0.5,
+  "gpu": 0.6923076923076923,
+  "clock": 1694997857.1538463,
+  "warps": 0.34615384615384615,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    10
+   ]
+  ]
+ },
+ {
+  "start": 42704645465,
+  "end": 42715317039,
+  "dur_ms": 10.671574,
+  "busy_ms": 0.038814,
+  "n": 31,
+  "cls": "other",
+  "sm_active": 0.2803738317757009,
+  "sm_issue": 0.2803738317757009,
+  "tensor": 0,
+  "dram_r": 0.09345794392523364,
+  "dram_w": 0.2803738317757009,
+  "gpu": 0.5887850467289719,
+  "clock": 1694998851.7850468,
+  "warps": 0.2803738317757009,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    31
+   ]
+  ]
+ },
+ {
+  "start": 42716477014,
+  "end": 42716944108,
+  "dur_ms": 0.467094,
+  "busy_ms": 0.004896,
+  "n": 4,
+  "cls": "other",
+  "sm_active": 0.75,
+  "sm_issue": 0.75,
+  "tensor": 0,
+  "dram_r": 1,
+  "dram_w": 1,
+  "gpu": 1.5,
+  "clock": 1695004285.75,
+  "warps": 0.75,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    4
+   ]
+  ]
+ },
+ {
+  "start": 42718184593,
+  "end": 42720722745,
+  "dur_ms": 2.538152,
+  "busy_ms": 0.012831,
+  "n": 10,
+  "cls": "other",
+  "sm_active": 0.36,
+  "sm_issue": 0.36,
+  "tensor": 0,
+  "dram_r": 0.48,
+  "dram_w": 0.52,
+  "gpu": 0.72,
+  "clock": 1694999485.72,
+  "warps": 0.36,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    10
+   ]
+  ]
+ },
+ {
+  "start": 42721731139,
+  "end": 42721732323,
+  "dur_ms": 0.001184,
+  "busy_ms": 0.001184,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42723950162,
+  "end": 42731752232,
+  "dur_ms": 7.80207,
+  "busy_ms": 1.509758,
+  "n": 32,
+  "cls": "other",
+  "sm_active": 19.025641025641026,
+  "sm_issue": 3.8076923076923075,
+  "tensor": 0,
+  "dram_r": 7.858974358974359,
+  "dram_w": 9.85897435897436,
+  "gpu": 19.858974358974358,
+  "clock": 1694667875.5128205,
+  "warps": 16.44871794871795,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    26
+   ],
+   [
+    "void <unnamed>::elementwise_kernel",
+    2
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    2
+   ]
+  ]
+ },
+ {
+  "start": 42732770609,
+  "end": 42768233546,
+  "dur_ms": 35.462937,
+  "busy_ms": 0.125532,
+  "n": 100,
+  "cls": "other",
+  "sm_active": 0.2853107344632768,
+  "sm_issue": 0.2824858757062147,
+  "tensor": 0,
+  "dram_r": 0.2598870056497175,
+  "dram_w": 0.4152542372881356,
+  "gpu": 0.6016949152542372,
+  "clock": 1694998797.4152544,
+  "warps": 0.2853107344632768,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    100
+   ]
+  ]
+ },
+ {
+  "start": 42769260979,
+  "end": 42770352443,
+  "dur_ms": 1.091464,
+  "busy_ms": 0.006079,
+  "n": 5,
+  "cls": "other",
+  "sm_active": 0.4,
+  "sm_issue": 0.4,
+  "tensor": 0,
+  "dram_r": 0.2,
+  "dram_w": 0.3,
+  "gpu": 0.8,
+  "clock": 1694999142.8,
+  "warps": 0.4,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    5
+   ]
+  ]
+ },
+ {
+  "start": 42771607072,
+  "end": 42776503477,
+  "dur_ms": 4.896405,
+  "busy_ms": 0.018784,
+  "n": 15,
+  "cls": "other",
+  "sm_active": 0.2857142857142857,
+  "sm_issue": 0.2857142857142857,
+  "tensor": 0,
+  "dram_r": 0.2653061224489796,
+  "dram_w": 0.32653061224489793,
+  "gpu": 0.5918367346938775,
+  "clock": 1694999854.2448978,
+  "warps": 0.2857142857142857,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    15
+   ]
+  ]
+ },
+ {
+  "start": 42777722938,
+  "end": 42782523729,
+  "dur_ms": 4.800791,
+  "busy_ms": 0.018784,
+  "n": 15,
+  "cls": "other",
+  "sm_active": 0.2916666666666667,
+  "sm_issue": 0.2916666666666667,
+  "tensor": 0,
+  "dram_r": 0.5625,
+  "dram_w": 0.7916666666666666,
+  "gpu": 0.6041666666666666,
+  "clock": 1694999553.6041667,
+  "warps": 0.2916666666666667,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    15
+   ]
+  ]
+ },
+ {
+  "start": 42783856116,
+  "end": 42786563417,
+  "dur_ms": 2.707301,
+  "busy_ms": 0.012512,
+  "n": 10,
+  "cls": "other",
+  "sm_active": 0.32142857142857145,
+  "sm_issue": 0.32142857142857145,
+  "tensor": 0,
+  "dram_r": 0.21428571428571427,
+  "dram_w": 0.35714285714285715,
+  "gpu": 0.7142857142857143,
+  "clock": 1695002244.857143,
+  "warps": 0.32142857142857145,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    10
+   ]
+  ]
+ },
+ {
+  "start": 42787740767,
+  "end": 42788818664,
+  "dur_ms": 1.077897,
+  "busy_ms": 0.006048,
+  "n": 5,
+  "cls": "other",
+  "sm_active": 0.36363636363636365,
+  "sm_issue": 0.36363636363636365,
+  "tensor": 0,
+  "dram_r": 0,
+  "dram_w": 0.2727272727272727,
+  "gpu": 0.7272727272727273,
+  "clock": 1695000779.1818182,
+  "warps": 0.36363636363636365,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    5
+   ]
+  ]
+ },
+ {
+  "start": 42790142731,
+  "end": 42792974445,
+  "dur_ms": 2.831714,
+  "busy_ms": 0.0128,
+  "n": 10,
+  "cls": "other",
+  "sm_active": 0.3103448275862069,
+  "sm_issue": 0.3103448275862069,
+  "tensor": 0,
+  "dram_r": 0.10344827586206896,
+  "dram_w": 0.3793103448275862,
+  "gpu": 0.6551724137931034,
+  "clock": 1694998029.586207,
+  "warps": 0.3103448275862069,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    10
+   ]
+  ]
+ },
+ {
+  "start": 42794000726,
+  "end": 42795107870,
+  "dur_ms": 1.107144,
+  "busy_ms": 0.00624,
+  "n": 5,
+  "cls": "other",
+  "sm_active": 0.36363636363636365,
+  "sm_issue": 0.36363636363636365,
+  "tensor": 0,
+  "dram_r": 0.18181818181818182,
+  "dram_w": 0.36363636363636365,
+  "gpu": 0.7272727272727273,
+  "clock": 1694999740.1818182,
+  "warps": 0.36363636363636365,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    5
+   ]
+  ]
+ },
+ {
+  "start": 42796416449,
+  "end": 42801230232,
+  "dur_ms": 4.813783,
+  "busy_ms": 0.019328,
+  "n": 15,
+  "cls": "other",
+  "sm_active": 0.2916666666666667,
+  "sm_issue": 0.2916666666666667,
+  "tensor": 0,
+  "dram_r": 0.5625,
+  "dram_w": 0.6666666666666666,
+  "gpu": 0.6458333333333334,
+  "clock": 1694999523.8333333,
+  "warps": 0.2916666666666667,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    15
+   ]
+  ]
+ },
+ {
+  "start": 42802382431,
+  "end": 42807351634,
+  "dur_ms": 4.969203,
+  "busy_ms": 0.018624,
+  "n": 15,
+  "cls": "other",
+  "sm_active": 0.2857142857142857,
+  "sm_issue": 0.2857142857142857,
+  "tensor": 0,
+  "dram_r": 0.14285714285714285,
+  "dram_w": 0.32653061224489793,
+  "gpu": 0.6326530612244898,
+  "clock": 1694999621.0408163,
+  "warps": 0.2857142857142857,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    15
+   ]
+  ]
+ },
+ {
+  "start": 42808605815,
+  "end": 42813386606,
+  "dur_ms": 4.780791,
+  "busy_ms": 0.019487,
+  "n": 15,
+  "cls": "other",
+  "sm_active": 0.2916666666666667,
+  "sm_issue": 0.2916666666666667,
+  "tensor": 0,
+  "dram_r": 0.10416666666666667,
+  "dram_w": 0.20833333333333334,
+  "gpu": 0.625,
+  "clock": 1694999375,
+  "warps": 0.2916666666666667,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    15
+   ]
+  ]
+ },
+ {
+  "start": 42814973388,
+  "end": 42817748975,
+  "dur_ms": 2.775587,
+  "busy_ms": 0.012863,
+  "n": 10,
+  "cls": "other",
+  "sm_active": 0.3333333333333333,
+  "sm_issue": 0.3333333333333333,
+  "tensor": 0,
+  "dram_r": 0.5555555555555556,
+  "dram_w": 0.6296296296296297,
+  "gpu": 0.6666666666666666,
+  "clock": 1694998994.8148148,
+  "warps": 0.3333333333333333,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    10
+   ]
+  ]
+ },
+ {
+  "start": 42818787608,
+  "end": 42819861537,
+  "dur_ms": 1.073929,
+  "busy_ms": 0.006048,
+  "n": 5,
+  "cls": "other",
+  "sm_active": 0.36363636363636365,
+  "sm_issue": 0.36363636363636365,
+  "tensor": 0,
+  "dram_r": 0.36363636363636365,
+  "dram_w": 0.45454545454545453,
+  "gpu": 0.7272727272727273,
+  "clock": 1694998571.4545455,
+  "warps": 0.36363636363636365,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    5
+   ]
+  ]
+ },
+ {
+  "start": 42821128069,
+  "end": 42825945660,
+  "dur_ms": 4.817591,
+  "busy_ms": 0.018912,
+  "n": 15,
+  "cls": "other",
+  "sm_active": 0.3125,
+  "sm_issue": 0.3125,
+  "tensor": 0,
+  "dram_r": 0.22916666666666666,
+  "dram_w": 0.4166666666666667,
+  "gpu": 0.6041666666666666,
+  "clock": 1694999493.9791667,
+  "warps": 0.3125,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    15
+   ]
+  ]
+ },
+ {
+  "start": 42827489306,
+  "end": 42830298620,
+  "dur_ms": 2.809314,
+  "busy_ms": 0.012448,
+  "n": 10,
+  "cls": "other",
+  "sm_active": 0.32142857142857145,
+  "sm_issue": 0.32142857142857145,
+  "tensor": 0,
+  "dram_r": 0.35714285714285715,
+  "dram_w": 0.4642857142857143,
+  "gpu": 0.6428571428571429,
+  "clock": 1694999132.5714285,
+  "warps": 0.32142857142857145,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    10
+   ]
+  ]
+ },
+ {
+  "start": 42831558753,
+  "end": 42832701064,
+  "dur_ms": 1.142311,
+  "busy_ms": 0.006208,
+  "n": 5,
+  "cls": "other",
+  "sm_active": 0.45454545454545453,
+  "sm_issue": 0.36363636363636365,
+  "tensor": 0,
+  "dram_r": 0,
+  "dram_w": 0.2727272727272727,
+  "gpu": 0.8181818181818182,
+  "clock": 1694998441.4545455,
+  "warps": 0.36363636363636365,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    5
+   ]
+  ]
+ },
+ {
+  "start": 42834053130,
+  "end": 42839116059,
+  "dur_ms": 5.062929,
+  "busy_ms": 0.019136,
+  "n": 15,
+  "cls": "other",
+  "sm_active": 0.27450980392156865,
+  "sm_issue": 0.27450980392156865,
+  "tensor": 0,
+  "dram_r": 0.5098039215686274,
+  "dram_w": 0.5882352941176471,
+  "gpu": 0.6274509803921569,
+  "clock": 1695001680.745098,
+  "warps": 0.27450980392156865,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    15
+   ]
+  ]
+ },
+ {
+  "start": 42840287746,
+  "end": 42843038406,
+  "dur_ms": 2.75066,
+  "busy_ms": 0.012512,
+  "n": 10,
+  "cls": "other",
+  "sm_active": 0.3333333333333333,
+  "sm_issue": 0.3333333333333333,
+  "tensor": 0,
+  "dram_r": 0.4444444444444444,
+  "dram_w": 0.4444444444444444,
+  "gpu": 0.7037037037037037,
+  "clock": 1694999259.2592592,
+  "warps": 0.3333333333333333,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    10
+   ]
+  ]
+ },
+ {
+  "start": 42844312714,
+  "end": 42845399250,
+  "dur_ms": 1.086536,
+  "busy_ms": 0.00608,
+  "n": 5,
+  "cls": "other",
+  "sm_active": 0.36363636363636365,
+  "sm_issue": 0.36363636363636365,
+  "tensor": 0,
+  "dram_r": 0.09090909090909091,
+  "dram_w": 0.18181818181818182,
+  "gpu": 0.7272727272727273,
+  "clock": 1695001428.6363637,
+  "warps": 0.36363636363636365,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    5
+   ]
+  ]
+ },
+ {
+  "start": 42846473851,
+  "end": 42851240018,
+  "dur_ms": 4.766167,
+  "busy_ms": 0.016414,
+  "n": 13,
+  "cls": "other",
+  "sm_active": 0.2553191489361702,
+  "sm_issue": 0.2553191489361702,
+  "tensor": 0,
+  "dram_r": 0.0851063829787234,
+  "dram_w": 0.2127659574468085,
+  "gpu": 0.5531914893617021,
+  "clock": 1695000060.7021277,
+  "warps": 0.2553191489361702,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    13
+   ]
+  ]
+ },
+ {
+  "start": 42852575573,
+  "end": 42852706194,
+  "dur_ms": 0.130621,
+  "busy_ms": 0.002528,
+  "n": 2,
+  "cls": "other",
+  "sm_active": 1,
+  "sm_issue": 1,
+  "tensor": 0,
+  "dram_r": 0,
+  "dram_w": 1,
+  "gpu": 2,
+  "clock": 1694987143,
+  "warps": 1,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    2
+   ]
+  ]
+ },
+ {
+  "start": 42853827738,
+  "end": 42853829562,
+  "dur_ms": 0.001824,
+  "busy_ms": 0.001824,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 42854926050,
+  "end": 42858947274,
+  "dur_ms": 4.021224,
+  "busy_ms": 0.017823,
+  "n": 14,
+  "cls": "other",
+  "sm_active": 0.325,
+  "sm_issue": 0.325,
+  "tensor": 0,
+  "dram_r": 0.5,
+  "dram_w": 0.525,
+  "gpu": 0.65,
+  "clock": 1694999714.3,
+  "warps": 0.325,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    14
+   ]
+  ]
+ },
+ {
+  "start": 42860162223,
+  "end": 42864980870,
+  "dur_ms": 4.818647,
+  "busy_ms": 0.018848,
+  "n": 15,
+  "cls": "other",
+  "sm_active": 0.2916666666666667,
+  "sm_issue": 0.2916666666666667,
+  "tensor": 0,
+  "dram_r": 0.22916666666666666,
+  "dram_w": 0.25,
+  "gpu": 0.6041666666666666,
+  "clock": 1694999821.4166667,
+  "warps": 0.2916666666666667,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    15
+   ]
+  ]
+ },
+ {
+  "start": 42866415334,
+  "end": 42871049601,
+  "dur_ms": 4.634267,
+  "busy_ms": 0.01952,
+  "n": 15,
+  "cls": "other",
+  "sm_active": 0.30434782608695654,
+  "sm_issue": 0.30434782608695654,
+  "tensor": 0,
+  "dram_r": 0.1956521739130435,
+  "dram_w": 0.391304347826087,
+  "gpu": 0.6956521739130435,
+  "clock": 1694999565.1956522,
+  "warps": 0.30434782608695654,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    15
+   ]
+  ]
+ },
+ {
+  "start": 42872276102,
+  "end": 42877452085,
+  "dur_ms": 5.175983,
+  "busy_ms": 0.018942,
+  "n": 15,
+  "cls": "other",
+  "sm_active": 0.27450980392156865,
+  "sm_issue": 0.27450980392156865,
+  "tensor": 0,
+  "dram_r": 0.4117647058823529,
+  "dram_w": 0.49019607843137253,
+  "gpu": 0.5882352941176471,
+  "clock": 1694999467.8235295,
+  "warps": 0.27450980392156865,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    15
+   ]
+  ]
+ },
+ {
+  "start": 42878690682,
+  "end": 42881475741,
+  "dur_ms": 2.785059,
+  "busy_ms": 0.012992,
+  "n": 10,
+  "cls": "other",
+  "sm_active": 0.32142857142857145,
+  "sm_issue": 0.32142857142857145,
+  "tensor": 0,
+  "dram_r": 0.5,
+  "dram_w": 0.6071428571428571,
+  "gpu": 0.6428571428571429,
+  "clock": 1694999285.75,
+  "warps": 0.32142857142857145,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    10
+   ]
+  ]
+ },
+ {
+  "start": 42882580101,
+  "end": 42883751691,
+  "dur_ms": 1.17159,
+  "busy_ms": 0.006016,
+  "n": 5,
+  "cls": "other",
+  "sm_active": 0.36363636363636365,
+  "sm_issue": 0.36363636363636365,
+  "tensor": 0,
+  "dram_r": 0.09090909090909091,
+  "dram_w": 0.45454545454545453,
+  "gpu": 0.8181818181818182,
+  "clock": 1694999740.2727273,
+  "warps": 0.36363636363636365,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    5
+   ]
+  ]
+ },
+ {
+  "start": 42884874867,
+  "end": 42890027554,
+  "dur_ms": 5.152687,
+  "busy_ms": 0.018718,
+  "n": 15,
+  "cls": "other",
+  "sm_active": 0.27450980392156865,
+  "sm_issue": 0.27450980392156865,
+  "tensor": 0,
+  "dram_r": 0.11764705882352941,
+  "dram_w": 0.2549019607843137,
+  "gpu": 0.5882352941176471,
+  "clock": 1694999999.9411764,
+  "warps": 0.27450980392156865,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    15
+   ]
+  ]
+ },
+ {
+  "start": 42891396868,
+  "end": 42895120115,
+  "dur_ms": 3.723247,
+  "busy_ms": 0.014144,
+  "n": 11,
+  "cls": "other",
+  "sm_active": 0.2702702702702703,
+  "sm_issue": 0.2702702702702703,
+  "tensor": 0,
+  "dram_r": 0.10810810810810811,
+  "dram_w": 0.32432432432432434,
+  "gpu": 0.5405405405405406,
+  "clock": 1694999227.8108108,
+  "warps": 0.2702702702702703,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    11
+   ]
+  ]
+ },
+ {
+  "start": 42896128764,
+  "end": 42896732431,
+  "dur_ms": 0.603667,
+  "busy_ms": 0.004896,
+  "n": 4,
+  "cls": "other",
+  "sm_active": 0.5,
+  "sm_issue": 0.5,
+  "tensor": 0,
+  "dram_r": 1,
+  "dram_w": 1,
+  "gpu": 1,
+  "clock": 1695000476.3333333,
+  "warps": 0.5,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    4
+   ]
+  ]
+ },
+ {
+  "start": 42897805848,
+  "end": 42902360852,
+  "dur_ms": 4.555004,
+  "busy_ms": 0.018848,
+  "n": 15,
+  "cls": "other",
+  "sm_active": 0.30434782608695654,
+  "sm_issue": 0.30434782608695654,
+  "tensor": 0,
+  "dram_r": 0.32608695652173914,
+  "dram_w": 0.43478260869565216,
+  "gpu": 0.6304347826086957,
+  "clock": 1694999813.6956522,
+  "warps": 0.30434782608695654,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    15
+   ]
+  ]
+ },
+ {
+  "start": 42903679703,
+  "end": 42909036578,
+  "dur_ms": 5.356875,
+  "busy_ms": 0.01984,
+  "n": 15,
+  "cls": "other",
+  "sm_active": 0.2641509433962264,
+  "sm_issue": 0.2641509433962264,
+  "tensor": 0,
+  "dram_r": 0.11320754716981132,
+  "dram_w": 0.2641509433962264,
+  "gpu": 0.6226415094339622,
+  "clock": 1694999433.9245284,
+  "warps": 0.2641509433962264,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    15
+   ]
+  ]
+ },
+ {
+  "start": 42910170953,
+  "end": 42914851971,
+  "dur_ms": 4.681018,
+  "busy_ms": 0.018942,
+  "n": 15,
+  "cls": "other",
+  "sm_active": 0.30434782608695654,
+  "sm_issue": 0.30434782608695654,
+  "tensor": 0,
+  "dram_r": 0.10869565217391304,
+  "dram_w": 0.391304347826087,
+  "gpu": 0.6521739130434783,
+  "clock": 1694999813.6304348,
+  "warps": 0.30434782608695654,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    15
+   ]
+  ]
+ },
+ {
+  "start": 42916046857,
+  "end": 42919017704,
+  "dur_ms": 2.970847,
+  "busy_ms": 0.012864,
+  "n": 10,
+  "cls": "other",
+  "sm_active": 0.3,
+  "sm_issue": 0.3,
+  "tensor": 0,
+  "dram_r": 0.5666666666666667,
+  "dram_w": 0.6333333333333333,
+  "gpu": 0.6333333333333333,
+  "clock": 1694999238.1,
+  "warps": 0.3,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    10
+   ]
+  ]
+ },
+ {
+  "start": 42920041521,
+  "end": 42921166105,
+  "dur_ms": 1.124584,
+  "busy_ms": 0.006048,
+  "n": 5,
+  "cls": "other",
+  "sm_active": 0.3333333333333333,
+  "sm_issue": 0.3333333333333333,
+  "tensor": 0,
+  "dram_r": 0.5833333333333334,
+  "dram_w": 0.4166666666666667,
+  "gpu": 0.6666666666666666,
+  "clock": 1695000357.0833333,
+  "warps": 0.3333333333333333,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    5
+   ]
+  ]
+ },
+ {
+  "start": 42922382878,
+  "end": 42927189013,
+  "dur_ms": 4.806135,
+  "busy_ms": 0.01888,
+  "n": 15,
+  "cls": "other",
+  "sm_active": 0.2916666666666667,
+  "sm_issue": 0.2916666666666667,
+  "tensor": 0,
+  "dram_r": 0.3333333333333333,
+  "dram_w": 0.5208333333333334,
+  "gpu": 0.6041666666666666,
+  "clock": 1694999226.25,
+  "warps": 0.2916666666666667,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    15
+   ]
+  ]
+ },
+ {
+  "start": 42928630614,
+  "end": 42931188094,
+  "dur_ms": 2.55748,
+  "busy_ms": 0.012479,
+  "n": 10,
+  "cls": "other",
+  "sm_active": 0.34615384615384615,
+  "sm_issue": 0.34615384615384615,
+  "tensor": 0,
+  "dram_r": 0.3076923076923077,
+  "dram_w": 0.38461538461538464,
+  "gpu": 0.7307692307692307,
+  "clock": 1695000109.9230769,
+  "warps": 0.34615384615384615,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    10
+   ]
+  ]
+ },
+ {
+  "start": 42932221223,
+  "end": 42933682151,
+  "dur_ms": 1.460928,
+  "busy_ms": 0.006047,
+  "n": 5,
+  "cls": "other",
+  "sm_active": 0.26666666666666666,
+  "sm_issue": 0.26666666666666666,
+  "tensor": 0,
+  "dram_r": 0.06666666666666667,
+  "dram_w": 0.2,
+  "gpu": 0.6,
+  "clock": 1695000857.2,
+  "warps": 0.26666666666666666,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    5
+   ]
+  ]
+ },
+ {
+  "start": 42934765903,
+  "end": 42937511315,
+  "dur_ms": 2.745412,
+  "busy_ms": 0.012928,
+  "n": 10,
+  "cls": "other",
+  "sm_active": 0.3333333333333333,
+  "sm_issue": 0.3333333333333333,
+  "tensor": 0,
+  "dram_r": 0.6666666666666666,
+  "dram_w": 0.6666666666666666,
+  "gpu": 0.7037037037037037,
+  "clock": 1694999259.3703704,
+  "warps": 0.3333333333333333,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    10
+   ]
+  ]
+ },
+ {
+  "start": 42938525053,
+  "end": 42940113562,
+  "dur_ms": 1.588509,
+  "busy_ms": 0.006144,
+  "n": 5,
+  "cls": "other",
+  "sm_active": 0.25,
+  "sm_issue": 0.25,
+  "tensor": 0,
+  "dram_r": 0.4375,
+  "dram_w": 0.5,
+  "gpu": 0.5625,
+  "clock": 1694999732.125,
+  "warps": 0.25,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    5
+   ]
+  ]
+ },
+ {
+  "start": 42941248930,
+  "end": 42946479919,
+  "dur_ms": 5.230989,
+  "busy_ms": 0.01936,
+  "n": 15,
+  "cls": "other",
+  "sm_active": 0.2641509433962264,
+  "sm_issue": 0.2641509433962264,
+  "tensor": 0,
+  "dram_r": 0.18867924528301888,
+  "dram_w": 0.2830188679245283,
+  "gpu": 0.5849056603773585,
+  "clock": 1695000646.9245284,
+  "warps": 0.2641509433962264,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    15
+   ]
+  ]
+ },
+ {
+  "start": 42947590071,
+  "end": 42950947373,
+  "dur_ms": 3.357302,
+  "busy_ms": 0.014848,
+  "n": 11,
+  "cls": "other",
+  "sm_active": 0.30303030303030304,
+  "sm_issue": 0.30303030303030304,
+  "tensor": 0,
+  "dram_r": 0.18181818181818182,
+  "dram_w": 0.2727272727272727,
+  "gpu": 0.6666666666666666,
+  "clock": 1695000043.2727273,
+  "warps": 0.30303030303030304,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    11
+   ]
+  ]
+ },
+ {
+  "start": 42952186770,
+  "end": 42999268653,
+  "dur_ms": 47.081883,
+  "busy_ms": 15.394097,
+  "n": 345,
+  "cls": "other",
+  "sm_active": 32.08704883227176,
+  "sm_issue": 24.520169851380043,
+  "tensor": 0,
+  "dram_r": 0.4543524416135881,
+  "dram_w": 16.694267515923567,
+  "gpu": 33.10615711252654,
+  "clock": 1694971031.254777,
+  "warps": 21.940552016985137,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    340
+   ],
+   [
+    "void at::native::<unnamed>::distri",
+    5
+   ]
+  ]
+ },
+ {
+  "start": 43000390740,
+  "end": 43037416714,
+  "dur_ms": 37.025974,
+  "busy_ms": 0.307901,
+  "n": 239,
+  "cls": "other",
+  "sm_active": 0.6405405405405405,
+  "sm_issue": 0.6378378378378379,
+  "tensor": 0,
+  "dram_r": 0.2810810810810811,
+  "dram_w": 0.6432432432432432,
+  "gpu": 1.354054054054054,
+  "clock": 1694995023.1540542,
+  "warps": 0.6378378378378379,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    224
+   ],
+   [
+    "void at::native::<unnamed>::distri",
+    15
+   ]
+  ]
+ },
+ {
+  "start": 43198627236,
+  "end": 43240723211,
+  "dur_ms": 42.095975,
+  "busy_ms": 0.587758,
+  "n": 480,
+  "cls": "other",
+  "sm_active": 0.7743467933491687,
+  "sm_issue": 0.7743467933491687,
+  "tensor": 0,
+  "dram_r": 0.35629453681710216,
+  "dram_w": 0.7862232779097387,
+  "gpu": 3.007125890736342,
+  "clock": 1695000000,
+  "warps": 0.7743467933491687,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    480
+   ]
+  ]
+ },
+ {
+  "start": 44692598421,
+  "end": 44692599477,
+  "dur_ms": 0.001056,
+  "busy_ms": 0.001056,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 44711723442,
+  "end": 44711724498,
+  "dur_ms": 0.001056,
+  "busy_ms": 0.001056,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 44730578004,
+  "end": 44730579092,
+  "dur_ms": 0.001088,
+  "busy_ms": 0.001088,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 44749509845,
+  "end": 44749510933,
+  "dur_ms": 0.001088,
+  "busy_ms": 0.001088,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 44769764472,
+  "end": 44769765528,
+  "dur_ms": 0.001056,
+  "busy_ms": 0.001056,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 44787754990,
+  "end": 44787756078,
+  "dur_ms": 0.001088,
+  "busy_ms": 0.001088,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 44805541575,
+  "end": 44805542631,
+  "dur_ms": 0.001056,
+  "busy_ms": 0.001056,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 44823150565,
+  "end": 44823151653,
+  "dur_ms": 0.001088,
+  "busy_ms": 0.001088,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 44841957705,
+  "end": 44841958760,
+  "dur_ms": 0.001055,
+  "busy_ms": 0.001055,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 44859795457,
+  "end": 44859796513,
+  "dur_ms": 0.001056,
+  "busy_ms": 0.001056,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 44879631310,
+  "end": 44879632366,
+  "dur_ms": 0.001056,
+  "busy_ms": 0.001056,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 44898300724,
+  "end": 44898301812,
+  "dur_ms": 0.001088,
+  "busy_ms": 0.001088,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 44915855155,
+  "end": 44915856243,
+  "dur_ms": 0.001088,
+  "busy_ms": 0.001088,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 44933687308,
+  "end": 44933688364,
+  "dur_ms": 0.001056,
+  "busy_ms": 0.001056,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 44952636908,
+  "end": 44952637996,
+  "dur_ms": 0.001088,
+  "busy_ms": 0.001088,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 44970522820,
+  "end": 44970523908,
+  "dur_ms": 0.001088,
+  "busy_ms": 0.001088,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 44987905094,
+  "end": 44987906182,
+  "dur_ms": 0.001088,
+  "busy_ms": 0.001088,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 45007380795,
+  "end": 45007381883,
+  "dur_ms": 0.001088,
+  "busy_ms": 0.001088,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 45023522681,
+  "end": 45023523769,
+  "dur_ms": 0.001088,
+  "busy_ms": 0.001088,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 45040027631,
+  "end": 45040028719,
+  "dur_ms": 0.001088,
+  "busy_ms": 0.001088,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 45056397704,
+  "end": 45056398792,
+  "dur_ms": 0.001088,
+  "busy_ms": 0.001088,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 45072365641,
+  "end": 45072366729,
+  "dur_ms": 0.001088,
+  "busy_ms": 0.001088,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 45088301484,
+  "end": 45088302572,
+  "dur_ms": 0.001088,
+  "busy_ms": 0.001088,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 45105658799,
+  "end": 45105659855,
+  "dur_ms": 0.001056,
+  "busy_ms": 0.001056,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 45123133968,
+  "end": 45123135023,
+  "dur_ms": 0.001055,
+  "busy_ms": 0.001055,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 45140510002,
+  "end": 45140511090,
+  "dur_ms": 0.001088,
+  "busy_ms": 0.001088,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 45158751874,
+  "end": 45158752962,
+  "dur_ms": 0.001088,
+  "busy_ms": 0.001088,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 45175005341,
+  "end": 45175006429,
+  "dur_ms": 0.001088,
+  "busy_ms": 0.001088,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 45191344983,
+  "end": 45191346039,
+  "dur_ms": 0.001056,
+  "busy_ms": 0.001056,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 45208107751,
+  "end": 45208108807,
+  "dur_ms": 0.001056,
+  "busy_ms": 0.001056,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 45226282424,
+  "end": 45226283512,
+  "dur_ms": 0.001088,
+  "busy_ms": 0.001088,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 45243810872,
+  "end": 45243811960,
+  "dur_ms": 0.001088,
+  "busy_ms": 0.001088,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 45261278489,
+  "end": 45261279577,
+  "dur_ms": 0.001088,
+  "busy_ms": 0.001088,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 45278269988,
+  "end": 45278271076,
+  "dur_ms": 0.001088,
+  "busy_ms": 0.001088,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 45295550889,
+  "end": 45295551945,
+  "dur_ms": 0.001056,
+  "busy_ms": 0.001056,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 45314253838,
+  "end": 45314254926,
+  "dur_ms": 0.001088,
+  "busy_ms": 0.001088,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 45331758606,
+  "end": 45331759694,
+  "dur_ms": 0.001088,
+  "busy_ms": 0.001088,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 45352318347,
+  "end": 45352319435,
+  "dur_ms": 0.001088,
+  "busy_ms": 0.001088,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 45373445148,
+  "end": 45373446236,
+  "dur_ms": 0.001088,
+  "busy_ms": 0.001088,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 45391560814,
+  "end": 45391561902,
+  "dur_ms": 0.001088,
+  "busy_ms": 0.001088,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 45409659521,
+  "end": 45409660609,
+  "dur_ms": 0.001088,
+  "busy_ms": 0.001088,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 45427222304,
+  "end": 45427223392,
+  "dur_ms": 0.001088,
+  "busy_ms": 0.001088,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 45450197544,
+  "end": 45450261094,
+  "dur_ms": 0.06355,
+  "busy_ms": 0.002144,
+  "n": 2,
+  "cls": "other",
+  "sm_active": 1,
+  "sm_issue": 1,
+  "tensor": 0,
+  "dram_r": 1,
+  "dram_w": 1,
+  "gpu": 2,
+  "clock": 1933247143,
+  "warps": 1,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    2
+   ]
+  ]
+ },
+ {
+  "start": 45451482220,
+  "end": 45454134545,
+  "dur_ms": 2.652325,
+  "busy_ms": 0.030015,
+  "n": 28,
+  "cls": "other",
+  "sm_active": 0.6666666666666666,
+  "sm_issue": 0.6666666666666666,
+  "tensor": 0,
+  "dram_r": 0.1111111111111111,
+  "dram_w": 0.5925925925925926,
+  "gpu": 6.333333333333333,
+  "clock": 1933320370.4074075,
+  "warps": 0.6666666666666666,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    28
+   ]
+  ]
+ },
+ {
+  "start": 45455218202,
+  "end": 45457766370,
+  "dur_ms": 2.548168,
+  "busy_ms": 0.030046,
+  "n": 28,
+  "cls": "other",
+  "sm_active": 0.68,
+  "sm_issue": 0.68,
+  "tensor": 0,
+  "dram_r": 0.52,
+  "dram_w": 0.76,
+  "gpu": 7.72,
+  "clock": 1933267314.28,
+  "warps": 0.68,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    28
+   ]
+  ]
+ },
+ {
+  "start": 45458961383,
+  "end": 45461390162,
+  "dur_ms": 2.428779,
+  "busy_ms": 0.030272,
+  "n": 28,
+  "cls": "other",
+  "sm_active": 0.7083333333333334,
+  "sm_issue": 0.7083333333333334,
+  "tensor": 0,
+  "dram_r": 0.08333333333333333,
+  "dram_w": 0.6666666666666666,
+  "gpu": 7.25,
+  "clock": 1933036071.4166667,
+  "warps": 0.7083333333333334,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    28
+   ]
+  ]
+ },
+ {
+  "start": 45462573048,
+  "end": 45465190111,
+  "dur_ms": 2.617063,
+  "busy_ms": 0.03024,
+  "n": 28,
+  "cls": "other",
+  "sm_active": 0.6923076923076923,
+  "sm_issue": 0.6923076923076923,
+  "tensor": 0,
+  "dram_r": 0.038461538461538464,
+  "dram_w": 0.7307692307692307,
+  "gpu": 6.615384615384615,
+  "clock": 1933071098.8846154,
+  "warps": 0.6923076923076923,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    28
+   ]
+  ]
+ },
+ {
+  "start": 45466365413,
+  "end": 45468781200,
+  "dur_ms": 2.415787,
+  "busy_ms": 0.030175,
+  "n": 28,
+  "cls": "other",
+  "sm_active": 0.6666666666666666,
+  "sm_issue": 0.6666666666666666,
+  "tensor": 0,
+  "dram_r": 0.08333333333333333,
+  "dram_w": 0.625,
+  "gpu": 7.208333333333333,
+  "clock": 1933248928.5833333,
+  "warps": 0.6666666666666666,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    28
+   ]
+  ]
+ },
+ {
+  "start": 45469975222,
+  "end": 45472456511,
+  "dur_ms": 2.481289,
+  "busy_ms": 0.030207,
+  "n": 28,
+  "cls": "other",
+  "sm_active": 0.68,
+  "sm_issue": 0.68,
+  "tensor": 0,
+  "dram_r": 0.12,
+  "dram_w": 0.68,
+  "gpu": 6.92,
+  "clock": 1933244914.32,
+  "warps": 0.68,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    28
+   ]
+  ]
+ },
+ {
+  "start": 45473694276,
+  "end": 45476312971,
+  "dur_ms": 2.618695,
+  "busy_ms": 0.029984,
+  "n": 28,
+  "cls": "other",
+  "sm_active": 0.7407407407407407,
+  "sm_issue": 0.7407407407407407,
+  "tensor": 0,
+  "dram_r": 0.48148148148148145,
+  "dram_w": 0.7037037037037037,
+  "gpu": 6.481481481481482,
+  "clock": 1933224285.7037036,
+  "warps": 0.7407407407407407,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    28
+   ]
+  ]
+ },
+ {
+  "start": 45477502545,
+  "end": 45480117111,
+  "dur_ms": 2.614566,
+  "busy_ms": 0.030047,
+  "n": 28,
+  "cls": "other",
+  "sm_active": 0.6923076923076923,
+  "sm_issue": 0.6923076923076923,
+  "tensor": 0,
+  "dram_r": 0.19230769230769232,
+  "dram_w": 0.6538461538461539,
+  "gpu": 6.538461538461538,
+  "clock": 1933272527.5,
+  "warps": 0.6923076923076923,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    28
+   ]
+  ]
+ },
+ {
+  "start": 45481307709,
+  "end": 45483810726,
+  "dur_ms": 2.503017,
+  "busy_ms": 0.030144,
+  "n": 28,
+  "cls": "other",
+  "sm_active": 0.76,
+  "sm_issue": 0.76,
+  "tensor": 0,
+  "dram_r": 0.16,
+  "dram_w": 0.64,
+  "gpu": 6.84,
+  "clock": 1933198628.52,
+  "warps": 0.76,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    28
+   ]
+  ]
+ },
+ {
+  "start": 45485054571,
+  "end": 45487516405,
+  "dur_ms": 2.461834,
+  "busy_ms": 0.03024,
+  "n": 28,
+  "cls": "other",
+  "sm_active": 0.76,
+  "sm_issue": 0.76,
+  "tensor": 0,
+  "dram_r": 0.16,
+  "dram_w": 0.68,
+  "gpu": 7,
+  "clock": 1933178971.52,
+  "warps": 0.76,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    28
+   ]
+  ]
+ },
+ {
+  "start": 45488716379,
+  "end": 45491216420,
+  "dur_ms": 2.500041,
+  "busy_ms": 0.030144,
+  "n": 28,
+  "cls": "other",
+  "sm_active": 0.64,
+  "sm_issue": 0.64,
+  "tensor": 0,
+  "dram_r": 0.08,
+  "dram_w": 0.68,
+  "gpu": 6.88,
+  "clock": 1933116800.04,
+  "warps": 0.64,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    28
+   ]
+  ]
+ },
+ {
+  "start": 45492413226,
+  "end": 45494980401,
+  "dur_ms": 2.567175,
+  "busy_ms": 0.030047,
+  "n": 28,
+  "cls": "other",
+  "sm_active": 0.68,
+  "sm_issue": 0.68,
+  "tensor": 0,
+  "dram_r": 0.08,
+  "dram_w": 0.8,
+  "gpu": 6.88,
+  "clock": 1933090742.88,
+  "warps": 0.68,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    28
+   ]
+  ]
+ },
+ {
+  "start": 45496186743,
+  "end": 45498606498,
+  "dur_ms": 2.419755,
+  "busy_ms": 0.03024,
+  "n": 28,
+  "cls": "other",
+  "sm_active": 0.72,
+  "sm_issue": 0.72,
+  "tensor": 0,
+  "dram_r": 0.56,
+  "dram_w": 0.84,
+  "gpu": 6.96,
+  "clock": 1933056685.76,
+  "warps": 0.72,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    28
+   ]
+  ]
+ },
+ {
+  "start": 45499782568,
+  "end": 45502264401,
+  "dur_ms": 2.481833,
+  "busy_ms": 0.030144,
+  "n": 28,
+  "cls": "other",
+  "sm_active": 0.72,
+  "sm_issue": 0.72,
+  "tensor": 0,
+  "dram_r": 0.16,
+  "dram_w": 0.64,
+  "gpu": 6.84,
+  "clock": 1933205657.16,
+  "warps": 0.72,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    28
+   ]
+  ]
+ },
+ {
+  "start": 45503432920,
+  "end": 45505986912,
+  "dur_ms": 2.553992,
+  "busy_ms": 0.030207,
+  "n": 28,
+  "cls": "other",
+  "sm_active": 0.64,
+  "sm_issue": 0.64,
+  "tensor": 0,
+  "dram_r": 0.08,
+  "dram_w": 0.6,
+  "gpu": 6.76,
+  "clock": 1933414000.04,
+  "warps": 0.64,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    28
+   ]
+  ]
+ },
+ {
+  "start": 45507150214,
+  "end": 45509444500,
+  "dur_ms": 2.294286,
+  "busy_ms": 0.028032,
+  "n": 26,
+  "cls": "other",
+  "sm_active": 0.6956521739130435,
+  "sm_issue": 0.6956521739130435,
+  "tensor": 0,
+  "dram_r": 0.08695652173913043,
+  "dram_w": 0.6086956521739131,
+  "gpu": 7.304347826086956,
+  "clock": 1933309627.4347825,
+  "warps": 0.6956521739130435,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    26
+   ]
+  ]
+ },
+ {
+  "start": 45797385894,
+  "end": 45798294994,
+  "dur_ms": 0.9091,
+  "busy_ms": 0.006271,
+  "n": 2,
+  "cls": "other",
+  "sm_active": 0.5,
+  "sm_issue": 0.2,
+  "tensor": 0,
+  "dram_r": 0.3,
+  "dram_w": 0.3,
+  "gpu": 1.3,
+  "clock": 1933365999.9,
+  "warps": 0.3,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 45900299956,
+  "end": 45900631053,
+  "dur_ms": 0.331097,
+  "busy_ms": 0.008544,
+  "n": 2,
+  "cls": "other",
+  "sm_active": 0.6666666666666666,
+  "sm_issue": 0.3333333333333333,
+  "tensor": 0,
+  "dram_r": 0.3333333333333333,
+  "dram_w": 0.3333333333333333,
+  "gpu": 3,
+  "clock": 1933269048,
+  "warps": 0.3333333333333333,
+  "top": [
+   [
+    "void sglang::device::marlin::gptq_",
+    1
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 45928520585,
+  "end": 45928524713,
+  "dur_ms": 0.004128,
+  "busy_ms": 0.004128,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::index_elementwise",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 45929583154,
+  "end": 46301754803,
+  "dur_ms": 372.171649,
+  "busy_ms": 23.006004,
+  "n": 1960,
+  "cls": "other",
+  "sm_active": 5.600483610961849,
+  "sm_issue": 1.2708221386351424,
+  "tensor": 0,
+  "dram_r": 1.6606663084363245,
+  "dram_w": 1.8788285867813004,
+  "gpu": 6.844707146695325,
+  "clock": 1932706213.6423965,
+  "warps": 3.4207415368081677,
+  "top": [
+   [
+    "void at::native::elementwise_kerne",
+    784
+   ],
+   [
+    "void at::native::vectorized_elemen",
+    392
+   ],
+   [
+    "void sglang::device::marlin::gptq_",
+    392
+   ]
+  ]
+ },
+ {
+  "start": 46314386909,
+  "end": 46317140736,
+  "dur_ms": 2.753827,
+  "busy_ms": 1.005515,
+  "n": 12,
+  "cls": "other",
+  "sm_active": 35.333333333333336,
+  "sm_issue": 0.9629629629629629,
+  "tensor": 0,
+  "dram_r": 17,
+  "dram_w": 16.962962962962962,
+  "gpu": 37.851851851851855,
+  "clock": 1933275238.0370371,
+  "warps": 32.2962962962963,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    4
+   ],
+   [
+    "void at::native::<unnamed>::CatArr",
+    4
+   ],
+   [
+    "void <unnamed>::elementwise_kernel",
+    2
+   ]
+  ]
+ },
+ {
+  "start": 50280246509,
+  "end": 50280268204,
+  "dur_ms": 0.021695,
+  "busy_ms": 0.021695,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 50282390973,
+  "end": 50296115340,
+  "dur_ms": 13.724367,
+  "busy_ms": 13.413237,
+  "n": 8,
+  "cls": "other",
+  "sm_active": 97.07246376811594,
+  "sm_issue": 8.521739130434783,
+  "tensor": 0,
+  "dram_r": 0.9927536231884058,
+  "dram_w": 95.10144927536231,
+  "gpu": 99.44927536231884,
+  "clock": 1694918198.7463768,
+  "warps": 62.53623188405797,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    8
+   ]
+  ]
+ },
+ {
+  "start": 50297350352,
+  "end": 50306767038,
+  "dur_ms": 9.416686,
+  "busy_ms": 1.564988,
+  "n": 40,
+  "cls": "other",
+  "sm_active": 15.436170212765957,
+  "sm_issue": 1.3191489361702127,
+  "tensor": 0,
+  "dram_r": 0.8404255319148937,
+  "dram_w": 15.75531914893617,
+  "gpu": 17.319148936170212,
+  "clock": 1694700866.212766,
+  "warps": 9.96808510638298,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    40
+   ]
+  ]
+ },
+ {
+  "start": 50308687444,
+  "end": 50310573930,
+  "dur_ms": 1.886486,
+  "busy_ms": 0.101916,
+  "n": 9,
+  "cls": "other",
+  "sm_active": 4.368421052631579,
+  "sm_issue": 0.47368421052631576,
+  "tensor": 0,
+  "dram_r": 1.0526315789473684,
+  "dram_w": 3.5789473684210527,
+  "gpu": 6.421052631578948,
+  "clock": 1694905338.2631578,
+  "warps": 2.473684210526316,
+  "top": [
+   [
+    "void <unnamed>::elementwise_kernel",
+    4
+   ],
+   [
+    "void at::native::vectorized_elemen",
+    4
+   ],
+   [
+    "void at::native::<unnamed>::CatArr",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 50541942156,
+  "end": 50541944492,
+  "dur_ms": 0.002336,
+  "busy_ms": 0.002336,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void cutlass::Kernel2<cutlass_80_w",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 50578693626,
+  "end": 50583963621,
+  "dur_ms": 5.269995,
+  "busy_ms": 0.21049,
+  "n": 39,
+  "cls": "other",
+  "sm_active": 3.3076923076923075,
+  "sm_issue": 0.5192307692307693,
+  "tensor": 0,
+  "dram_r": 0.5192307692307693,
+  "dram_w": 3.5961538461538463,
+  "gpu": 4.846153846153846,
+  "clock": 1694943379.1538463,
+  "warps": 2.6538461538461537,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    39
+   ]
+  ]
+ },
+ {
+  "start": 51110477726,
+  "end": 51110479262,
+  "dur_ms": 0.001536,
+  "busy_ms": 0.001536,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 51132827564,
+  "end": 51132830700,
+  "dur_ms": 0.003136,
+  "busy_ms": 0.003136,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::reduce_kernel<(in",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 51159760213,
+  "end": 51159761461,
+  "dur_ms": 0.001248,
+  "busy_ms": 0.001248,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at_cuda_detail::cub::DeviceSc",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 51165630898,
+  "end": 51165903500,
+  "dur_ms": 0.272602,
+  "busy_ms": 0.00416,
+  "n": 2,
+  "cls": "other",
+  "sm_active": 0.3333333333333333,
+  "sm_issue": 0.3333333333333333,
+  "tensor": 0,
+  "dram_r": 0.3333333333333333,
+  "dram_w": 0.6666666666666666,
+  "gpu": 3,
+  "clock": 1695001428.6666667,
+  "warps": 0.3333333333333333,
+  "top": [
+   [
+    "void at_cuda_detail::cub::DeviceSc",
+    1
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 52803956780,
+  "end": 52803959244,
+  "dur_ms": 0.002464,
+  "busy_ms": 0.002464,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "create_flashinfer_kv_indices_trito",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 52833741173,
+  "end": 52834205034,
+  "dur_ms": 0.463861,
+  "busy_ms": 0.008384,
+  "n": 5,
+  "cls": "other",
+  "sm_active": 0.5,
+  "sm_issue": 0.5,
+  "tensor": 0,
+  "dram_r": 0.75,
+  "dram_w": 0.75,
+  "gpu": 2.5,
+  "clock": 1694996071.5,
+  "warps": 0.5,
+  "top": [
+   [
+    "void at_cuda_detail::cub::DeviceSc",
+    2
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    1
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 52853662969,
+  "end": 52853664473,
+  "dur_ms": 0.001504,
+  "busy_ms": 0.001504,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 52856269919,
+  "end": 52856517721,
+  "dur_ms": 0.247802,
+  "busy_ms": 0.006207,
+  "n": 2,
+  "cls": "other",
+  "sm_active": 1,
+  "sm_issue": 0.5,
+  "tensor": 0,
+  "dram_r": 0.5,
+  "dram_w": 0.5,
+  "gpu": 7,
+  "clock": 1695003571.5,
+  "warps": 0.5,
+  "top": [
+   [
+    "create_flashinfer_kv_indices_trito",
+    1
+   ],
+   [
+    "void at::native::index_elementwise",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 52860559839,
+  "end": 52860875320,
+  "dur_ms": 0.315481,
+  "busy_ms": 0.00848,
+  "n": 3,
+  "cls": "other",
+  "sm_active": 0.6666666666666666,
+  "sm_issue": 0.6666666666666666,
+  "tensor": 0,
+  "dram_r": 0,
+  "dram_w": 0.6666666666666666,
+  "gpu": 3,
+  "clock": 1694996190.6666667,
+  "warps": 0.6666666666666666,
+  "top": [
+   [
+    "get_num_kv_splits_triton",
+    2
+   ],
+   [
+    "void at::native::index_elementwise",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 52862004831,
+  "end": 52862006271,
+  "dur_ms": 0.00144,
+  "busy_ms": 0.00144,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 52889628055,
+  "end": 52889958576,
+  "dur_ms": 0.330521,
+  "busy_ms": 0.002688,
+  "n": 2,
+  "cls": "other",
+  "sm_active": 0.25,
+  "sm_issue": 0.25,
+  "tensor": 0,
+  "dram_r": 0,
+  "dram_w": 0.25,
+  "gpu": 0.5,
+  "clock": 1695005714,
+  "warps": 0.25,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    2
+   ]
+  ]
+ },
+ {
+  "start": 52906935189,
+  "end": 52907430570,
+  "dur_ms": 0.495381,
+  "busy_ms": 0.010432,
+  "n": 7,
+  "cls": "other",
+  "sm_active": 0.75,
+  "sm_issue": 0.75,
+  "tensor": 0,
+  "dram_r": 0.25,
+  "dram_w": 0.75,
+  "gpu": 3.75,
+  "clock": 1694997857,
+  "warps": 0.75,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    4
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    3
+   ]
+  ]
+ },
+ {
+  "start": 52919328609,
+  "end": 52919551964,
+  "dur_ms": 0.223355,
+  "busy_ms": 0.00288,
+  "n": 2,
+  "cls": "other",
+  "sm_active": 0.3333333333333333,
+  "sm_issue": 0.3333333333333333,
+  "tensor": 0,
+  "dram_r": 0,
+  "dram_w": 0.3333333333333333,
+  "gpu": 0.6666666666666666,
+  "clock": 1694999047.6666667,
+  "warps": 0.3333333333333333,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    2
+   ]
+  ]
+ },
+ {
+  "start": 52952177541,
+  "end": 52952645211,
+  "dur_ms": 0.46767,
+  "busy_ms": 0.00432,
+  "n": 3,
+  "cls": "other",
+  "sm_active": 0.4,
+  "sm_issue": 0.4,
+  "tensor": 0,
+  "dram_r": 0.4,
+  "dram_w": 0.6,
+  "gpu": 1.8,
+  "clock": 1694999142.8,
+  "warps": 0.4,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    3
+   ]
+  ]
+ },
+ {
+  "start": 52953737410,
+  "end": 52954181656,
+  "dur_ms": 0.444246,
+  "busy_ms": 0.008384,
+  "n": 4,
+  "cls": "other",
+  "sm_active": 0.75,
+  "sm_issue": 0.75,
+  "tensor": 0,
+  "dram_r": 0.75,
+  "dram_w": 0.75,
+  "gpu": 2,
+  "clock": 1694890357.25,
+  "warps": 0.75,
+  "top": [
+   [
+    "void at::native::vectorized_gather",
+    2
+   ],
+   [
+    "void at::native::vectorized_elemen",
+    2
+   ]
+  ]
+ },
+ {
+  "start": 53010315253,
+  "end": 53011080772,
+  "dur_ms": 0.765519,
+  "busy_ms": 0.03376,
+  "n": 2,
+  "cls": "other",
+  "sm_active": 1.75,
+  "sm_issue": 0.375,
+  "tensor": 0.625,
+  "dram_r": 1.125,
+  "dram_w": 0.375,
+  "gpu": 3.25,
+  "clock": 1694617678.75,
+  "warps": 0.5,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    1
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 53387821816,
+  "end": 53388207440,
+  "dur_ms": 0.385624,
+  "busy_ms": 0.00832,
+  "n": 3,
+  "cls": "other",
+  "sm_active": 1.25,
+  "sm_issue": 0.5,
+  "tensor": 0,
+  "dram_r": 0.5,
+  "dram_w": 0.5,
+  "gpu": 3.5,
+  "clock": 1694394285.5,
+  "warps": 0.75,
+  "top": [
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    1
+   ],
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 53817341492,
+  "end": 53817875016,
+  "dur_ms": 0.533524,
+  "busy_ms": 0.026752,
+  "n": 2,
+  "cls": "other",
+  "sm_active": 3.2,
+  "sm_issue": 0.4,
+  "tensor": 0.8,
+  "dram_r": 1,
+  "dram_w": 0.4,
+  "gpu": 4.8,
+  "clock": 1693942857.2,
+  "warps": 0.6,
+  "top": [
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    1
+   ],
+   [
+    "void sglang::device::marlin::Marli",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 53823272752,
+  "end": 53823275248,
+  "dur_ms": 0.002496,
+  "busy_ms": 0.002496,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "_gemma_qkv_rmsnorm_kernel",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 53833585322,
+  "end": 53834372664,
+  "dur_ms": 0.787342,
+  "busy_ms": 0.013024,
+  "n": 5,
+  "cls": "other",
+  "sm_active": 0.5,
+  "sm_issue": 0.375,
+  "tensor": 0,
+  "dram_r": 0.75,
+  "dram_w": 0.625,
+  "gpu": 3.125,
+  "clock": 1694998035.75,
+  "warps": 0.375,
+  "top": [
+   [
+    "void at::native::elementwise_kerne",
+    4
+   ],
+   [
+    "void sglang::fused_rope_kernel<(bo",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 53843291153,
+  "end": 53843292721,
+  "dur_ms": 0.001568,
+  "busy_ms": 0.001568,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void sglang::store_kvcache<(long)5",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 53852257642,
+  "end": 53852264618,
+  "dur_ms": 0.006976,
+  "busy_ms": 0.006976,
+  "n": 1,
+  "cls": "decode",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "_fwd_grouped_kernel_stage1",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 53856422189,
+  "end": 53857063967,
+  "dur_ms": 0.641778,
+  "busy_ms": 0.028575,
+  "n": 3,
+  "cls": "other",
+  "sm_active": 2.6666666666666665,
+  "sm_issue": 0.5,
+  "tensor": 0.3333333333333333,
+  "dram_r": 0.6666666666666666,
+  "dram_w": 0.3333333333333333,
+  "gpu": 4.666666666666667,
+  "clock": 1694547381,
+  "warps": 0.5,
+  "top": [
+   [
+    "_fwd_kernel_stage2",
+    1
+   ],
+   [
+    "void sglang::device::marlin::Marli",
+    1
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 54388411576,
+  "end": 54388953836,
+  "dur_ms": 0.54226,
+  "busy_ms": 0.046336,
+  "n": 2,
+  "cls": "other",
+  "sm_active": 7.8,
+  "sm_issue": 2,
+  "tensor": 4.8,
+  "dram_r": 6.4,
+  "dram_w": 0.4,
+  "gpu": 8.6,
+  "clock": 1692264857.2,
+  "warps": 1.4,
+  "top": [
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    1
+   ],
+   [
+    "void sglang::device::marlin::Marli",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 54399504864,
+  "end": 54400686566,
+  "dur_ms": 1.181702,
+  "busy_ms": 0.126973,
+  "n": 5,
+  "cls": "other",
+  "sm_active": 4.818181818181818,
+  "sm_issue": 0.8181818181818182,
+  "tensor": 1.1818181818181819,
+  "dram_r": 1.8181818181818181,
+  "dram_w": 0.5454545454545454,
+  "gpu": 11.636363636363637,
+  "clock": 1694177272.6363637,
+  "warps": 0.9090909090909091,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    2
+   ],
+   [
+    "void sglang::act_and_mul_kernel<__",
+    1
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 54405058212,
+  "end": 54421800175,
+  "dur_ms": 16.741963,
+  "busy_ms": 1.130444,
+  "n": 112,
+  "cls": "decode",
+  "sm_active": 3.6607142857142856,
+  "sm_issue": 1,
+  "tensor": 1.125,
+  "dram_r": 1.9821428571428572,
+  "dram_w": 0.6011904761904762,
+  "gpu": 7.351190476190476,
+  "clock": 1694085059.4940476,
+  "warps": 0.9404761904761905,
+  "top": [
+   [
+    "void at::native::elementwise_kerne",
+    26
+   ],
+   [
+    "void sglang::device::marlin::Marli",
+    26
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    22
+   ]
+  ]
+ },
+ {
+  "start": 54424459764,
+  "end": 54424462772,
+  "dur_ms": 0.003008,
+  "busy_ms": 0.003008,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "_gemma_qkv_rmsnorm_kernel",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 54434097725,
+  "end": 54434604145,
+  "dur_ms": 0.50642,
+  "busy_ms": 0.013888,
+  "n": 5,
+  "cls": "other",
+  "sm_active": 1.3333333333333333,
+  "sm_issue": 0.6666666666666666,
+  "tensor": 0,
+  "dram_r": 0.3333333333333333,
+  "dram_w": 0.3333333333333333,
+  "gpu": 2.6666666666666665,
+  "clock": 1694951666.6666667,
+  "warps": 0.6666666666666666,
+  "top": [
+   [
+    "void at::native::elementwise_kerne",
+    4
+   ],
+   [
+    "void sglang::fused_rope_kernel<(bo",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 54443543978,
+  "end": 54443545482,
+  "dur_ms": 0.001504,
+  "busy_ms": 0.001504,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void sglang::store_kvcache<(long)1",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 54446914527,
+  "end": 54446922943,
+  "dur_ms": 0.008416,
+  "busy_ms": 0.008416,
+  "n": 1,
+  "cls": "decode",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "_fwd_grouped_kernel_stage1",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 54448987409,
+  "end": 54518551873,
+  "dur_ms": 69.564464,
+  "busy_ms": 5.141075,
+  "n": 486,
+  "cls": "decode",
+  "sm_active": 4.05316091954023,
+  "sm_issue": 1.0517241379310345,
+  "tensor": 1.2586206896551724,
+  "dram_r": 2.146551724137931,
+  "dram_w": 0.6120689655172413,
+  "gpu": 8.020114942528735,
+  "clock": 1694018630.9439654,
+  "warps": 0.985632183908046,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    114
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    110
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    95
+   ]
+  ]
+ },
+ {
+  "start": 54521201670,
+  "end": 54538490980,
+  "dur_ms": 17.28931,
+  "busy_ms": 1.296447,
+  "n": 110,
+  "cls": "decode",
+  "sm_active": 4.156976744186046,
+  "sm_issue": 1.0406976744186047,
+  "tensor": 1.319767441860465,
+  "dram_r": 2.203488372093023,
+  "dram_w": 0.563953488372093,
+  "gpu": 8.081395348837209,
+  "clock": 1693999377.1162791,
+  "warps": 0.9651162790697675,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    30
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    25
+   ],
+   [
+    "void at::native::vectorized_elemen",
+    20
+   ]
+  ]
+ },
+ {
+  "start": 54541173256,
+  "end": 54584517986,
+  "dur_ms": 43.34473,
+  "busy_ms": 3.371727,
+  "n": 285,
+  "cls": "decode",
+  "sm_active": 4.299539170506913,
+  "sm_issue": 1.0714285714285714,
+  "tensor": 1.3778801843317972,
+  "dram_r": 2.2649769585253456,
+  "dram_w": 0.5921658986175116,
+  "gpu": 8.331797235023041,
+  "clock": 1693978268.608295,
+  "warps": 1,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    77
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    65
+   ],
+   [
+    "void at::native::vectorized_elemen",
+    52
+   ]
+  ]
+ },
+ {
+  "start": 54809116144,
+  "end": 54810756300,
+  "dur_ms": 1.640156,
+  "busy_ms": 1.639324,
+  "n": 2,
+  "cls": "other",
+  "sm_active": 96.8125,
+  "sm_issue": 7.9375,
+  "tensor": 36.1875,
+  "dram_r": 89.5,
+  "dram_w": 3.0625,
+  "gpu": 97.8125,
+  "clock": 1694567678.5625,
+  "warps": 11,
+  "top": [
+   [
+    "ampere_bf16_s16816gemm_bf16_128x64",
+    1
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 54813091159,
+  "end": 54963165668,
+  "dur_ms": 150.074509,
+  "busy_ms": 13.03504,
+  "n": 1049,
+  "cls": "decode",
+  "sm_active": 5.276666666666666,
+  "sm_issue": 1.1653333333333333,
+  "tensor": 1.6973333333333334,
+  "dram_r": 3.202,
+  "dram_w": 0.68,
+  "gpu": 9.286666666666667,
+  "clock": 1693991792.3813334,
+  "warps": 1.1693333333333333,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    253
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    212
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    185
+   ]
+  ]
+ },
+ {
+  "start": 55118308192,
+  "end": 55118459229,
+  "dur_ms": 0.151037,
+  "busy_ms": 0.005632,
+  "n": 2,
+  "cls": "other",
+  "sm_active": 1,
+  "sm_issue": 1,
+  "tensor": 0,
+  "dram_r": 1,
+  "dram_w": 1,
+  "gpu": 5,
+  "clock": 1695001429,
+  "warps": 1,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ],
+   [
+    "void at::native::reduce_kernel<(in",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 55120462128,
+  "end": 55121225535,
+  "dur_ms": 0.763407,
+  "busy_ms": 0.024544,
+  "n": 12,
+  "cls": "other",
+  "sm_active": 1,
+  "sm_issue": 0.875,
+  "tensor": 0,
+  "dram_r": 0.75,
+  "dram_w": 0.875,
+  "gpu": 4.5,
+  "clock": 1694990892.875,
+  "warps": 0.875,
+  "top": [
+   [
+    "void at_cuda_detail::cub::DeviceSc",
+    4
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    2
+   ],
+   [
+    "create_flashinfer_kv_indices_trito",
+    2
+   ]
+  ]
+ },
+ {
+  "start": 55124003937,
+  "end": 55419905881,
+  "dur_ms": 295.901944,
+  "busy_ms": 25.701447,
+  "n": 2100,
+  "cls": "decode",
+  "sm_active": 5.208516390672525,
+  "sm_issue": 1.169651909428861,
+  "tensor": 1.7218654950996959,
+  "dram_r": 3.2284555593105777,
+  "dram_w": 0.6150726596823252,
+  "gpu": 9.331530922608989,
+  "clock": 1694019219.8256168,
+  "warps": 1.1507265968232512,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    506
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    424
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    370
+   ]
+  ]
+ },
+ {
+  "start": 55569753643,
+  "end": 55569909671,
+  "dur_ms": 0.156028,
+  "busy_ms": 0.005632,
+  "n": 2,
+  "cls": "other",
+  "sm_active": 0.5,
+  "sm_issue": 0.5,
+  "tensor": 0,
+  "dram_r": 0.5,
+  "dram_w": 0.5,
+  "gpu": 2.5,
+  "clock": 1694998571.5,
+  "warps": 0.5,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ],
+   [
+    "void at::native::reduce_kernel<(in",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 55571793725,
+  "end": 55574717020,
+  "dur_ms": 2.923295,
+  "busy_ms": 0.059262,
+  "n": 33,
+  "cls": "other",
+  "sm_active": 0.8275862068965517,
+  "sm_issue": 0.7586206896551724,
+  "tensor": 0,
+  "dram_r": 1,
+  "dram_w": 0.9310344827586207,
+  "gpu": 3.2413793103448274,
+  "clock": 1694988719.2068965,
+  "warps": 0.7586206896551724,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    16
+   ],
+   [
+    "void at_cuda_detail::cub::DeviceSc",
+    4
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    4
+   ]
+  ]
+ },
+ {
+  "start": 55662106911,
+  "end": 55956167008,
+  "dur_ms": 294.060097,
+  "busy_ms": 17.384775,
+  "n": 2079,
+  "cls": "decode",
+  "sm_active": 4.206732403944237,
+  "sm_issue": 1.1081264875892554,
+  "tensor": 1.1183270996259775,
+  "dram_r": 3.242434546072764,
+  "dram_w": 0.41312478748724923,
+  "gpu": 6.55593335600136,
+  "clock": 1694297647.547773,
+  "warps": 0.9904794287657259,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    506
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    424
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    367
+   ]
+  ]
+ },
+ {
+  "start": 56104537203,
+  "end": 56104668529,
+  "dur_ms": 0.131326,
+  "busy_ms": 0.005728,
+  "n": 2,
+  "cls": "other",
+  "sm_active": 0.5,
+  "sm_issue": 0.5,
+  "tensor": 0,
+  "dram_r": 0.5,
+  "dram_w": 0.5,
+  "gpu": 2.5,
+  "clock": 1694997143,
+  "warps": 0.5,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ],
+   [
+    "void at::native::reduce_kernel<(in",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 56106571462,
+  "end": 56409670565,
+  "dur_ms": 303.099103,
+  "busy_ms": 17.317015,
+  "n": 2112,
+  "cls": "decode",
+  "sm_active": 4.007918178818872,
+  "sm_issue": 1.0838007258330584,
+  "tensor": 1.0818211811283405,
+  "dram_r": 3.148135928736391,
+  "dram_w": 0.39161992741669416,
+  "gpu": 6.355328274496865,
+  "clock": 1694335223.178159,
+  "warps": 0.9633784229627186,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    506
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    424
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    371
+   ]
+  ]
+ },
+ {
+  "start": 56693173528,
+  "end": 56693768394,
+  "dur_ms": 0.594866,
+  "busy_ms": 0.005664,
+  "n": 2,
+  "cls": "other",
+  "sm_active": 0.16666666666666666,
+  "sm_issue": 0.16666666666666666,
+  "tensor": 0,
+  "dram_r": 0.3333333333333333,
+  "dram_w": 0.3333333333333333,
+  "gpu": 0.8333333333333334,
+  "clock": 1694997142.8333333,
+  "warps": 0.16666666666666666,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ],
+   [
+    "void at::native::reduce_kernel<(in",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 56699522634,
+  "end": 56703279030,
+  "dur_ms": 3.756396,
+  "busy_ms": 0.033728,
+  "n": 16,
+  "cls": "other",
+  "sm_active": 0.4473684210526316,
+  "sm_issue": 0.42105263157894735,
+  "tensor": 0,
+  "dram_r": 0.4473684210526316,
+  "dram_w": 0.5263157894736842,
+  "gpu": 1.3157894736842106,
+  "clock": 1694998195.4210527,
+  "warps": 0.42105263157894735,
+  "top": [
+   [
+    "void at_cuda_detail::cub::DeviceSc",
+    4
+   ],
+   [
+    "void at::native::vectorized_elemen",
+    3
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    2
+   ]
+  ]
+ },
+ {
+  "start": 56706807368,
+  "end": 56709843748,
+  "dur_ms": 3.03638,
+  "busy_ms": 0.031391,
+  "n": 19,
+  "cls": "other",
+  "sm_active": 0.43333333333333335,
+  "sm_issue": 0.43333333333333335,
+  "tensor": 0,
+  "dram_r": 0.36666666666666664,
+  "dram_w": 0.36666666666666664,
+  "gpu": 1.7,
+  "clock": 1694996333.3333333,
+  "warps": 0.43333333333333335,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    14
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    3
+   ],
+   [
+    "void at::native::vectorized_gather",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 56711799385,
+  "end": 56780504094,
+  "dur_ms": 68.704709,
+  "busy_ms": 1.039021,
+  "n": 172,
+  "cls": "decode",
+  "sm_active": 0.9388646288209607,
+  "sm_issue": 0.3609898107714702,
+  "tensor": 0.12809315866084425,
+  "dram_r": 0.8893740902474527,
+  "dram_w": 0.11935953420669577,
+  "gpu": 1.7219796215429404,
+  "clock": 1694866009.56623,
+  "warps": 0.314410480349345,
+  "top": [
+   [
+    "void at::native::elementwise_kerne",
+    42
+   ],
+   [
+    "void sglang::device::marlin::Marli",
+    38
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    32
+   ]
+  ]
+ },
+ {
+  "start": 56781572230,
+  "end": 56786687476,
+  "dur_ms": 5.115246,
+  "busy_ms": 0.123484,
+  "n": 15,
+  "cls": "other",
+  "sm_active": 1.4901960784313726,
+  "sm_issue": 0.5098039215686274,
+  "tensor": 0.21568627450980393,
+  "dram_r": 1.2352941176470589,
+  "dram_w": 0.0784313725490196,
+  "gpu": 2.4901960784313726,
+  "clock": 1694800784.3529413,
+  "warps": 0.4117647058823529,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    5
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    4
+   ],
+   [
+    "void at::native::vectorized_elemen",
+    3
+   ]
+  ]
+ },
+ {
+  "start": 56787730173,
+  "end": 56792779660,
+  "dur_ms": 5.049487,
+  "busy_ms": 0.035776,
+  "n": 11,
+  "cls": "decode",
+  "sm_active": 0.3333333333333333,
+  "sm_issue": 0.21568627450980393,
+  "tensor": 0.0392156862745098,
+  "dram_r": 0.45098039215686275,
+  "dram_w": 0.058823529411764705,
+  "gpu": 0.8235294117647058,
+  "clock": 1694944369.72549,
+  "warps": 0.19607843137254902,
+  "top": [
+   [
+    "void at::native::elementwise_kerne",
+    4
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    1
+   ],
+   [
+    "void sglang::device::marlin::Marli",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 56793836853,
+  "end": 56798523020,
+  "dur_ms": 4.686167,
+  "busy_ms": 0.111677,
+  "n": 11,
+  "cls": "other",
+  "sm_active": 1.5106382978723405,
+  "sm_issue": 0.46808510638297873,
+  "tensor": 0.2127659574468085,
+  "dram_r": 1.3191489361702127,
+  "dram_w": 0.06382978723404255,
+  "gpu": 2.3617021276595747,
+  "clock": 1694798358.7234042,
+  "warps": 0.3617021276595745,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    4
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    3
+   ],
+   [
+    "void at::native::vectorized_elemen",
+    2
+   ]
+  ]
+ },
+ {
+  "start": 56799577781,
+  "end": 56803481886,
+  "dur_ms": 3.904105,
+  "busy_ms": 0.02816,
+  "n": 8,
+  "cls": "other",
+  "sm_active": 0.358974358974359,
+  "sm_issue": 0.20512820512820512,
+  "tensor": 0.02564102564102564,
+  "dram_r": 0.41025641025641024,
+  "dram_w": 0.02564102564102564,
+  "gpu": 0.7692307692307693,
+  "clock": 1694922747.2307692,
+  "warps": 0.1794871794871795,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    2
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    2
+   ],
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 56804583205,
+  "end": 56815403700,
+  "dur_ms": 10.820495,
+  "busy_ms": 0.159675,
+  "n": 26,
+  "cls": "decode",
+  "sm_active": 0.9351851851851852,
+  "sm_issue": 0.35185185185185186,
+  "tensor": 0.12962962962962962,
+  "dram_r": 0.8611111111111112,
+  "dram_w": 0.05555555555555555,
+  "gpu": 1.6944444444444444,
+  "clock": 1694866071.398148,
+  "warps": 0.3148148148148148,
+  "top": [
+   [
+    "void at::native::elementwise_kerne",
+    6
+   ],
+   [
+    "void sglang::device::marlin::Marli",
+    6
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    5
+   ]
+  ]
+ },
+ {
+  "start": 56816487548,
+  "end": 56818224853,
+  "dur_ms": 1.737305,
+  "busy_ms": 0.018944,
+  "n": 7,
+  "cls": "decode",
+  "sm_active": 0.47058823529411764,
+  "sm_issue": 0.4117647058823529,
+  "tensor": 0.058823529411764705,
+  "dram_r": 0.35294117647058826,
+  "dram_w": 0.11764705882352941,
+  "gpu": 1.2352941176470589,
+  "clock": 1694991092.4705882,
+  "warps": 0.4117647058823529,
+  "top": [
+   [
+    "void at::native::elementwise_kerne",
+    4
+   ],
+   [
+    "void sglang::store_kvcache<(long)5",
+    1
+   ],
+   [
+    "_fwd_grouped_kernel_stage1",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 56819363548,
+  "end": 56854233395,
+  "dur_ms": 34.869847,
+  "busy_ms": 0.637359,
+  "n": 101,
+  "cls": "decode",
+  "sm_active": 1.160919540229885,
+  "sm_issue": 0.4367816091954023,
+  "tensor": 0.16091954022988506,
+  "dram_r": 1.0316091954022988,
+  "dram_w": 0.09770114942528736,
+  "gpu": 2.089080459770115,
+  "clock": 1694838284.060345,
+  "warps": 0.3735632183908046,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    24
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    24
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    20
+   ]
+  ]
+ },
+ {
+  "start": 56855335354,
+  "end": 56855336858,
+  "dur_ms": 0.001504,
+  "busy_ms": 0.001504,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void sglang::store_kvcache<(long)5",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 56856364899,
+  "end": 56867651080,
+  "dur_ms": 11.286181,
+  "busy_ms": 0.165914,
+  "n": 28,
+  "cls": "decode",
+  "sm_active": 0.9026548672566371,
+  "sm_issue": 0.35398230088495575,
+  "tensor": 0.12389380530973451,
+  "dram_r": 0.7876106194690266,
+  "dram_w": 0.035398230088495575,
+  "gpu": 1.6725663716814159,
+  "clock": 1694871959.5663717,
+  "warps": 0.3008849557522124,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    6
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    6
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    5
+   ]
+  ]
+ },
+ {
+  "start": 56868785455,
+  "end": 56879330084,
+  "dur_ms": 10.544629,
+  "busy_ms": 0.158075,
+  "n": 26,
+  "cls": "decode",
+  "sm_active": 0.9047619047619048,
+  "sm_issue": 0.3619047619047619,
+  "tensor": 0.12380952380952381,
+  "dram_r": 0.8761904761904762,
+  "dram_w": 0.14285714285714285,
+  "gpu": 1.638095238095238,
+  "clock": 1694875238.0380952,
+  "warps": 0.3047619047619048,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    6
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    6
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    5
+   ]
+  ]
+ },
+ {
+  "start": 56880411660,
+  "end": 56881794893,
+  "dur_ms": 1.383233,
+  "busy_ms": 0.017311,
+  "n": 3,
+  "cls": "other",
+  "sm_active": 0.14285714285714285,
+  "sm_issue": 0.14285714285714285,
+  "tensor": 0,
+  "dram_r": 0.21428571428571427,
+  "dram_w": 0.07142857142857142,
+  "gpu": 0.6428571428571429,
+  "clock": 1695000000,
+  "warps": 0.14285714285714285,
+  "top": [
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    2
+   ],
+   [
+    "void sglang::device::marlin::Marli",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 56882971411,
+  "end": 56910552748,
+  "dur_ms": 27.581337,
+  "busy_ms": 0.609329,
+  "n": 94,
+  "cls": "decode",
+  "sm_active": 1.3007246376811594,
+  "sm_issue": 0.4855072463768116,
+  "tensor": 0.17753623188405798,
+  "dram_r": 1.0797101449275361,
+  "dram_w": 0.10869565217391304,
+  "gpu": 2.3768115942028984,
+  "clock": 1694812971.036232,
+  "warps": 0.4166666666666667,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    23
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    20
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    18
+   ]
+  ]
+ },
+ {
+  "start": 56911570005,
+  "end": 56921566615,
+  "dur_ms": 9.99661,
+  "busy_ms": 0.158558,
+  "n": 26,
+  "cls": "decode",
+  "sm_active": 0.99,
+  "sm_issue": 0.37,
+  "tensor": 0.14,
+  "dram_r": 0.89,
+  "dram_w": 0.08,
+  "gpu": 1.78,
+  "clock": 1694856142.86,
+  "warps": 0.32,
+  "top": [
+   [
+    "void at::native::elementwise_kerne",
+    6
+   ],
+   [
+    "void sglang::device::marlin::Marli",
+    6
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    5
+   ]
+  ]
+ },
+ {
+  "start": 56923094357,
+  "end": 56925382338,
+  "dur_ms": 2.287981,
+  "busy_ms": 0.018911,
+  "n": 7,
+  "cls": "decode",
+  "sm_active": 0.30434782608695654,
+  "sm_issue": 0.2608695652173913,
+  "tensor": 0.043478260869565216,
+  "dram_r": 0.21739130434782608,
+  "dram_w": 0.043478260869565216,
+  "gpu": 0.9565217391304348,
+  "clock": 1694992422.4347825,
+  "warps": 0.2608695652173913,
+  "top": [
+   [
+    "void at::native::elementwise_kerne",
+    4
+   ],
+   [
+    "void sglang::store_kvcache<(long)5",
+    1
+   ],
+   [
+    "_fwd_grouped_kernel_stage1",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 56926664133,
+  "end": 56928371679,
+  "dur_ms": 1.707546,
+  "busy_ms": 0.05667,
+  "n": 4,
+  "cls": "other",
+  "sm_active": 2.2941176470588234,
+  "sm_issue": 0.6470588235294118,
+  "tensor": 0.35294117647058826,
+  "dram_r": 2.3529411764705883,
+  "dram_w": 0.17647058823529413,
+  "gpu": 2.8823529411764706,
+  "clock": 1694749327.8235295,
+  "warps": 0.47058823529411764,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    2
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    2
+   ]
+  ]
+ },
+ {
+  "start": 56929372329,
+  "end": 57103583295,
+  "dur_ms": 174.210966,
+  "busy_ms": 3.241656,
+  "n": 486,
+  "cls": "decode",
+  "sm_active": 1.2290470723306544,
+  "sm_issue": 0.4500574052812859,
+  "tensor": 0.17795637198622274,
+  "dram_r": 1.0826636050516647,
+  "dram_w": 0.10849598163030999,
+  "gpu": 2.1343283582089554,
+  "clock": 1694823362.3030999,
+  "warps": 0.3823191733639495,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    129
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    108
+   ],
+   [
+    "void at::native::vectorized_elemen",
+    84
+   ]
+  ]
+ },
+ {
+  "start": 57105063134,
+  "end": 57106645403,
+  "dur_ms": 1.582269,
+  "busy_ms": 1.580797,
+  "n": 3,
+  "cls": "other",
+  "sm_active": 93.125,
+  "sm_issue": 7.9375,
+  "tensor": 35.75,
+  "dram_r": 88.375,
+  "dram_w": 1.8125,
+  "gpu": 94.125,
+  "clock": 1694730357.1875,
+  "warps": 9.0625,
+  "top": [
+   [
+    "ampere_bf16_s16816gemm_bf16_64x64_",
+    1
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    1
+   ],
+   [
+    "softcap_inplace_logits_kernel",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 57109138755,
+  "end": 57112523224,
+  "dur_ms": 3.384469,
+  "busy_ms": 0.031392,
+  "n": 19,
+  "cls": "other",
+  "sm_active": 0.4411764705882353,
+  "sm_issue": 0.4411764705882353,
+  "tensor": 0,
+  "dram_r": 0.5882352941176471,
+  "dram_w": 0.7058823529411765,
+  "gpu": 1.5,
+  "clock": 1694997478.9411764,
+  "warps": 0.4411764705882353,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    14
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    3
+   ],
+   [
+    "void at::native::vectorized_gather",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 57114134900,
+  "end": 57149373283,
+  "dur_ms": 35.238383,
+  "busy_ms": 0.870288,
+  "n": 146,
+  "cls": "decode",
+  "sm_active": 1.575070821529745,
+  "sm_issue": 0.5949008498583569,
+  "tensor": 0.21529745042492918,
+  "dram_r": 1.2946175637393769,
+  "dram_w": 0.17563739376770537,
+  "gpu": 2.861189801699717,
+  "clock": 1694777248.0849857,
+  "warps": 0.5042492917847026,
+  "top": [
+   [
+    "void at::native::elementwise_kerne",
+    36
+   ],
+   [
+    "void sglang::device::marlin::Marli",
+    32
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    27
+   ]
+  ]
+ },
+ {
+  "start": 57150415627,
+  "end": 57161907275,
+  "dur_ms": 11.491648,
+  "busy_ms": 0.162012,
+  "n": 26,
+  "cls": "decode",
+  "sm_active": 0.8260869565217391,
+  "sm_issue": 0.33043478260869563,
+  "tensor": 0.11304347826086956,
+  "dram_r": 0.808695652173913,
+  "dram_w": 0.0782608695652174,
+  "gpu": 1.5043478260869565,
+  "clock": 1694884322.973913,
+  "warps": 0.2782608695652174,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    6
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    6
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    5
+   ]
+  ]
+ },
+ {
+  "start": 57163023410,
+  "end": 57171612595,
+  "dur_ms": 8.589185,
+  "busy_ms": 0.139102,
+  "n": 19,
+  "cls": "other",
+  "sm_active": 1.0116279069767442,
+  "sm_issue": 0.36046511627906974,
+  "tensor": 0.13953488372093023,
+  "dram_r": 0.9418604651162791,
+  "dram_w": 0.05813953488372093,
+  "gpu": 1.697674418604651,
+  "clock": 1694852059.8023255,
+  "warps": 0.29069767441860467,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    6
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    5
+   ],
+   [
+    "void at::native::vectorized_elemen",
+    3
+   ]
+  ]
+ },
+ {
+  "start": 57172725850,
+  "end": 57175246210,
+  "dur_ms": 2.52036,
+  "busy_ms": 0.018559,
+  "n": 7,
+  "cls": "decode",
+  "sm_active": 0.2692307692307692,
+  "sm_issue": 0.23076923076923078,
+  "tensor": 0.038461538461538464,
+  "dram_r": 0.7307692307692307,
+  "dram_w": 0.15384615384615385,
+  "gpu": 0.8461538461538461,
+  "clock": 1694994945.0384614,
+  "warps": 0.23076923076923078,
+  "top": [
+   [
+    "void at::native::elementwise_kerne",
+    4
+   ],
+   [
+    "void sglang::store_kvcache<(long)5",
+    1
+   ],
+   [
+    "_fwd_grouped_kernel_stage1",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 57176322058,
+  "end": 57231379967,
+  "dur_ms": 55.057909,
+  "busy_ms": 0.923691,
+  "n": 145,
+  "cls": "decode",
+  "sm_active": 1.0816696914700545,
+  "sm_issue": 0.4101633393829401,
+  "tensor": 0.15245009074410162,
+  "dram_r": 0.956442831215971,
+  "dram_w": 0.07441016333938294,
+  "gpu": 1.9183303085299455,
+  "clock": 1694846178.3611615,
+  "warps": 0.3502722323049002,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    35
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    32
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    29
+   ]
+  ]
+ },
+ {
+  "start": 57232469959,
+  "end": 57237200702,
+  "dur_ms": 4.730743,
+  "busy_ms": 0.035776,
+  "n": 11,
+  "cls": "decode",
+  "sm_active": 0.3617021276595745,
+  "sm_issue": 0.2127659574468085,
+  "tensor": 0.0425531914893617,
+  "dram_r": 0.5106382978723404,
+  "dram_w": 0.10638297872340426,
+  "gpu": 0.9361702127659575,
+  "clock": 1694935471.0851064,
+  "warps": 0.19148936170212766,
+  "top": [
+   [
+    "void at::native::elementwise_kerne",
+    4
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    1
+   ],
+   [
+    "void sglang::device::marlin::Marli",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 57238498785,
+  "end": 57240169148,
+  "dur_ms": 1.670363,
+  "busy_ms": 0.058048,
+  "n": 5,
+  "cls": "other",
+  "sm_active": 2.2941176470588234,
+  "sm_issue": 0.7647058823529411,
+  "tensor": 0.4117647058823529,
+  "dram_r": 2.1176470588235294,
+  "dram_w": 0.11764705882352941,
+  "gpu": 3.0588235294117645,
+  "clock": 1694714621.8235295,
+  "warps": 0.5882352941176471,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    2
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    2
+   ],
+   [
+    "void sglang::act_and_mul_kernel<__",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 57241211300,
+  "end": 57249047542,
+  "dur_ms": 7.836242,
+  "busy_ms": 0.099679,
+  "n": 21,
+  "cls": "decode",
+  "sm_active": 0.3924050632911392,
+  "sm_issue": 0.22784810126582278,
+  "tensor": 0.05063291139240506,
+  "dram_r": 0.3291139240506329,
+  "dram_w": 0.02531645569620253,
+  "gpu": 1.2151898734177216,
+  "clock": 1694941103.0253165,
+  "warps": 0.21518987341772153,
+  "top": [
+   [
+    "void at::native::elementwise_kerne",
+    6
+   ],
+   [
+    "void sglang::device::marlin::Marli",
+    4
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    3
+   ]
+  ]
+ },
+ {
+  "start": 57250139197,
+  "end": 57259040183,
+  "dur_ms": 8.900986,
+  "busy_ms": 0.139421,
+  "n": 19,
+  "cls": "other",
+  "sm_active": 0.9775280898876404,
+  "sm_issue": 0.34831460674157305,
+  "tensor": 0.1348314606741573,
+  "dram_r": 1,
+  "dram_w": 0.06741573033707865,
+  "gpu": 1.651685393258427,
+  "clock": 1694857158.8876405,
+  "warps": 0.2808988764044944,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    6
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    5
+   ],
+   [
+    "void at::native::vectorized_elemen",
+    3
+   ]
+  ]
+ },
+ {
+  "start": 57260053312,
+  "end": 57262290287,
+  "dur_ms": 2.236975,
+  "busy_ms": 0.018528,
+  "n": 7,
+  "cls": "decode",
+  "sm_active": 0.3181818181818182,
+  "sm_issue": 0.2727272727272727,
+  "tensor": 0.045454545454545456,
+  "dram_r": 0.3181818181818182,
+  "dram_w": 0.09090909090909091,
+  "gpu": 1.0454545454545454,
+  "clock": 1694994220.8181818,
+  "warps": 0.2727272727272727,
+  "top": [
+   [
+    "void at::native::elementwise_kerne",
+    4
+   ],
+   [
+    "void sglang::store_kvcache<(long)5",
+    1
+   ],
+   [
+    "_fwd_grouped_kernel_stage1",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 57263320184,
+  "end": 57273988298,
+  "dur_ms": 10.668114,
+  "busy_ms": 0.157052,
+  "n": 26,
+  "cls": "decode",
+  "sm_active": 0.8785046728971962,
+  "sm_issue": 0.35514018691588783,
+  "tensor": 0.12149532710280374,
+  "dram_r": 0.8878504672897196,
+  "dram_w": 0.056074766355140186,
+  "gpu": 1.5981308411214954,
+  "clock": 1694879412.5140188,
+  "warps": 0.29906542056074764,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    6
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    6
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    5
+   ]
+  ]
+ },
+ {
+  "start": 57275039347,
+  "end": 57367201165,
+  "dur_ms": 92.161818,
+  "busy_ms": 1.858042,
+  "n": 290,
+  "cls": "decode",
+  "sm_active": 1.3007600434310531,
+  "sm_issue": 0.4809989142236699,
+  "tensor": 0.1791530944625407,
+  "dram_r": 1.1074918566775245,
+  "dram_w": 0.10206297502714441,
+  "gpu": 2.3083604777415854,
+  "clock": 1694814093.3702497,
+  "warps": 0.40608034744842564,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    72
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    60
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    52
+   ]
+  ]
+ },
+ {
+  "start": 57368201335,
+  "end": 57470460784,
+  "dur_ms": 102.259449,
+  "busy_ms": 2.069481,
+  "n": 304,
+  "cls": "decode",
+  "sm_active": 1.3528836754643205,
+  "sm_issue": 0.48191593352883677,
+  "tensor": 0.19648093841642228,
+  "dram_r": 1.1485826001955035,
+  "dram_w": 0.11143695014662756,
+  "gpu": 2.300097751710655,
+  "clock": 1694805070.5288367,
+  "warps": 0.40762463343108507,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    83
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    70
+   ],
+   [
+    "void at::native::vectorized_elemen",
+    55
+   ]
+  ]
+ },
+ {
+  "start": 57471575031,
+  "end": 57473156276,
+  "dur_ms": 1.581245,
+  "busy_ms": 1.579741,
+  "n": 3,
+  "cls": "other",
+  "sm_active": 94.3125,
+  "sm_issue": 8,
+  "tensor": 36.1875,
+  "dram_r": 89.5,
+  "dram_w": 1.875,
+  "gpu": 95.3125,
+  "clock": 1694721517.9375,
+  "warps": 9.125,
+  "top": [
+   [
+    "ampere_bf16_s16816gemm_bf16_64x64_",
+    1
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    1
+   ],
+   [
+    "softcap_inplace_logits_kernel",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 57846168093,
+  "end": 57846638130,
+  "dur_ms": 0.470037,
+  "busy_ms": 0.005504,
+  "n": 2,
+  "cls": "other",
+  "sm_active": 0.2,
+  "sm_issue": 0.2,
+  "tensor": 0,
+  "dram_r": 0.2,
+  "dram_w": 0.2,
+  "gpu": 1,
+  "clock": 1695000285.6,
+  "warps": 0.2,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ],
+   [
+    "void at::native::reduce_kernel<(in",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 57849748717,
+  "end": 57851458631,
+  "dur_ms": 1.709914,
+  "busy_ms": 0.0336,
+  "n": 16,
+  "cls": "other",
+  "sm_active": 0.7647058823529411,
+  "sm_issue": 0.7058823529411765,
+  "tensor": 0,
+  "dram_r": 0.7647058823529411,
+  "dram_w": 0.7647058823529411,
+  "gpu": 2.823529411764706,
+  "clock": 1694996806.6470587,
+  "warps": 0.7058823529411765,
+  "top": [
+   [
+    "void at_cuda_detail::cub::DeviceSc",
+    4
+   ],
+   [
+    "void at::native::vectorized_elemen",
+    3
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    2
+   ]
+  ]
+ },
+ {
+  "start": 57853535033,
+  "end": 58143278721,
+  "dur_ms": 289.743688,
+  "busy_ms": 16.182343,
+  "n": 2096,
+  "cls": "decode",
+  "sm_active": 3.879875733517432,
+  "sm_issue": 1.1087331722471523,
+  "tensor": 0.8370728339661719,
+  "dram_r": 3.258543320676562,
+  "dram_w": 0.1898515705902658,
+  "gpu": 6.289955125992406,
+  "clock": 1694565629.9658267,
+  "warps": 0.9420089748015188,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    506
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    424
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    370
+   ]
+  ]
+ },
+ {
+  "start": 58288901203,
+  "end": 58289071663,
+  "dur_ms": 0.17046,
+  "busy_ms": 0.005472,
+  "n": 2,
+  "cls": "other",
+  "sm_active": 0.5,
+  "sm_issue": 0.5,
+  "tensor": 0,
+  "dram_r": 0.5,
+  "dram_w": 0.5,
+  "gpu": 2.5,
+  "clock": 1694991428.5,
+  "warps": 0.5,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ],
+   [
+    "void at::native::reduce_kernel<(in",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 58290940165,
+  "end": 58582542690,
+  "dur_ms": 291.602525,
+  "busy_ms": 15.93738,
+  "n": 2112,
+  "cls": "decode",
+  "sm_active": 3.8333333333333335,
+  "sm_issue": 1.107681755829904,
+  "tensor": 0.828875171467764,
+  "dram_r": 3.2575445816186557,
+  "dram_w": 0.17832647462277093,
+  "gpu": 6.154663923182442,
+  "clock": 1694555857.8264747,
+  "warps": 0.9410150891632373,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    506
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    424
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    371
+   ]
+  ]
+ },
+ {
+  "start": 58726623286,
+  "end": 58726740467,
+  "dur_ms": 0.117181,
+  "busy_ms": 0.005184,
+  "n": 2,
+  "cls": "other",
+  "sm_active": 1,
+  "sm_issue": 1,
+  "tensor": 0,
+  "dram_r": 1,
+  "dram_w": 0,
+  "gpu": 5,
+  "clock": 1695000000,
+  "warps": 1,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ],
+   [
+    "void at::native::reduce_kernel<(in",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 58728763142,
+  "end": 58729693906,
+  "dur_ms": 0.930764,
+  "busy_ms": 0.024736,
+  "n": 12,
+  "cls": "other",
+  "sm_active": 0.8888888888888888,
+  "sm_issue": 0.7777777777777778,
+  "tensor": 0,
+  "dram_r": 0.6666666666666666,
+  "dram_w": 0.4444444444444444,
+  "gpu": 3.888888888888889,
+  "clock": 1695001428.6666667,
+  "warps": 0.7777777777777778,
+  "top": [
+   [
+    "void at_cuda_detail::cub::DeviceSc",
+    4
+   ],
+   [
+    "void at::native::vectorized_elemen",
+    3
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    2
+   ]
+  ]
+ },
+ {
+  "start": 58733772599,
+  "end": 58735601742,
+  "dur_ms": 1.829143,
+  "busy_ms": 0.030432,
+  "n": 19,
+  "cls": "other",
+  "sm_active": 0.6111111111111112,
+  "sm_issue": 0.6111111111111112,
+  "tensor": 0,
+  "dram_r": 0.6666666666666666,
+  "dram_w": 0.5,
+  "gpu": 2.8333333333333335,
+  "clock": 1694999365.1111112,
+  "warps": 0.6111111111111112,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    15
+   ],
+   [
+    "get_num_kv_splits_triton",
+    2
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 58759866801,
+  "end": 58898627164,
+  "dur_ms": 138.760363,
+  "busy_ms": 6.255858,
+  "n": 1030,
+  "cls": "decode",
+  "sm_active": 2.9164265129683,
+  "sm_issue": 1.0547550432276658,
+  "tensor": 0.43587896253602304,
+  "dram_r": 2.3595100864553316,
+  "dram_w": 0.15561959654178675,
+  "gpu": 5.222622478386167,
+  "clock": 1694528054.748559,
+  "warps": 0.877521613832853,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    285
+   ],
+   [
+    "void sglang::device::marlin::Marli",
+    253
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    212
+   ]
+  ]
+ },
+ {
+  "start": 58912475847,
+  "end": 59056776663,
+  "dur_ms": 144.300816,
+  "busy_ms": 9.280868,
+  "n": 1051,
+  "cls": "decode",
+  "sm_active": 4.879417879417879,
+  "sm_issue": 1.5051975051975053,
+  "tensor": 0.42203742203742206,
+  "dram_r": 4.288288288288288,
+  "dram_w": 0.16424116424116425,
+  "gpu": 7.133749133749133,
+  "clock": 1694527013.1607761,
+  "warps": 2.221760221760222,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    300
+   ],
+   [
+    "void sglang::device::marlin::Marli",
+    253
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    212
+   ]
+  ]
+ },
+ {
+  "start": 68648199277,
+  "end": 68648203469,
+  "dur_ms": 0.004192,
+  "busy_ms": 0.004192,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::index_elementwise",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 68654576736,
+  "end": 68654579104,
+  "dur_ms": 0.002368,
+  "busy_ms": 0.002368,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "write_req_to_token_pool_triton",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 68660782166,
+  "end": 68660783990,
+  "dur_ms": 0.001824,
+  "busy_ms": 0.001824,
+  "n": 1,
+  "cls": "other",
+  "sm_active": 1,
+  "sm_issue": 1,
+  "tensor": 0,
+  "dram_r": 1,
+  "dram_w": 0,
+  "gpu": 1,
+  "clock": 1694914286,
+  "warps": 1,
+  "top": [
+   [
+    "compute_position_kernel",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 68670369249,
+  "end": 68671182351,
+  "dur_ms": 0.813102,
+  "busy_ms": 0.00976,
+  "n": 5,
+  "cls": "other",
+  "sm_active": 0.25,
+  "sm_issue": 0.25,
+  "tensor": 0,
+  "dram_r": 0.375,
+  "dram_w": 0.125,
+  "gpu": 2.125,
+  "clock": 1694946964.375,
+  "warps": 0.25,
+  "top": [
+   [
+    "void at::native::unrolled_elementw",
+    2
+   ],
+   [
+    "void at_cuda_detail::cub::DeviceSc",
+    2
+   ],
+   [
+    "void at::native::<unnamed>::multi_",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 68675195318,
+  "end": 68675740682,
+  "dur_ms": 0.545364,
+  "busy_ms": 0.012991,
+  "n": 8,
+  "cls": "other",
+  "sm_active": 1,
+  "sm_issue": 1,
+  "tensor": 0,
+  "dram_r": 0.6,
+  "dram_w": 0.2,
+  "gpu": 6.2,
+  "clock": 1694888285.8,
+  "warps": 1,
+  "top": [
+   [
+    "void at::native::unrolled_elementw",
+    3
+   ],
+   [
+    "void at_cuda_detail::cub::DeviceSc",
+    2
+   ],
+   [
+    "void at::native::vectorized_elemen",
+    2
+   ]
+  ]
+ },
+ {
+  "start": 68679216061,
+  "end": 68683578748,
+  "dur_ms": 4.362687,
+  "busy_ms": 0.107872,
+  "n": 39,
+  "cls": "other",
+  "sm_active": 1.3255813953488371,
+  "sm_issue": 0.7674418604651163,
+  "tensor": 0.09302325581395349,
+  "dram_r": 1.0232558139534884,
+  "dram_w": 0.18604651162790697,
+  "gpu": 3.627906976744186,
+  "clock": 1694699634.5581396,
+  "warps": 0.6976744186046512,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    22
+   ],
+   [
+    "void at::native::index_elementwise",
+    2
+   ],
+   [
+    "void at_cuda_detail::cub::DeviceSc",
+    2
+   ]
+  ]
+ },
+ {
+  "start": 68706083241,
+  "end": 68723532518,
+  "dur_ms": 17.449277,
+  "busy_ms": 0.888679,
+  "n": 125,
+  "cls": "prefill",
+  "sm_active": 2.9195402298850577,
+  "sm_issue": 1,
+  "tensor": 0.39655172413793105,
+  "dram_r": 2.2298850574712645,
+  "dram_w": 1.1091954022988506,
+  "gpu": 26.482758620689655,
+  "clock": 1694371223.3045976,
+  "warps": 0.8390804597701149,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    40
+   ],
+   [
+    "void sglang::device::marlin::Marli",
+    30
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    25
+   ]
+  ]
+ },
+ {
+  "start": 68730661704,
+  "end": 68856450689,
+  "dur_ms": 125.788985,
+  "busy_ms": 8.130059,
+  "n": 941,
+  "cls": "prefill",
+  "sm_active": 4.167726550079491,
+  "sm_issue": 1.3124006359300477,
+  "tensor": 0.4189189189189189,
+  "dram_r": 3.4674085850556438,
+  "dram_w": 0.2845786963434022,
+  "gpu": 7.197933227344992,
+  "clock": 1694398298.899841,
+  "warps": 1.6653418124006358,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    240
+   ],
+   [
+    "void sglang::device::marlin::Marli",
+    221
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    185
+   ]
+  ]
+ },
+ {
+  "start": 68859414367,
+  "end": 68859810710,
+  "dur_ms": 0.396343,
+  "busy_ms": 0.014944,
+  "n": 4,
+  "cls": "other",
+  "sm_active": 0.75,
+  "sm_issue": 0.75,
+  "tensor": 0,
+  "dram_r": 0.75,
+  "dram_w": 0,
+  "gpu": 2.5,
+  "clock": 1694997500,
+  "warps": 0.75,
+  "top": [
+   [
+    "void at::native::index_elementwise",
+    2
+   ],
+   [
+    "void at::native::reduce_kernel<(in",
+    1
+   ],
+   [
+    "void at::native::vectorized_elemen",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 68861265334,
+  "end": 68862163746,
+  "dur_ms": 0.898412,
+  "busy_ms": 0.01408,
+  "n": 6,
+  "cls": "other",
+  "sm_active": 0.6666666666666666,
+  "sm_issue": 0.6666666666666666,
+  "tensor": 0,
+  "dram_r": 0.6666666666666666,
+  "dram_w": 0,
+  "gpu": 3.4444444444444446,
+  "clock": 1694998888.8888888,
+  "warps": 0.6666666666666666,
+  "top": [
+   [
+    "void at::native::index_elementwise",
+    3
+   ],
+   [
+    "void at::native::vectorized_elemen",
+    2
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 68875705366,
+  "end": 68877568364,
+  "dur_ms": 1.862998,
+  "busy_ms": 0.035071,
+  "n": 18,
+  "cls": "other",
+  "sm_active": 0.7222222222222222,
+  "sm_issue": 0.6666666666666666,
+  "tensor": 0,
+  "dram_r": 0.5555555555555556,
+  "dram_w": 0,
+  "gpu": 3,
+  "clock": 1694996984,
+  "warps": 0.6666666666666666,
+  "top": [
+   [
+    "void at_cuda_detail::cub::DeviceSc",
+    4
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    3
+   ],
+   [
+    "void at::native::vectorized_elemen",
+    3
+   ]
+  ]
+ },
+ {
+  "start": 68883790338,
+  "end": 68891474776,
+  "dur_ms": 7.684438,
+  "busy_ms": 7.624787,
+  "n": 1053,
+  "cls": "decode",
+  "sm_active": 63.85526315789474,
+  "sm_issue": 14.5,
+  "tensor": 5.9605263157894735,
+  "dram_r": 52.078947368421055,
+  "dram_w": 1,
+  "gpu": 99.97368421052632,
+  "clock": 1689647293.25,
+  "warps": 20.342105263157894,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    301
+   ],
+   [
+    "void sglang::device::marlin::Marli",
+    253
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    212
+   ]
+  ]
+ },
+ {
+  "start": 68944992436,
+  "end": 68944995924,
+  "dur_ms": 0.003488,
+  "busy_ms": 0.003488,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::index_elementwise",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 69660148921,
+  "end": 69660387987,
+  "dur_ms": 0.239066,
+  "busy_ms": 0.008127,
+  "n": 2,
+  "cls": "other",
+  "sm_active": 0.3333333333333333,
+  "sm_issue": 0.3333333333333333,
+  "tensor": 0,
+  "dram_r": 0.6666666666666666,
+  "dram_w": 0,
+  "gpu": 1.6666666666666667,
+  "clock": 1695001428.6666667,
+  "warps": 0.3333333333333333,
+  "top": [
+   [
+    "void at::native::index_elementwise",
+    1
+   ],
+   [
+    "write_req_to_token_pool_triton",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 69661784212,
+  "end": 69667620083,
+  "dur_ms": 5.835871,
+  "busy_ms": 1.138597,
+  "n": 46,
+  "cls": "other",
+  "sm_active": 18.43103448275862,
+  "sm_issue": 3.9655172413793105,
+  "tensor": 8.775862068965518,
+  "dram_r": 12.982758620689655,
+  "dram_w": 3.6379310344827585,
+  "gpu": 20.75862068965517,
+  "clock": 1694293078.775862,
+  "warps": 7.913793103448276,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    17
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    6
+   ],
+   [
+    "void at_cuda_detail::cub::DeviceSc",
+    6
+   ]
+  ]
+ },
+ {
+  "start": 69676384848,
+  "end": 69695762690,
+  "dur_ms": 19.377842,
+  "busy_ms": 13.169144,
+  "n": 135,
+  "cls": "prefill",
+  "sm_active": 63.04639175257732,
+  "sm_issue": 11.25257731958763,
+  "tensor": 35.850515463917525,
+  "dram_r": 41.55154639175258,
+  "dram_w": 11.768041237113403,
+  "gpu": 68.3659793814433,
+  "clock": 1691736325.4845362,
+  "warps": 13.278350515463918,
+  "top": [
+   [
+    "void at::native::elementwise_kerne",
+    40
+   ],
+   [
+    "void sglang::device::marlin::Marli",
+    30
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    25
+   ]
+  ]
+ },
+ {
+  "start": 69700654614,
+  "end": 69771166137,
+  "dur_ms": 70.511523,
+  "busy_ms": 52.103839,
+  "n": 513,
+  "cls": "prefill",
+  "sm_active": 68.5014164305949,
+  "sm_issue": 12.118980169971671,
+  "tensor": 38.141643059490086,
+  "dram_r": 44.3413597733711,
+  "dram_w": 13.63172804532578,
+  "gpu": 74.41359773371104,
+  "clock": 1691377084.184136,
+  "warps": 14.624645892351275,
+  "top": [
+   [
+    "void at::native::elementwise_kerne",
+    152
+   ],
+   [
+    "void sglang::device::marlin::Marli",
+    114
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    95
+   ]
+  ]
+ },
+ {
+  "start": 69775434907,
+  "end": 69793164689,
+  "dur_ms": 17.729782,
+  "busy_ms": 13.06681,
+  "n": 130,
+  "cls": "prefill",
+  "sm_active": 68.06741573033707,
+  "sm_issue": 12.207865168539326,
+  "tensor": 39.07303370786517,
+  "dram_r": 45.28651685393258,
+  "dram_w": 12.735955056179776,
+  "gpu": 73.97191011235955,
+  "clock": 1691549093.1067417,
+  "warps": 14.162921348314606,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    30
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    25
+   ],
+   [
+    "void at::native::vectorized_elemen",
+    20
+   ]
+  ]
+ },
+ {
+  "start": 69797574607,
+  "end": 69845239182,
+  "dur_ms": 47.664575,
+  "busy_ms": 36.892909,
+  "n": 347,
+  "cls": "prefill",
+  "sm_active": 72.02310924369748,
+  "sm_issue": 12.878151260504202,
+  "tensor": 38.52100840336134,
+  "dram_r": 47.73529411764706,
+  "dram_w": 13.783613445378151,
+  "gpu": 78.1155462184874,
+  "clock": 1691561317.514706,
+  "warps": 16.439075630252102,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    77
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    65
+   ],
+   [
+    "void at::native::vectorized_elemen",
+    55
+   ]
+  ]
+ },
+ {
+  "start": 69851238409,
+  "end": 69854010923,
+  "dur_ms": 2.772514,
+  "busy_ms": 0.050144,
+  "n": 24,
+  "cls": "other",
+  "sm_active": 0.5714285714285714,
+  "sm_issue": 0.5714285714285714,
+  "tensor": 0,
+  "dram_r": 0.6428571428571429,
+  "dram_w": 0,
+  "gpu": 2.857142857142857,
+  "clock": 1694997908.25,
+  "warps": 0.5714285714285714,
+  "top": [
+   [
+    "void at::native::index_elementwise",
+    5
+   ],
+   [
+    "void at::native::vectorized_elemen",
+    5
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    4
+   ]
+  ]
+ },
+ {
+  "start": 69856720495,
+  "end": 69865699496,
+  "dur_ms": 8.979001,
+  "busy_ms": 8.038345,
+  "n": 1086,
+  "cls": "decode",
+  "sm_active": 55.3,
+  "sm_issue": 12.577777777777778,
+  "tensor": 5.211111111111111,
+  "dram_r": 44.766666666666666,
+  "dram_w": 0.9222222222222223,
+  "gpu": 90.3,
+  "clock": 1690591841.2555556,
+  "warps": 17.444444444444443,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    306
+   ],
+   [
+    "void sglang::device::marlin::Marli",
+    253
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    212
+   ]
+  ]
+ },
+ {
+  "start": 69868381676,
+  "end": 69924847048,
+  "dur_ms": 56.465372,
+  "busy_ms": 55.992724,
+  "n": 7510,
+  "cls": "decode",
+  "sm_active": 61.6241134751773,
+  "sm_issue": 13.920212765957446,
+  "tensor": 5.785460992907802,
+  "dram_r": 49.88297872340426,
+  "dram_w": 1.0070921985815602,
+  "gpu": 99.98226950354609,
+  "clock": 1690144680.8439717,
+  "warps": 19.31028368794326,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    2137
+   ],
+   [
+    "void sglang::device::marlin::Marli",
+    1771
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    1484
+   ]
+  ]
+ },
+ {
+  "start": 69948301919,
+  "end": 69948570073,
+  "dur_ms": 0.268154,
+  "busy_ms": 0.008416,
+  "n": 2,
+  "cls": "other",
+  "sm_active": 0.3333333333333333,
+  "sm_issue": 0.3333333333333333,
+  "tensor": 0,
+  "dram_r": 1,
+  "dram_w": 0,
+  "gpu": 2,
+  "clock": 1695003809.6666667,
+  "warps": 0.3333333333333333,
+  "top": [
+   [
+    "void at::native::index_elementwise",
+    1
+   ],
+   [
+    "write_req_to_token_pool_triton",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 69949998010,
+  "end": 70104070879,
+  "dur_ms": 154.072869,
+  "busy_ms": 115.104351,
+  "n": 1171,
+  "cls": "prefill",
+  "sm_active": 69.40752757949383,
+  "sm_issue": 12.254380272550293,
+  "tensor": 38.05321219987022,
+  "dram_r": 45.75794938351719,
+  "dram_w": 13.594419208306295,
+  "gpu": 75.34977287475665,
+  "clock": 1733938246.037638,
+  "warps": 15.262816353017522,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    253
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    233
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    212
+   ]
+  ]
+ },
+ {
+  "start": 70109766209,
+  "end": 70110138136,
+  "dur_ms": 0.371927,
+  "busy_ms": 0.010687,
+  "n": 5,
+  "cls": "other",
+  "sm_active": 1,
+  "sm_issue": 1,
+  "tensor": 0,
+  "dram_r": 1,
+  "dram_w": 0,
+  "gpu": 5,
+  "clock": 1739996666.6666667,
+  "warps": 1,
+  "top": [
+   [
+    "void at::native::index_elementwise",
+    2
+   ],
+   [
+    "void at::native::vectorized_elemen",
+    2
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 70125651264,
+  "end": 70125654432,
+  "dur_ms": 0.003168,
+  "busy_ms": 0.003168,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::index_elementwise",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 70127948621,
+  "end": 70129756197,
+  "dur_ms": 1.807576,
+  "busy_ms": 0.034784,
+  "n": 18,
+  "cls": "other",
+  "sm_active": 0.6842105263157895,
+  "sm_issue": 0.6842105263157895,
+  "tensor": 0,
+  "dram_r": 0.8421052631578947,
+  "dram_w": 0,
+  "gpu": 3,
+  "clock": 1739996842.1052632,
+  "warps": 0.6842105263157895,
+  "top": [
+   [
+    "void at_cuda_detail::cub::DeviceSc",
+    4
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    3
+   ],
+   [
+    "void at::native::vectorized_elemen",
+    3
+   ]
+  ]
+ },
+ {
+  "start": 70132577735,
+  "end": 70140523478,
+  "dur_ms": 7.945743,
+  "busy_ms": 7.903338,
+  "n": 1055,
+  "cls": "decode",
+  "sm_active": 62.35443037974684,
+  "sm_issue": 13.949367088607595,
+  "tensor": 5.69620253164557,
+  "dram_r": 50.68354430379747,
+  "dram_w": 1,
+  "gpu": 99.70886075949367,
+  "clock": 1720002441.21519,
+  "warps": 19.59493670886076,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    301
+   ],
+   [
+    "void sglang::device::marlin::Marli",
+    253
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    212
+   ]
+  ]
+ },
+ {
+  "start": 70176973453,
+  "end": 70176978765,
+  "dur_ms": 0.005312,
+  "busy_ms": 0.005312,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::index_elementwise",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 70181680165,
+  "end": 70181682757,
+  "dur_ms": 0.002592,
+  "busy_ms": 0.002592,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "write_req_to_token_pool_triton",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 70183125765,
+  "end": 70345109664,
+  "dur_ms": 161.983899,
+  "busy_ms": 151.453604,
+  "n": 1221,
+  "cls": "prefill",
+  "sm_active": 87.94567901234568,
+  "sm_issue": 15.310493827160494,
+  "tensor": 47.568518518518516,
+  "dram_r": 57.00308641975309,
+  "dram_w": 17.42098765432099,
+  "gpu": 94.15123456790124,
+  "clock": 1660478429.4376543,
+  "warps": 19.21851851851852,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    303
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    233
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    212
+   ]
+  ]
+ },
+ {
+  "start": 70346994774,
+  "end": 70347326574,
+  "dur_ms": 0.3318,
+  "busy_ms": 0.011775,
+  "n": 5,
+  "cls": "other",
+  "sm_active": 1,
+  "sm_issue": 1,
+  "tensor": 0,
+  "dram_r": 1,
+  "dram_w": 0,
+  "gpu": 5.333333333333333,
+  "clock": 1605003333,
+  "warps": 1,
+  "top": [
+   [
+    "void at::native::index_elementwise",
+    2
+   ],
+   [
+    "void at::native::vectorized_elemen",
+    2
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 70355539416,
+  "end": 70357780711,
+  "dur_ms": 2.241295,
+  "busy_ms": 0.041213,
+  "n": 19,
+  "cls": "other",
+  "sm_active": 0.6086956521739131,
+  "sm_issue": 0.5652173913043478,
+  "tensor": 0,
+  "dram_r": 0.5652173913043478,
+  "dram_w": 0.043478260869565216,
+  "gpu": 2.8260869565217392,
+  "clock": 1619998074.5217392,
+  "warps": 0.5652173913043478,
+  "top": [
+   [
+    "void at_cuda_detail::cub::DeviceSc",
+    4
+   ],
+   [
+    "void at::native::index_elementwise",
+    3
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    3
+   ]
+  ]
+ },
+ {
+  "start": 70360780196,
+  "end": 70369014990,
+  "dur_ms": 8.234794,
+  "busy_ms": 8.192613,
+  "n": 1055,
+  "cls": "decode",
+  "sm_active": 60.91463414634146,
+  "sm_issue": 14.195121951219512,
+  "tensor": 5.878048780487805,
+  "dram_r": 48.926829268292686,
+  "dram_w": 1,
+  "gpu": 99.6829268292683,
+  "clock": 1614212613.2560976,
+  "warps": 19.085365853658537,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    301
+   ],
+   [
+    "void sglang::device::marlin::Marli",
+    253
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    212
+   ]
+  ]
+ },
+ {
+  "start": 70404129572,
+  "end": 70404370751,
+  "dur_ms": 0.241179,
+  "busy_ms": 0.010048,
+  "n": 2,
+  "cls": "other",
+  "sm_active": 0.3333333333333333,
+  "sm_issue": 0.3333333333333333,
+  "tensor": 0,
+  "dram_r": 0.3333333333333333,
+  "dram_w": 0,
+  "gpu": 2.6666666666666665,
+  "clock": 1845000952,
+  "warps": 0.3333333333333333,
+  "top": [
+   [
+    "void at::native::index_elementwise",
+    1
+   ],
+   [
+    "write_req_to_token_pool_triton",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 70405980315,
+  "end": 70983063274,
+  "dur_ms": 577.082959,
+  "busy_ms": 572.364029,
+  "n": 1326,
+  "cls": "prefill",
+  "sm_active": 96.64824120603015,
+  "sm_issue": 14.934326806446023,
+  "tensor": 45.56108126841102,
+  "dram_r": 62.5274649107607,
+  "dram_w": 22.594351065673195,
+  "gpu": 99.39022699705424,
+  "clock": 1588281793.9514816,
+  "warps": 20.435972968289725,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    403
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    233
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    212
+   ]
+  ]
+ },
+ {
+  "start": 70991501167,
+  "end": 70991504655,
+  "dur_ms": 0.003488,
+  "busy_ms": 0.003488,
+  "n": 1,
+  "cls": "other",
+  "sm_active": null,
+  "sm_issue": null,
+  "tensor": null,
+  "dram_r": null,
+  "dram_w": null,
+  "gpu": null,
+  "clock": null,
+  "warps": null,
+  "top": [
+   [
+    "void at::native::index_elementwise",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 70992516280,
+  "end": 70994357360,
+  "dur_ms": 1.84108,
+  "busy_ms": 0.04048,
+  "n": 18,
+  "cls": "other",
+  "sm_active": 0.7368421052631579,
+  "sm_issue": 0.7368421052631579,
+  "tensor": 0,
+  "dram_r": 0.7368421052631579,
+  "dram_w": 0.05263157894736842,
+  "gpu": 3.3684210526315788,
+  "clock": 1632234210.631579,
+  "warps": 0.7368421052631579,
+  "top": [
+   [
+    "void at_cuda_detail::cub::DeviceSc",
+    4
+   ],
+   [
+    "void at::native::unrolled_elementw",
+    3
+   ],
+   [
+    "void at::native::vectorized_elemen",
+    3
+   ]
+  ]
+ },
+ {
+  "start": 70997275855,
+  "end": 71005910544,
+  "dur_ms": 8.634689,
+  "busy_ms": 8.590298,
+  "n": 1055,
+  "cls": "decode",
+  "sm_active": 59.104651162790695,
+  "sm_issue": 13.63953488372093,
+  "tensor": 5.72093023255814,
+  "dram_r": 47.22093023255814,
+  "dram_w": 1.0116279069767442,
+  "gpu": 99.81395348837209,
+  "clock": 1629496627.9534883,
+  "warps": 18.24418604651163,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    301
+   ],
+   [
+    "void sglang::device::marlin::Marli",
+    253
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    212
+   ]
+  ]
+ },
+ {
+  "start": 71076206010,
+  "end": 71076454901,
+  "dur_ms": 0.248891,
+  "busy_ms": 0.009664,
+  "n": 2,
+  "cls": "other",
+  "sm_active": 0.3333333333333333,
+  "sm_issue": 0.3333333333333333,
+  "tensor": 0,
+  "dram_r": 0.3333333333333333,
+  "dram_w": 0,
+  "gpu": 2.3333333333333335,
+  "clock": 1903965238.3333333,
+  "warps": 0.3333333333333333,
+  "top": [
+   [
+    "void at::native::index_elementwise",
+    1
+   ],
+   [
+    "write_req_to_token_pool_triton",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 71079044539,
+  "end": 71656688734,
+  "dur_ms": 577.644195,
+  "busy_ms": 573.526262,
+  "n": 1333,
+  "cls": "prefill",
+  "sm_active": 96.79259002770083,
+  "sm_issue": 14.994459833795014,
+  "tensor": 45.7796052631579,
+  "dram_r": 62.586391966759,
+  "dram_w": 22.58535318559557,
+  "gpu": 99.51004155124653,
+  "clock": 1580518701.7662742,
+  "warps": 20.45567867036011,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    403
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    233
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    212
+   ]
+  ]
+ },
+ {
+  "start": 71665765237,
+  "end": 77330744102,
+  "dur_ms": 5664.978865,
+  "busy_ms": 5653.434587,
+  "n": 10429,
+  "cls": "decode",
+  "sm_active": 96.55220560978624,
+  "sm_issue": 19.459850664595507,
+  "tensor": 42.43985101763429,
+  "dram_r": 41.49787294134261,
+  "dram_w": 16.239095514642283,
+  "gpu": 99.9481562549646,
+  "clock": 1621297261.9040442,
+  "warps": 19.266738451218867,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    3074
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    1696
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    1675
+   ]
+  ]
+ },
+ {
+  "start": 77332417217,
+  "end": 77369257173,
+  "dur_ms": 36.839956,
+  "busy_ms": 36.648105,
+  "n": 3206,
+  "cls": "decode",
+  "sm_active": 46.91576086956522,
+  "sm_issue": 9.519021739130435,
+  "tensor": 4.233695652173913,
+  "dram_r": 36.85597826086956,
+  "dram_w": 0.782608695652174,
+  "gpu": 99.91304347826087,
+  "clock": 1832282927.0108695,
+  "warps": 13.282608695652174,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    913
+   ],
+   [
+    "void sglang::device::marlin::Marli",
+    759
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    636
+   ]
+  ]
+ },
+ {
+  "start": 77404467885,
+  "end": 77404757415,
+  "dur_ms": 0.28953,
+  "busy_ms": 0.007744,
+  "n": 2,
+  "cls": "other",
+  "sm_active": 0.3333333333333333,
+  "sm_issue": 0.3333333333333333,
+  "tensor": 0,
+  "dram_r": 1,
+  "dram_w": 0,
+  "gpu": 1.6666666666666667,
+  "clock": 1918985238,
+  "warps": 0.3333333333333333,
+  "top": [
+   [
+    "void at::native::index_elementwise",
+    1
+   ],
+   [
+    "write_req_to_token_pool_triton",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 77406139432,
+  "end": 77559381238,
+  "dur_ms": 153.241806,
+  "busy_ms": 114.135682,
+  "n": 1171,
+  "cls": "prefill",
+  "sm_active": 69.24543080939948,
+  "sm_issue": 12.202349869451696,
+  "tensor": 37.882506527415146,
+  "dram_r": 45.79699738903394,
+  "dram_w": 13.689947780678851,
+  "gpu": 75.14164490861619,
+  "clock": 1771287431.926893,
+  "warps": 15.237597911227153,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    253
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    233
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    212
+   ]
+  ]
+ },
+ {
+  "start": 77588408919,
+  "end": 77588691216,
+  "dur_ms": 0.282297,
+  "busy_ms": 0.008159,
+  "n": 2,
+  "cls": "other",
+  "sm_active": 0.3333333333333333,
+  "sm_issue": 0.3333333333333333,
+  "tensor": 0,
+  "dram_r": 0.3333333333333333,
+  "dram_w": 0.3333333333333333,
+  "gpu": 1.6666666666666667,
+  "clock": 1778397619,
+  "warps": 0.3333333333333333,
+  "top": [
+   [
+    "void at::native::index_elementwise",
+    1
+   ],
+   [
+    "write_req_to_token_pool_triton",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 77614154399,
+  "end": 77621647162,
+  "dur_ms": 7.492763,
+  "busy_ms": 4.373854,
+  "n": 58,
+  "cls": "other",
+  "sm_active": 56.81333333333333,
+  "sm_issue": 11.306666666666667,
+  "tensor": 25.973333333333333,
+  "dram_r": 39.89333333333333,
+  "dram_w": 11.786666666666667,
+  "gpu": 59.16,
+  "clock": 1851669599.9733334,
+  "warps": 26,
+  "top": [
+   [
+    "void at::native::vectorized_elemen",
+    17
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    12
+   ],
+   [
+    "void at_cuda_detail::cub::DeviceSc",
+    6
+   ]
+  ]
+ },
+ {
+  "start": 77633132477,
+  "end": 78476061400,
+  "dur_ms": 842.928923,
+  "busy_ms": 837.424837,
+  "n": 3727,
+  "cls": "decode",
+  "sm_active": 96.27559615612765,
+  "sm_issue": 16.803060861312137,
+  "tensor": 53.50860125756317,
+  "dram_r": 67.76414758571597,
+  "dram_w": 17.21283663542532,
+  "gpu": 99.6554751453316,
+  "clock": 1567627933.8336694,
+  "warps": 20.793332542413097,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    1004
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    643
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    634
+   ]
+  ]
+ },
+ {
+  "start": 78478928089,
+  "end": 78488275436,
+  "dur_ms": 9.347347,
+  "busy_ms": 9.24294,
+  "n": 1092,
+  "cls": "decode",
+  "sm_active": 64.03191489361703,
+  "sm_issue": 12.53191489361702,
+  "tensor": 13.702127659574469,
+  "dram_r": 45.829787234042556,
+  "dram_w": 1.3936170212765957,
+  "gpu": 99.02127659574468,
+  "clock": 1461309696.0106382,
+  "warps": 9.095744680851064,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    253
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    212
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    187
+   ]
+  ]
+ },
+ {
+  "start": 78490060740,
+  "end": 78516678875,
+  "dur_ms": 26.618135,
+  "busy_ms": 26.148144,
+  "n": 3256,
+  "cls": "decode",
+  "sm_active": 63.54307116104869,
+  "sm_issue": 11.363295880149813,
+  "tensor": 12.629213483146067,
+  "dram_r": 47.32209737827716,
+  "dram_w": 1.247191011235955,
+  "gpu": 98.37827715355806,
+  "clock": 1645585002.681648,
+  "warps": 8.99625468164794,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    759
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    636
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    560
+   ]
+  ]
+ },
+ {
+  "start": 78517858594,
+  "end": 78606896573,
+  "dur_ms": 89.037979,
+  "busy_ms": 88.415582,
+  "n": 11820,
+  "cls": "decode",
+  "sm_active": 65.18630751964085,
+  "sm_issue": 10.860830527497194,
+  "tensor": 12.399551066217732,
+  "dram_r": 51.098765432098766,
+  "dram_w": 1.0740740740740742,
+  "gpu": 99.92929292929293,
+  "clock": 1826529265.6734006,
+  "warps": 8.814814814814815,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    2783
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    2332
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    2045
+   ]
+  ]
+ },
+ {
+  "start": 78655952038,
+  "end": 78656189697,
+  "dur_ms": 0.237659,
+  "busy_ms": 0.007584,
+  "n": 2,
+  "cls": "other",
+  "sm_active": 0.3333333333333333,
+  "sm_issue": 0.3333333333333333,
+  "tensor": 0,
+  "dram_r": 0.3333333333333333,
+  "dram_w": 0.3333333333333333,
+  "gpu": 2.6666666666666665,
+  "clock": 1928310952.3333333,
+  "warps": 0.3333333333333333,
+  "top": [
+   [
+    "void at::native::index_elementwise",
+    1
+   ],
+   [
+    "write_req_to_token_pool_triton",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 78657545507,
+  "end": 78808928644,
+  "dur_ms": 151.383137,
+  "busy_ms": 114.791487,
+  "n": 1171,
+  "cls": "prefill",
+  "sm_active": 70.46036988110964,
+  "sm_issue": 12.447159841479525,
+  "tensor": 38.613606340819025,
+  "dram_r": 46.481505944517835,
+  "dram_w": 13.842800528401586,
+  "gpu": 76.47886393659181,
+  "clock": 1750339656.5396302,
+  "warps": 15.498678996036988,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    253
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    233
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    212
+   ]
+  ]
+ },
+ {
+  "start": 78840790056,
+  "end": 78841300093,
+  "dur_ms": 0.510037,
+  "busy_ms": 0.008128,
+  "n": 2,
+  "cls": "other",
+  "sm_active": 0.2,
+  "sm_issue": 0.2,
+  "tensor": 0,
+  "dram_r": 0.2,
+  "dram_w": 0,
+  "gpu": 1.2,
+  "clock": 1823392000,
+  "warps": 0.2,
+  "top": [
+   [
+    "void at::native::index_elementwise",
+    1
+   ],
+   [
+    "write_req_to_token_pool_triton",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 78866403701,
+  "end": 80678729806,
+  "dur_ms": 1812.326105,
+  "busy_ms": 1804.206841,
+  "n": 6497,
+  "cls": "decode",
+  "sm_active": 96.82724564113882,
+  "sm_issue": 17.033050099315826,
+  "tensor": 54.36675126903553,
+  "dram_r": 68.01798719929376,
+  "dram_w": 17.26655263738689,
+  "gpu": 99.82647318472743,
+  "clock": 1544245170.9659016,
+  "warps": 21.051092474067534,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    1815
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    1122
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    1060
+   ]
+  ]
+ },
+ {
+  "start": 80680022194,
+  "end": 80682667672,
+  "dur_ms": 2.645478,
+  "busy_ms": 0.055871,
+  "n": 24,
+  "cls": "other",
+  "sm_active": 0.6923076923076923,
+  "sm_issue": 0.6538461538461539,
+  "tensor": 0,
+  "dram_r": 0.5384615384615384,
+  "dram_w": 0.34615384615384615,
+  "gpu": 3.3461538461538463,
+  "clock": 1514998736.3076923,
+  "warps": 0.6538461538461539,
+  "top": [
+   [
+    "void at::native::index_elementwise",
+    5
+   ],
+   [
+    "void at::native::vectorized_elemen",
+    5
+   ],
+   [
+    "void at_cuda_detail::cub::DeviceSc",
+    4
+   ]
+  ]
+ },
+ {
+  "start": 80685476443,
+  "end": 80705598275,
+  "dur_ms": 20.121832,
+  "busy_ms": 19.685038,
+  "n": 2186,
+  "cls": "decode",
+  "sm_active": 65.97014925373135,
+  "sm_issue": 12.323383084577115,
+  "tensor": 16.940298507462686,
+  "dram_r": 45.66169154228856,
+  "dram_w": 2.099502487562189,
+  "gpu": 97.7412935323383,
+  "clock": 1603710568.5870647,
+  "warps": 10.313432835820896,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    506
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    424
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    374
+   ]
+  ]
+ },
+ {
+  "start": 80708117100,
+  "end": 80823952071,
+  "dur_ms": 115.834971,
+  "busy_ms": 115.23313,
+  "n": 14060,
+  "cls": "decode",
+  "sm_active": 68.01986183074266,
+  "sm_issue": 11.518134715025907,
+  "tensor": 16.600172711571677,
+  "dram_r": 49.35146804835924,
+  "dram_w": 1.819516407599309,
+  "gpu": 99.94905008635578,
+  "clock": 1810317823.851468,
+  "warps": 10.053540587219343,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    3289
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    2756
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    2429
+   ]
+  ]
+ },
+ {
+  "start": 80893540470,
+  "end": 80893783856,
+  "dur_ms": 0.243386,
+  "busy_ms": 0.007776,
+  "n": 2,
+  "cls": "other",
+  "sm_active": 0.5,
+  "sm_issue": 0.5,
+  "tensor": 0,
+  "dram_r": 0.5,
+  "dram_w": 0.5,
+  "gpu": 3,
+  "clock": 1928107143,
+  "warps": 0.5,
+  "top": [
+   [
+    "void at::native::index_elementwise",
+    1
+   ],
+   [
+    "write_req_to_token_pool_triton",
+    1
+   ]
+  ]
+ },
+ {
+  "start": 80895170482,
+  "end": 81135407118,
+  "dur_ms": 240.236636,
+  "busy_ms": 236.101045,
+  "n": 1221,
+  "cls": "prefill",
+  "sm_active": 94.44338051623647,
+  "sm_issue": 16.755620316402997,
+  "tensor": 53.507910074937556,
+  "dram_r": 65.6594504579517,
+  "dram_w": 17.42173189009159,
+  "gpu": 98.7398001665279,
+  "clock": 1590704435.5795171,
+  "warps": 20.512905911740216,
+  "top": [
+   [
+    "void sglang::device::marlin::Marli",
+    303
+   ],
+   [
+    "void at::native::elementwise_kerne",
+    234
+   ],
+   [
+    "kernel_cutlass_kernel_flashinferno",
+    212
+   ]
+  ]
+ },
+ {
+  "start": 81176782053,
+  "end": 81177081534,
+  "dur_ms": 0.299481,
+  "busy_ms": 0.008095,
+  "n": 2,
+  "cls": "other",
+  "sm_active": 0.3333333333333333,
+  "sm_issue": 0.3333333333333333,
+  "tensor": 0,
+  "dram_r": 0.3333333333333333,
+  "dram_w": 0.3333333333333333,
+  "gpu": 1.6666666666666667,
+  "clock": 1784890952.3333333,
+  "warps": 0.3333333333333333,
+  "top": [
+   [
+    "void at::native::index_elementwise",
+    1
+   ],
+   [
+    "write_req_to_token_pool_triton",
+    1
+   ]
+  ]
+ }
+]

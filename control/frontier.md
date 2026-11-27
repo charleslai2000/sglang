@@ -73,3 +73,22 @@
   - unblock/reopen: GPU phase/counter seam与L1/L2正确性通过；Disk仅在L3读回与恢复PASS后开启。
 
 **FROZEN 2026-11-25**: T007 performance acceptance passed (median ~550 TPS, 77-78% duty, 800/800, zero sanity failures, real L3 restore re-validated). Configuration and code frozen at `c24c421daf`; no further optimisation, no new experiments, no repeated correctness certification. Complete phase diff for architecture review in `runs/G5-L3-PERFORMANCE-CODE-REVIEW.md` §6.
+
+## T010-GPU-HARDWARE-PROFILING — 2026-11-27 (source freeze `a76206a5fb`)
+
+Hardware-resource profiling of Gemma4 E4B on the RTX 3090 at production config, delivered as
+`control/gemma4-rtx3090-throughput-scheduling/runs/T010-GPU-HARDWARE-PROFILING-20261127.md`.
+T010's tier result is preserved; anchor restore, eviction work and L3 sizing are frozen.
+
+Measured: 7 forward shapes (extend 1024/1280/4096, 32K chunked prefill, decode b8/b16/b32) in one
+Nsight Systems capture with GPU sampling metrics, plus the existing C-8 120 s window and the A/B/C
+load records. Class results: short extend 86.4% SMs Active / 46.1% Tensor / 58.0% DRAM read,
+90.5% duty; 32K extend 96.6% / 42.4% / 41.5%, 99.8% duty; decode 61.9% / 11.4% / 46.7% read with
+only 1.3% DRAM write. Operator budget (C-8): attention 47.0%, Marlin GEMM 42.2%, norms 2.7%,
+activation 1.2%, RoPE 0.4%.
+
+**Tooling limitation, recorded not worked around:** Nsight Compute cannot serialise kernels inside
+this scheduler process (every filter on `Marlin`/`_fwd_kernel` fails with
+`Failed to profile … in process <scheduler>`; NVTX include matches nothing even in a minimal repro),
+so per-kernel pipeline mix, achieved occupancy, stall reasons, hardware L1/L2 hit rates and
+per-kernel DRAM bytes are explicitly NOT COLLECTED in the report.

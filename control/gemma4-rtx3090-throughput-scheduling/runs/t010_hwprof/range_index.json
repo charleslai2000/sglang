@@ -1,0 +1,1891 @@
+[
+ {
+  "i": 0,
+  "s": 68655489629,
+  "e": 68860325202,
+  "dur": 204.835573,
+  "busy": 9.166129,
+  "n": 1123,
+  "fwdgx": 1,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void at::native::vectorize",
+    305
+   ],
+   [
+    "void sglang::device::marli",
+    253
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    212
+   ]
+  ]
+ },
+ {
+  "i": 1,
+  "s": 68861916111,
+  "e": 68885408807,
+  "dur": 23.492696,
+  "busy": 1.65398,
+  "n": 318,
+  "fwdgx": 1,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void at::native::vectorize",
+    105
+   ],
+   [
+    "void sglang::device::marli",
+    64
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    54
+   ]
+  ]
+ },
+ {
+  "i": 2,
+  "s": 69661029929,
+  "e": 69845094017,
+  "dur": 184.064088,
+  "busy": 116.346979,
+  "n": 1164,
+  "fwdgx": 1,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    253
+   ],
+   [
+    "void at::native::elementwi",
+    233
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    212
+   ]
+  ]
+ },
+ {
+  "i": 3,
+  "s": 69851612698,
+  "e": 69857761661,
+  "dur": 6.148963,
+  "busy": 1.06868,
+  "n": 210,
+  "fwdgx": 1,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void at::native::vectorize",
+    73
+   ],
+   [
+    "void sglang::device::marli",
+    38
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    32
+   ]
+  ]
+ },
+ {
+  "i": 4,
+  "s": 69863541836,
+  "e": 69869479530,
+  "dur": 5.937694,
+  "busy": 1.179908,
+  "n": 232,
+  "fwdgx": 1,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void at::native::vectorize",
+    76
+   ],
+   [
+    "void sglang::device::marli",
+    40
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    34
+   ]
+  ]
+ },
+ {
+  "i": 5,
+  "s": 69870961667,
+  "e": 69876607748,
+  "dur": 5.646081,
+  "busy": 5.582626,
+  "n": 658,
+  "fwdgx": 1,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void at::native::vectorize",
+    176
+   ],
+   [
+    "void sglang::device::marli",
+    158
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    134
+   ]
+  ]
+ },
+ {
+  "i": 6,
+  "s": 69878181040,
+  "e": 69883912118,
+  "dur": 5.731078,
+  "busy": 6.216111,
+  "n": 745,
+  "fwdgx": 1,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void at::native::vectorize",
+    198
+   ],
+   [
+    "void sglang::device::marli",
+    188
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    158
+   ]
+  ]
+ },
+ {
+  "i": 7,
+  "s": 69885873767,
+  "e": 69891572134,
+  "dur": 5.698367,
+  "busy": 6.593064,
+  "n": 803,
+  "fwdgx": 1,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void at::native::vectorize",
+    214
+   ],
+   [
+    "void sglang::device::marli",
+    203
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    170
+   ]
+  ]
+ },
+ {
+  "i": 8,
+  "s": 69894034366,
+  "e": 69899795379,
+  "dur": 5.761013,
+  "busy": 6.510282,
+  "n": 796,
+  "fwdgx": 1,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void at::native::vectorize",
+    214
+   ],
+   [
+    "void sglang::device::marli",
+    200
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    167
+   ]
+  ]
+ },
+ {
+  "i": 9,
+  "s": 69902066731,
+  "e": 69908095379,
+  "dur": 6.028648,
+  "busy": 6.539146,
+  "n": 799,
+  "fwdgx": 1,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void at::native::vectorize",
+    214
+   ],
+   [
+    "void sglang::device::marli",
+    201
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    168
+   ]
+  ]
+ },
+ {
+  "i": 10,
+  "s": 69910153990,
+  "e": 69916004081,
+  "dur": 5.850091,
+  "busy": 6.537164,
+  "n": 799,
+  "fwdgx": 1,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void at::native::vectorize",
+    214
+   ],
+   [
+    "void sglang::device::marli",
+    201
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    168
+   ]
+  ]
+ },
+ {
+  "i": 11,
+  "s": 69949270440,
+  "e": 70103835851,
+  "dur": 154.565411,
+  "busy": 115.080768,
+  "n": 1164,
+  "fwdgx": 1,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    253
+   ],
+   [
+    "void at::native::elementwi",
+    233
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    212
+   ]
+  ]
+ },
+ {
+  "i": 12,
+  "s": 70110208792,
+  "e": 70133717307,
+  "dur": 23.508515,
+  "busy": 1.166213,
+  "n": 222,
+  "fwdgx": 1,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void at::native::vectorize",
+    76
+   ],
+   [
+    "void sglang::device::marli",
+    43
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    35
+   ]
+  ]
+ },
+ {
+  "i": 13,
+  "s": 70182351938,
+  "e": 70341002533,
+  "dur": 158.650595,
+  "busy": 147.448381,
+  "n": 1191,
+  "fwdgx": 1,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    297
+   ],
+   [
+    "void at::native::elementwi",
+    231
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    207
+   ]
+  ]
+ },
+ {
+  "i": 14,
+  "s": 70347379128,
+  "e": 70361964341,
+  "dur": 14.585213,
+  "busy": 1.211108,
+  "n": 219,
+  "fwdgx": 1,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void at::native::vectorize",
+    74
+   ],
+   [
+    "void sglang::device::marli",
+    42
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    35
+   ]
+  ]
+ },
+ {
+  "i": 15,
+  "s": 70405118945,
+  "e": 70563904274,
+  "dur": 158.785329,
+  "busy": 157.807382,
+  "n": 395,
+  "fwdgx": 1,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    110
+   ],
+   [
+    "void at::native::elementwi",
+    99
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    57
+   ]
+  ]
+ },
+ {
+  "i": 16,
+  "s": 70570503371,
+  "e": 70998583441,
+  "dur": 428.08007,
+  "busy": 412.936839,
+  "n": 1166,
+  "fwdgx": 1,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    336
+   ],
+   [
+    "void at::native::vectorize",
+    233
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    192
+   ]
+  ]
+ },
+ {
+  "i": 17,
+  "s": 71077099787,
+  "e": 71233191495,
+  "dur": 156.091708,
+  "busy": 157.449824,
+  "n": 395,
+  "fwdgx": 1,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    110
+   ],
+   [
+    "void at::native::elementwi",
+    99
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    57
+   ]
+  ]
+ },
+ {
+  "i": 18,
+  "s": 71244319230,
+  "e": 71822240275,
+  "dur": 577.921045,
+  "busy": 580.700888,
+  "n": 1326,
+  "fwdgx": 1,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    398
+   ],
+   [
+    "void at::native::elementwi",
+    233
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    210
+   ]
+  ]
+ },
+ {
+  "i": 19,
+  "s": 71831291028,
+  "e": 72412079815,
+  "dur": 580.788787,
+  "busy": 573.297997,
+  "n": 1240,
+  "fwdgx": 1,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    373
+   ],
+   [
+    "void at::native::elementwi",
+    209
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    197
+   ]
+  ]
+ },
+ {
+  "i": 20,
+  "s": 72420257496,
+  "e": 73104846279,
+  "dur": 684.588783,
+  "busy": 684.718328,
+  "n": 1321,
+  "fwdgx": 1,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    396
+   ],
+   [
+    "void at::native::elementwi",
+    233
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    209
+   ]
+  ]
+ },
+ {
+  "i": 21,
+  "s": 73113238047,
+  "e": 73862107356,
+  "dur": 748.869309,
+  "busy": 748.946473,
+  "n": 1318,
+  "fwdgx": 1,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    395
+   ],
+   [
+    "void at::native::elementwi",
+    232
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    209
+   ]
+  ]
+ },
+ {
+  "i": 22,
+  "s": 73870744912,
+  "e": 74681220124,
+  "dur": 810.475212,
+  "busy": 810.687876,
+  "n": 1317,
+  "fwdgx": 1,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    395
+   ],
+   [
+    "void at::native::elementwi",
+    232
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    208
+   ]
+  ]
+ },
+ {
+  "i": 23,
+  "s": 74690124330,
+  "e": 75561815398,
+  "dur": 871.691068,
+  "busy": 871.544599,
+  "n": 1313,
+  "fwdgx": 1,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    394
+   ],
+   [
+    "void at::native::elementwi",
+    231
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    207
+   ]
+  ]
+ },
+ {
+  "i": 24,
+  "s": 75571466581,
+  "e": 76499606571,
+  "dur": 928.13999,
+  "busy": 925.696412,
+  "n": 1303,
+  "fwdgx": 1,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    394
+   ],
+   [
+    "void at::native::elementwi",
+    225
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    207
+   ]
+  ]
+ },
+ {
+  "i": 25,
+  "s": 76502407880,
+  "e": 76513031871,
+  "dur": 10.623991,
+  "busy": 10.97051,
+  "n": 30,
+  "fwdgx": 1,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    9
+   ],
+   [
+    "void at::native::elementwi",
+    8
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    5
+   ]
+  ]
+ },
+ {
+  "i": 26,
+  "s": 77327224083,
+  "e": 77333473358,
+  "dur": 6.249275,
+  "busy": 4.727125,
+  "n": 339,
+  "fwdgx": 1,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void at::native::vectorize",
+    100
+   ],
+   [
+    "void sglang::device::marli",
+    73
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    62
+   ]
+  ]
+ },
+ {
+  "i": 27,
+  "s": 77334819091,
+  "e": 77340006564,
+  "dur": 5.187473,
+  "busy": 4.588662,
+  "n": 444,
+  "fwdgx": 1,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void at::native::vectorize",
+    126
+   ],
+   [
+    "void sglang::device::marli",
+    108
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    90
+   ]
+  ]
+ },
+ {
+  "i": 28,
+  "s": 77346090506,
+  "e": 77351478241,
+  "dur": 5.387735,
+  "busy": 5.079918,
+  "n": 539,
+  "fwdgx": 1,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void at::native::vectorize",
+    159
+   ],
+   [
+    "void sglang::device::marli",
+    128
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    107
+   ]
+  ]
+ },
+ {
+  "i": 29,
+  "s": 77405317662,
+  "e": 77559020669,
+  "dur": 153.703007,
+  "busy": 114.112227,
+  "n": 1164,
+  "fwdgx": 1,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    253
+   ],
+   [
+    "void at::native::elementwi",
+    233
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    212
+   ]
+  ]
+ },
+ {
+  "i": 30,
+  "s": 77589334413,
+  "e": 77818507634,
+  "dur": 229.173221,
+  "busy": 189.053975,
+  "n": 554,
+  "fwdgx": 4,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    161
+   ],
+   [
+    "void at::native::elementwi",
+    140
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    84
+   ]
+  ]
+ },
+ {
+  "i": 31,
+  "s": 77856385531,
+  "e": 78167044545,
+  "dur": 310.659014,
+  "busy": 309.270363,
+  "n": 935,
+  "fwdgx": 4,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    271
+   ],
+   [
+    "void at::native::vectorize",
+    164
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    147
+   ]
+  ]
+ },
+ {
+  "i": 32,
+  "s": 78188706689,
+  "e": 78196843235,
+  "dur": 8.136546,
+  "busy": 7.974,
+  "n": 29,
+  "fwdgx": 3,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    8
+   ],
+   [
+    "void at::native::elementwi",
+    8
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    5
+   ]
+  ]
+ },
+ {
+  "i": 33,
+  "s": 78473797179,
+  "e": 78480118190,
+  "dur": 6.321011,
+  "busy": 1.220864,
+  "n": 200,
+  "fwdgx": 8,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void at::native::elementwi",
+    42
+   ],
+   [
+    "void at::native::vectorize",
+    37
+   ],
+   [
+    "void sglang::device::marli",
+    37
+   ]
+  ]
+ },
+ {
+  "i": 34,
+  "s": 78484744672,
+  "e": 78491121936,
+  "dur": 6.377264,
+  "busy": 4.474292,
+  "n": 437,
+  "fwdgx": 8,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    95
+   ],
+   [
+    "void at::native::vectorize",
+    83
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    81
+   ]
+  ]
+ },
+ {
+  "i": 35,
+  "s": 78494432344,
+  "e": 78500242894,
+  "dur": 5.81055,
+  "busy": 5.387046,
+  "n": 578,
+  "fwdgx": 8,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    136
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    114
+   ],
+   [
+    "void at::native::vectorize",
+    104
+   ]
+  ]
+ },
+ {
+  "i": 36,
+  "s": 78501613351,
+  "e": 78507500306,
+  "dur": 5.886955,
+  "busy": 6.248759,
+  "n": 671,
+  "fwdgx": 8,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    172
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    144
+   ],
+   [
+    "void at::native::vectorize",
+    105
+   ]
+  ]
+ },
+ {
+  "i": 37,
+  "s": 78511350427,
+  "e": 78519025018,
+  "dur": 7.674591,
+  "busy": 6.428715,
+  "n": 756,
+  "fwdgx": 8,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    180
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    151
+   ],
+   [
+    "void at::native::vectorize",
+    127
+   ]
+  ]
+ },
+ {
+  "i": 38,
+  "s": 78520599111,
+  "e": 78526472419,
+  "dur": 5.873308,
+  "busy": 5.802079,
+  "n": 678,
+  "fwdgx": 4,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    162
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    135
+   ],
+   [
+    "void at::native::vectorize",
+    119
+   ]
+  ]
+ },
+ {
+  "i": 39,
+  "s": 78528000142,
+  "e": 78533223966,
+  "dur": 5.223824,
+  "busy": 6.367116,
+  "n": 743,
+  "fwdgx": 4,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    188
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    157
+   ],
+   [
+    "void at::native::elementwi",
+    116
+   ]
+  ]
+ },
+ {
+  "i": 40,
+  "s": 78535842846,
+  "e": 78541120731,
+  "dur": 5.277885,
+  "busy": 6.69239,
+  "n": 812,
+  "fwdgx": 4,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    203
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    170
+   ],
+   [
+    "void at::native::elementwi",
+    132
+   ]
+  ]
+ },
+ {
+  "i": 41,
+  "s": 78543957131,
+  "e": 78549201347,
+  "dur": 5.244216,
+  "busy": 5.199917,
+  "n": 818,
+  "fwdgx": 4,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    206
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    171
+   ],
+   [
+    "void at::native::elementwi",
+    133
+   ]
+  ]
+ },
+ {
+  "i": 42,
+  "s": 78552072837,
+  "e": 78556985681,
+  "dur": 4.912844,
+  "busy": 4.869041,
+  "n": 785,
+  "fwdgx": 4,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    196
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    163
+   ],
+   [
+    "void at::native::elementwi",
+    130
+   ]
+  ]
+ },
+ {
+  "i": 43,
+  "s": 78560177287,
+  "e": 78565172324,
+  "dur": 4.995037,
+  "busy": 4.957969,
+  "n": 797,
+  "fwdgx": 4,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    200
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    166
+   ],
+   [
+    "void at::native::elementwi",
+    131
+   ]
+  ]
+ },
+ {
+  "i": 44,
+  "s": 78568234347,
+  "e": 78573484251,
+  "dur": 5.249904,
+  "busy": 6.643053,
+  "n": 823,
+  "fwdgx": 4,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    206
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    173
+   ],
+   [
+    "void at::native::elementwi",
+    134
+   ]
+  ]
+ },
+ {
+  "i": 45,
+  "s": 78576452347,
+  "e": 78582040647,
+  "dur": 5.5883,
+  "busy": 6.442193,
+  "n": 792,
+  "fwdgx": 4,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    199
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    167
+   ],
+   [
+    "void at::native::elementwi",
+    127
+   ]
+  ]
+ },
+ {
+  "i": 46,
+  "s": 78584383779,
+  "e": 78589507429,
+  "dur": 5.12365,
+  "busy": 6.492366,
+  "n": 799,
+  "fwdgx": 4,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    201
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    168
+   ],
+   [
+    "void at::native::elementwi",
+    128
+   ]
+  ]
+ },
+ {
+  "i": 47,
+  "s": 78592296807,
+  "e": 78597276915,
+  "dur": 4.980108,
+  "busy": 4.963984,
+  "n": 807,
+  "fwdgx": 4,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    202
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    169
+   ],
+   [
+    "void at::native::elementwi",
+    132
+   ]
+  ]
+ },
+ {
+  "i": 48,
+  "s": 78656776179,
+  "e": 78809102319,
+  "dur": 152.32614,
+  "busy": 114.791487,
+  "n": 1171,
+  "fwdgx": 1,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    253
+   ],
+   [
+    "void at::native::elementwi",
+    233
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    212
+   ]
+  ]
+ },
+ {
+  "i": 49,
+  "s": 78842109187,
+  "e": 79022744210,
+  "dur": 180.635023,
+  "busy": 152.776898,
+  "n": 565,
+  "fwdgx": 3,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    151
+   ],
+   [
+    "void at::native::elementwi",
+    148
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    89
+   ]
+  ]
+ },
+ {
+  "i": 50,
+  "s": 79083808158,
+  "e": 79322262303,
+  "dur": 238.454145,
+  "busy": 237.950384,
+  "n": 803,
+  "fwdgx": 4,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    221
+   ],
+   [
+    "void at::native::vectorize",
+    146
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    127
+   ]
+  ]
+ },
+ {
+  "i": 51,
+  "s": 79390272284,
+  "e": 79804458753,
+  "dur": 414.186469,
+  "busy": 413.71702,
+  "n": 1176,
+  "fwdgx": 4,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    346
+   ],
+   [
+    "void at::native::elementwi",
+    186
+   ],
+   [
+    "void at::native::vectorize",
+    185
+   ]
+  ]
+ },
+ {
+  "i": 52,
+  "s": 79819187801,
+  "e": 80286178309,
+  "dur": 466.990508,
+  "busy": 466.150689,
+  "n": 1333,
+  "fwdgx": 4,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    391
+   ],
+   [
+    "void at::native::elementwi",
+    226
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    205
+   ]
+  ]
+ },
+ {
+  "i": 53,
+  "s": 80298036848,
+  "e": 80306335396,
+  "dur": 8.298548,
+  "busy": 10.263519,
+  "n": 29,
+  "fwdgx": 4,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    8
+   ],
+   [
+    "void at::native::elementwi",
+    8
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    5
+   ]
+  ]
+ },
+ {
+  "i": 54,
+  "s": 80680416059,
+  "e": 80686515279,
+  "dur": 6.09922,
+  "busy": 1.087208,
+  "n": 167,
+  "fwdgx": 16,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void at::native::elementwi",
+    34
+   ],
+   [
+    "void at::native::vectorize",
+    32
+   ],
+   [
+    "void sglang::device::marli",
+    30
+   ]
+  ]
+ },
+ {
+  "i": 55,
+  "s": 80691659451,
+  "e": 80696952554,
+  "dur": 5.293103,
+  "busy": 4.789013,
+  "n": 431,
+  "fwdgx": 16,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    98
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    83
+   ],
+   [
+    "void at::native::vectorize",
+    78
+   ]
+  ]
+ },
+ {
+  "i": 56,
+  "s": 80701006868,
+  "e": 80709100822,
+  "dur": 8.093954,
+  "busy": 5.511138,
+  "n": 530,
+  "fwdgx": 16,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    126
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    106
+   ],
+   [
+    "void at::native::vectorize",
+    96
+   ]
+  ]
+ },
+ {
+  "i": 57,
+  "s": 80710582796,
+  "e": 80715788183,
+  "dur": 5.205387,
+  "busy": 6.581006,
+  "n": 690,
+  "fwdgx": 12,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    175
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    147
+   ],
+   [
+    "void at::native::vectorize",
+    107
+   ]
+  ]
+ },
+ {
+  "i": 58,
+  "s": 80718649939,
+  "e": 80723938471,
+  "dur": 5.288532,
+  "busy": 5.260776,
+  "n": 731,
+  "fwdgx": 12,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    181
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    151
+   ],
+   [
+    "void at::native::elementwi",
+    128
+   ]
+  ]
+ },
+ {
+  "i": 59,
+  "s": 80727901161,
+  "e": 80733171644,
+  "dur": 5.270483,
+  "busy": 5.239432,
+  "n": 736,
+  "fwdgx": 12,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    181
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    152
+   ],
+   [
+    "void at::native::elementwi",
+    128
+   ]
+  ]
+ },
+ {
+  "i": 60,
+  "s": 80738884477,
+  "e": 80744249853,
+  "dur": 5.365376,
+  "busy": 5.625603,
+  "n": 563,
+  "fwdgx": 12,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    146
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    123
+   ],
+   [
+    "void at::native::vectorize",
+    93
+   ]
+  ]
+ },
+ {
+  "i": 61,
+  "s": 80746059194,
+  "e": 80751410251,
+  "dur": 5.351057,
+  "busy": 5.32177,
+  "n": 753,
+  "fwdgx": 12,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    189
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    157
+   ],
+   [
+    "void at::native::elementwi",
+    126
+   ]
+  ]
+ },
+ {
+  "i": 62,
+  "s": 80755802991,
+  "e": 80761084683,
+  "dur": 5.281692,
+  "busy": 6.573455,
+  "n": 718,
+  "fwdgx": 12,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    182
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    152
+   ],
+   [
+    "void at::native::vectorize",
+    111
+   ]
+  ]
+ },
+ {
+  "i": 63,
+  "s": 80765838419,
+  "e": 80771130076,
+  "dur": 5.291657,
+  "busy": 5.448937,
+  "n": 540,
+  "fwdgx": 12,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    142
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    118
+   ],
+   [
+    "void at::native::vectorize",
+    90
+   ]
+  ]
+ },
+ {
+  "i": 64,
+  "s": 80772855197,
+  "e": 80778232489,
+  "dur": 5.377292,
+  "busy": 5.331437,
+  "n": 784,
+  "fwdgx": 12,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    195
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    163
+   ],
+   [
+    "void at::native::elementwi",
+    130
+   ]
+  ]
+ },
+ {
+  "i": 65,
+  "s": 80781697800,
+  "e": 80787088296,
+  "dur": 5.390496,
+  "busy": 5.36657,
+  "n": 779,
+  "fwdgx": 12,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    195
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    162
+   ],
+   [
+    "void at::native::elementwi",
+    128
+   ]
+  ]
+ },
+ {
+  "i": 66,
+  "s": 80790386451,
+  "e": 80795399555,
+  "dur": 5.013104,
+  "busy": 4.962289,
+  "n": 728,
+  "fwdgx": 12,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    181
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    151
+   ],
+   [
+    "void at::native::elementwi",
+    124
+   ]
+  ]
+ },
+ {
+  "i": 67,
+  "s": 80799096342,
+  "e": 80804297893,
+  "dur": 5.201551,
+  "busy": 5.168525,
+  "n": 753,
+  "fwdgx": 12,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    189
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    157
+   ],
+   [
+    "void at::native::elementwi",
+    126
+   ]
+  ]
+ },
+ {
+  "i": 68,
+  "s": 80807910144,
+  "e": 80813110383,
+  "dur": 5.200239,
+  "busy": 5.166924,
+  "n": 763,
+  "fwdgx": 12,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void sglang::device::marli",
+    190
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    158
+   ],
+   [
+    "void at::native::elementwi",
+    128
+   ]
+  ]
+ },
+ {
+  "i": 69,
+  "s": 80894378546,
+  "e": 81048722540,
+  "dur": 154.343994,
+  "busy": 150.124682,
+  "n": 793,
+  "fwdgx": 2,
+  "marlin_m": 82,
+  "top": [
+   [
+    "void at::native::elementwi",
+    202
+   ],
+   [
+    "void sglang::device::marli",
+    193
+   ],
+   [
+    "kernel_cutlass_kernel_flas",
+    134
+   ]
+  ]
+ },
+ {
+  "i": 70,
+  "s": 81177745828,
+  "e": 81367127443,
+  "dur": 189.381615,
+  "busy": 0.0,
+  "n": 0,
+  "fwdgx": 0,
+  "marlin_m": 0,
+  "top": []
+ },
+ {
+  "i": 71,
+  "s": 81516443658,
+  "e": 81780349525,
+  "dur": 263.905867,
+  "busy": 0.0,
+  "n": 0,
+  "fwdgx": 0,
+  "marlin_m": 0,
+  "top": []
+ },
+ {
+  "i": 72,
+  "s": 81804434598,
+  "e": 82266912801,
+  "dur": 462.478203,
+  "busy": 0.0,
+  "n": 0,
+  "fwdgx": 0,
+  "marlin_m": 0,
+  "top": []
+ },
+ {
+  "i": 73,
+  "s": 82281792080,
+  "e": 82745617782,
+  "dur": 463.825702,
+  "busy": 0.0,
+  "n": 0,
+  "fwdgx": 0,
+  "marlin_m": 0,
+  "top": []
+ },
+ {
+  "i": 74,
+  "s": 82760110786,
+  "e": 83230023064,
+  "dur": 469.912278,
+  "busy": 0.0,
+  "n": 0,
+  "fwdgx": 0,
+  "marlin_m": 0,
+  "top": []
+ },
+ {
+  "i": 75,
+  "s": 83244644401,
+  "e": 83710406341,
+  "dur": 465.76194,
+  "busy": 0.0,
+  "n": 0,
+  "fwdgx": 0,
+  "marlin_m": 0,
+  "top": []
+ },
+ {
+  "i": 76,
+  "s": 83725195914,
+  "e": 84193339256,
+  "dur": 468.143342,
+  "busy": 0.0,
+  "n": 0,
+  "fwdgx": 0,
+  "marlin_m": 0,
+  "top": []
+ },
+ {
+  "i": 77,
+  "s": 84207419571,
+  "e": 84613069450,
+  "dur": 405.649879,
+  "busy": 0.0,
+  "n": 0,
+  "fwdgx": 0,
+  "marlin_m": 0,
+  "top": []
+ },
+ {
+  "i": 78,
+  "s": 84626301425,
+  "e": 84634929329,
+  "dur": 8.627904,
+  "busy": 0.0,
+  "n": 0,
+  "fwdgx": 0,
+  "marlin_m": 0,
+  "top": []
+ },
+ {
+  "i": 79,
+  "s": 84826907521,
+  "e": 84833407698,
+  "dur": 6.500177,
+  "busy": 0.0,
+  "n": 0,
+  "fwdgx": 0,
+  "marlin_m": 0,
+  "top": []
+ },
+ {
+  "i": 80,
+  "s": 84846811686,
+  "e": 84854972309,
+  "dur": 8.160623,
+  "busy": 0.0,
+  "n": 0,
+  "fwdgx": 0,
+  "marlin_m": 0,
+  "top": []
+ },
+ {
+  "i": 81,
+  "s": 84861056023,
+  "e": 84867326331,
+  "dur": 6.270308,
+  "busy": 0.0,
+  "n": 0,
+  "fwdgx": 0,
+  "marlin_m": 0,
+  "top": []
+ },
+ {
+  "i": 82,
+  "s": 84871080591,
+  "e": 84877683455,
+  "dur": 6.602864,
+  "busy": 0.0,
+  "n": 0,
+  "fwdgx": 0,
+  "marlin_m": 0,
+  "top": []
+ },
+ {
+  "i": 83,
+  "s": 84881297725,
+  "e": 84887059116,
+  "dur": 5.761391,
+  "busy": 0.0,
+  "n": 0,
+  "fwdgx": 0,
+  "marlin_m": 0,
+  "top": []
+ },
+ {
+  "i": 84,
+  "s": 84890554066,
+  "e": 84896142712,
+  "dur": 5.588646,
+  "busy": 0.0,
+  "n": 0,
+  "fwdgx": 0,
+  "marlin_m": 0,
+  "top": []
+ },
+ {
+  "i": 85,
+  "s": 84897750892,
+  "e": 84903293734,
+  "dur": 5.542842,
+  "busy": 0.0,
+  "n": 0,
+  "fwdgx": 0,
+  "marlin_m": 0,
+  "top": []
+ },
+ {
+  "i": 86,
+  "s": 84906312745,
+  "e": 84911665455,
+  "dur": 5.35271,
+  "busy": 0.0,
+  "n": 0,
+  "fwdgx": 0,
+  "marlin_m": 0,
+  "top": []
+ },
+ {
+  "i": 87,
+  "s": 84915336491,
+  "e": 84920714706,
+  "dur": 5.378215,
+  "busy": 0.0,
+  "n": 0,
+  "fwdgx": 0,
+  "marlin_m": 0,
+  "top": []
+ },
+ {
+  "i": 88,
+  "s": 84924295316,
+  "e": 91234458132,
+  "dur": 6310.162816,
+  "busy": 0.0,
+  "n": 0,
+  "fwdgx": 0,
+  "marlin_m": 0,
+  "top": []
+ }
+]
