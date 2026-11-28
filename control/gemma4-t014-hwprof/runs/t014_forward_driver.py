@@ -345,6 +345,8 @@ def main():
     parser.add_argument("--arm", choices=("marlin", "humming"), default="marlin")
     parser.add_argument("--attn", choices=("triton", "fa2"), default="triton")
     parser.add_argument("--profile-region", action="store_true")
+    parser.add_argument("--save-logits", default=None)
+    parser.add_argument("--timing-repeats", type=int, default=0)
     parser.add_argument("--out", required=True)
     args = parser.parse_args()
     # CUDA graphs are only needed for the decode stage; prefill/prefix keep the
@@ -475,6 +477,39 @@ def main():
             result["output_argmax"] = (
                 logs.next_token_logits.argmax(dim=-1).cpu().tolist()
             )
+            if args.save_logits:
+                import numpy as np
+
+                np.save(
+                    args.save_logits,
+                    logs.next_token_logits.detach().float().cpu().numpy(),
+                )
+            if args.timing_repeats > 0:
+                import time as _time
+
+                times = []
+                for _ in range(args.timing_repeats):
+                    if args.stage == "prefix":
+                        for req in reqs:
+                            req.prefix_indices = runner.req_to_token_pool.req_to_token[
+                                req.req_pool_idx, : args.prefix_len
+                            ].to(dtype=torch.int64, copy=True)
+                            req.set_extend_range(
+                                args.prefix_len, args.prefix_len + args.new_len
+                            )
+                        reset_fa2_plan(backend)
+                    rep_batch, _rep_cache = new_batch(reqs, runner, cfg)
+                    torch.cuda.synchronize()
+                    began = _time.perf_counter()
+                    forward_batch(rep_batch, runner)
+                    torch.cuda.synchronize()
+                    times.append((_time.perf_counter() - began) * 1e3)
+                    # Return the repeat's extend slots so the SWA pool does not fill
+                    # up across repeats (the prefix KV stays resident).
+                    loc = getattr(rep_batch, "out_cache_loc", None)
+                    if loc is not None and loc.numel():
+                        runner.token_to_kv_pool_allocator.free(loc)
+                result["timing_repeats_ms"] = times
             result["tokens"] = total * args.batch
             result["extend_tokens"] = (
                 args.input_len * args.batch

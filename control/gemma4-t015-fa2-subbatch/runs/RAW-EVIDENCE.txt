@@ -1,0 +1,12 @@
+Raw per-cell artefacts for T015 live outside the repository:
+
+  /data/sglang-hicache/gemma4/runs/20261128T-t015-fa2-subbatch/
+    cells/<cell>/perf.jsonl            per-request client log (bench_multiturn)
+    cells/<cell>/hashes.jsonl          request/response hash log (payload multiset)
+    cells/<cell>/request-metrics/      scheduler request-metrics dumps
+    restore/extent/                    primed FA2 extent (L3 round trip)
+    restore/extent-triton/             primed Triton extent (L3 round trip)
+
+The in-repo cells/ directories keep the summaries needed to reproduce the report:
+official-summary.txt, manifest.txt (frozen benchmark/workload parameters),
+launch-argv.txt, ragged-coverage.json, capacity/metrics files, exit.txt and server.log.

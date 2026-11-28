@@ -1,0 +1,37 @@
+{
+  "project_root": "/home/ubuntu/workspaces/3rdparty/sglang-hicache",
+  "git_head": "c1feed4d211d286ac129ef5e35388feae05a73ca",
+  "branch": "3090-24g-hicache",
+  "python": "/usr/bin/python3.12",
+  "pythonpath": "/home/ubuntu/workspaces/3rdparty/sglang-hicache/control/gemma4-w4a16-3090-performance-capacity/runs:/data/sglang-hicache/g2-quasar-runs/20261110T-g2-postrope-e5m2-quality/aot-sm86-package:/home/ubuntu/workspaces/3rdparty/sglang-hicache/python:/home/ubuntu/venvs/sglang-3090/lib/python3.12/site-packages:/home/ubuntu/workspaces/3rdparty/sglang-hicache/python/sglang/kernels/aot/python:/home/ubuntu/workspaces/3rdparty/sglang-hicache/control/gemma4-w4a16-3090-performance-capacity/runs/overlay",
+  "modules": {
+    "sglang": {
+      "path": "/home/ubuntu/workspaces/3rdparty/sglang-hicache/python/sglang/__init__.py",
+      "sha256": "0c6bd1b5bc75da013d49d26f7799ca36d682779293405dce1adc193b97a0e6bd"
+    },
+    "sglang.launch_server": {
+      "path": "/home/ubuntu/workspaces/3rdparty/sglang-hicache/python/sglang/launch_server.py",
+      "sha256": "1a3e02c4208e13242b9a47ce92e7bc3769c8e069f863849671b9b8cc8fabdbe7"
+    },
+    "sglang.srt.managers.scheduler": {
+      "path": "/home/ubuntu/workspaces/3rdparty/sglang-hicache/python/sglang/srt/managers/scheduler.py",
+      "sha256": "bbff452908e2564fe4e7be624e67f0aee97318104bf052bc7a53585faa743352"
+    },
+    "sglang.srt.managers.schedule_policy": {
+      "path": "/home/ubuntu/workspaces/3rdparty/sglang-hicache/python/sglang/srt/managers/schedule_policy.py",
+      "sha256": "184d10c61b6eebaaae0019629fcb573d3ac85bdd8885109f03eeeaf1875c0989"
+    },
+    "sglang.srt.managers.scheduler_components.metrics_reporter": {
+      "path": "/home/ubuntu/workspaces/3rdparty/sglang-hicache/python/sglang/srt/managers/scheduler_components/metrics_reporter.py",
+      "sha256": "9fe1d477baaf1b239d589d6ecd807098475173856b356ead6cde340bfa3ce613"
+    },
+    "sglang.srt.utils.device_timer": {
+      "path": "/home/ubuntu/workspaces/3rdparty/sglang-hicache/python/sglang/srt/utils/device_timer.py",
+      "sha256": "e9fea4957d945e67a1e6eef31edb9ea6a178558aff721b55bdbf32a01549b2d8"
+    },
+    "sglang.srt.mem_cache.unified_radix_cache": {
+      "path": "/home/ubuntu/workspaces/3rdparty/sglang-hicache/python/sglang/srt/mem_cache/unified_radix_cache.py",
+      "sha256": "1b7d88323bdd0e8e62d9f7146399da076645192ab9999938b4a41b5178562e8f"
+    }
+  }
+}

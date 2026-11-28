@@ -1645,6 +1645,25 @@ class TritonAttnBackend(AttentionBackend):
         pool = self.token_to_kv_pool
         k_pool, v_pool = pool.get_kv_buffer(layer.layer_id)
         cache_dtype = getattr(pool, "dtype", None) or k_pool.dtype
+        if plan.subbatched:
+            # Total prefix exceeds the transient budget but every single request fits:
+            # the extend attention stays whole-batch, the prefix attention is split
+            # into consecutive bounded groups and merged back in original Q order.
+            ragged.run_layer_subbatched(
+                plan,
+                self._fa2_ragged_state,
+                q,
+                k,
+                v,
+                o,
+                k_pool,
+                v_pool,
+                self.forward_metadata.kv_indices,
+                cache_dtype,
+                layer.k_scale_float if layer.k_scale is not None else 1.0,
+                layer.v_scale_float if layer.v_scale is not None else 1.0,
+            )
+            return True
         k_prefix, v_prefix = ragged.prefix_kv_for_owner(
             plan,
             self._fa2_ragged_state,

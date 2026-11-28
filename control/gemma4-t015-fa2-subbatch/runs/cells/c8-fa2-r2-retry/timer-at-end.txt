@@ -1,0 +1,7 @@
+# HELP sglang:forward_execution_seconds_total Total time that GPU is busy executing model forward passes. Refer to ForwardMode for category labels.
+# TYPE sglang:forward_execution_seconds_total counter
+sglang:forward_execution_seconds_total{category="extend",engine_type="unified",model_name="/data/sglang-hicache/gemma4/model",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 136.95316302490244
+sglang:forward_execution_seconds_total{category="decode",engine_type="unified",model_name="/data/sglang-hicache/gemma4/model",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 119.53524872970573
+# HELP sglang:fwd_occupancy Forward pass GPU occupancy percentage.
+# TYPE sglang:fwd_occupancy gauge
+sglang:fwd_occupancy{engine_type="unified",model_name="/data/sglang-hicache/gemma4/model",moe_ep_rank="0",pp_rank="0",tp_rank="0"} NaN

@@ -1,0 +1,22 @@
+{
+  "arm": "fa2",
+  "phase": "restore",
+  "main": {
+    "output_ids": null,
+    "prompt_tokens": 10305,
+    "cached_tokens": 10304
+  },
+  "short_greedy": {
+    "short-0": null,
+    "short-1": null,
+    "short-2": null,
+    "short-3": null
+  },
+  "log": {
+    "storage_hit_1": 0,
+    "restore_disposition": 1,
+    "extent_read": 11,
+    "prefetch_revoke": 0,
+    "restore_recompute": 3
+  }
+}

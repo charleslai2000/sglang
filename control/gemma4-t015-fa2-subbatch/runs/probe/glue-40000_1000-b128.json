@@ -1,0 +1,21 @@
+{
+  "budget_mb": 128,
+  "cap_tokens": 32768,
+  "prefix_lens": [
+    40000,
+    1000
+  ],
+  "expect": "skip",
+  "plan_is_none": true,
+  "coverage_stats": {
+    "plans": 0.0,
+    "skip_no_prefix": 0.0,
+    "skip_over_budget": 1.0,
+    "max_prefix_bytes": 167936000,
+    "owner_conversions": 0.0,
+    "shared_reuses": 0.0,
+    "subbatch_plans": 0.0,
+    "subbatch_groups": 0.0,
+    "skip_request_over_budget": 1.0
+  }
+}

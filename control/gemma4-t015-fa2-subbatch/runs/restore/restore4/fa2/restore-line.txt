@@ -1,0 +1,1 @@
+[2026-11-28 12:17:36] [P2A] ts_ms=1795868256681 evt=restore_disposition rid=bc484c8be7694f659a5b8a55b97ade7f disposition=RESTORE requested=10304 granted=10304 reason=full

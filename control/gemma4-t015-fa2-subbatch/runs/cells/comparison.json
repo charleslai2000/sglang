@@ -1,0 +1,199 @@
+{
+  "c8-fa2-r1": {
+    "cell": "c8-fa2-r1",
+    "workload": "c8",
+    "arm": "fa2",
+    "tps": 784.03,
+    "duty_pct": 99.08,
+    "completed": "800/800",
+    "failed": "0",
+    "accepted_baseline_tps": 760.17,
+    "payloads": {
+      "records": 800,
+      "distinct": 1,
+      "digest": "3215cb6df740e8b1"
+    },
+    "capacity": null,
+    "coverage": {
+      "plans": 384.0,
+      "skip_no_prefix": 25.0,
+      "skip_over_budget": 0.0,
+      "max_prefix_bytes": 383778816,
+      "owner_conversions": 1104.0,
+      "shared_reuses": 828.0,
+      "subbatch_plans": 108.0,
+      "group_gathers": 2002.0,
+      "subbatch_groups": 290.0,
+      "skip_request_over_budget": 0.0
+    },
+    "forwards_seen": 384,
+    "peak_vram_mib": 24124.0
+  },
+  "c8-fa2-r2-retry": {
+    "cell": "c8-fa2-r2-retry",
+    "workload": "c8",
+    "arm": "fa2",
+    "tps": 792.17,
+    "duty_pct": 99.14,
+    "completed": "800/800",
+    "failed": "0",
+    "accepted_baseline_tps": 760.17,
+    "payloads": {
+      "records": 800,
+      "distinct": 1,
+      "digest": "3215cb6df740e8b1"
+    },
+    "capacity": null,
+    "coverage": {
+      "plans": 384.0,
+      "skip_no_prefix": 26.0,
+      "skip_over_budget": 0.0,
+      "max_prefix_bytes": 383778816,
+      "owner_conversions": 1100.0,
+      "shared_reuses": 825.0,
+      "subbatch_plans": 109.0,
+      "group_gathers": 2016.0,
+      "subbatch_groups": 292.0,
+      "skip_request_over_budget": 0.0
+    },
+    "forwards_seen": 384,
+    "peak_vram_mib": 24124.0
+  },
+  "c8-triton-r1": {
+    "cell": "c8-triton-r1",
+    "workload": "c8",
+    "arm": "triton",
+    "tps": 744.1,
+    "duty_pct": 99.35,
+    "completed": "800/800",
+    "failed": "0",
+    "accepted_baseline_tps": 737.55,
+    "payloads": {
+      "records": 800,
+      "distinct": 1,
+      "digest": "3215cb6df740e8b1"
+    },
+    "capacity": null,
+    "peak_vram_mib": 24100.0
+  },
+  "long-fa2-r1": {
+    "cell": "long-fa2-r1",
+    "workload": "long",
+    "arm": "fa2",
+    "tps": 138.4,
+    "duty_pct": 91.45,
+    "completed": "576/576",
+    "failed": "0",
+    "accepted_baseline_tps": 135.22,
+    "payloads": {
+      "records": 576,
+      "distinct": 1,
+      "digest": "4d2dbd2da6a8ff23"
+    },
+    "capacity": null,
+    "coverage": {
+      "plans": 1536.0,
+      "skip_no_prefix": 22.0,
+      "skip_over_budget": 0.0,
+      "max_prefix_bytes": 233734144,
+      "owner_conversions": 5688.0,
+      "shared_reuses": 4266.0,
+      "subbatch_plans": 114.0,
+      "group_gathers": 1582.0,
+      "subbatch_groups": 228.0,
+      "skip_request_over_budget": 0.0
+    },
+    "forwards_seen": 1536,
+    "peak_vram_mib": 24058.0
+  },
+  "long-triton-r1": {
+    "cell": "long-triton-r1",
+    "workload": "long",
+    "arm": "triton",
+    "tps": 116.62,
+    "duty_pct": 92.58,
+    "completed": "576/576",
+    "failed": "0",
+    "accepted_baseline_tps": 116.51,
+    "payloads": {
+      "records": 576,
+      "distinct": 1,
+      "digest": "4d2dbd2da6a8ff23"
+    },
+    "capacity": null,
+    "peak_vram_mib": 23798.0
+  },
+  "tiers-fa2-coverage1": {
+    "cell": "tiers-fa2-coverage1",
+    "workload": "tiers",
+    "arm": "fa2",
+    "tps": 612.78,
+    "duty_pct": 87.33,
+    "completed": "800/800",
+    "failed": "0",
+    "accepted_baseline_tps": 644.21,
+    "payloads": {
+      "records": 800,
+      "distinct": 1,
+      "digest": "3215cb6df740e8b1"
+    },
+    "capacity": null,
+    "coverage": {
+      "plans": 192.0,
+      "skip_no_prefix": 29.0,
+      "skip_over_budget": 132.0,
+      "max_prefix_bytes": 390070272,
+      "owner_conversions": 764.0,
+      "shared_reuses": 573.0
+    },
+    "forwards_seen": 192,
+    "peak_vram_mib": 23996.0
+  },
+  "tiers-fa2-r1": {
+    "cell": "tiers-fa2-r1",
+    "workload": "tiers",
+    "arm": "fa2",
+    "tps": 657.38,
+    "duty_pct": 88.49,
+    "completed": "800/800",
+    "failed": "0",
+    "accepted_baseline_tps": 644.21,
+    "payloads": {
+      "records": 800,
+      "distinct": 1,
+      "digest": "3215cb6df740e8b1"
+    },
+    "capacity": null,
+    "coverage": {
+      "plans": 320.0,
+      "skip_no_prefix": 30.0,
+      "skip_over_budget": 0.0,
+      "max_prefix_bytes": 389021696,
+      "owner_conversions": 792.0,
+      "shared_reuses": 594.0,
+      "subbatch_plans": 122.0,
+      "group_gathers": 2380.0,
+      "subbatch_groups": 344.0,
+      "skip_request_over_budget": 0.0
+    },
+    "forwards_seen": 320,
+    "peak_vram_mib": 23996.0
+  },
+  "tiers-triton-r1": {
+    "cell": "tiers-triton-r1",
+    "workload": "tiers",
+    "arm": "triton",
+    "tps": 632.84,
+    "duty_pct": 88.93,
+    "completed": "800/800",
+    "failed": "0",
+    "accepted_baseline_tps": 624.85,
+    "payloads": {
+      "records": 800,
+      "distinct": 1,
+      "digest": "3215cb6df740e8b1"
+    },
+    "capacity": null,
+    "peak_vram_mib": 23978.0
+  }
+}

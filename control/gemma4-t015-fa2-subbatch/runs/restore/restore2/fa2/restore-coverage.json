@@ -1,0 +1,25 @@
+{
+  "forwards_seen": 6,
+  "stride": 1,
+  "ms": {
+    "plan": 33.518591195344925,
+    "gather_cast": 11.114111870527267,
+    "prefix_attention": 305.85968156158924,
+    "extend_attention": 48.740768037736416,
+    "merge": 6.358111955225468
+  },
+  "coverage": {
+    "plans": 6.0,
+    "skip_no_prefix": 2.0,
+    "skip_over_budget": 0.0,
+    "max_prefix_bytes": 75759616,
+    "owner_conversions": 24.0,
+    "shared_reuses": 18.0,
+    "subbatch_plans": 0.0,
+    "group_gathers": 0.0,
+    "subbatch_groups": 0.0,
+    "skip_request_over_budget": 0.0
+  },
+  "over_budget_samples": [],
+  "prefix_budget_bytes": 134217728
+}

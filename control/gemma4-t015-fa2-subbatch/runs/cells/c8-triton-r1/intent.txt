@@ -1,0 +1,1 @@
+workload=c8 arm=triton tag=r1

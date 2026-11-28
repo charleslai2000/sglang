@@ -1,0 +1,814 @@
+{
+  "forwards_seen": 192,
+  "stride": 8,
+  "ms": {
+    "plan": 31.775551855564117,
+    "gather_cast": 177.1637450605631,
+    "prefix_attention": 813.4998095035553,
+    "extend_attention": 82.40918406844139,
+    "merge": 29.296383813023567
+  },
+  "coverage": {
+    "plans": 192.0,
+    "skip_no_prefix": 29.0,
+    "skip_over_budget": 132.0,
+    "max_prefix_bytes": 390070272,
+    "owner_conversions": 764.0,
+    "shared_reuses": 573.0
+  },
+  "over_budget_samples": [
+    {
+      "requests": 4,
+      "total_tokens": 33536,
+      "max_request_tokens": 8704,
+      "bytes": 137363456
+    },
+    {
+      "requests": 4,
+      "total_tokens": 34816,
+      "max_request_tokens": 9984,
+      "bytes": 142606336
+    },
+    {
+      "requests": 4,
+      "total_tokens": 33536,
+      "max_request_tokens": 8704,
+      "bytes": 137363456
+    },
+    {
+      "requests": 4,
+      "total_tokens": 36352,
+      "max_request_tokens": 9984,
+      "bytes": 148897792
+    },
+    {
+      "requests": 4,
+      "total_tokens": 37376,
+      "max_request_tokens": 9984,
+      "bytes": 153092096
+    },
+    {
+      "requests": 4,
+      "total_tokens": 36352,
+      "max_request_tokens": 9984,
+      "bytes": 148897792
+    },
+    {
+      "requests": 4,
+      "total_tokens": 37376,
+      "max_request_tokens": 9984,
+      "bytes": 153092096
+    },
+    {
+      "requests": 4,
+      "total_tokens": 39936,
+      "max_request_tokens": 9984,
+      "bytes": 163577856
+    },
+    {
+      "requests": 4,
+      "total_tokens": 38656,
+      "max_request_tokens": 9984,
+      "bytes": 158334976
+    },
+    {
+      "requests": 4,
+      "total_tokens": 40192,
+      "max_request_tokens": 11264,
+      "bytes": 164626432
+    },
+    {
+      "requests": 4,
+      "total_tokens": 39936,
+      "max_request_tokens": 11264,
+      "bytes": 163577856
+    },
+    {
+      "requests": 4,
+      "total_tokens": 40192,
+      "max_request_tokens": 11264,
+      "bytes": 164626432
+    },
+    {
+      "requests": 3,
+      "total_tokens": 33024,
+      "max_request_tokens": 11776,
+      "bytes": 135266304
+    },
+    {
+      "requests": 4,
+      "total_tokens": 42496,
+      "max_request_tokens": 11264,
+      "bytes": 174063616
+    },
+    {
+      "requests": 4,
+      "total_tokens": 42496,
+      "max_request_tokens": 11264,
+      "bytes": 174063616
+    },
+    {
+      "requests": 4,
+      "total_tokens": 42496,
+      "max_request_tokens": 11264,
+      "bytes": 174063616
+    },
+    {
+      "requests": 4,
+      "total_tokens": 42752,
+      "max_request_tokens": 11264,
+      "bytes": 175112192
+    },
+    {
+      "requests": 3,
+      "total_tokens": 33024,
+      "max_request_tokens": 11264,
+      "bytes": 135266304
+    },
+    {
+      "requests": 4,
+      "total_tokens": 46336,
+      "max_request_tokens": 12544,
+      "bytes": 189792256
+    },
+    {
+      "requests": 4,
+      "total_tokens": 42752,
+      "max_request_tokens": 11520,
+      "bytes": 175112192
+    },
+    {
+      "requests": 3,
+      "total_tokens": 34304,
+      "max_request_tokens": 11776,
+      "bytes": 140509184
+    },
+    {
+      "requests": 4,
+      "total_tokens": 46336,
+      "max_request_tokens": 12544,
+      "bytes": 189792256
+    },
+    {
+      "requests": 3,
+      "total_tokens": 34048,
+      "max_request_tokens": 12544,
+      "bytes": 139460608
+    },
+    {
+      "requests": 4,
+      "total_tokens": 46336,
+      "max_request_tokens": 12544,
+      "bytes": 189792256
+    },
+    {
+      "requests": 4,
+      "total_tokens": 48896,
+      "max_request_tokens": 12544,
+      "bytes": 200278016
+    },
+    {
+      "requests": 4,
+      "total_tokens": 46592,
+      "max_request_tokens": 12544,
+      "bytes": 190840832
+    },
+    {
+      "requests": 3,
+      "total_tokens": 36864,
+      "max_request_tokens": 12544,
+      "bytes": 150994944
+    },
+    {
+      "requests": 4,
+      "total_tokens": 48896,
+      "max_request_tokens": 12544,
+      "bytes": 200278016
+    },
+    {
+      "requests": 4,
+      "total_tokens": 47872,
+      "max_request_tokens": 12800,
+      "bytes": 196083712
+    },
+    {
+      "requests": 3,
+      "total_tokens": 38144,
+      "max_request_tokens": 13824,
+      "bytes": 156237824
+    },
+    {
+      "requests": 4,
+      "total_tokens": 48896,
+      "max_request_tokens": 12544,
+      "bytes": 200278016
+    },
+    {
+      "requests": 3,
+      "total_tokens": 35328,
+      "max_request_tokens": 12544,
+      "bytes": 144703488
+    },
+    {
+      "requests": 4,
+      "total_tokens": 51456,
+      "max_request_tokens": 13824,
+      "bytes": 210763776
+    },
+    {
+      "requests": 4,
+      "total_tokens": 48896,
+      "max_request_tokens": 13824,
+      "bytes": 200278016
+    },
+    {
+      "requests": 4,
+      "total_tokens": 54272,
+      "max_request_tokens": 14080,
+      "bytes": 222298112
+    },
+    {
+      "requests": 3,
+      "total_tokens": 40704,
+      "max_request_tokens": 14336,
+      "bytes": 166723584
+    },
+    {
+      "requests": 4,
+      "total_tokens": 55296,
+      "max_request_tokens": 13824,
+      "bytes": 226492416
+    },
+    {
+      "requests": 4,
+      "total_tokens": 54272,
+      "max_request_tokens": 14080,
+      "bytes": 222298112
+    },
+    {
+      "requests": 3,
+      "total_tokens": 41984,
+      "max_request_tokens": 14336,
+      "bytes": 171966464
+    },
+    {
+      "requests": 4,
+      "total_tokens": 52736,
+      "max_request_tokens": 13824,
+      "bytes": 216006656
+    },
+    {
+      "requests": 3,
+      "total_tokens": 41728,
+      "max_request_tokens": 15104,
+      "bytes": 170917888
+    },
+    {
+      "requests": 4,
+      "total_tokens": 56576,
+      "max_request_tokens": 15104,
+      "bytes": 231735296
+    },
+    {
+      "requests": 4,
+      "total_tokens": 56576,
+      "max_request_tokens": 15104,
+      "bytes": 231735296
+    },
+    {
+      "requests": 4,
+      "total_tokens": 55552,
+      "max_request_tokens": 15360,
+      "bytes": 227540992
+    },
+    {
+      "requests": 3,
+      "total_tokens": 43264,
+      "max_request_tokens": 15104,
+      "bytes": 177209344
+    },
+    {
+      "requests": 4,
+      "total_tokens": 55296,
+      "max_request_tokens": 15104,
+      "bytes": 226492416
+    },
+    {
+      "requests": 4,
+      "total_tokens": 56832,
+      "max_request_tokens": 15104,
+      "bytes": 232783872
+    },
+    {
+      "requests": 3,
+      "total_tokens": 45824,
+      "max_request_tokens": 15616,
+      "bytes": 187695104
+    },
+    {
+      "requests": 4,
+      "total_tokens": 57856,
+      "max_request_tokens": 15104,
+      "bytes": 236978176
+    },
+    {
+      "requests": 3,
+      "total_tokens": 44288,
+      "max_request_tokens": 15360,
+      "bytes": 181403648
+    },
+    {
+      "requests": 4,
+      "total_tokens": 59136,
+      "max_request_tokens": 16384,
+      "bytes": 242221056
+    },
+    {
+      "requests": 4,
+      "total_tokens": 61696,
+      "max_request_tokens": 16384,
+      "bytes": 252706816
+    },
+    {
+      "requests": 4,
+      "total_tokens": 60672,
+      "max_request_tokens": 15360,
+      "bytes": 248512512
+    },
+    {
+      "requests": 3,
+      "total_tokens": 44544,
+      "max_request_tokens": 15616,
+      "bytes": 182452224
+    },
+    {
+      "requests": 4,
+      "total_tokens": 60416,
+      "max_request_tokens": 16384,
+      "bytes": 247463936
+    },
+    {
+      "requests": 4,
+      "total_tokens": 61952,
+      "max_request_tokens": 16384,
+      "bytes": 253755392
+    },
+    {
+      "requests": 3,
+      "total_tokens": 48384,
+      "max_request_tokens": 16896,
+      "bytes": 198180864
+    },
+    {
+      "requests": 4,
+      "total_tokens": 64256,
+      "max_request_tokens": 16384,
+      "bytes": 263192576
+    },
+    {
+      "requests": 3,
+      "total_tokens": 46848,
+      "max_request_tokens": 16640,
+      "bytes": 191889408
+    },
+    {
+      "requests": 4,
+      "total_tokens": 64256,
+      "max_request_tokens": 16384,
+      "bytes": 263192576
+    },
+    {
+      "requests": 4,
+      "total_tokens": 64256,
+      "max_request_tokens": 17664,
+      "bytes": 263192576
+    },
+    {
+      "requests": 4,
+      "total_tokens": 64512,
+      "max_request_tokens": 17920,
+      "bytes": 264241152
+    },
+    {
+      "requests": 3,
+      "total_tokens": 47104,
+      "max_request_tokens": 16896,
+      "bytes": 192937984
+    },
+    {
+      "requests": 4,
+      "total_tokens": 65536,
+      "max_request_tokens": 16384,
+      "bytes": 268435456
+    },
+    {
+      "requests": 4,
+      "total_tokens": 67072,
+      "max_request_tokens": 17664,
+      "bytes": 274726912
+    },
+    {
+      "requests": 3,
+      "total_tokens": 50944,
+      "max_request_tokens": 17664,
+      "bytes": 208666624
+    },
+    {
+      "requests": 4,
+      "total_tokens": 64256,
+      "max_request_tokens": 17664,
+      "bytes": 263192576
+    },
+    {
+      "requests": 3,
+      "total_tokens": 50688,
+      "max_request_tokens": 17664,
+      "bytes": 207618048
+    },
+    {
+      "requests": 4,
+      "total_tokens": 68096,
+      "max_request_tokens": 17664,
+      "bytes": 278921216
+    },
+    {
+      "requests": 4,
+      "total_tokens": 66816,
+      "max_request_tokens": 17664,
+      "bytes": 273678336
+    },
+    {
+      "requests": 4,
+      "total_tokens": 69632,
+      "max_request_tokens": 17664,
+      "bytes": 285212672
+    },
+    {
+      "requests": 3,
+      "total_tokens": 50944,
+      "max_request_tokens": 18176,
+      "bytes": 208666624
+    },
+    {
+      "requests": 4,
+      "total_tokens": 69376,
+      "max_request_tokens": 18944,
+      "bytes": 284164096
+    },
+    {
+      "requests": 4,
+      "total_tokens": 70912,
+      "max_request_tokens": 17920,
+      "bytes": 290455552
+    },
+    {
+      "requests": 3,
+      "total_tokens": 54784,
+      "max_request_tokens": 18944,
+      "bytes": 224395264
+    },
+    {
+      "requests": 4,
+      "total_tokens": 69376,
+      "max_request_tokens": 18944,
+      "bytes": 284164096
+    },
+    {
+      "requests": 3,
+      "total_tokens": 50688,
+      "max_request_tokens": 17664,
+      "bytes": 207618048
+    },
+    {
+      "requests": 4,
+      "total_tokens": 71936,
+      "max_request_tokens": 18944,
+      "bytes": 294649856
+    },
+    {
+      "requests": 4,
+      "total_tokens": 73216,
+      "max_request_tokens": 18944,
+      "bytes": 299892736
+    },
+    {
+      "requests": 4,
+      "total_tokens": 72192,
+      "max_request_tokens": 20224,
+      "bytes": 295698432
+    },
+    {
+      "requests": 3,
+      "total_tokens": 54784,
+      "max_request_tokens": 20736,
+      "bytes": 224395264
+    },
+    {
+      "requests": 4,
+      "total_tokens": 74496,
+      "max_request_tokens": 18944,
+      "bytes": 305135616
+    },
+    {
+      "requests": 4,
+      "total_tokens": 74752,
+      "max_request_tokens": 19200,
+      "bytes": 306184192
+    },
+    {
+      "requests": 3,
+      "total_tokens": 57344,
+      "max_request_tokens": 20224,
+      "bytes": 234881024
+    },
+    {
+      "requests": 4,
+      "total_tokens": 73216,
+      "max_request_tokens": 18944,
+      "bytes": 299892736
+    },
+    {
+      "requests": 3,
+      "total_tokens": 55808,
+      "max_request_tokens": 19200,
+      "bytes": 228589568
+    },
+    {
+      "requests": 4,
+      "total_tokens": 75776,
+      "max_request_tokens": 18944,
+      "bytes": 310378496
+    },
+    {
+      "requests": 4,
+      "total_tokens": 77056,
+      "max_request_tokens": 20224,
+      "bytes": 315621376
+    },
+    {
+      "requests": 4,
+      "total_tokens": 77312,
+      "max_request_tokens": 20224,
+      "bytes": 316669952
+    },
+    {
+      "requests": 3,
+      "total_tokens": 58624,
+      "max_request_tokens": 20736,
+      "bytes": 240123904
+    },
+    {
+      "requests": 4,
+      "total_tokens": 79616,
+      "max_request_tokens": 21504,
+      "bytes": 326107136
+    },
+    {
+      "requests": 4,
+      "total_tokens": 78592,
+      "max_request_tokens": 21504,
+      "bytes": 321912832
+    },
+    {
+      "requests": 3,
+      "total_tokens": 59904,
+      "max_request_tokens": 20224,
+      "bytes": 245366784
+    },
+    {
+      "requests": 4,
+      "total_tokens": 75776,
+      "max_request_tokens": 20224,
+      "bytes": 310378496
+    },
+    {
+      "requests": 3,
+      "total_tokens": 59648,
+      "max_request_tokens": 20480,
+      "bytes": 244318208
+    },
+    {
+      "requests": 4,
+      "total_tokens": 80896,
+      "max_request_tokens": 20224,
+      "bytes": 331350016
+    },
+    {
+      "requests": 4,
+      "total_tokens": 79616,
+      "max_request_tokens": 20224,
+      "bytes": 326107136
+    },
+    {
+      "requests": 4,
+      "total_tokens": 82432,
+      "max_request_tokens": 21504,
+      "bytes": 337641472
+    },
+    {
+      "requests": 3,
+      "total_tokens": 59904,
+      "max_request_tokens": 20736,
+      "bytes": 245366784
+    },
+    {
+      "requests": 4,
+      "total_tokens": 80896,
+      "max_request_tokens": 21504,
+      "bytes": 331350016
+    },
+    {
+      "requests": 4,
+      "total_tokens": 84992,
+      "max_request_tokens": 21760,
+      "bytes": 348127232
+    },
+    {
+      "requests": 3,
+      "total_tokens": 65024,
+      "max_request_tokens": 22784,
+      "bytes": 266338304
+    },
+    {
+      "requests": 4,
+      "total_tokens": 84736,
+      "max_request_tokens": 22784,
+      "bytes": 347078656
+    },
+    {
+      "requests": 3,
+      "total_tokens": 63488,
+      "max_request_tokens": 21760,
+      "bytes": 260046848
+    },
+    {
+      "requests": 4,
+      "total_tokens": 86016,
+      "max_request_tokens": 21504,
+      "bytes": 352321536
+    },
+    {
+      "requests": 4,
+      "total_tokens": 82176,
+      "max_request_tokens": 21504,
+      "bytes": 336592896
+    },
+    {
+      "requests": 4,
+      "total_tokens": 84992,
+      "max_request_tokens": 21760,
+      "bytes": 348127232
+    },
+    {
+      "requests": 3,
+      "total_tokens": 61184,
+      "max_request_tokens": 21504,
+      "bytes": 250609664
+    },
+    {
+      "requests": 4,
+      "total_tokens": 88576,
+      "max_request_tokens": 22784,
+      "bytes": 362807296
+    },
+    {
+      "requests": 4,
+      "total_tokens": 87552,
+      "max_request_tokens": 23040,
+      "bytes": 358612992
+    },
+    {
+      "requests": 3,
+      "total_tokens": 63744,
+      "max_request_tokens": 22016,
+      "bytes": 261095424
+    },
+    {
+      "requests": 4,
+      "total_tokens": 87296,
+      "max_request_tokens": 24064,
+      "bytes": 357564416
+    },
+    {
+      "requests": 3,
+      "total_tokens": 66048,
+      "max_request_tokens": 22784,
+      "bytes": 270532608
+    },
+    {
+      "requests": 4,
+      "total_tokens": 84736,
+      "max_request_tokens": 22784,
+      "bytes": 347078656
+    },
+    {
+      "requests": 4,
+      "total_tokens": 91136,
+      "max_request_tokens": 24064,
+      "bytes": 373293056
+    },
+    {
+      "requests": 4,
+      "total_tokens": 88832,
+      "max_request_tokens": 23040,
+      "bytes": 363855872
+    },
+    {
+      "requests": 3,
+      "total_tokens": 66304,
+      "max_request_tokens": 23296,
+      "bytes": 271581184
+    },
+    {
+      "requests": 4,
+      "total_tokens": 88576,
+      "max_request_tokens": 22784,
+      "bytes": 362807296
+    },
+    {
+      "requests": 4,
+      "total_tokens": 91392,
+      "max_request_tokens": 24064,
+      "bytes": 374341632
+    },
+    {
+      "requests": 3,
+      "total_tokens": 70144,
+      "max_request_tokens": 24576,
+      "bytes": 287309824
+    },
+    {
+      "requests": 4,
+      "total_tokens": 92416,
+      "max_request_tokens": 24064,
+      "bytes": 378535936
+    },
+    {
+      "requests": 3,
+      "total_tokens": 69888,
+      "max_request_tokens": 24064,
+      "bytes": 286261248
+    },
+    {
+      "requests": 4,
+      "total_tokens": 92416,
+      "max_request_tokens": 24064,
+      "bytes": 378535936
+    },
+    {
+      "requests": 4,
+      "total_tokens": 93696,
+      "max_request_tokens": 24064,
+      "bytes": 383778816
+    },
+    {
+      "requests": 4,
+      "total_tokens": 92672,
+      "max_request_tokens": 24064,
+      "bytes": 379584512
+    },
+    {
+      "requests": 3,
+      "total_tokens": 70144,
+      "max_request_tokens": 24576,
+      "bytes": 287309824
+    },
+    {
+      "requests": 4,
+      "total_tokens": 91136,
+      "max_request_tokens": 24064,
+      "bytes": 373293056
+    },
+    {
+      "requests": 4,
+      "total_tokens": 95232,
+      "max_request_tokens": 24320,
+      "bytes": 390070272
+    },
+    {
+      "requests": 3,
+      "total_tokens": 71424,
+      "max_request_tokens": 24576,
+      "bytes": 292552704
+    },
+    {
+      "requests": 4,
+      "total_tokens": 91136,
+      "max_request_tokens": 24064,
+      "bytes": 373293056
+    },
+    {
+      "requests": 3,
+      "total_tokens": 71168,
+      "max_request_tokens": 24064,
+      "bytes": 291504128
+    },
+    {
+      "requests": 4,
+      "total_tokens": 94976,
+      "max_request_tokens": 24064,
+      "bytes": 389021696
+    }
+  ],
+  "prefix_budget_bytes": 134217728
+}

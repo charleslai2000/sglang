@@ -125,3 +125,26 @@ W4A16 GEMM, 26.8 % Full-layer extend attention (5.0 ms/launch), 21.8 % decode at
 attention; FA2 replaced only 198 of 1 781 Full-layer extend launches (128 MiB transient-prefix
 ceiling) at 3.1 ms/launch vs 5.0 ms. Whole-GPU DRAM/SM-issue percentages are recorded as NOT
 COLLECTED because nsys GPU metrics need root on this driver.
+
+## T015-FA2-BOUNDED-RAGGED-SUBBATCH — 2026-11-28 (baseline `c1feed4d21`)
+
+FA2 coverage was limited by the per-forward 128 MiB transient-prefix ceiling, not by per-request
+size: over-budget rejections were 58–84 % of all FA2 skips and the rejected forwards needed up to
+2.8× the budget. A run-scoped diagnostic over 132 real rejected three-tier forwards showed every
+single request inside 32 768 tokens (max 24 576) and 2–3 groups per forward, so the batch is now
+partitioned into consecutive bounded groups (`bf16_ragged_extend.py`: `max_group_tokens`,
+`_partition_groups`, `BF16RaggedGroupPlan`, `gather_group_prefix`, `run_layer_subbatched`;
+`triton_backend.py` dispatch). The causal extend stays whole-batch, each group runs its own
+forward-level prefix plan reusing one transient pair sequentially, and each group's state is
+merged with the extend state of its own contiguous Q rows. A request above the cap keeps the
+Triton fallback; the single-group path is byte-identical to the accepted T013 code.
+
+Evidence: bitwise-equal output versus the ungrouped reference for 2, 2, 2 and 4 groups (max abs
+diff 0.0); driver net benefit on previously rejected forwards 615.45 → 549.95 ms (−10.6 %); service
+cells with identical payload multisets and byte-identical KV capacity (1 443 628 + 65 536) —
+C-8 744.10 → 784.03/792.17 TPS (+5.4/+6.5 %, was +3.07 % in T013), three-tier 632.84 → 657.38
+(+3.9 %), long-context 116.62 → 138.40 (+18.7 %); `skip_over_budget` now 0 in every FA2 cell
+(108–122 sub-batch forwards, 228–344 groups); extent restore round trip still
+`disposition=RESTORE requested=10304 granted=10304 reason=full` on both arms with identical greedy
+text. Peak VRAM +24 MiB (C-8) / +18 MiB (three-tier) versus Triton, inside the unchanged budget.
+Report `control/gemma4-t015-fa2-subbatch/runs/T015-FA2-SUBBATCH.md`.

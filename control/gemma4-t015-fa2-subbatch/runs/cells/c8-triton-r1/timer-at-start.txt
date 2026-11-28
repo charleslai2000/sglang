@@ -1,0 +1,5 @@
+# HELP sglang:fwd_occupancy Forward pass GPU occupancy percentage.
+# TYPE sglang:fwd_occupancy gauge
+sglang:fwd_occupancy{engine_type="unified",model_name="/data/sglang-hicache/gemma4/model",moe_ep_rank="0",pp_rank="0",tp_rank="0"} NaN
+sglang:forward_execution_seconds_total{category="extend",engine_type="unified",model_name="/data/sglang-hicache/gemma4/model",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.13685501098632813
+sglang:forward_execution_seconds_total{category="decode",engine_type="unified",model_name="/data/sglang-hicache/gemma4/model",moe_ep_rank="0",pp_rank="0",tp_rank="0"} 0.009842687606811524

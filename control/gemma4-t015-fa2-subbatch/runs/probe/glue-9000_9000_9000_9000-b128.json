@@ -1,0 +1,61 @@
+{
+  "budget_mb": 128,
+  "cap_tokens": 32768,
+  "reference_budget_bytes": 134217728,
+  "groups": [
+    [
+      0,
+      3,
+      27000
+    ],
+    [
+      3,
+      4,
+      9000
+    ]
+  ],
+  "groups_count": 2,
+  "group_token_counts": [
+    27000,
+    9000
+  ],
+  "coverage_stats": {
+    "plans": 2.0,
+    "skip_no_prefix": 0.0,
+    "skip_over_budget": 0.0,
+    "max_prefix_bytes": 147456000,
+    "owner_conversions": 3.0,
+    "shared_reuses": 0.0,
+    "subbatch_plans": 1.0,
+    "subbatch_groups": 2.0,
+    "skip_request_over_budget": 0.0
+  },
+  "overall": {
+    "max_abs": 0.0,
+    "mean_abs": 0.0,
+    "ref_absmax": 0.10205078125
+  },
+  "per_request": {
+    "req0": {
+      "max_abs": 0.0,
+      "mean_abs": 0.0,
+      "ref_absmax": 0.10107421875
+    },
+    "req1": {
+      "max_abs": 0.0,
+      "mean_abs": 0.0,
+      "ref_absmax": 0.10205078125
+    },
+    "req2": {
+      "max_abs": 0.0,
+      "mean_abs": 0.0,
+      "ref_absmax": 0.091796875
+    },
+    "req3": {
+      "max_abs": 0.0,
+      "mean_abs": 0.0,
+      "ref_absmax": 0.08642578125
+    }
+  },
+  "bitwise_equal": true
+}

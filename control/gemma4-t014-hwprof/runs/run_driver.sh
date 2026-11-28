@@ -12,7 +12,7 @@ export LD_LIBRARY_PATH="$VENV/lib/python3.12/site-packages/torch/lib:/usr/local/
 export SGLANG_CACHE_DIR=/data/sglang-hicache/gemma4/cache HF_HOME=/data/sglang-hicache/gemma4/cache/hf-home
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export SGLANG_HUMMING_USE_F16_ACCUM=0
-export SGLANG_T011_BF16_PREFIX_BUDGET_MB=128
+export SGLANG_T011_BF16_PREFIX_BUDGET_MB="${SGLANG_T011_BF16_PREFIX_BUDGET_MB:-128}"
 
 exec 9>"$LOCK"
 flock -n 9 || { echo GPU_LOCK_BUSY >&2; exit 90; }

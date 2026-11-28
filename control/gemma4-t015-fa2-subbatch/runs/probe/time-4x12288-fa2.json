@@ -1,0 +1,56 @@
+{
+  "stage": "prefix",
+  "arm": "humming",
+  "attn": "fa2",
+  "batch": 4,
+  "input_len": 1024,
+  "prefix_len": 12288,
+  "new_len": 1024,
+  "decode_context": 8192,
+  "device": "NVIDIA GeForce RTX 3090",
+  "capability": [
+    8,
+    6
+  ],
+  "torch": "2.13.0+cu129",
+  "max_total_num_tokens": 1300000,
+  "max_total_tokens_pinned": 1300000,
+  "max_total_tokens_clamped": false,
+  "max_total_num_tokens_swa": 0,
+  "kv_pool_geometry": {
+    "alloc.size": 65536,
+    "alloc.size_full": 1300000,
+    "alloc.size_swa": 65536,
+    "pool.size_swa": 65536
+  },
+  "kv_cache_dtype": "fp8_e5m2",
+  "quantization_flag": "1",
+  "fa2_flag": "1",
+  "fa2_enabled_in_backend": true,
+  "fa2_stats_before": null,
+  "output_argmax": [
+    236772,
+    49931,
+    201468,
+    236940
+  ],
+  "timing_repeats_ms": [
+    549.946942133829,
+    550.1557248644531,
+    549.848466180265
+  ],
+  "tokens": 53248,
+  "extend_tokens": 4096,
+  "prefix_tokens": 49152,
+  "fa2_stats_after": {
+    "plans": 15.0,
+    "skip_no_prefix": 1.0,
+    "skip_over_budget": 0.0,
+    "max_prefix_bytes": 201326592,
+    "owner_conversions": 130.0,
+    "shared_reuses": 24.0,
+    "subbatch_plans": 7.0,
+    "subbatch_groups": 14.0,
+    "skip_request_over_budget": 0.0
+  }
+}

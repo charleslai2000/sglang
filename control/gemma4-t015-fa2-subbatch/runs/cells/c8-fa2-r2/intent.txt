@@ -1,0 +1,1 @@
+workload=c8 arm=fa2 tag=r2
