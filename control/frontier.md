@@ -104,3 +104,24 @@ this scheduler process (every filter on `Marlin`/`_fwd_kernel` fails with
 `Failed to profile … in process <scheduler>`; NVTX include matches nothing even in a minimal repro),
 so per-kernel pipeline mix, achieved occupancy, stall reasons, hardware L1/L2 hit rates and
 per-kernel DRAM bytes are explicitly NOT COLLECTED in the report.
+
+## T014-GPU-HARDWARE-PROFILING — 2026-11-28 (source freeze `ed6cec9299`)
+
+Hardware profiling of the two served arm combinations on the unchanged commit, delivered as
+`control/gemma4-t014-hwprof/runs/T014-HW-PROFILING.md`. Measurement only: no serving-path change,
+no new telemetry, no throughput re-certification.
+
+Method: NCU **CUPTI ApplicationReplay** (the mode T010 could not use inside the scheduler) on a
+standalone driver that runs the production ModelRunner/pools/quantisation/attention/graph for one
+Forward, 16 cells (6 shapes × 2 arms + 4 instruction-pipe supplements + 1 FA2-attributed prefix
+cell), plus two bounded 45 s nsys + NVML windows of the real C-8 three-tier service. KV capacity
+pinned to 1 300 000 full-pool + 65 536 SWA tokens in every cell (`clamped=False`).
+
+Headline findings: prefill GEMM is tensor-pipe bound (Marlin 82.6 % SM / 83.5 % tensor, DRAM read
+78.8 % of peak, L2 hit 16.5 %) and Humming removes the DRAM bottleneck (87.9 % / 89.0 %, 12.6 %
+DRAM read, 82.7 % L2); decode GEMM is latency/DRAM bound (A 21.2 % SM with 20.0 % `barrier` stalls
+from split-K, B 34.6 % with 1.4 % `math_pipe_throttle`); service-window kernel time is 37.9 %
+W4A16 GEMM, 26.8 % Full-layer extend attention (5.0 ms/launch), 21.8 % decode attention, 0.5 % SWA
+attention; FA2 replaced only 198 of 1 781 Full-layer extend launches (128 MiB transient-prefix
+ceiling) at 3.1 ms/launch vs 5.0 ms. Whole-GPU DRAM/SM-issue percentages are recorded as NOT
+COLLECTED because nsys GPU metrics need root on this driver.

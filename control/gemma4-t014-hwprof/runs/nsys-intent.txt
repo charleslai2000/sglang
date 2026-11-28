@@ -1,0 +1,4 @@
+T014 hardware profiling: bounded steady-state window of the production C-8
+three-tier HiCache stack (frozen argv, Humming W4A16 in both arms; arm B adds
+SGLANG_FA2_RAGGED_EXTEND=1). One nsys capture with GPU metrics plus NVML
+sampling for clocks/power/PCIe; kernels are attributed to real Forward shapes.

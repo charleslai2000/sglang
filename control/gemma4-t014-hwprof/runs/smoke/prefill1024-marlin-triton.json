@@ -1,0 +1,30 @@
+{
+  "stage": "prefill",
+  "arm": "marlin",
+  "attn": "triton",
+  "batch": 1,
+  "input_len": 1024,
+  "prefix_len": 28672,
+  "new_len": 4096,
+  "decode_context": 8192,
+  "device": "NVIDIA GeForce RTX 3090",
+  "capability": [
+    8,
+    6
+  ],
+  "torch": "2.13.0+cu129",
+  "max_total_num_tokens": 1538490,
+  "max_total_num_tokens_swa": 0,
+  "kv_cache_dtype": "fp8_e5m2",
+  "quantization_flag": "0",
+  "fa2_flag": "0",
+  "fa2_enabled_in_backend": false,
+  "fa2_stats_before": null,
+  "output_argmax": [
+    155552
+  ],
+  "tokens": 1024,
+  "extend_tokens": 1024,
+  "prefix_tokens": 0,
+  "fa2_stats_after": null
+}
