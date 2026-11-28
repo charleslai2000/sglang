@@ -163,5 +163,13 @@ Keep the sub-batch change with the existing opt-in (no new switch). It converts 
 the over-budget skips on all three loads into covered forwards, costs one extra gather
 per (Full layer, group) and no extra VRAM budget, and improves the accepted FA2 arm on
 every load (C-8 +5.4/+6.5 % versus Triton today, three-tier +3.9 %, long +18.7 %). The
-deployment recommendation is unchanged from T013 and still requires both exports at
-launch time: `SGLANG_CTWNA16_HUMMING=1 SGLANG_FA2_RAGGED_EXTEND=1` (both default off).
+deployment recommendation still needs the launch-time exports, all of them default off or
+below the measured value:
+
+```bash
+export SGLANG_CTWNA16_HUMMING=1
+export SGLANG_FA2_RAGGED_EXTEND=1
+export SGLANG_T011_BF16_PREFIX_BUDGET_MB=128   # default 32 MB; group cap is budget-derived
+```
+
+See `control/gemma4-e4b-3090-archive/DEPLOYMENT.md` for the archived configuration.
